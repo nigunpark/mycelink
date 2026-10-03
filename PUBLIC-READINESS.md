@@ -1,11 +1,12 @@
 # Public readiness — Mycelink 0.2.0-beta.1
 
-**Status: CI_FIX_PENDING_CONFIRMATION.** `main` is public at
-`nigunpark/mycelink`. The first public CI run (`37105450954`) failed on all
-six matrix legs (CodeQL and Scorecard passed); see *First public CI run*. The
-fix is committed locally and verified on Windows, including under an 8.3
-short-name temp directory that reproduces the runner, but it has not yet been
-pushed or confirmed by CI. Nothing has been tagged or released.
+**Status: PUBLIC_CI_GREEN.** The repository is public at
+<https://github.com/nigunpark/mycelink>. The first public CI run
+(`37105450954`) failed on all six matrix legs; the fix (`41b99d8`) is pushed
+and CI run `37137320314` passed on all six legs (Windows, Ubuntu, macOS ×
+Node 22.12.0 and 24), with CodeQL (`37137320292`) and OpenSSF Scorecard
+(`37137320290`) also passing on the same commit. Branch protection and the
+beta GitHub Release/tag remain; nothing has been tagged or released.
 
 This file records what was verified, how, and what remains. It is not
 shipped in the release archive.
@@ -16,16 +17,15 @@ shipped in the release archive.
 |---|---|---|
 | Windows 11 Pro (x64) | 24.14.1 | full suite 583/583, strict plugin validation, packaging ×2, ZIP install/update/uninstall in an isolated Claude profile |
 | Windows 11 Pro (x64) | 22.12.0 (official portable build, SHA-256 checked) | full suite 583/583; runtime bundle rebuilt under 22.12.0 is byte-identical to the committed one |
-| Ubuntu (latest) | 22.12.0, 24 | **not yet verified**: first CI run stopped at the build check (bundle mode flip), before `npm test`; the test suite has never run on Linux |
-| macOS (latest) | 22.12.0, 24 | **not yet verified**: same as Ubuntu |
-| Windows (GitHub-hosted) | 22.12.0, 24 | **not yet verified**: first CI run failed in `npm test` (8.3 temp-path worktree identity); fixed locally, awaiting CI |
+| Ubuntu (GitHub-hosted, latest) | 22.12.0, 24 | **verified** by CI run `37137320314` at `41b99d8`: 593 tests, 589 passed, 4 skipped (Windows-only) per leg, including the POSIX-only bundle-mode test |
+| macOS (GitHub-hosted, latest) | 22.12.0, 24 | **verified** by CI run `37137320314` at `41b99d8`: same totals as Ubuntu |
+| Windows (GitHub-hosted, latest) | 22.12.0, 24 | **verified** by CI run `37137320314` at `41b99d8`: 593 tests, 592 passed, 1 skipped (POSIX-only) per leg, including the 8.3 short-path worktree regressions |
 
 Tooling used locally: Git 2.53.0.windows.2, npm 11.19.0, Claude Code 2.1.288
-(the CI pins the same CLI version). The README's Linux/macOS support claim is
-backed by the CI matrix definition; treat it as unproven until a CI run on
-GitHub is green on all six legs.
+(the CI pins the same CLI version). The README's Windows/Linux/macOS support
+claim is backed by a CI run that is green on all six legs.
 
-## First public CI run (`37105450954`): failure and fix
+## First public CI run (`37105450954`): failure and fix (confirmed)
 
 CodeQL and Scorecard passed; all six `test` legs failed, for two independent
 reasons.
@@ -45,8 +45,8 @@ reasons.
    the index change: `bin/` and `dist/` were `100644`).
    `tests/release/bundle.test.ts` rebuilds to a temp file and compares its
    executable bit with the tracked mode; it runs on Linux/macOS only (Windows
-   has no executable bit) and so has **not been observed locally**. CI will
-   be its first run.
+   has no executable bit), so it is not observed locally; it passed on all
+   four Ubuntu/macOS legs of CI run `37137320314`.
 2. **Windows: worktree identity under an 8.3 temp path.** The runner's temp
    directory is under the 8.3 alias `RUNNER~1`; `git worktree list --porcelain`
    reports the long form of the same directory. `createWorkerWorktree` and
@@ -75,12 +75,30 @@ exit 0; `npm run build:check` exit 0; `npm test` 36 files, 592 passed,
 zips and SBOMs, zip sha256
 `ecd6c876c34b0d8aedadd2f44d843b84c1d3717b73a936c9a1083957759855de` (the
 bundle changed, so this supersedes the hashes below). Node 22.12.0 was not
-re-run locally for this fix.
+re-run locally for this fix; CI covers it.
+
+**CI confirmation.** The fix was pushed as `41b99d8`. On that commit:
+
+| Workflow | Run | Result |
+|---|---|---|
+| CI | `37137320314` | success on all six legs; Windows (Node 22.12.0, 24): 592 passed, 1 skipped; Ubuntu and macOS (Node 22.12.0, 24): 589 passed, 4 skipped (Windows-only 8.3/case tests); 593 tests in 36 files on every leg |
+| CodeQL | `37137320292` | success |
+| OpenSSF Scorecard | `37137320290` | success |
+
+The commit that records these results also adds a line to `CHANGELOG.md`,
+which is shipped, so it changes the zip hash. On that tree, `npx vitest run`
+gave 36 files, 592 passed, 1 skipped; `claude plugin validate --strict .`
+✔; and packaging twice with the same `SOURCE_DATE_EPOCH` gave byte-identical
+zips, sha256
+`e4a154df1e0e0e6a0194c9082f511f9c77e5d4033130d873931fad22ba5fe3e5`. The
+`ecd6c876…` hash above remains the hash for `41b99d8` (re-checked). Runtime
+files are unchanged.
 
 ## Test totals
 
-593 tests in 36 files: on Windows (Node 24.14.1) 592 passed, 0 failed,
-1 skipped (the POSIX-only bundle-mode test). The 583-test pass recorded
+593 tests in 36 files: locally on Windows (Node 24.14.1) 592 passed,
+0 failed, 1 skipped (the POSIX-only bundle-mode test). CI run `37137320314`
+ran the same 593 on all six legs with no failures (see *CI confirmation*). The 583-test pass recorded
 below also passed on Node 22.12.0. The reference implementation had 312; all
 were ported and adapted (none deleted), and 281 were added.
 
@@ -148,7 +166,9 @@ not file contents.
   It is an orphan history (single root commit `35ad200`, no ancestry from the
   reference implementation or the internal bootstrap work) and is **the
   branch to push**.
-- No other branches, tags, worktrees, stashes or reflog entries remain.
+- No other local branches, tags, worktrees or stashes. On GitHub, `main` is
+  pushed at `41b99d8`; the only other remote branches are Dependabot update
+  branches (open pull requests #1 and #2). No tags exist.
 - Authorship was rewritten before publication: every reachable commit has
   author and committer `nigunpark` with the GitHub no-reply address, and no
   reachable commit carries a personal e-mail address. New commits use the
@@ -156,27 +176,30 @@ not file contents.
 
 ## Remaining before publishing
 
-1. ~~Create the GitHub repository and push `main`.~~ Done; the first CI run
-   failed (see *First public CI run*).
+1. ~~Create the GitHub repository and push `main`.~~ Done: public at
+   <https://github.com/nigunpark/mycelink>.
 2. ~~Add real URLs once the owner is known.~~ Done for `nigunpark/mycelink`:
    `package.json`, `.claude-plugin/plugin.json`, README install snippet,
    SECURITY/SUPPORT and issue-template links.
 3. ~~Fill the maintainers table in `GOVERNANCE.md` and add
    `.github/CODEOWNERS`.~~ Done (`@nigunpark`); `tests/release/metadata.test.ts`
    now asserts both.
-4. Repository settings: enable **private vulnerability reporting** (SECURITY.md
-   depends on it), Dependabot alerts/updates, code scanning, and branch
-   protection for `main` requiring the CI checks.
-5. Push the CI fix and get a run that is green on all six matrix legs
-   (Windows, Ubuntu, macOS × Node 22.12.0, 24), plus CodeQL and Scorecard.
-   The first run never reached `npm test` on Linux/macOS, so failures specific
-   to those platforms may still appear; fix them before tagging.
+4. ~~Repository settings: private vulnerability reporting, Dependabot
+   alerts/updates, code scanning.~~ Done: private vulnerability reporting,
+   vulnerability alerts, automated security fixes, Issues and Discussions are
+   enabled; CodeQL runs.
+5. ~~Push the CI fix and get a run that is green on all six matrix legs,
+   plus CodeQL and Scorecard.~~ Done: CI `37137320314`, CodeQL
+   `37137320292`, Scorecard `37137320290`, all at `41b99d8`.
+6. **Branch protection** for `main` requiring the CI checks. Not yet
+   configured (`main` is currently unprotected).
+7. **Beta GitHub Release and tag** `v0.2.0-beta.1` (see *Exact release
+   commands*). Not yet created; `CHANGELOG.md` still carries the fixes under
+   *Unreleased*.
 
 ## Known limitations
 
 - Beta: schemas and CLI flags may change before 1.0.
-- The test suite has not yet run on Linux or macOS (the first CI run stopped
-  at the build check there).
 - Worker branches use `wip/<feature>/<node>` (Git refs cannot nest under
   `feature/<feature>`).
 - The ECC adapter is validated against the documented artifact shape only, not
@@ -195,7 +218,7 @@ not file contents.
 ## Exact release commands
 
 ```bash
-# one-time: publish `main` to the new remote
+# one-time: publish `main` to the new remote (done)
 git remote add origin https://github.com/nigunpark/mycelink.git
 git push -u origin main
 
