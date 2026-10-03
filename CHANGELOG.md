@@ -31,6 +31,8 @@ under **Breaking**.
   re-adding it failed with "missing but already registered worktree".
   Worktrees are now matched by real location (8.3 names expanded,
   case-insensitive on Windows). Found by the first public CI run.
+- CI: both fixes above are confirmed by a run that passes on Windows, Ubuntu
+  and macOS with Node.js 22.12.0 and 24.
 
 ## [0.2.0-beta.1]
 
