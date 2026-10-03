@@ -16469,7 +16469,8 @@ var DEFAULT_CONFIG = {
   hook_session_start_max_bytes: 4096,
   hook_prompt_delta_max_bytes: 2048,
   brain_dir: null,
-  allow_shell_commands: false
+  allow_shell_commands: false,
+  allow_dangerous_permission_bypass: false
 };
 var WorkspaceError = class extends Error {
 };
@@ -19769,6 +19770,24 @@ function zeroObservationUsage() {
 }
 
 // src/sessions/claude-cli-adapter.ts
+var PermissionPolicyError = class extends Error {
+  constructor(detail) {
+    super(
+      `${detail} disables Claude Code's permission system for every worker session. Set allow_dangerous_permission_bypass: true in mycelink.config.json only if workers run in a disposable sandbox.`
+    );
+    this.name = "PermissionPolicyError";
+  }
+};
+function permissionBypassFlag(args, permissionMode) {
+  if (permissionMode === "bypassPermissions") return "--permission-mode bypassPermissions";
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--dangerously-skip-permissions" || a === "--allow-dangerously-skip-permissions") return a;
+    if (a === "--permission-mode=bypassPermissions") return a;
+    if (a === "--permission-mode" && args[i + 1] === "bypassPermissions") return `${a} ${args[i + 1]}`;
+  }
+  return null;
+}
 var WORKER_PROMPT = [
   "You are a bounded Claude Code worker session driven by the multi-repo orchestrator.",
   "Read the JSON context pack at $MYCELINK_CONTEXT_PACK. It is your entire brief.",
@@ -19784,6 +19803,11 @@ var ClaudeCliAdapter = class {
   options;
   runs = /* @__PURE__ */ new Map();
   constructor(options) {
+    const bypass = permissionBypassFlag(
+      [...options.prefixArgs ?? [], ...options.extraArgs ?? []],
+      options.permissionMode
+    );
+    if (bypass !== null && options.allowPermissionBypass !== true) throw new PermissionPolicyError(bypass);
     this.options = options;
     this.name = options.adapterName ?? "claude-background";
   }
@@ -20225,7 +20249,11 @@ var MANAGED_PATTERNS = [
   "**/repos.lock.yaml",
   "**/candidates/*.yaml",
   "**/.mycelink/*.json",
-  "**/.mycelink/*.lock"
+  "**/.mycelink/*.lock",
+  // Security-relevant configuration: shell mode, permission bypass, and the
+  // hook registration itself. A model must not be able to switch these off.
+  "**/mycelink.config.json",
+  "**/.claude/settings.json"
 ];
 var GUARDED_COMMAND_PATTERNS = [
   { rx: /\bgit\s+worktree\s+(add|remove)\b/, why: "worker worktrees are created by mycelink" },
@@ -20447,7 +20475,7 @@ function preToolUse(ctx, io, input) {
     if (MANAGED_PATTERNS.some((p) => matchGlob(p, normalised))) {
       return block(
         io,
-        `Blocked: ${relative3(ctx.controlRoot, target) || target} is controller-owned state. Use mycelink (node/tdd/evidence/candidate/resource) instead of editing it.`
+        `Blocked: ${relative3(ctx.controlRoot, target) || target} is controller-owned state or protected configuration. Use mycelink (node/tdd/evidence/candidate/resource) instead of editing it.`
       );
     }
   }
@@ -21507,6 +21535,7 @@ function adapterFor(controlRoot) {
   return new ClaudeCliAdapter({
     executable: config.claude_executable,
     extraArgs: config.claude_extra_args,
+    allowPermissionBypass: config.allow_dangerous_permission_bypass === true,
     adapterName: "claude-background",
     mode: "print"
   });

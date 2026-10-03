@@ -68,6 +68,10 @@ const MANAGED_PATTERNS = [
   '**/candidates/*.yaml',
   '**/.mycelink/*.json',
   '**/.mycelink/*.lock',
+  // Security-relevant configuration: shell mode, permission bypass, and the
+  // hook registration itself. A model must not be able to switch these off.
+  '**/mycelink.config.json',
+  '**/.claude/settings.json',
 ];
 
 /** Commands that must go through the controller rather than raw shell. */
@@ -347,7 +351,7 @@ function preToolUse(ctx: HookContext, io: CliIo, input: HookInput): number {
     if (MANAGED_PATTERNS.some((p) => matchGlob(p, normalised))) {
       return block(
         io,
-        `Blocked: ${relative(ctx.controlRoot, target) || target} is controller-owned state. ` +
+        `Blocked: ${relative(ctx.controlRoot, target) || target} is controller-owned state or protected configuration. ` +
           `Use mycelink (node/tdd/evidence/candidate/resource) instead of editing it.`,
       );
     }

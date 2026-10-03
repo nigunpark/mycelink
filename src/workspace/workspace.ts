@@ -38,6 +38,11 @@ export interface MycelinkConfig {
    * graph author with arbitrary command execution.
    */
   allow_shell_commands: boolean;
+  /**
+   * Allow claude_extra_args to disable Claude Code permission checks
+   * (--dangerously-skip-permissions, bypassPermissions). Off by default.
+   */
+  allow_dangerous_permission_bypass: boolean;
 }
 
 export const DEFAULT_CONFIG: MycelinkConfig = {
@@ -51,6 +56,7 @@ export const DEFAULT_CONFIG: MycelinkConfig = {
   hook_prompt_delta_max_bytes: 2048,
   brain_dir: null,
   allow_shell_commands: false,
+  allow_dangerous_permission_bypass: false,
 };
 
 export interface Workspace {
