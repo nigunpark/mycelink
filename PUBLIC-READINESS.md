@@ -71,13 +71,13 @@ hash, so it changes with the commit time by design.
 
 ## Repository and history
 
-- Work is on branch **`mycelink-public`**, an **orphan branch with clean
-  history** (no ancestry from the reference implementation or from `main`).
-- `main` (commit `dd03912`) contains the internal release-task document,
-  which includes a personal absolute path. **Publish only `mycelink-public`**
-  (for example push it as `main` of the new remote); do not push the local
-  `main`.
-- Commits on `mycelink-public` carry the local Git author identity configured
+- **`main` is the clean public history** and the only local branch. It is an
+  orphan history (single root commit `9fb32f3`, no ancestry from the
+  reference implementation or the internal bootstrap work) and is **the
+  branch to push**.
+- The internal bootstrap branch and the temporary worktree branches have
+  been deleted; no other local branches, worktrees or stashes remain.
+- Commits on `main` carry the local Git author identity configured
   on this machine (name and e-mail). Decide before publishing whether to keep
   it or rewrite the branch's authorship to a GitHub no-reply address; this
   was deliberately not changed without your decision.
