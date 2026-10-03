@@ -61,7 +61,7 @@ workflows and runtime files are unchanged.
 | `actionlint` 1.7.12 on all workflows | no findings |
 | Manual ZIP install in an isolated profile (`CLAUDE_CONFIG_DIR` in a temp dir) | strict validation ✔, marketplace add ✔, install ✔ (`0.2.0-beta.1`, enabled, under the isolated config), installed `mycelink --version` ✔, `init` ✔, `doctor` hooks ✔ pointing at the installed copy, uninstall ✔, control repo untouched; no `node_modules`, no `src`, no build step |
 | Secret / personal-path scan of tracked files | no personal paths, no real e-mail addresses, no secret-like values (only synthetic `*@example.invalid` fixtures and a `c:/Users/someone` path-rejection test vector) |
-| History scan of `mycelink-public` (`git log -p HEAD`) | no personal paths or e-mail addresses in file contents |
+| History scan of `main` (`git log -p HEAD`) | no personal paths or e-mail addresses in file contents |
 | `git status --short` | clean |
 
 The zip hash covers file contents only; it is unaffected by commits that do
@@ -84,7 +84,7 @@ hash, so it changes with the commit time by design.
 
 ## Remaining before publishing (GitHub-owner-dependent)
 
-1. Create the GitHub repository and push `mycelink-public` as `main`.
+1. Create the GitHub repository and push `main`.
 2. Add real URLs once the owner is known — intentionally absent now (no fake
    placeholders): `repository`, `homepage` and `bugs` in `package.json`;
    `repository`/`homepage` in `.claude-plugin/plugin.json` (re-run
@@ -123,9 +123,9 @@ hash, so it changes with the commit time by design.
 ## Exact release commands
 
 ```bash
-# one-time: publish the clean branch to the new remote
+# one-time: publish `main` to the new remote
 git remote add origin https://github.com/<owner>/mycelink.git
-git push -u origin mycelink-public:main
+git push -u origin main
 
 # every release (see docs/RELEASING.md)
 npm ci
