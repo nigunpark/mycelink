@@ -40,7 +40,7 @@ import { planShards } from '../e2e/scheduler.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
 import { appendEvent, readEvents } from '../state/event-log.js';
 import { runHook } from '../hooks/entrypoint.js';
-import { installHooks } from '../workspace/hook-settings.js';
+import { hookHealth, installHooks } from '../workspace/hook-settings.js';
 import { memoryCommand } from '../knowledge/cli.js';
 import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
 import { assertPlainFileName } from '../security/names.js';
@@ -249,6 +249,11 @@ function doctor(args: ParsedArgs, io: CliIo): number {
 
   const config = loadConfig(controlRoot);
   push('session adapter', true, config.session_adapter);
+
+  if (existsSync(paths.config)) {
+    const hooks = hookHealth(controlRoot);
+    push('hooks', hooks.ok, hooks.detail);
+  }
 
   const features = existsSync(paths.featuresDir)
     ? readdirSync(paths.featuresDir).filter((f) => !f.startsWith('.'))

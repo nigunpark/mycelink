@@ -10,6 +10,7 @@ import { join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 import { makeGitRepo, commitAll, git } from './git-fixture.js';
 import { makeTmpDir } from './tmp.js';
+import { buildHookSettings } from '../../src/workspace/hook-settings.js';
 
 export const FEATURE_ID = 'FEAT-901';
 
@@ -187,6 +188,8 @@ export function createPortfolio(): Portfolio {
   makeGitRepo(control, {
     files: {
       'README.md': '# control\n',
+      // What `mycelink init` writes: project hooks pointing at this checkout.
+      '.claude/settings.json': JSON.stringify({ hooks: buildHookSettings(mycelink) }, null, 2) + '\n',
       'contracts/order-status.json': JSON.stringify({ name: 'order-status', version: 2 }, null, 2) + '\n',
       'mycelink.config.json':
         JSON.stringify(

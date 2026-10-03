@@ -96,12 +96,47 @@ export function installHooks(controlRoot: string, launcher = mycelinkCliPath()):
   const merged: HookSettings = { ...(existing.hooks ?? {}) };
 
   for (const [event, matchers] of Object.entries(ours)) {
-    const keep = (merged[event] ?? []).filter(
-      (m) => !m.hooks.some((h) => h.command.includes('mycelink')),
-    );
+    const keep = (merged[event] ?? []).filter((m) => !m.hooks.some((h) => isOurHook(h.command)));
     merged[event] = [...keep, ...matchers];
   }
 
   writeTextAtomic(file, JSON.stringify({ ...existing, hooks: merged }, null, 2) + '\n');
   return file;
+}
+
+/** Only entries this package wrote; a user's own hooks are never touched. */
+function isOurHook(command: string): boolean {
+  return /mycelink\.mjs" hook [a-z-]+$/.test(command);
+}
+
+/**
+ * Whether the control repository's Mycelink hooks point at a launcher that
+ * exists. After a plugin update the installed copy may live elsewhere; the
+ * fix is to re-run `mycelink init <control-repo>`, which rewrites only these
+ * entries.
+ */
+export function hookHealth(controlRoot: string): { ok: boolean; detail: string } {
+  const file = join(controlRoot, '.claude', 'settings.json');
+  let settings: ClaudeSettings = {};
+  try {
+    settings = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as ClaudeSettings) : {};
+  } catch {
+    return { ok: false, detail: `${file} is not valid JSON` };
+  }
+  const commands = Object.values(settings.hooks ?? {})
+    .flat()
+    .flatMap((m) => m.hooks.map((h) => h.command))
+    .filter(isOurHook);
+  if (commands.length === 0) {
+    return { ok: false, detail: 'Mycelink hooks are not installed; run "mycelink init <control-repo>"' };
+  }
+  const launchers = new Set(commands.map((c) => /"([^"]+mycelink\.mjs)"/.exec(c)?.[1] ?? ''));
+  const missing = [...launchers].filter((l) => l === '' || !existsSync(l));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      detail: `hooks point at a missing launcher (${missing.join(', ')}); re-run "mycelink init <control-repo>" after updating the plugin`,
+    };
+  }
+  return { ok: true, detail: [...launchers].join(', ') };
 }

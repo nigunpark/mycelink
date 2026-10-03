@@ -115,7 +115,24 @@ describeIfClaude('release ZIP lifecycle in an isolated profile', () => {
     expect(refresh.code, refresh.stdout + refresh.stderr).toBe(0);
     const update = runClaude(profile, ['plugin', 'update', PLUGIN_ID, '--json']);
     expect(update.code, update.stdout + update.stderr).toBe(0);
-    expect(installed().find((p) => p.id === PLUGIN_ID)?.version).toBe(NEXT_VERSION);
+    const entry = installed().find((p) => p.id === PLUGIN_ID) as Installed;
+    expect(entry.version).toBe(NEXT_VERSION);
+
+    // The documented post-update step: re-run init from the new copy so the
+    // project hooks point at it, then doctor confirms.
+    const launcher = join(entry.installPath, 'bin', 'mycelink.mjs');
+    const reinit = spawnSync(process.execPath, [launcher, 'init', control], { encoding: 'utf8', env: profile.env, windowsHide: true });
+    expect(reinit.status, reinit.stderr).toBe(0);
+    const doctor = spawnSync(process.execPath, [launcher, 'doctor', '--control-root', control, '--json'], {
+      encoding: 'utf8',
+      env: profile.env,
+      windowsHide: true,
+    });
+    const hooks = (JSON.parse(doctor.stdout) as { checks: { name: string; ok: boolean; detail: string }[] }).checks.find(
+      (c) => c.name === 'hooks',
+    );
+    expect(hooks?.ok, hooks?.detail).toBe(true);
+    expect(hooks?.detail.replace(/\\/g, '/')).toContain(entry.installPath.replace(/\\/g, '/'));
   });
 
   it('leaves control-repository data untouched across update and uninstall', () => {

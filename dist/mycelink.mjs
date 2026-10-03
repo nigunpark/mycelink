@@ -20699,13 +20699,36 @@ function installHooks(controlRoot, launcher = mycelinkCliPath()) {
   const ours = buildHookSettings(launcher);
   const merged = { ...existing.hooks ?? {} };
   for (const [event, matchers] of Object.entries(ours)) {
-    const keep = (merged[event] ?? []).filter(
-      (m) => !m.hooks.some((h) => h.command.includes("mycelink"))
-    );
+    const keep = (merged[event] ?? []).filter((m) => !m.hooks.some((h) => isOurHook(h.command)));
     merged[event] = [...keep, ...matchers];
   }
   writeTextAtomic(file, JSON.stringify({ ...existing, hooks: merged }, null, 2) + "\n");
   return file;
+}
+function isOurHook(command) {
+  return /mycelink\.mjs" hook [a-z-]+$/.test(command);
+}
+function hookHealth(controlRoot) {
+  const file = join18(controlRoot, ".claude", "settings.json");
+  let settings = {};
+  try {
+    settings = existsSync17(file) ? JSON.parse(readFileSync12(file, "utf8")) : {};
+  } catch {
+    return { ok: false, detail: `${file} is not valid JSON` };
+  }
+  const commands = Object.values(settings.hooks ?? {}).flat().flatMap((m) => m.hooks.map((h) => h.command)).filter(isOurHook);
+  if (commands.length === 0) {
+    return { ok: false, detail: 'Mycelink hooks are not installed; run "mycelink init <control-repo>"' };
+  }
+  const launchers = new Set(commands.map((c) => /"([^"]+mycelink\.mjs)"/.exec(c)?.[1] ?? ""));
+  const missing = [...launchers].filter((l) => l === "" || !existsSync17(l));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      detail: `hooks point at a missing launcher (${missing.join(", ")}); re-run "mycelink init <control-repo>" after updating the plugin`
+    };
+  }
+  return { ok: true, detail: [...launchers].join(", ") };
 }
 
 // src/knowledge/cli.ts
@@ -21644,6 +21667,10 @@ function doctor(args, io) {
   }
   const config = loadConfig(controlRoot);
   push("session adapter", true, config.session_adapter);
+  if (existsSync19(paths.config)) {
+    const hooks = hookHealth(controlRoot);
+    push("hooks", hooks.ok, hooks.detail);
+  }
   const features = existsSync19(paths.featuresDir) ? readdirSync8(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
