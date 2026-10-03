@@ -74,9 +74,10 @@ under **Breaking**.
 - CI: both fixes above are confirmed by a run that passes on Windows, Ubuntu
   and macOS with Node.js 22.12.0 and 24.
 - Windows: every worker attempt failed with `WORKER_PROTOCOL_INVALID: gate
-  argument "C:/Users/RUNNER~1/..." could be reinterpreted by a shell` when the
-  control repository lived under an 8.3 short name, because `~` was not an
-  accepted gate-argument character. A tilde is now accepted, but only inside
+  argument "<8.3 short-name path containing ~1>" could be reinterpreted by a
+  shell` when the control repository lived under an 8.3 short name (such as a
+  user directory abbreviated to `RUNNER~1`), because `~` was not an accepted
+  gate-argument character. A tilde is now accepted, but only inside
   double quotes, where every shell treats it as literal (an unquoted `~` is
   expanded by bash at the start of a word and after `=`). The gate-argument
   rules were also tightened: `%` is refused (cmd.exe expands `%VAR%` even
