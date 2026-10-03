@@ -19,13 +19,13 @@ import { minimalPack, writePack } from '../helpers/context-pack.js';
 
 const race = vi.hoisted(() => ({
   /** Called once, right after the named check on `path` returns. */
-  after: null as null | { fn: 'statSync' | 'lstatSync'; path: string; swap: () => void },
+  after: null as null | { fn: 'statSync' | 'lstatSync' | 'renameSync'; path: string; swap: () => void },
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
   const wrap =
-    <F extends (...a: never[]) => unknown>(name: 'statSync' | 'lstatSync', real: F) =>
+    <F extends (...a: never[]) => unknown>(name: 'statSync' | 'lstatSync' | 'renameSync', real: F) =>
     (...args: Parameters<F>): ReturnType<F> => {
       const out = real(...args) as ReturnType<F>;
       const hook = race.after;
@@ -40,6 +40,7 @@ vi.mock('node:fs', async (importOriginal) => {
     default: fs,
     statSync: wrap('statSync', fs.statSync),
     lstatSync: wrap('lstatSync', fs.lstatSync),
+    renameSync: wrap('renameSync', fs.renameSync),
   };
 });
 
@@ -111,15 +112,25 @@ describe('context pack: the bytes parsed are the bytes size-checked', () => {
 });
 
 describe('worker result: collected from the file that was checked, never through a link', () => {
-  it('is not fooled by a result swapped for another file after the link check', () => {
+  it('is not fooled by a result swapped in at the slot path once it was captured', () => {
     const { cwd, file, controller } = slot();
     realFs.writeFileSync(file, validResult(), 'utf8');
-    race.after = { fn: 'lstatSync', path: file, swap: () => replaceFile(file, SECRET) };
+    // The capture renames the slot away; a racing process recreates it at once.
+    const dir = join(cwd, '.mycelink-worker');
+    race.after = {
+      fn: 'renameSync',
+      path: dir,
+      swap: () => {
+        realFs.mkdirSync(dir, { recursive: true });
+        replaceFile(file, SECRET);
+      },
+    };
 
     const collected = collectWorkerResult(cwd, IDENTITY, controller, {});
     expect(collected.failure ?? '').not.toContain('TOP-SECRET');
-    if (collected.result === null) expect(collected.failure).toMatch(/^RESULT_PATH_ESCAPE/);
-    else expect(collected.result.claim_id).toBe('claim-1');
+    expect(race.after).toBeNull(); // The swap really ran.
+    expect(collected.failure).toBeNull();
+    expect(collected.result?.claim_id).toBe('claim-1');
     let stored = '';
     try {
       stored = realFs.readFileSync(controller, 'utf8');

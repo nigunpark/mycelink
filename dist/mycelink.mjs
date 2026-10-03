@@ -15361,8 +15361,8 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync20, mkdirSync as mkdirSync14, readFileSync as readFileSync14, readdirSync as readdirSync8 } from "node:fs";
-import { dirname as dirname8, join as join21, resolve as resolve16 } from "node:path";
+import { existsSync as existsSync20, mkdirSync as mkdirSync14, readFileSync as readFileSync14, readdirSync as readdirSync9 } from "node:fs";
+import { dirname as dirname9, join as join21, resolve as resolve16 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -19879,7 +19879,7 @@ function isProcessAlive(pid) {
 // src/sessions/claude-cli-adapter.ts
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync as existsSync16, mkdirSync as mkdirSync12, rmSync as rmSync6 } from "node:fs";
-import { dirname as dirname7, resolve as resolve12 } from "node:path";
+import { dirname as dirname8, resolve as resolve12 } from "node:path";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // src/sessions/adapter.ts
@@ -19911,14 +19911,17 @@ import {
   fstatSync,
   lstatSync,
   mkdirSync as mkdirSync11,
+  mkdtempSync,
   openSync as openSync4,
+  readdirSync as readdirSync6,
   readSync,
+  renameSync as renameSync3,
   rmdirSync,
   rmSync as rmSync5,
   unlinkSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
-import { join as join18 } from "node:path";
+import { dirname as dirname7, join as join18 } from "node:path";
 var WORKER_RESULT_DIR = ".mycelink-worker";
 var WORKER_RESULT_FILE = "result.json";
 var WORKER_RESULT_REL = `${WORKER_RESULT_DIR}/${WORKER_RESULT_FILE}`;
@@ -20075,33 +20078,50 @@ function isLink(path) {
     return false;
   }
 }
+var RESULT_QUARANTINE_PREFIX = ".result-quarantine-";
 function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
-  const dir = join18(cwd, WORKER_RESULT_DIR);
-  const file = join18(dir, WORKER_RESULT_FILE);
   const fail = (failure) => ({ result: null, failure });
-  const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
-  if (isLink(dir) || existsSync15(dir) && !isInsideReal(cwd, file)) {
-    return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
-  }
-  let fd = null;
+  const captureFailed = (what, err) => fail(
+    `RESULT_CAPTURE_FAILED: could not move ${what} into quarantine (${err.code ?? "error"})`
+  );
+  mkdirSync11(dirname7(controllerPath), { recursive: true });
+  const quarantine = mkdtempSync(join18(dirname7(controllerPath), RESULT_QUARANTINE_PREFIX));
+  const capturedDir = join18(quarantine, "slot");
+  const captured = join18(quarantine, WORKER_RESULT_FILE);
   try {
     try {
-      fd = openSync4(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      retrySync(() => renameSync3(join18(cwd, WORKER_RESULT_DIR), capturedDir));
     } catch (err) {
-      const code = err.code;
-      if (code === "ENOENT") return fail("RESULT_MISSING");
-      return notRegular();
+      if (err.code === "ENOENT") return fail("RESULT_MISSING");
+      return captureFailed("the result slot", err);
     }
-    const st = fstatSync(fd, { bigint: true });
-    let named;
+    const dirSt = lstatSync(capturedDir);
+    if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
+      return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
+    }
     try {
-      named = lstatSync(file, { bigint: true });
-    } catch {
-      return notRegular();
+      retrySync(() => renameSync3(join18(capturedDir, WORKER_RESULT_FILE), captured));
+    } catch (err) {
+      if (err.code === "ENOENT") return fail("RESULT_MISSING");
+      return captureFailed("the result", err);
     }
-    if (named.isSymbolicLink() || !st.isFile() || named.dev !== st.dev || named.ino !== st.ino || st.nlink !== 1n) {
-      return notRegular();
-    }
+    return readCapturedResult(captured, expected, controllerPath, env);
+  } finally {
+    removeQuarantine(quarantine);
+  }
+}
+function readCapturedResult(captured, expected, controllerPath, env) {
+  const fail = (failure) => ({ result: null, failure });
+  const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
+  let fd;
+  try {
+    fd = openSync4(captured, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return notRegular();
+  }
+  try {
+    const st = fstatSync(fd, { bigint: true });
+    if (lstatSync(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
     }
@@ -20124,8 +20144,25 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + "\n");
     return { result, failure: null };
   } finally {
-    if (fd !== null) closeSync4(fd);
-    rmSync5(file, { force: true });
+    closeSync4(fd);
+  }
+}
+function removeTree(path) {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) return retrySync(() => removeLink(path));
+  if (!st.isDirectory()) return retrySync(() => unlinkSync(path));
+  for (const name of readdirSync6(path)) removeTree(join18(path, name));
+  retrySync(() => rmdirSync(path));
+}
+function removeQuarantine(quarantine) {
+  try {
+    removeTree(quarantine);
+  } catch {
   }
 }
 
@@ -20189,8 +20226,8 @@ var ClaudeCliAdapter = class {
   }
   spawn(request) {
     const sessionId = randomUUID3();
-    mkdirSync12(dirname7(resolve12(request.logPath)), { recursive: true });
-    mkdirSync12(dirname7(resolve12(request.resultPath)), { recursive: true });
+    mkdirSync12(dirname8(resolve12(request.logPath)), { recursive: true });
+    mkdirSync12(dirname8(resolve12(request.resultPath)), { recursive: true });
     if (existsSync16(request.resultPath)) rmSync6(request.resultPath, { force: true });
     const handle = {
       session_id: sessionId,
@@ -20612,7 +20649,7 @@ function writeLoops(file, loops) {
 }
 
 // src/hooks/entrypoint.ts
-import { existsSync as existsSync18, readFileSync as readFileSync11, readdirSync as readdirSync6 } from "node:fs";
+import { existsSync as existsSync18, readFileSync as readFileSync11, readdirSync as readdirSync7 } from "node:fs";
 import { join as join19, relative as relative3, resolve as resolve13, sep as sep3 } from "node:path";
 import { createHash as createHash6 } from "node:crypto";
 var MAX_BLOCK_BYTES = 1024;
@@ -20664,7 +20701,7 @@ function activeFeature(controlRoot, explicit) {
   if (envFeature) return isSafeFeatureId(envFeature) ? envFeature : null;
   const dir = controlPaths(controlRoot).featuresDir;
   if (!existsSync18(dir)) return null;
-  const candidates = readdirSync6(dir).filter(
+  const candidates = readdirSync7(dir).filter(
     (f) => isSafeFeatureId(f) && existsSync18(join19(dir, f, "STATE.json"))
   );
   if (candidates.length === 1) return candidates[0];
@@ -21031,7 +21068,7 @@ import { resolve as resolve15 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync19, mkdirSync as mkdirSync13, readFileSync as readFileSync12, readdirSync as readdirSync7, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync19, mkdirSync as mkdirSync13, readFileSync as readFileSync12, readdirSync as readdirSync8, statSync as statSync4 } from "node:fs";
 import { join as join20, relative as relative4, resolve as resolve14 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
@@ -21170,7 +21207,7 @@ function listPages(root) {
   if (!existsSync19(root)) return [];
   const out = [];
   const walk = (dir) => {
-    for (const entry of readdirSync7(dir).sort()) {
+    for (const entry of readdirSync8(dir).sort()) {
       const full = join20(dir, entry);
       if (statSync4(full).isDirectory()) {
         if (entry === "archive") continue;
@@ -21829,7 +21866,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   let dir = resolve16(cwd);
   for (let i = 0; i < 12; i++) {
     if (existsSync20(join21(dir, "mycelink.config.json"))) return dir;
-    const parent = dirname8(dir);
+    const parent = dirname9(dir);
     if (parent === dir) break;
     dir = parent;
   }
@@ -21966,7 +22003,7 @@ function doctor(args, io) {
     const hooks = hookHealth(controlRoot);
     push("hooks", hooks.ok, hooks.detail);
   }
-  const features = existsSync20(paths.featuresDir) ? readdirSync8(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync20(paths.featuresDir) ? readdirSync9(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -22263,7 +22300,7 @@ function graphGroup(args, io) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
-    mkdirSync14(dirname8(out), { recursive: true });
+    mkdirSync14(dirname9(out), { recursive: true });
     const header = `# DRAFT generated by the "${adapter.name}" adapter (${adapter.verification}).
 # Requires human review. Not approved. Rename to PORTFOLIO-GRAPH.yaml only after review,
 # then run: mycelink graph validate ${featureId}
@@ -22680,7 +22717,7 @@ function candidateGroup(args, io) {
     branch: integrationBranchName(featureId)
   }));
   if (sub === "create") {
-    const contracts = existsSync20(workspace.paths.contractsDir) ? readdirSync8(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+    const contracts = existsSync20(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
     const manifest = createCandidate({
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
@@ -22989,7 +23026,7 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync20(paths.checkpointsDir) ? readdirSync8(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync20(paths.checkpointsDir) ? readdirSync9(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");

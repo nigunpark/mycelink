@@ -8,7 +8,7 @@ Node 22.12.0 and 24), with CodeQL (`37137320292`) and OpenSSF Scorecard
 (`37137320290`) also passing on the same commit. Branch protection and the
 beta GitHub Release/tag remain; nothing has been tagged or released.
 
-**New beta blocker found and fixed locally (not yet pushed or CI-verified).**
+**New beta blocker found and fixed on PR #3 (not yet green in CI).**
 The first real-Claude pilot showed that real worker sessions could not start
 any node: the worker was denied every attempt to read the context pack and
 result path from environment variables and exited 0 with `RESULT_MISSING`.
@@ -16,7 +16,10 @@ The worker transport was redesigned on branch
 `fix/real-worker-context-transport`, and the real pilot now reaches `DONE`
 with a structured result and verified RED/GREEN evidence (see *Real-Claude
 pilot*). The public CI status above is for `41b99d8`, which does **not**
-contain this fix.
+contain this fix. The latest PR #3 run (`37141412218`) passed CodeQL and
+every test leg except Windows / Node 22.12.0, where every worker result was
+refused (see *PR #3 CI run: Windows / Node 22 result capture*). That is fixed
+locally and not yet pushed.
 
 This file records what was verified, how, and what remains. It is not
 shipped in the release archive.
@@ -106,9 +109,10 @@ files are unchanged.
 
 ## Test totals
 
-With the worker-transport fix and the PR #3 CI/CodeQL fixes (local branch,
-not yet in CI): 657 tests in 40 files, 656 passed, 0 failed, 1 skipped on
-Windows (Node 24.14.1). The worker-transport fix added 24 tests, in
+With the worker-transport fix, the PR #3 CI/CodeQL fixes and the Node 22
+result-capture fix (local branch; the capture fix is not yet in CI): 662
+tests in 41 files, 661 passed, 0 failed, 1 skipped on Windows (Node 24.14.1
+and Node 22.12.0). The capture fix added 5 tests in `tests/security`. The worker-transport fix added 24 tests, in
 `tests/integration` (+17) and `tests/unit` (+7). The CI/CodeQL fixes added
 40 more, in `tests/security` (+39) and `tests/integration` (+1). The figures
 below are for `41b99d8`.
@@ -388,7 +392,83 @@ SARIF code flows were read before anything was changed.
   2,497 output tokens, worker result `SUBMITTED`, and fresh GREEN and
   regression exit 0.
 
-**Not yet done:** push the branch and get CI and CodeQL green on PR #3.
+**Pushed** (PR #3 head `0876bcf`). CI run `37141412218` passed CodeQL and
+every test leg except Windows / Node 22.12.0; see the next section.
+
+## PR #3 CI run: Windows / Node 22 result capture
+
+**Failure (CI run `37141412218`, job `111256454280`, Windows / Node
+22.12.0 only).** `collectWorkerResult` refused ordinary worker output with
+`RESULT_PATH_ESCAPE: the result is not a regular file`, and 23 tests
+failed as a consequence. Windows / Node 24 and every Linux and macOS leg
+passed. This was not a flake.
+
+**Root cause (reproduced locally).** The collector opened the result and
+required `fstat(fd)` and `lstat(path)` (bigint) to agree on `dev`, `ino` and
+`nlink`. A probe with the official Node 22.12.0 Windows build on this
+machine showed path-based `lstat`/`stat` returning `dev: 0n` while `fstat`
+returned the volume serial (`3726988745n`); `ino` and `nlink` agreed. Node
+24.14.1 returned the volume serial from all three. With the old code, Node
+22.12.0 failed 8 of 16 `tests/integration/worker-transport.test.ts` tests
+locally with the CI error text.
+
+**Fix.** The identity comparison is gone. Capture now moves the slot
+directory, then the result file, by atomic rename into a fresh
+controller-owned quarantine (`.result-quarantine-*`) beside the stored
+result. From then on, the worker cannot swap the path being checked. A
+rename moves a link itself, so a slot directory or result replaced by a
+link is refused (`RESULT_PATH_ESCAPE`) and its target is left alone. The
+captured file is opened (with `O_NOFOLLOW` and `O_NONBLOCK` where they
+exist), checked through the descriptor (regular file, exactly one link,
+size), checked once more for a link, read with a byte bound, schema- and
+identity-checked, redacted, and written atomically to the controller path.
+A rename that fails (for example `EXDEV` across volumes) fails closed with
+`RESULT_CAPTURE_FAILED`, and nothing is copied. The quarantine is always
+removed, and links in it are unlinked, never followed.
+
+**Tests (RED verified first).**
+
+- `tests/security/worker-result-capture.test.ts` (5 tests, new). A
+  file-system fake makes path stats report `dev: 0n`, as Node 22 does on
+  Windows, on every platform. Under that fake, an ordinary result must be
+  accepted and a hard link must still be refused. A cross-volume rename
+  (`EXDEV`) must fail closed with no copy. A slot-directory junction and a
+  final symlink to outside files must be refused, with the targets left in
+  place. No quarantine may be left behind. RED: 2 failed (`expected
+  'RESULT_PATH_ESCAPE: the result is not…' to be null`, and a result
+  accepted with no quarantine). The 3 link cases passed before and after.
+- `tests/security/worker-protocol-race.test.ts`: the swap test now fires
+  right after the slot is renamed away. A racing process recreates the slot
+  with an outside secret, and the captured original must still be the one
+  stored.
+
+**CodeQL.** A local run (CodeQL 2.27.1, `javascript-security-extended`)
+on the working tree reported the same 8 results as before. There are none
+in `src/sessions/worker-protocol.ts` or the new test, and no
+`js/file-system-race` result other than the pre-existing
+`workspace.ts:161` `.gitkeep` and its `dist/` copy.
+
+**Local verification at this change (Windows 11):**
+
+- `npm run verify` on Node 24.14.1: 662 tests in 41 files, 661 passed,
+  1 skipped (POSIX-only).
+- Full suite on the official Node 22.12.0 Windows build: 662 tests,
+  661 passed, 1 skipped. Under `npx node@22.12.0`, two `gate-command` tests
+  failed with and without this change. The reason was that npx puts a
+  placeholder `node` script on `PATH`, which Git Bash runs. They pass with
+  the real `node.exe` first on `PATH`.
+- `npm run build:check` is clean after commit, and `claude plugin validate
+  --strict .` passed.
+- Two packages with `SOURCE_DATE_EPOCH=1791072000` are byte-identical:
+  58 files, zip SHA-256
+  `18e0d1a8b575f68ce700ea7c2bc3d4c508b41f6c1d788fde4d2df0210433a041`.
+- **Real-Claude pilot re-run** (capture code changed), Claude Code
+  2.1.288: verdict `ok`, `DONE` in 1 attempt, 1 session, 12 turns, about
+  29 s, 2,919 output tokens, worker result `SUBMITTED`, behaviour-missing
+  RED (exit 1), and fresh GREEN and regression exit 0.
+
+**Not yet done:** push the branch and get all six test legs and CodeQL
+green on PR #3.
 
 ## Remaining before publishing
 
@@ -414,9 +494,10 @@ SARIF code flows were read before anything was changed.
    *Unreleased*.
 8. **Land the worker-transport fix.** It is on PR #3
    (`fix/real-worker-context-transport`). The Windows 8.3 gate failure and
-   the five CodeQL alerts found by its first CI run are fixed locally and
-   not pushed. Push, get CI and CodeQL green on all six legs, and merge to
-   `main`. The tag must not be cut from a
+   the five CodeQL alerts found by its first CI run are fixed and pushed
+   (`0876bcf`; CodeQL green). The Windows / Node 22.12.0 result-capture
+   failure found by that run is fixed locally and not pushed. Push, get CI
+   and CodeQL green on all six legs, and merge to `main`. The tag must not be cut from a
    commit without it, because real workers cannot start a node without it.
 
 ## Known limitations

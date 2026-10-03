@@ -83,6 +83,15 @@ under **Breaking**.
   rules were also tightened: `%` is refused (cmd.exe expands `%VAR%` even
   inside double quotes), and a leading `@` (PowerShell splatting) is offered
   quoted. Found by the CI run for the worker-transport fix.
+- Windows with Node.js 22: every worker result was refused with
+  `RESULT_PATH_ESCAPE: the result is not a regular file`, so no real worker
+  attempt could finish. The result's identity was checked by comparing
+  `fstat` on the open file with `lstat` on its path. On Node 22 for Windows,
+  path-based `lstat`/`stat` report `dev` as `0` while `fstat` reports the
+  volume serial; Node 24 reports the same value from both. The check is
+  gone: the result is now captured into a controller-owned quarantine by
+  atomic rename before it is validated (see *Security*). Found by the CI run
+  for the previous fix (Windows, Node 22.12.0 leg only).
 
 ### Security
 
@@ -93,11 +102,18 @@ These issues were found by CodeQL on the worker-transport pull request.
   swapped in between was parsed without its size or link checks, and the
   first bytes of a non-JSON file outside the worktree could surface in the
   `RESULT_UNREADABLE` parse error. Both are now opened once, checked through
-  that descriptor (`fstat`), and read with a byte bound. The result is opened
-  without following a final link where the platform supports it. It must be
-  the same file the slot path names, and it must have exactly one link, so a
-  hard link to a file outside the worktree is also refused
-  (`RESULT_PATH_ESCAPE`).
+  that descriptor (`fstat`), and read with a byte bound. The worker result
+  is first captured: the slot directory, then the result file, are moved by
+  atomic rename into a fresh controller-owned quarantine beside the stored
+  result, so the worker can no longer swap the path being checked. A rename
+  moves a link itself, never its target, so a slot directory or result
+  replaced by a link is refused without touching what it points at, and a
+  result with more than one name (a hard link to a file outside the
+  worktree) is refused too (`RESULT_PATH_ESCAPE`). If the rename cannot be
+  done atomically, for example across volumes, capture fails closed
+  (`RESULT_CAPTURE_FAILED`); nothing is copied out of the worktree. The
+  quarantine is always removed, and links in it are unlinked, never
+  followed.
 - The result slot's `.gitignore` was written through whatever stood at that
   path, so a link left by an earlier attempt redirected the controller's
   write outside the worktree. It is now removed and recreated exclusively.

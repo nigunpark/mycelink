@@ -13,9 +13,10 @@
  *  - gate commands are rendered from controller-built argv and offered
  *    verbatim, and only those exact lines are pre-approved;
  *  - the result slot is `.mycelink-worker/result.json`, git-ignored by its own
- *    `.gitignore`, pre-approved for exactly that one file, and collected with
- *    link, size, schema and identity checks before a redacted copy is stored
- *    at the controller-owned path.
+ *    `.gitignore`, pre-approved for exactly that one file, moved by atomic
+ *    rename into a controller-owned quarantine, and checked there for links,
+ *    size, schema and identity before a redacted copy is stored at the
+ *    controller-owned path.
  */
 import {
   closeSync,
@@ -24,20 +25,24 @@ import {
   fstatSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
+  readdirSync,
   readSync,
+  renameSync,
   rmdirSync,
   rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { NodeResult } from './adapter.js';
 import { packBytes, type ContextPack } from './context-pack.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { redactValue, type Env } from '../security/redact.js';
 import { isInsideReal } from '../security/paths.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
+import { retrySync } from '../util/retry.js';
 
 export const WORKER_RESULT_DIR = '.mycelink-worker';
 export const WORKER_RESULT_FILE = 'result.json';
@@ -267,19 +272,27 @@ function isLink(path: string): boolean {
 
 export type CollectedResult = { result: NodeResult; failure: null } | { result: null; failure: string };
 
+/** Prefix of the controller-owned directories a result is captured into. */
+export const RESULT_QUARANTINE_PREFIX = '.result-quarantine-';
+
 /**
  * Take the worker's result out of its slot.
  *
- * The file must be a regular file reached without links, inside the
- * worktree, under the size ceiling, schema-valid and bound to this node and
- * claim. A redacted copy is written to `controllerPath`; the worker's copy is
- * always removed so the next attempt starts empty.
+ * The slot directory is first moved, with one atomic rename, into a fresh
+ * quarantine directory beside `controllerPath`, and the result file is then
+ * moved out of it the same way. Renames act on the directory entry itself, so
+ * a slot or result replaced by a link moves the link, never what it points
+ * at. After capture every path that is checked and read is controller-owned:
+ * a worker or its leftover processes can no longer swap it, so the checks
+ * hold without comparing file identities across `fstat` and `lstat` (which
+ * disagree on `dev` on Node 22 for Windows). A rename that cannot be done on
+ * one volume fails closed (`RESULT_CAPTURE_FAILED`); nothing is copied.
  *
- * The file is opened once (without following a final link where the platform
- * allows) and every check and the read go through that descriptor. Its
- * identity must match what the slot path names without following links, and
- * it must have exactly one name, so neither a swap after the checks nor a
- * hard link to a file outside the worktree is ever read.
+ * The captured file must be a regular file that is not a link, has exactly
+ * one name (so it is not a hard link to a file outside the worktree), is
+ * under the size ceiling, schema-valid and bound to this node and claim. A
+ * redacted copy is written atomically to `controllerPath`, and the
+ * quarantine is always removed, links unlinked rather than followed.
  */
 export function collectWorkerResult(
   cwd: string,
@@ -287,39 +300,61 @@ export function collectWorkerResult(
   controllerPath: string,
   env: Env = process.env,
 ): CollectedResult {
-  const dir = join(cwd, WORKER_RESULT_DIR);
-  const file = join(dir, WORKER_RESULT_FILE);
   const fail = (failure: string): CollectedResult => ({ result: null, failure });
-  const notRegular = (): CollectedResult => fail('RESULT_PATH_ESCAPE: the result is not a regular file');
+  const captureFailed = (what: string, err: unknown): CollectedResult =>
+    fail(
+      `RESULT_CAPTURE_FAILED: could not move ${what} into quarantine (${(err as NodeJS.ErrnoException).code ?? 'error'})`,
+    );
 
-  if (isLink(dir) || (existsSync(dir) && !isInsideReal(cwd, file))) {
-    return fail('RESULT_PATH_ESCAPE: the result slot was replaced by a link');
-  }
-  let fd: number | null = null;
+  mkdirSync(dirname(controllerPath), { recursive: true });
+  const quarantine = mkdtempSync(join(dirname(controllerPath), RESULT_QUARANTINE_PREFIX));
+  const capturedDir = join(quarantine, 'slot');
+  const captured = join(quarantine, WORKER_RESULT_FILE);
   try {
     try {
-      fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      retrySync(() => renameSync(join(cwd, WORKER_RESULT_DIR), capturedDir));
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return fail('RESULT_MISSING');
-      return notRegular(); // ELOOP: the result itself is a link.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fail('RESULT_MISSING');
+      return captureFailed('the result slot', err);
     }
-    const st = fstatSync(fd, { bigint: true });
-    let named;
+    const dirSt = lstatSync(capturedDir);
+    if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
+      return fail('RESULT_PATH_ESCAPE: the result slot was replaced by a link');
+    }
     try {
-      named = lstatSync(file, { bigint: true });
-    } catch {
-      return notRegular();
+      retrySync(() => renameSync(join(capturedDir, WORKER_RESULT_FILE), captured));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fail('RESULT_MISSING');
+      return captureFailed('the result', err);
     }
-    if (
-      named.isSymbolicLink() ||
-      !st.isFile() ||
-      named.dev !== st.dev ||
-      named.ino !== st.ino ||
-      st.nlink !== 1n
-    ) {
-      return notRegular();
-    }
+    return readCapturedResult(captured, expected, controllerPath, env);
+  } finally {
+    removeQuarantine(quarantine);
+  }
+}
+
+function readCapturedResult(
+  captured: string,
+  expected: WorkerIdentity,
+  controllerPath: string,
+  env: Env,
+): CollectedResult {
+  const fail = (failure: string): CollectedResult => ({ result: null, failure });
+  const notRegular = (): CollectedResult => fail('RESULT_PATH_ESCAPE: the result is not a regular file');
+  let fd: number;
+  try {
+    // No final link is followed where the platform allows it, and a FIFO
+    // cannot block the open.
+    fd = openSync(captured, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return notRegular(); // ELOOP: the result itself is a link.
+  }
+  try {
+    const st = fstatSync(fd, { bigint: true });
+    // The quarantine is controller-owned, so the entry still names what was
+    // opened; where an open follows links (Windows), this refuses one before
+    // anything is read through it.
+    if (lstatSync(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
     }
@@ -342,7 +377,28 @@ export function collectWorkerResult(
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + '\n');
     return { result, failure: null };
   } finally {
-    if (fd !== null) closeSync(fd);
-    rmSync(file, { force: true });
+    closeSync(fd);
+  }
+}
+
+/** Delete a tree without following any link in it: links are unlinked, never entered. */
+function removeTree(path: string): void {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) return retrySync(() => removeLink(path));
+  if (!st.isDirectory()) return retrySync(() => unlinkSync(path));
+  for (const name of readdirSync(path)) removeTree(join(path, name));
+  retrySync(() => rmdirSync(path));
+}
+
+function removeQuarantine(quarantine: string): void {
+  try {
+    removeTree(quarantine);
+  } catch {
+    // Controller-owned and outside the worktree; a later run can remove it.
   }
 }
