@@ -23,7 +23,11 @@ First public beta.
   same command), bounded retries and budgets, failure fingerprints,
   capacity-bounded resource leases, E2E conflict scheduling, fresh
   verification and an optional LLM Wiki Brain memory adapter.
-- Project-scoped enforcement hooks installed by `mycelink init`.
+- Project-scoped enforcement hooks installed by `mycelink init`; `mycelink
+  doctor` reports missing hooks or hooks that point at a moved installation
+  (re-run `init` after a plugin update). Permission-bypass flags for worker
+  sessions are refused unless explicitly allowed, and the hooks block model
+  edits of `mycelink.config.json` and `.claude/settings.json`.
 - Plan-source adapter registry (`mycelink graph adapters`,
   `mycelink graph import`); the ECC adapter is optional and validated against
   the documented artifact shape only.
