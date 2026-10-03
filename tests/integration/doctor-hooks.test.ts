@@ -50,6 +50,15 @@ describe('doctor hook check', () => {
     expect((JSON.parse(after.out) as { checks: Check[] }).checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
   });
 
+  it('explains an empty repository manifest instead of printing a schema error', async () => {
+    const control = makeTmpDir('dh-');
+    await run(['init', control]);
+    const r = await run(['doctor', '--control-root', control, '--json']);
+    const check = (JSON.parse(r.out) as { checks: Check[] }).checks.find((c) => c.name === 'repositories.yaml');
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toMatch(/no repositories registered yet.*mycelink repo register/);
+  });
+
   it('reports hooks as not installed when init ran with --no-hooks', async () => {
     const control = makeTmpDir('dh-');
     await run(['init', control, '--no-hooks']);
