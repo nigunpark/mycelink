@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CLAUDE_CODE_VERSION: 2.1.288
+
+jobs:
+  verify:
+    name: verify and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Check the tag matches every version field
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          test "$TAG" = "v${VERSION}" || { echo "tag $TAG does not match package version $VERSION"; exit 1; }
+          test "$(node -p "require('./.claude-plugin/plugin.json').version")" = "$VERSION"
+          test "$(node -p "require('./.claude-plugin/marketplace.json').plugins[0].version")" = "$VERSION"
+
+      - name: Configure git identity for test fixtures
+        run: |
+          git config --global user.name "Mycelink CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build and check the committed bundle is current
+        run: |
+          npm run build
+          git diff --exit-code -- dist THIRD_PARTY_NOTICES.md
+
+      - name: Install Claude Code CLI (validation only, no model usage)
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Test
+        run: npm test
+        env:
+          ANTHROPIC_API_KEY: ''
+
+      - name: Validate plugin (strict)
+        run: claude plugin validate --strict .
+
+      - name: Package reproducibly
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          npm run package -- --out artifacts/a
+          npm run package -- --out artifacts/b
+          VERSION="$(node -p "require('./package.json').version")"
+          cmp "artifacts/a/mycelink-${VERSION}.zip" "artifacts/b/mycelink-${VERSION}.zip"
+          cmp artifacts/a/SBOM.spdx.json artifacts/b/SBOM.spdx.json
+          (cd artifacts/a && sha256sum -c "mycelink-${VERSION}.zip.sha256")
+
+      - name: Validate the packaged plugin (strict)
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          mkdir -p artifacts/extracted
+          unzip -q "artifacts/a/mycelink-${VERSION}.zip" -d artifacts/extracted
+          claude plugin validate --strict artifacts/extracted
+
+      - name: Upload release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: |
+            artifacts/a/*.zip
+            artifacts/a/*.zip.sha256
+            artifacts/a/SBOM.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish GitHub release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only job with write access, and it runs no project code.
+    permissions:
+      contents: write
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-files
+          path: release
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          PRERELEASE=""
+          case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
+          gh release create "$TAG" release/* \
+            --repo "$REPO" \
+            --verify-tag \
+            --title "Mycelink $TAG" \
+            --notes "See CHANGELOG.md for details. Verify with: sha256sum -c mycelink-${TAG#v}.zip.sha256" \
+            $PRERELEASE
