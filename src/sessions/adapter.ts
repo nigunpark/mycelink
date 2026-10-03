@@ -43,11 +43,18 @@ export interface SpawnRequest {
   nodeId: string;
   claimId: string;
   attempt: number;
-  /** Path to the bounded context pack; the worker's only inherited context. */
+  /**
+   * Path to the bounded context pack; the worker's only inherited context.
+   * The adapter validates it and hands it to the worker inside the prompt;
+   * the worker never reads this path.
+   */
   contextPackPath: string;
   /** Worker worktree. The session is confined here. */
   cwd: string;
-  /** Where the worker must write its structured result. */
+  /**
+   * Controller-owned copy of the worker's validated, redacted result. The
+   * worker writes to the result slot inside `cwd` and never sees this path.
+   */
   resultPath: string;
   /** Where the raw session stream is captured (pointer, never inlined). */
   logPath: string;
@@ -64,6 +71,11 @@ export interface SpawnRequest {
   allowedTools?: string[];
   disallowedTools?: string[];
   addDirs?: string[];
+  /**
+   * Controller-built gate commands (`mycelink tdd ...`). Each is offered to
+   * the worker verbatim and pre-approved as that exact command line only.
+   */
+  gateCommands?: { gate: 'red' | 'green' | 'regression'; argv: string[] }[];
   env?: Record<string, string>;
   /** Links a replacement session to the one it took over from. */
   replacesSessionId?: string | null;

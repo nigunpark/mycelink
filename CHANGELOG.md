@@ -8,6 +8,14 @@ under **Breaking**.
 
 ## [Unreleased]
 
+### Breaking
+
+- Worker sessions receive their brief on stdin and write their result to
+  `.mycelink-worker/result.json` in the worktree. Custom worker agents or
+  skills that read `$MYCELINK_CONTEXT_PACK` or write `$MYCELINK_RESULT_PATH`
+  must follow the bundled `module-worker` agent and `node-worker` skill
+  instead; those variables are no longer set.
+
 ### Changed
 
 - Repository metadata now points at the public GitHub repository
@@ -24,6 +32,38 @@ under **Breaking**.
 
 ### Fixed
 
+- **Real worker sessions could never start their node (beta blocker).** The
+  worker prompt told Claude Code to read `$MYCELINK_CONTEXT_PACK` and write
+  `$MYCELINK_RESULT_PATH`. In print mode Claude Code's permission checks deny
+  shell expansion of variables, and the pack lived outside the worktree, so
+  the first real-Claude pilot's worker was denied on every attempt and exited
+  0 with no result (`RESULT_MISSING`, no RED/GREEN evidence). The worker
+  transport no longer depends on the worker discovering anything:
+  - the validated, redacted, byte-bounded context pack is inlined in the
+    prompt, which is sent on **stdin** (no command-line length limit, no
+    batch-shim expansion). Pack text is JSON with `<`, `>`, `&` and backticks
+    `\u`-escaped, so it cannot close its data block or forge protocol lines.
+    A pack that is schema-invalid, over its byte budget, or for another
+    feature, node or claim fails the attempt (`CONTEXT_PACK_INVALID`) without
+    starting a worker;
+  - the worker writes `.mycelink-worker/result.json` inside its own worktree.
+    The controller creates that slot with a self-ignoring `.gitignore`,
+    pre-approves exactly that file (`--allowed-tools
+    Edit(./.mycelink-worker/result.json)`), and after the session collects it
+    with link, size (256 KiB), schema and node/claim identity checks
+    (`RESULT_PATH_ESCAPE`, `RESULT_TOO_LARGE`, `RESULT_SCHEMA_INVALID`,
+    `RESULT_IDENTITY_MISMATCH`), stores a redacted copy under the feature's
+    `sessions/` directory, and removes the worker's copy;
+  - the controller offers the node's `mycelink tdd red|green|regression`
+    calls as exact command lines (no `--` passthrough, so each runs the
+    declared verifier) and pre-approves only those exact lines;
+  - `MYCELINK_CONTEXT_PACK` and `MYCELINK_RESULT_PATH` are no longer set for
+    workers; the PreToolUse hook exempts exactly the result file from the
+    ownership fence and the RED gate.
+- The real-Claude pilot no longer passes on a non-result. It now requires a
+  structured worker result plus either a behaviour-missing RED and a passing
+  GREEN on the same command, or a `NEEDS_DECISION` with a real question and at
+  least two options; `RESULT_MISSING`, `READY`, `BLOCKED` and the rest fail it.
 - Windows: node and integration worktrees were matched against `git worktree
   list` by path text. When the configured location used an 8.3 short name
   (for example the `RUNNER~1` user directory on GitHub-hosted runners), the
@@ -33,6 +73,61 @@ under **Breaking**.
   case-insensitive on Windows). Found by the first public CI run.
 - CI: both fixes above are confirmed by a run that passes on Windows, Ubuntu
   and macOS with Node.js 22.12.0 and 24.
+- Windows: every worker attempt failed with `WORKER_PROTOCOL_INVALID: gate
+  argument "<8.3 short-name path containing ~1>" could be reinterpreted by a
+  shell` when the control repository lived under an 8.3 short name (such as a
+  user directory abbreviated to `RUNNER~1`), because `~` was not an accepted
+  gate-argument character. A tilde is now accepted, but only inside
+  double quotes, where every shell treats it as literal (an unquoted `~` is
+  expanded by bash at the start of a word and after `=`). The gate-argument
+  rules were also tightened: `%` is refused (cmd.exe expands `%VAR%` even
+  inside double quotes), and a leading `@` (PowerShell splatting) is offered
+  quoted. Found by the CI run for the worker-transport fix.
+- Windows with Node.js 22: every worker result was refused with
+  `RESULT_PATH_ESCAPE: the result is not a regular file`, so no real worker
+  attempt could finish. The result's identity was checked by comparing
+  `fstat` on the open file with `lstat` on its path. On Node 22 for Windows,
+  path-based `lstat`/`stat` report `dev` as `0` while `fstat` reports the
+  volume serial; Node 24 reports the same value from both. The check is
+  gone: the result is now captured into a controller-owned quarantine by
+  atomic rename before it is validated (see *Security*). Found by the CI run
+  for the previous fix (Windows, Node 22.12.0 leg only).
+
+### Security
+
+These issues were found by CodeQL on the worker-transport pull request.
+
+- The worker result and the context pack were checked through one path
+  lookup and read through another (CodeQL `js/file-system-race`). A file
+  swapped in between was parsed without its size or link checks, and the
+  first bytes of a non-JSON file outside the worktree could surface in the
+  `RESULT_UNREADABLE` parse error. Both are now opened once, checked through
+  that descriptor (`fstat`), and read with a byte bound. The worker result
+  is first captured: the slot directory, then the result file, are moved by
+  atomic rename into a fresh controller-owned quarantine beside the stored
+  result, so the worker can no longer swap the path being checked. A rename
+  moves a link itself, never its target, so a slot directory or result
+  replaced by a link is refused without touching what it points at, and a
+  result with more than one name (a hard link to a file outside the
+  worktree) is refused too (`RESULT_PATH_ESCAPE`). If the rename cannot be
+  done atomically, for example across volumes, capture fails closed
+  (`RESULT_CAPTURE_FAILED`); nothing is copied out of the worktree. The
+  quarantine is always removed, and links in it are unlinked, never
+  followed.
+- The result slot's `.gitignore` was written through whatever stood at that
+  path, so a link left by an earlier attempt redirected the controller's
+  write outside the worktree. It is now removed and recreated exclusively.
+- Argv commands and opted-in shell scripts went through one planning
+  function and one spawn, separated only by a runtime flag (CodeQL
+  `js/shell-command-injection-from-environment`,
+  `js/indirect-command-line-injection`). Shell scripts now have their own
+  entry points (`planShellScript`, `runShellScriptSync`) and their own spawn.
+  Verification takes either `command` (argv) or `shellScript`, never both,
+  so an operator's `-- <argv>` cannot reach a shell. Batch-shim arguments
+  are quoted only after passing an allowlist check.
+- On Windows, batch shims and shell scripts run through the system
+  `%SystemRoot%\System32\cmd.exe`. Before, they used `ComSpec`, which could
+  come from a command's own environment.
 
 ## [0.2.0-beta.1]
 

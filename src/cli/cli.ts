@@ -25,7 +25,7 @@ import { DEFAULT_BUDGET, initialState, loadState, mutateState, saveState } from 
 import { applyNodeTransition, recordFailure } from '../state/transition.js';
 import { computeReady, scheduleBatch } from '../scheduler/ready.js';
 import { acquireResource, leaseStatus, recoverLeases, releaseAllForNode, releaseResource } from '../resources/leases.js';
-import { runVerification } from '../evidence/runner.js';
+import { runVerification, verifierInvocation, type VerificationInvocation } from '../evidence/runner.js';
 import { createCandidate, listCandidates, loadCandidate, verifyCandidate } from '../git/candidate.js';
 import { integrateNodeBranch } from '../git/integrate.js';
 import { createWorkerWorktree, workerBranchName, integrationBranchName } from '../git/worktree.js';
@@ -876,9 +876,12 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
 
   const declared = node.verification_commands[0];
-  const usePassthrough = args.passthrough.length > 0;
-  const command = usePassthrough ? args.passthrough : (declared?.command ?? []);
-  if (command.length === 0) throw new Error('No command given and the node declares no verifier.');
+  // An explicit `-- <argv>` from the operator is always argv; a declared
+  // verifier may ask for a shell, which the control-repo config must allow.
+  let invocation: VerificationInvocation;
+  if (args.passthrough.length > 0) invocation = { command: args.passthrough };
+  else if (declared !== undefined && declared.command.length > 0) invocation = verifierInvocation(declared);
+  else throw new Error('No command given and the node declares no verifier.');
 
   const cwd =
     typeof args.flags['cwd'] === 'string'
@@ -894,14 +897,11 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
     kind,
     nodeId,
     repository: node.repository,
-    command,
+    ...invocation,
     cwd,
     evidenceDir: nodeEvidenceDir(controlRoot, featureId, nodeId),
     ...(phase === 'red' ? { expectExit: -1 } : {}),
     baselineFailures: repoDecl?.baseline_failures ?? [],
-    // An explicit `-- <argv>` from the operator is always argv; a declared
-    // verifier may ask for a shell, which the control-repo config must allow.
-    shell: !usePassthrough && declared?.shell === true,
     allowShell: loadConfig(controlRoot).allow_shell_commands,
   });
 
