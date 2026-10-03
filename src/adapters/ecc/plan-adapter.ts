@@ -14,7 +14,7 @@
  * from a live ECC installation. See docs/ADAPTERS.md.
  */
 import YAML from 'yaml';
-import type { EvidenceKind, PortfolioGraph, Problem, RepositoryManifest } from '../model/types.js';
+import type { EvidenceKind, PortfolioGraph, Problem, RepositoryManifest } from '../../model/types.js';
 
 export class EccApprovalError extends Error {
   constructor(artifact: string, status: string) {
