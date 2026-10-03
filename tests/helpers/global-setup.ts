@@ -5,19 +5,25 @@ import { dirname, resolve } from 'node:path';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
- * Compile the controller once per vitest run.
+ * Build once per vitest run.
  *
- * Several suites spawn real child processes (process locks, hook entrypoints,
- * the fake Claude adapter, the plugin harness). Those children must execute the
- * same code the CLI ships, so they load `dist/`. Building here also means every
- * `vitest run` fails loudly on a TypeScript error.
+ *  - `scripts/build.mjs` produces the shipped runtime bundle
+ *    (`dist/mycelink.mjs`). Every suite that spawns the CLI or a hook goes
+ *    through `bin/mycelink.mjs`, so the tests exercise exactly what ships.
+ *  - `tsc` emits per-module output to `build/` for the few suites whose child
+ *    processes import a single internal module (locks, leases, event log),
+ *    and fails the run loudly on any TypeScript error.
  */
 export default function setup(): void {
   execFileSync(process.execPath, [resolve(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json'], {
     cwd: repoRoot,
     stdio: 'inherit',
   });
+  execFileSync(process.execPath, [resolve(repoRoot, 'scripts', 'build.mjs')], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
 }
 
-export const DIST_DIR = resolve(repoRoot, 'dist');
+export const BUILD_DIR = resolve(repoRoot, 'build');
 export const REPO_ROOT = repoRoot;

@@ -95,7 +95,8 @@ export function createIsolatedProfile(pluginSource: string): IsolatedProfile {
   // Matching the absolute path would exclude everything when the package
   // itself happens to live under one of these directory names — for example
   // when developing inside `.claude/worktrees/<name>`.
-  const EXCLUDED_PREFIXES = ['node_modules', '.git', '.claude/worktrees', 'tests/.work', 'dist/.cache'];
+  // Mirror what a git-based marketplace install sees: tracked files only.
+  const EXCLUDED_PREFIXES = ['node_modules', '.git', '.claude/worktrees', 'tests/.work', 'build', 'artifacts'];
   cpSync(sourceRoot, source, {
     recursive: true,
     dereference: false,

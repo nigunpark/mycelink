@@ -181,7 +181,7 @@ export function createPortfolio(): Portfolio {
     },
   });
 
-  const mycelink = resolve(process.cwd(), 'dist', 'index.js');
+  const mycelink = resolve(process.cwd(), 'bin', 'mycelink.mjs');
   const fakeClaude = resolve(process.cwd(), 'tests', 'fake-claude', 'claude.mjs');
 
   makeGitRepo(control, {

@@ -16,7 +16,8 @@ import {
 
 afterAll(() => cleanupTmpRoots());
 
-const DIST = resolve(process.cwd(), 'dist');
+// Child processes load the per-module tsc output, not the single runtime bundle.
+const DIST = resolve(process.cwd(), 'build');
 const CAPACITIES = { 'full-runtime': { capacity: 1 }, 'browser-worker': { capacity: 2 } };
 
 describe('resource leases', () => {

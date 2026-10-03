@@ -1,5 +1,5 @@
 /**
- * Loading and initialising an control repository.
+ * Loading and initialising a control repository.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
