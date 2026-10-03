@@ -14,6 +14,7 @@ import {
   listWorktrees,
   runGit,
 } from './git.js';
+import { assertFeatureId, assertNodeId } from '../security/names.js';
 
 export class AllowedPathViolationError extends Error {
   readonly violations: string[];
@@ -39,12 +40,15 @@ export class AllowedPathViolationError extends Error {
  * manifest — is preserved; only the internal worker-branch namespace differs.
  */
 export function workerBranchName(featureId: string, nodeId: string): string {
+  assertFeatureId(featureId);
+  assertNodeId(nodeId);
   const suffix = nodeId.startsWith(featureId + '.') ? nodeId.slice(featureId.length + 1) : nodeId;
   return `wip/${featureId}/${suffix}`;
 }
 
 /** `feature/<feature-id>` — the per-repository integration branch. */
 export function integrationBranchName(featureId: string): string {
+  assertFeatureId(featureId);
   return `feature/${featureId}`;
 }
 

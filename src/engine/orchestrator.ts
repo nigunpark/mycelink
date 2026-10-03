@@ -58,8 +58,15 @@ import { runVerification } from '../evidence/runner.js';
 import { appendEvent } from '../state/event-log.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
 import type { NodeResult, SessionAdapter, SpawnRequest } from '../sessions/adapter.js';
-import { recordObservation, recordSpawn, liveSessions, markTerminal } from '../sessions/registry.js';
+import {
+  findOrphanedSessions,
+  recordObservation,
+  recordSpawn,
+  liveSessions,
+  markTerminal,
+} from '../sessions/registry.js';
 import { appendRun } from '../loops/runs.js';
+import { CommandPolicyError } from '../security/exec.js';
 
 export interface OrchestratorOptions {
   controlRoot: string;
@@ -365,6 +372,8 @@ export class Orchestrator {
           evidenceDir,
           label: `fresh-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
+          shell: verifier.shell === true,
+          allowShell: this.workspace.config.allow_shell_commands,
           ...(verifier.expect_exit !== undefined ? { expectExit: verifier.expect_exit } : {}),
         });
         evidence.push(record);
@@ -742,8 +751,17 @@ export class Orchestrator {
       // An e2e node declares its runtime steps as named verifiers, so the
       // deploy/healthcheck/fixture-reset sequence is part of the graph rather
       // than hidden in a flag.
-      const named = (id: string): string[] | undefined =>
-        node.verification_commands.find((v) => v.id === id)?.command;
+      const named = (id: string): string[] | undefined => {
+        const verifier = node.verification_commands.find((v) => v.id === id);
+        if (verifier?.shell) {
+          // Runtime steps are argv-only; never reinterpret a script string.
+          throw new CommandPolicyError(
+            'SHELL_NOT_ALLOWED',
+            `E2E runtime step "${id}" of ${node.id} declares shell: true; runtime steps must be argv arrays`,
+          );
+        }
+        return verifier?.command;
+      };
 
       const result = await runE2E({
         featureDir: this.paths.featureDir,
@@ -1003,9 +1021,17 @@ export class Orchestrator {
     const orphaned: string[] = [];
     const released: string[] = [];
 
-    for (const session of liveSessions(this.paths.sessionsRegistry)) {
-      const alive = session.pid !== null && isProcessAlive(session.pid);
-      if (alive) continue;
+    const live = liveSessions(this.paths.sessionsRegistry);
+    const gone = new Set(
+      findOrphanedSessions(live, {
+        isAlive: isProcessAlive,
+        // A live PID that has been silent past the session ceiling is treated
+        // as reused by an unrelated process, not as a still-working worker.
+        staleAfterMs: this.workspace.config.session_timeout_ms + 5 * 60 * 1000,
+      }),
+    );
+    for (const session of live) {
+      if (!gone.has(session.session_id)) continue;
       orphaned.push(session.session_id);
       markTerminal(this.paths.sessionsRegistry, session.session_id, 'failed');
 

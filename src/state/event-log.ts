@@ -14,6 +14,7 @@ import { basename, dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { withLock } from './process-lock.js';
 import { bestEffortSync, retrySync } from '../util/retry.js';
+import { redactValue } from '../security/redact.js';
 
 export interface MycelinkEvent {
   seq: number;
@@ -188,7 +189,8 @@ export function appendEvent(
     actor: input.actor,
     ...(input.feature_id ? { feature_id: input.feature_id } : {}),
     ...(input.node_id ? { node_id: input.node_id } : {}),
-    data: input.data ?? {},
+    // Event logs and the run ledger are durable and often committed.
+    data: redactValue(input.data ?? {}),
   };
 
   const probe = Buffer.byteLength(JSON.stringify(draft), 'utf8');

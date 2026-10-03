@@ -275,7 +275,7 @@ export const PRD = `# ${FEATURE_ID} — Order status notifications
 
 ## Acceptance criteria
 
-- AC-1: the core publishes a order-status event at the contracted version.
+- AC-1: the core publishes an order-status event at the contracted version.
 - AC-2: the API consumes that event and exposes the result.
 - AC-3: the Windows app renders the result for the operator.
 `;
@@ -309,7 +309,7 @@ export function portfolioGraph(): Record<string, unknown> {
     title: 'Order status notifications',
     prd: 'PRD.md',
     acceptance_criteria: [
-      { id: 'AC-1', text: 'The core publishes a order-status event at the contracted version.' },
+      { id: 'AC-1', text: 'The core publishes an order-status event at the contracted version.' },
       { id: 'AC-2', text: 'The API consumes that event and exposes the result.' },
       { id: 'AC-3', text: 'The Windows app renders the result for the operator.' },
     ],

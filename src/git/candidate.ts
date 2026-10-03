@@ -8,7 +8,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 import { dirtyPaths, isWorktreeClean, resolveRef, runGit } from './git.js';
 import { DirtyWorktreeError } from './integrate.js';
@@ -16,6 +16,7 @@ import { writeTextAtomic } from '../state/atomic-json.js';
 import { stableStringify } from '../graph/validate.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import type { Problem } from '../model/types.js';
+import { assertCandidateId } from '../security/names.js';
 
 export interface CandidateRepoRef {
   name: string;
@@ -61,6 +62,7 @@ function candidatesDir(featureDir: string): string {
 }
 
 export function candidateFile(featureDir: string, id: string): string {
+  assertCandidateId(id);
   return join(candidatesDir(featureDir), `${id}.yaml`);
 }
 
@@ -218,6 +220,19 @@ export function loadCandidate(featureDir: string, id: string): CandidateManifest
   const manifest = YAML.parse(readFileSync(file, 'utf8')) as CandidateManifest;
   const problems = validateAgainstSchema('candidate', manifest);
   if (problems.length > 0) throw new CandidateSchemaError(problems);
+  // A manifest is only valid where it was written: copying it under another
+  // id, or into another feature, must not let it vouch for that one.
+  if (manifest.candidate_id !== id) {
+    throw new Error(
+      `CANDIDATE_ID_MISMATCH: ${file} records candidate "${manifest.candidate_id}", not "${id}".`,
+    );
+  }
+  const featureId = basename(resolve(featureDir));
+  if (manifest.feature_id !== featureId || !id.startsWith(`${featureId}-C`)) {
+    throw new Error(
+      `CANDIDATE_FEATURE_MISMATCH: ${file} belongs to feature "${manifest.feature_id}", not "${featureId}".`,
+    );
+  }
   return manifest;
 }
 

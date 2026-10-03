@@ -17,7 +17,7 @@ status: APPROVED
 
 ## Acceptance criteria
 
-- AC-1: The core publishes a order-status event at the contracted version.
+- AC-1: The core publishes an order-status event at the contracted version.
 - AC-2: The API consumes that event and exposes the result.
 `;
 
@@ -62,7 +62,7 @@ describe('ECC PRD adapter', () => {
     expect(prd.feature_id).toBe('FEAT-101');
     expect(prd.title).toContain('Order status notifications');
     expect(prd.acceptance_criteria).toEqual([
-      { id: 'AC-1', text: 'The core publishes a order-status event at the contracted version.' },
+      { id: 'AC-1', text: 'The core publishes an order-status event at the contracted version.' },
       { id: 'AC-2', text: 'The API consumes that event and exposes the result.' },
     ]);
   });

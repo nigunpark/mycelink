@@ -68,6 +68,8 @@ export interface Argv {
   command: string[];
   cwd?: string;
   expect_exit?: number;
+  /** Run command[0] as a shell script; also requires allow_shell_commands. */
+  shell?: boolean;
 }
 
 export interface WorkerBudget {

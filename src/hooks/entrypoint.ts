@@ -27,6 +27,8 @@ import { leaseStatus } from '../resources/leases.js';
 import { liveSessions } from '../sessions/registry.js';
 import { appendEvent } from '../state/event-log.js';
 import { matchGlob } from '../git/worktree.js';
+import { isSafeFeatureId } from '../security/names.js';
+import { isInsideReal } from '../security/paths.js';
 import type { FeatureState_, GraphNode, PortfolioGraph } from '../model/types.js';
 
 export interface HookInput {
@@ -102,13 +104,13 @@ function readAllStdinSync(): string {
 
 /** The feature the hook should talk about: an explicit flag, or the only one. */
 export function activeFeature(controlRoot: string, explicit?: string): string | null {
-  if (explicit) return explicit;
+  if (explicit) return isSafeFeatureId(explicit) ? explicit : null;
   const envFeature = process.env['MYCELINK_FEATURE_ID'];
-  if (envFeature) return envFeature;
+  if (envFeature) return isSafeFeatureId(envFeature) ? envFeature : null;
   const dir = controlPaths(controlRoot).featuresDir;
   if (!existsSync(dir)) return null;
   const candidates = readdirSync(dir).filter(
-    (f) => !f.startsWith('.') && existsSync(join(dir, f, 'STATE.json')),
+    (f) => isSafeFeatureId(f) && existsSync(join(dir, f, 'STATE.json')),
   );
   if (candidates.length === 1) return candidates[0] as string;
   // Several features: prefer one that is actually running.
@@ -384,6 +386,14 @@ function preToolUse(ctx: HookContext, io: CliIo, input: HookInput): number {
       return block(
         io,
         `Blocked: ${active.id} may only edit inside its own worktree. "${target}" is outside it.`,
+      );
+    }
+
+    // A symlink or junction inside the worktree must not lead outside it.
+    if (worktree && !isInsideReal(worktree, resolve(worktree, rel))) {
+      return block(
+        io,
+        `Blocked: "${rel}" resolves through a link to a location outside the worktree of ${active.id}.`,
       );
     }
 

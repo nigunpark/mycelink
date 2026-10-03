@@ -43,6 +43,7 @@ import { runHook } from '../hooks/entrypoint.js';
 import { installHooks } from '../workspace/hook-settings.js';
 import { memoryCommand } from '../knowledge/cli.js';
 import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
+import { assertPlainFileName } from '../security/names.js';
 
 export interface CliIo {
   out: (text: string) => void;
@@ -792,8 +793,9 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   const runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
 
-  const command =
-    args.passthrough.length > 0 ? args.passthrough : (node.verification_commands[0]?.command ?? []);
+  const declared = node.verification_commands[0];
+  const usePassthrough = args.passthrough.length > 0;
+  const command = usePassthrough ? args.passthrough : (declared?.command ?? []);
   if (command.length === 0) throw new Error('No command given and the node declares no verifier.');
 
   const cwd =
@@ -815,6 +817,10 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
     evidenceDir: nodeEvidenceDir(controlRoot, featureId, nodeId),
     ...(phase === 'red' ? { expectExit: -1 } : {}),
     baselineFailures: repoDecl?.baseline_failures ?? [],
+    // An explicit `-- <argv>` from the operator is always argv; a declared
+    // verifier may ask for a shell, which the control-repo config must allow.
+    shell: !usePassthrough && declared?.shell === true,
+    allowShell: loadConfig(controlRoot).allow_shell_commands,
   });
 
   mutateState(paths.featureDir, (s) => {
@@ -1316,6 +1322,7 @@ function checkpointGroup(args: ParsedArgs, io: CliIo): number {
 
   if (sub === 'restore') {
     const name = requirePositional(args, 3, 'checkpoint-file');
+    assertPlainFileName(name);
     const file = join(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync(file, 'utf8')) as { state: Parameters<typeof saveState>[1] };
     saveState(paths.featureDir, checkpoint.state);

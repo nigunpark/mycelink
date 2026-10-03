@@ -6,8 +6,9 @@
  * a path and a hash, never the body), derives a stable failure fingerprint,
  * and classifies whether a RED failed for the right reason.
  */
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { runCommandSync } from '../security/exec.js';
+import { redactText } from '../security/redact.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { EvidenceKind, EvidenceRecord } from '../model/types.js';
@@ -30,6 +31,10 @@ export interface RunVerificationArgs {
   label?: string;
   candidateId?: string | null;
   scenarioId?: string | null;
+  /** Run `command[0]` as a shell script. Refused unless `allowShell`. */
+  shell?: boolean;
+  /** From the control repository's `allow_shell_commands`; never from a graph. */
+  allowShell?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -183,26 +188,26 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   const first = args.command[0];
   if (first === undefined) throw new Error('A verification command must have at least one element.');
 
-  const proc = spawnSync(first, args.command.slice(1), {
+  // Throws CommandPolicyError before anything runs if the command is unsafe
+  // or asks for a shell the control repository has not allowed.
+  const proc = runCommandSync(args.command, {
     cwd,
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    windowsHide: true,
-    maxBuffer: 32 * 1024 * 1024,
-    env: { ...process.env, ...(args.env ?? {}) },
+    timeoutMs,
+    env: args.env ?? {},
+    shell: args.shell ?? false,
+    allowShell: args.allowShell ?? false,
   });
   const finishedAt = new Date();
 
-  const timedOut = proc.error !== undefined && (proc.error as NodeJS.ErrnoException).code === 'ETIMEDOUT';
-  const spawnFailed = proc.error !== undefined && !timedOut;
-
   let output = `$ ${args.command.join(' ')}\n(cwd: ${cwd})\n\n`;
-  output += proc.stdout ?? '';
-  output += proc.stderr ?? '';
-  if (timedOut) output += `\n[mycelink] command timed out after ${timeoutMs} ms\n`;
-  if (spawnFailed) output += `\n[mycelink] failed to start: ${String(proc.error?.message)}\n`;
+  output += proc.stdout;
+  output += proc.stderr;
+  if (proc.timedOut) output += `\n[mycelink] command timed out after ${timeoutMs} ms\n`;
+  if (proc.spawnError !== null) output += `\n[mycelink] failed to start: ${proc.spawnError}\n`;
+  // Evidence is durable and may be committed: never let a secret reach it.
+  output = redactText(output);
 
-  const exitCode = timedOut ? 124 : spawnFailed ? 127 : (proc.status ?? 1);
+  const exitCode = proc.exitCode;
   const expectExit = args.expectExit ?? 0;
 
   const label = args.label ?? args.kind;
@@ -226,7 +231,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   const record: EvidenceRecord = {
     kind: args.kind,
     node_id: args.nodeId,
-    command: [...args.command],
+    command: args.command.map((part) => redactText(part)),
     exit_code: exitCode,
     started_at: startedAt.toISOString(),
     finished_at: finishedAt.toISOString(),

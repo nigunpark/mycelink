@@ -32,6 +32,12 @@ export interface MycelinkConfig {
   hook_prompt_delta_max_bytes: number;
   /** Optional LLM Wiki Brain root, relative to the control repo. */
   brain_dir: string | null;
+  /**
+   * Allow verification commands that declare shell: true. Off by default: a
+   * shell script interprets everything in it, so enabling this trusts every
+   * graph author with arbitrary command execution.
+   */
+  allow_shell_commands: boolean;
 }
 
 export const DEFAULT_CONFIG: MycelinkConfig = {
@@ -44,6 +50,7 @@ export const DEFAULT_CONFIG: MycelinkConfig = {
   hook_session_start_max_bytes: 4096,
   hook_prompt_delta_max_bytes: 2048,
   brain_dir: null,
+  allow_shell_commands: false,
 };
 
 export interface Workspace {
