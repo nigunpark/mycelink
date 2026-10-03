@@ -14,7 +14,7 @@ Do this in order, and do not skip verification.
    This creates `mycelink.config.json`, `repositories.yaml`, `contracts/`,
    `handoffs/`, `features/`, `.mycelink/`, a control-repo `CLAUDE.md`, and
    `.claude/settings.json` wired to the enforcement hooks.
-2. If `$1` is not yet a git repository, tell the user and stop. Harness state
+2. If `$1` is not yet a git repository, tell the user and stop. Mycelink state
    must be versioned; do not silently `git init` on their behalf.
 3. For each repository the user wants in the portfolio, run
    `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" repo register --control-root "$1" --name <name> --path <relative-path> --base-branch <branch> -- <test argv>`.

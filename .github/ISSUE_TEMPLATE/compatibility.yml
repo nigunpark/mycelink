@@ -1,0 +1,54 @@
+name: Compatibility report
+description: Mycelink does not work with a specific OS, Node.js, Git or Claude Code version.
+labels: [compatibility, triage]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Linux, macOS, Other]
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "Windows 11 24H2 / Ubuntu 24.04 / macOS 15"
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: "node --version"
+    validations:
+      required: true
+  - type: input
+    id: git
+    attributes:
+      label: Git version
+      placeholder: "git --version"
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      placeholder: "claude --version"
+    validations:
+      required: true
+  - type: input
+    id: mycelink
+    attributes:
+      label: Mycelink version and install method
+      placeholder: "0.2.0-beta.1 from release ZIP / marketplace / --plugin-dir"
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: What fails
+      description: Command, exit code and output. `claude plugin validate --strict <path>` and `mycelink doctor --json` output help most.
+      render: shell
+    validations:
+      required: true

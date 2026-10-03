@@ -2,7 +2,7 @@
   "_comment": [
     "You do not normally write this by hand. `mycelink init <control-repo>`",
     "generates it with absolute paths to the installed plugin, and re-running",
-    "init updates the harness entries without touching your own hooks or",
+    "init updates the Mycelink entries without touching your own hooks or",
     "permissions. This file shows what it produces, with <PLUGIN> standing in",
     "for the plugin's installed directory.",
     "",

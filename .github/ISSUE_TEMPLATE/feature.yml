@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a new capability, adapter or improvement.
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Mycelink do? Include CLI/graph/config shapes if you have them.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Controller / state machine
+        - Scheduling / resources
+        - Git / worktrees / candidates
+        - Worker sessions
+        - E2E
+        - Plan-source adapter (Jira, Linear, GitHub Issues, ...)
+        - Hooks / security
+        - Plugin commands, skills, agents
+        - Packaging / release
+        - Documentation
+    validations:
+      required: true
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Security impact
+      options:
+        - label: This proposal widens what a model, a graph or a command can do (it needs a threat-model review).
