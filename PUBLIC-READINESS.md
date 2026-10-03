@@ -70,7 +70,7 @@ not touch shipped files (this document is not shipped). The SBOM embeds the
 creation time (`SOURCE_DATE_EPOCH`, else the HEAD commit time) and the zip
 hash, so it changes with the commit time by design.
 
-### Re-verification after the publication-metadata commit (current `main`, `9902b06`)
+### Re-verification after the publication-metadata commit (`9902b06`, the last commit changing shipped files before the report-only commits)
 
 The commit that adds the `nigunpark/mycelink` URLs, CODEOWNERS and the
 maintainers table changes shipped files (`package.json`, plugin manifest,
