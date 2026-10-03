@@ -301,6 +301,42 @@ describe('hook enforcement', () => {
     expect(r.stderr).toMatch(/ownership fence/i);
   });
 
+  it('allows the worker to write its controller-assigned result file, even before RED', () => {
+    const worktree = join(p.control, '.mycelink', 'worktrees', `core__${node.replace(/[^\w.-]/g, '_')}`);
+    const r = runHookProcess(
+      p,
+      'pre-tool-use',
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(worktree, '.mycelink-worker', 'result.json') },
+        cwd: worktree,
+      },
+      { MYCELINK_NODE_ID: node },
+    );
+    expect(r.stderr).toBe('');
+    expect(r.code).toBe(0);
+  });
+
+  it('allows only that one file in the result slot', () => {
+    const worktree = join(p.control, '.mycelink', 'worktrees', `core__${node.replace(/[^\w.-]/g, '_')}`);
+    for (const file of ['.gitignore', 'other.json']) {
+      const r = runHookProcess(
+        p,
+        'pre-tool-use',
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Write',
+          tool_input: { file_path: join(worktree, '.mycelink-worker', file) },
+          cwd: worktree,
+        },
+        { MYCELINK_NODE_ID: node },
+      );
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/ownership fence/i);
+    }
+  });
+
   it('blocks an edit in another repository entirely', () => {
     const worktree = join(p.control, '.mycelink', 'worktrees', `core__${node.replace(/[^\w.-]/g, '_')}`);
     const r = runHookProcess(

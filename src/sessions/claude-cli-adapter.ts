@@ -14,10 +14,14 @@
  * `--verbose`, `--model`, `--session-id`, `--add-dir`, `--allowed-tools`,
  * `--disallowed-tools`, `--permission-mode` and `--bg` all exist; there is no
  * `--max-turns`, which is why the turn ceiling is enforced here.
+ *
+ * The worker's brief travels on stdin and its result comes back through a
+ * slot inside the worktree; see worker-protocol.ts for why neither may depend
+ * on the worker reading environment variables or paths outside its worktree.
  */
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import type { Readable } from 'node:stream';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import type { Readable, Writable } from 'node:stream';
+import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -30,10 +34,18 @@ import {
   type SessionStatus,
   type SpawnRequest,
 } from './adapter.js';
-import { validateAgainstSchema } from '../schema/registry.js';
 import type { UsageTotals } from '../model/types.js';
 import { LineRedactor } from '../security/redact.js';
 import { planCommand } from '../security/exec.js';
+import {
+  WORKER_RESULT_GRANT,
+  buildWorkerPrompt,
+  collectWorkerResult,
+  loadPromptPack,
+  prepareResultSlot,
+  renderGateCommand,
+  type WorkerGate,
+} from './worker-protocol.js';
 
 export interface ClaudeCliAdapterOptions {
   /** The executable to run. `claude` in production. */
@@ -73,7 +85,7 @@ export function permissionBypassFlag(args: readonly string[], permissionMode?: s
   return null;
 }
 
-type WorkerChild = ChildProcessByStdio<null, Readable, Readable>;
+type WorkerChild = ChildProcessByStdio<Writable, Readable, Readable>;
 
 interface RunState {
   handle: SessionHandle;
@@ -87,23 +99,16 @@ interface RunState {
   settled: boolean;
   status: SessionStatus;
   failureReason: string | null;
+  /** Collected once, when the session settles. */
+  result: NodeResult | null;
+  resultFailure: string | null;
+  workerEnv: NodeJS.ProcessEnv;
   timedOut: boolean;
   stopped: boolean;
   done: Promise<void>;
   finish: () => void;
   timers: NodeJS.Timeout[];
 }
-
-const WORKER_PROMPT = [
-  'You are a bounded Claude Code worker session driven by the multi-repo orchestrator.',
-  'Read the JSON context pack at $MYCELINK_CONTEXT_PACK. It is your entire brief.',
-  'Implement exactly the one node it names, inside this worktree only, and only within allowed_paths.',
-  'Do not spawn subagents. Do not edit PRD, PLAN, PORTFOLIO-GRAPH, STATE or contracts.',
-  'Write a failing test first; the RED must fail for a missing behaviour, not a setup error.',
-  'When finished, write a node-result JSON to $MYCELINK_RESULT_PATH with your commands, exit codes,',
-  'commit SHA, changed paths, evidence paths and an outcome of SUBMITTED, RETRYABLE, BLOCKED,',
-  'NEEDS_DECISION or BUDGET_EXHAUSTED. Do not claim success in prose; the result file is the claim.',
-].join(' ');
 
 export class ClaudeCliAdapter implements SessionAdapter {
   readonly name: 'fake-claude' | 'claude-background';
@@ -120,18 +125,29 @@ export class ClaudeCliAdapter implements SessionAdapter {
     this.name = options.adapterName ?? 'claude-background';
   }
 
+  /** Gate lines the worker is offered; each is also its own exact permission rule. */
+  gateLines(request: SpawnRequest): { gate: WorkerGate; line: string }[] {
+    return (request.gateCommands ?? []).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
+  }
+
+  /** CLI argv. The prompt is not part of it: it goes to stdin. */
   buildArgs(request: SpawnRequest, sessionId: string): string[] {
     const args = [...(this.options.prefixArgs ?? [])];
-    args.push('-p', WORKER_PROMPT);
+    args.push('-p');
     args.push('--output-format', 'stream-json', '--verbose');
     args.push('--model', request.model);
     args.push('--session-id', sessionId);
     if (this.options.mode === 'background') args.push('--bg');
     if (this.options.permissionMode) args.push('--permission-mode', this.options.permissionMode);
     for (const dir of request.addDirs ?? []) args.push('--add-dir', dir);
-    if (request.allowedTools && request.allowedTools.length > 0) {
-      args.push('--allowed-tools', ...request.allowedTools);
-    }
+    // Print mode cannot ask for approval, so the protocol's own needs are
+    // pre-approved here, each scoped to one exact file or command line.
+    args.push(
+      '--allowed-tools',
+      WORKER_RESULT_GRANT,
+      ...this.gateLines(request).map((g) => `Bash(${g.line})`),
+      ...(request.allowedTools ?? []),
+    );
     if (request.disallowedTools && request.disallowedTools.length > 0) {
       args.push('--disallowed-tools', ...request.disallowedTools);
     }
@@ -157,28 +173,17 @@ export class ClaudeCliAdapter implements SessionAdapter {
       result_path: request.resultPath,
     };
 
-    // The configured executable is a file name, never a shell string; on
-    // Windows an npm-installed claude.cmd goes through the batch-shim rules.
-    const plan = planCommand([this.options.executable, ...this.buildArgs(request, sessionId)]);
-    const child = spawn(plan.file, plan.args, {
-      cwd: request.cwd,
-      windowsHide: true,
-      windowsVerbatimArguments: plan.windowsVerbatimArguments,
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        MYCELINK_CONTEXT_PACK: resolve(request.contextPackPath),
-        MYCELINK_RESULT_PATH: resolve(request.resultPath),
-        MYCELINK_FEATURE_ID: request.featureId,
-        MYCELINK_NODE_ID: request.nodeId,
-        MYCELINK_CLAIM_ID: request.claimId,
-        MYCELINK_ATTEMPT: String(request.attempt),
-        ...(request.env ?? {}),
-      },
-    }) as WorkerChild;
-
-    handle.pid = child.pid ?? null;
+    const workerEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      MYCELINK_FEATURE_ID: request.featureId,
+      MYCELINK_NODE_ID: request.nodeId,
+      MYCELINK_CLAIM_ID: request.claimId,
+      MYCELINK_ATTEMPT: String(request.attempt),
+      ...(request.env ?? {}),
+    };
+    // Retired protocol variables: nothing may point a worker at them.
+    delete workerEnv['MYCELINK_CONTEXT_PACK'];
+    delete workerEnv['MYCELINK_RESULT_PATH'];
 
     let finish!: () => void;
     const done = new Promise<void>((res) => {
@@ -188,7 +193,7 @@ export class ClaudeCliAdapter implements SessionAdapter {
     const now = Date.now();
     const state: RunState = {
       handle,
-      child,
+      child: null,
       request,
       turns: 0,
       usage: zeroObservationUsage(),
@@ -198,6 +203,9 @@ export class ClaudeCliAdapter implements SessionAdapter {
       settled: false,
       status: 'working',
       failureReason: null,
+      result: null,
+      resultFailure: null,
+      workerEnv,
       timedOut: false,
       stopped: false,
       done,
@@ -205,6 +213,40 @@ export class ClaudeCliAdapter implements SessionAdapter {
       timers: [],
     };
     this.runs.set(sessionId, state);
+
+    // Everything the worker needs is settled before it starts. An invalid
+    // pack or an unsafe gate line fails the attempt without spawning anything.
+    let prompt: string;
+    let args: string[];
+    try {
+      const pack = loadPromptPack(request.contextPackPath, request, workerEnv);
+      prompt = buildWorkerPrompt({ pack, gates: this.gateLines(request) });
+      args = this.buildArgs(request, sessionId);
+      prepareResultSlot(request.cwd);
+    } catch (err) {
+      state.failureReason = (err as Error).message;
+      this.settle(state, 'failed');
+      return handle;
+    }
+
+    // The configured executable is a file name, never a shell string; on
+    // Windows an npm-installed claude.cmd goes through the batch-shim rules.
+    // The prompt goes to stdin, so no shell shim ever sees it and no
+    // command-line length limit applies.
+    const plan = planCommand([this.options.executable, ...args]);
+    const child = spawn(plan.file, plan.args, {
+      cwd: request.cwd,
+      windowsHide: true,
+      windowsVerbatimArguments: plan.windowsVerbatimArguments,
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: workerEnv,
+    }) as WorkerChild;
+    state.child = child;
+    handle.pid = child.pid ?? null;
+    // A worker that exits before reading its prompt must not crash the controller.
+    child.stdin.on('error', () => {});
+    child.stdin.end(prompt, 'utf8');
 
     const log = createWriteStream(resolve(request.logPath), { flags: 'a' });
     // The session log is durable: secrets echoed by tools or tests are
@@ -323,24 +365,22 @@ export class ClaudeCliAdapter implements SessionAdapter {
     } else {
       state.status = 'done';
     }
-    state.finish();
-  }
-
-  private readResult(state: RunState): NodeResult | null {
-    const file = resolve(state.request.resultPath);
-    if (!existsSync(file)) return null;
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8')) as NodeResult;
-      const problems = validateAgainstSchema('node-result', parsed);
-      if (problems.length > 0) {
-        state.failureReason = 'RESULT_SCHEMA_INVALID: ' + problems[0]?.detail;
-        return null;
+    if (state.child !== null) {
+      // Take the result out of the worktree exactly once, whatever the exit.
+      try {
+        const collected = collectWorkerResult(
+          state.request.cwd,
+          state.request,
+          resolve(state.request.resultPath),
+          state.workerEnv,
+        );
+        state.result = collected.result;
+        state.resultFailure = collected.failure;
+      } catch (err) {
+        state.resultFailure = `RESULT_UNREADABLE: ${(err as Error).message}`;
       }
-      return parsed;
-    } catch (err) {
-      state.failureReason = `RESULT_UNREADABLE: ${(err as Error).message}`;
-      return null;
     }
+    state.finish();
   }
 
   private observe(state: RunState): SessionObservation {
@@ -349,14 +389,14 @@ export class ClaudeCliAdapter implements SessionAdapter {
     let failureReason = state.failureReason;
 
     if (state.settled) {
-      result = this.readResult(state);
+      result = state.result;
       failureReason = state.failureReason;
       if (status === 'done') {
         if (result === null) {
           // A session that exits cleanly without a structured result has not
           // done anything the controller may act on.
           status = 'failed';
-          failureReason ??= 'RESULT_MISSING';
+          failureReason ??= state.resultFailure ?? 'RESULT_MISSING';
         } else {
           status = statusForOutcome(result.outcome);
           if (status === 'failed' && failureReason === null) {

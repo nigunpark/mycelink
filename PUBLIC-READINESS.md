@@ -8,6 +8,19 @@ Node 22.12.0 and 24), with CodeQL (`37137320292`) and OpenSSF Scorecard
 (`37137320290`) also passing on the same commit. Branch protection and the
 beta GitHub Release/tag remain; nothing has been tagged or released.
 
+**New beta blocker found and fixed on PR #3 (not yet green in CI).**
+The first real-Claude pilot showed that real worker sessions could not start
+any node: the worker was denied every attempt to read the context pack and
+result path from environment variables and exited 0 with `RESULT_MISSING`.
+The worker transport was redesigned on branch
+`fix/real-worker-context-transport`, and the real pilot now reaches `DONE`
+with a structured result and verified RED/GREEN evidence (see *Real-Claude
+pilot*). The public CI status above is for `41b99d8`, which does **not**
+contain this fix. The latest PR #3 run (`37141412218`) passed CodeQL and
+every test leg except Windows / Node 22.12.0, where every worker result was
+refused (see *PR #3 CI run: Windows / Node 22 result capture*). That is fixed
+locally and not yet pushed.
+
 This file records what was verified, how, and what remains. It is not
 shipped in the release archive.
 
@@ -96,6 +109,14 @@ files are unchanged.
 
 ## Test totals
 
+With the worker-transport fix, the PR #3 CI/CodeQL fixes and the Node 22
+result-capture fix (local branch; the capture fix is not yet in CI): 662
+tests in 41 files, 661 passed, 0 failed, 1 skipped on Windows (Node 24.14.1
+and Node 22.12.0). The capture fix added 5 tests in `tests/security`. The worker-transport fix added 24 tests, in
+`tests/integration` (+17) and `tests/unit` (+7). The CI/CodeQL fixes added
+40 more, in `tests/security` (+39) and `tests/integration` (+1). The figures
+below are for `41b99d8`.
+
 593 tests in 36 files: locally on Windows (Node 24.14.1) 592 passed,
 0 failed, 1 skipped (the POSIX-only bundle-mode test). CI run `37137320314`
 ran the same 593 on all six legs with no failures (see *CI confirmation*). The 583-test pass recorded
@@ -166,13 +187,288 @@ not file contents.
   It is an orphan history (single root commit `35ad200`, no ancestry from the
   reference implementation or the internal bootstrap work) and is **the
   branch to push**.
-- No other local branches, tags, worktrees or stashes. On GitHub, `main` is
+- Locally, `fix/real-worker-context-transport` (branched from `3575483`)
+  carries the worker-transport fix; it has not been pushed. No other local
+  branches, tags, worktrees or stashes. On GitHub, `main` is
   pushed at `41b99d8`; the only other remote branches are Dependabot update
   branches (open pull requests #1 and #2). No tags exist.
 - Authorship was rewritten before publication: every reachable commit has
   author and committer `nigunpark` with the GitHub no-reply address, and no
   reachable commit carries a personal e-mail address. New commits use the
   same configured identity.
+
+## Real-Claude pilot and the worker-transport fix
+
+**First run (failed).** `MYCELINK_REAL_CLAUDE_PILOT=1 npm run test:pilot`
+exited 0, but only because the pilot accepted a non-`DONE` ending.
+`implementation/PILOT-MEASUREMENTS.json` recorded outcome `RETRY`, final state
+`READY`, detail `RESULT_MISSING`, no RED or GREEN evidence. The durable
+transcript showed the cause. The prompt told the worker to read
+`$MYCELINK_CONTEXT_PACK` and write `$MYCELINK_RESULT_PATH`. Claude Code
+2.1.288 in print mode denied every form of reading them: Bash `$VAR` ("a
+variable in this command can't be checked before it runs"), PowerShell
+`$env:`, `[Environment]::GetEnvironmentVariable`, and `Env:` provider paths.
+The pack lived outside the worktree, where reads need an approval nobody can
+give, so the worker never learned its node and wrote no result. The pilot's
+pass was false, and real workers could not do any work.
+
+**Fix.** The worker no longer discovers anything; see `CHANGELOG.md`
+(*Unreleased → Fixed*) and `docs/PERMISSION_MODEL.md`. In summary:
+
+- the validated, redacted, byte-bounded pack goes inline in a prompt sent on
+  stdin;
+- results come back through a git-ignored `.mycelink-worker/result.json` in
+  the worktree, pre-approved as that one file and collected with link, size,
+  schema and identity checks;
+- the controller offers the `mycelink tdd` gates as exact, pre-approved
+  command lines.
+
+Before building on them, each Claude Code behavior this relies on was checked
+against the real CLI (2.1.288, `haiku`, throwaway repositories):
+
+- a stdin prompt with `-p` and `stream-json` works;
+- `Edit(./<file>)` permits writing that one file and still denies a sibling
+  path (`Write(./<file>)` does not match);
+- an exact `Bash(<line>)` rule permits that line and denies the same line with
+  one extra argument;
+- repeated `--allowed-tools` flags merge.
+
+**Regression tests (RED verified first).** 24 new tests:
+
+- `tests/integration/worker-transport.test.ts` (15). It covers prompt-only
+  delivery, no `MYCELINK_CONTEXT_PACK`/`MYCELINK_RESULT_PATH` in the worker
+  environment, and stdin rather than argv. It covers exact grants, the
+  git-ignored slot, and stale-result rejection. It covers rejection of an
+  identity mismatch, an oversized result, a junction-redirected slot, an
+  invalid/oversized/foreign pack, and an unsafe gate argument. It also covers
+  result redaction, pack text that cannot close its block or forge protocol
+  lines, and a prompt-only worker reaching `DONE` through the orchestrator
+  with a behaviour-missing RED and a same-command GREEN.
+- `tests/integration/hooks.test.ts` (+2): the result file is writable before
+  RED and outside the fence; no other file in the slot is.
+- `tests/unit/pilot-verdict.test.ts` (7): the pilot's pass rule.
+
+The fake `claude` was tightened to the real worker's constraints. It reads its
+brief only from the prompt, and it may write the result or run a gate only
+when that exact grant is present. Against the old code, 25 tests failed on
+assertions, including `expected 'RESULT_MISSING' to be null`, which reproduces
+the pilot exactly.
+
+**Pilot strengthened.** `tests/pilot/verdict.ts` now passes the pilot only on:
+
+- a structured worker result with a behaviour-missing RED and a passing GREEN
+  on the same command; or
+- `NEEDS_DECISION` with a real question and at least two options.
+
+`RESULT_MISSING`, `READY`, `BLOCKED` and `BUDGET_EXHAUSTED` fail it. The pilot
+also sets two things that only it uses. One is an operator-style
+least-privilege grant through `claude_extra_args`: `Read`, `Glob`, `Grep`,
+`Edit(./src/**)`, `Edit(./tests/**)`, `Bash(node tests/run.mjs)` and scoped
+`git` commands. The other is a realistic budget for the pilot node (80
+counted turns, 15 minutes); the fixture default of 20 turns and 2 minutes is
+sized for the fake.
+
+**Second run (passed), Claude Code 2.1.288, worker model `sonnet`.**
+
+- **Result:** `DONE` in 1 attempt, 1 session, 8 counted turns, about 26 s
+  wall clock, 2,582 output tokens. The worker returned a structured
+  `SUBMITTED` result with commit `5b705ea`.
+- **Evidence:** RED exit 1, `behaviour-missing`. GREEN, regression and
+  fresh-checkout verification all exit 0 on the same `node tests/run.mjs`.
+  Verdict `ok`.
+- **What the worker did** (from its durable transcript): it read only the
+  worktree, ran the offered `tdd red`, wrote `src/publish.js`, ran `tdd green`
+  and `tdd regression`, committed, and wrote the result file.
+- **One denial:** it first appended `; echo EXIT $?` to the red line. That
+  no longer matched the exact grant and was denied, and it retried with the
+  line as written.
+- **Limits:** this is one node and one run, not a distribution.
+- **Not verified:** whether the control repository's project hooks were
+  active inside the worker worktree. Fence enforcement in this run rests on
+  Claude Code's scoped grants and the controller's fresh-checkout diff check.
+
+**Other local verification at this change (Windows 11, Node 24.14.1):**
+
+- `npm test`: 617 tests in 38 files, 616 passed, 0 failed, 1 skipped
+  (POSIX-only).
+- By suite: unit 199, integration 119, security 179, fixtures 17, release 82
+  (1 skipped), plugin-e2e 21.
+- `npm run typecheck` is clean.
+- `npm run build:check` is clean: the rebuilt bundle is byte-identical to the
+  committed one.
+- `claude plugin validate --strict .` passed.
+- Two packages built with the same `SOURCE_DATE_EPOCH` are byte-identical:
+  58 files, SHA-256 `c27c97b6…f9c5f5`.
+
+**CI on the pull request (PR #3, head `31db246`): blocked.** Ubuntu and
+macOS passed on Node 22.12.0 and 24. Both Windows legs failed 12 tests, and
+CodeQL reported 5 alerts; see the next section.
+
+## PR #3 CI run: Windows gate failure and CodeQL alerts
+
+**Windows (12 failures, CI run `37139719553`).** On the runner, every worker
+attempt failed before it started. The error was `WORKER_PROTOCOL_INVALID:
+gate argument "C:/Users/RUNNER~1/AppData/Local/Temp/mycelink-tests/portfolio-…/control"
+could be reinterpreted by a shell`. The orchestrator offers
+`--control-root` with forward slashes, and the runner's temp directory is the
+8.3 alias `RUNNER~1`. `renderGateCommand` did not accept `~` in any form, so
+three-repo E2E steps 5–7 and 9–16 and the orchestrator transport test
+failed. Locally the temp directory is a long path, which is why those tests
+passed here.
+*Fix:* a tilde is accepted only in the quoted form. Probes on this machine
+showed bash expands an unquoted `~` at the start of a word and after `=`
+(`a=~/x` → `a=/c/Users/…/x`), while a double-quoted tilde is literal in sh,
+bash, cmd.exe and PowerShell. The same probes showed cmd.exe expanding
+`"%OS%"` inside double quotes and PowerShell dropping an unquoted `@x`
+(splatting). `%` is therefore now refused, and a leading `@` is offered
+quoted.
+*Tests (RED verified first):*
+
+- `tests/security/gate-command.test.ts` (30 tests). It checks that the CI
+  path renders quoted and that `~` is never offered unquoted. It runs a real
+  local 8.3 alias (`…/MYCELI~1/GATE-L~1/control`) through cmd.exe and Git
+  Bash and gets the same argv back. It also checks 24 refused metacharacter
+  cases. RED: 7 failed, including the CI error text with the real alias.
+- `tests/integration/worker-transport.test.ts` (+1). A prompt-only worker
+  reaches `DONE` with the whole portfolio under a real 8.3 alias. RED:
+  `WORKER_PROTOCOL_INVALID`, as in CI.
+
+**CodeQL (analysis on `refs/pull/3/merge`).** These alerts were reproduced
+locally with CodeQL 2.27.1 (`javascript-security-extended`), and the
+SARIF code flows were read before anything was changed.
+
+- **#18, #19 `js/file-system-race` (high), `worker-protocol.ts` 88 and
+  269.** The pack and the result were checked by `statSync`/`lstatSync` and
+  then read by path.
+  *Fix:* open once, then check (`fstat`) and read through that descriptor
+  with a byte bound. The result is opened with `O_NOFOLLOW` where the
+  platform has it. Its device and inode must match `lstat` of the slot path,
+  and it must have `nlink === 1`.
+  *Tests:* `tests/security/worker-protocol-race.test.ts` makes the swap
+  deterministic by replacing the file right after the check. RED results:
+  the swapped oversized pack was parsed; the swapped result leaked
+  `"TOP-SECRET"…` through `RESULT_UNREADABLE`; a hard-linked result leaked
+  the same way.
+- **Found while fixing the race:** the slot's `.gitignore` was written
+  through a symlink left by an earlier attempt, overwriting a file outside
+  the worktree. RED in the same file. It is now removed and created with
+  `wx`.
+- **#8, #9, #17 command construction (medium), `exec.ts` 192–202 and
+  `claude-cli-adapter.ts` 237–244.** The flows ran from `process.argv` (the
+  `tdd -- <argv>` passthrough) and from absolute paths into `planCommand`,
+  which returned either an argv plan or `/bin/sh -c` / `cmd /c`. Every argv
+  therefore reached a value that might be shell-interpreted, guarded only by
+  a runtime `shell` flag. The interpreter also came from `ComSpec` in the
+  command's own environment.
+  *Fix:* shell scripts have their own planner, runner and spawn.
+  `RunVerificationArgs` takes `command` or `shellScript`, so the passthrough
+  can only be argv. Batch arguments are quoted only after an anchored
+  allowlist test. The Windows interpreter is always
+  `%SystemRoot%\System32\cmd.exe`.
+  *Tests:* `tests/security/exec-policy.test.ts` (+2 RED: an argv planned as
+  `/bin/sh`; a `ComSpec` of `C:\evil\cmd.exe` honoured), plus the shell-mode
+  tests moved to the new entry points with the same assertions.
+- **Local CodeQL after the fix:** 18 results fell to 8, with none added. All
+  five PR alerts are gone, and so is pre-existing #16 (`exec.ts`, same root
+  cause). The remaining 8 predate this branch:
+  - #15 `workspace.ts:161` (an `existsSync` check before writing an empty
+    `.gitkeep`) and its copy in `dist/`;
+  - five `js/insecure-temporary-file` results in test helpers;
+  - one result in `tests/fake-claude`.
+
+**Local verification at this change (Windows 11, Node 24.14.1):**
+
+- `npm test`: 657 tests in 40 files, 656 passed, 1 skipped (POSIX-only).
+- By suite: unit 199, integration 120, security 218, fixtures 17, release 82
+  (1 skipped), plugin-e2e 21.
+- `npm run typecheck` is clean, and `npm run build:check` is clean after
+  commit.
+- `claude plugin validate --strict .` passed.
+- Two packages with `SOURCE_DATE_EPOCH=1791072000` are byte-identical: 58
+  files, zip SHA-256
+  `7bfb7323c22a9e5da47a9d627746d1561676ba2cf0f25d0b5bc1955938be8792`.
+- **Real-Claude pilot re-run** (transport code changed), Claude Code
+  2.1.288: verdict `ok`, `DONE` in 1 attempt, 1 session, 9 turns, about 28 s,
+  2,497 output tokens, worker result `SUBMITTED`, and fresh GREEN and
+  regression exit 0.
+
+**Pushed** (PR #3 head `0876bcf`). CI run `37141412218` passed CodeQL and
+every test leg except Windows / Node 22.12.0; see the next section.
+
+## PR #3 CI run: Windows / Node 22 result capture
+
+**Failure (CI run `37141412218`, job `111256454280`, Windows / Node
+22.12.0 only).** `collectWorkerResult` refused ordinary worker output with
+`RESULT_PATH_ESCAPE: the result is not a regular file`, and 23 tests
+failed as a consequence. Windows / Node 24 and every Linux and macOS leg
+passed. This was not a flake.
+
+**Root cause (reproduced locally).** The collector opened the result and
+required `fstat(fd)` and `lstat(path)` (bigint) to agree on `dev`, `ino` and
+`nlink`. A probe with the official Node 22.12.0 Windows build on this
+machine showed path-based `lstat`/`stat` returning `dev: 0n` while `fstat`
+returned the volume serial (`3726988745n`); `ino` and `nlink` agreed. Node
+24.14.1 returned the volume serial from all three. With the old code, Node
+22.12.0 failed 8 of 16 `tests/integration/worker-transport.test.ts` tests
+locally with the CI error text.
+
+**Fix.** The identity comparison is gone. Capture now moves the slot
+directory, then the result file, by atomic rename into a fresh
+controller-owned quarantine (`.result-quarantine-*`) beside the stored
+result. From then on, the worker cannot swap the path being checked. A
+rename moves a link itself, so a slot directory or result replaced by a
+link is refused (`RESULT_PATH_ESCAPE`) and its target is left alone. The
+captured file is opened (with `O_NOFOLLOW` and `O_NONBLOCK` where they
+exist), checked through the descriptor (regular file, exactly one link,
+size), checked once more for a link, read with a byte bound, schema- and
+identity-checked, redacted, and written atomically to the controller path.
+A rename that fails (for example `EXDEV` across volumes) fails closed with
+`RESULT_CAPTURE_FAILED`, and nothing is copied. The quarantine is always
+removed, and links in it are unlinked, never followed.
+
+**Tests (RED verified first).**
+
+- `tests/security/worker-result-capture.test.ts` (5 tests, new). A
+  file-system fake makes path stats report `dev: 0n`, as Node 22 does on
+  Windows, on every platform. Under that fake, an ordinary result must be
+  accepted and a hard link must still be refused. A cross-volume rename
+  (`EXDEV`) must fail closed with no copy. A slot-directory junction and a
+  final symlink to outside files must be refused, with the targets left in
+  place. No quarantine may be left behind. RED: 2 failed (`expected
+  'RESULT_PATH_ESCAPE: the result is not…' to be null`, and a result
+  accepted with no quarantine). The 3 link cases passed before and after.
+- `tests/security/worker-protocol-race.test.ts`: the swap test now fires
+  right after the slot is renamed away. A racing process recreates the slot
+  with an outside secret, and the captured original must still be the one
+  stored.
+
+**CodeQL.** A local run (CodeQL 2.27.1, `javascript-security-extended`)
+on the working tree reported the same 8 results as before. There are none
+in `src/sessions/worker-protocol.ts` or the new test, and no
+`js/file-system-race` result other than the pre-existing
+`workspace.ts:161` `.gitkeep` and its `dist/` copy.
+
+**Local verification at this change (Windows 11):**
+
+- `npm run verify` on Node 24.14.1: 662 tests in 41 files, 661 passed,
+  1 skipped (POSIX-only).
+- Full suite on the official Node 22.12.0 Windows build: 662 tests,
+  661 passed, 1 skipped. Under `npx node@22.12.0`, two `gate-command` tests
+  failed with and without this change. The reason was that npx puts a
+  placeholder `node` script on `PATH`, which Git Bash runs. They pass with
+  the real `node.exe` first on `PATH`.
+- `npm run build:check` is clean after commit, and `claude plugin validate
+  --strict .` passed.
+- Two packages with `SOURCE_DATE_EPOCH=1791072000` are byte-identical:
+  58 files, zip SHA-256
+  `18e0d1a8b575f68ce700ea7c2bc3d4c508b41f6c1d788fde4d2df0210433a041`.
+- **Real-Claude pilot re-run** (capture code changed), Claude Code
+  2.1.288: verdict `ok`, `DONE` in 1 attempt, 1 session, 12 turns, about
+  29 s, 2,919 output tokens, worker result `SUBMITTED`, behaviour-missing
+  RED (exit 1), and fresh GREEN and regression exit 0.
+
+**Not yet done:** push the branch and get all six test legs and CodeQL
+green on PR #3.
 
 ## Remaining before publishing
 
@@ -196,6 +492,13 @@ not file contents.
 7. **Beta GitHub Release and tag** `v0.2.0-beta.1` (see *Exact release
    commands*). Not yet created; `CHANGELOG.md` still carries the fixes under
    *Unreleased*.
+8. **Land the worker-transport fix.** It is on PR #3
+   (`fix/real-worker-context-transport`). The Windows 8.3 gate failure and
+   the five CodeQL alerts found by its first CI run are fixed and pushed
+   (`0876bcf`; CodeQL green). The Windows / Node 22.12.0 result-capture
+   failure found by that run is fixed locally and not pushed. Push, get CI
+   and CodeQL green on all six legs, and merge to `main`. The tag must not be cut from a
+   commit without it, because real workers cannot start a node without it.
 
 ## Known limitations
 
@@ -205,7 +508,13 @@ not file contents.
 - The ECC adapter is validated against the documented artifact shape only, not
   a live ECC installation; ECC is optional.
 - The real-Claude pilot (`MYCELINK_REAL_CLAUDE_PILOT=1 npm run test:pilot`)
-  was not run for this release; it incurs model usage.
+  covers one representative node. It passed once after the transport fix (see
+  *Real-Claude pilot*), and it incurs model usage. Workers need
+  operator-granted tools (`claude_extra_args`) to edit and commit; without
+  them, a worker should return `BLOCKED` with `PERMISSION_DENIED:<tool>`. That
+  path is covered by the prompt but not exercised by a real run.
+- Turn counting is per stream event, so every tool call counts as a turn;
+  set `max_turns` with that in mind.
 - Claude Code has no `--max-turns`; the controller enforces turn ceilings by
   counting stream events.
 - Shell mode is unsupported for E2E runtime steps; on Windows, batch-shim

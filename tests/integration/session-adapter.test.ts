@@ -7,6 +7,7 @@ import { ClaudeCliAdapter } from '../../src/sessions/claude-cli-adapter.js';
 import { FakeInProcessAdapter } from '../../src/sessions/fake-adapter.js';
 import type { SpawnRequest } from '../../src/sessions/adapter.js';
 import { validateAgainstSchema } from '../../src/schema/registry.js';
+import { minimalPack, writePack } from '../helpers/context-pack.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -28,7 +29,7 @@ function harness(scenario: unknown): Harness {
   const scenarioPath = join(dir, 'scenario.json');
   writeFileSync(scenarioPath, JSON.stringify(scenario), 'utf8');
   const packPath = join(dir, 'pack.json');
-  writeFileSync(packPath, JSON.stringify({ schema_version: 1, node_id: 'N1' }), 'utf8');
+  writePack(packPath, minimalPack());
   mkdirSync(join(dir, 'sessions'), { recursive: true });
   return {
     dir,
@@ -184,12 +185,12 @@ describe('Claude CLI session adapter (driven by the fake claude executable)', ()
     expect(second.observation.result?.outcome).toBe('SUBMITTED');
   });
 
-  it('passes the worker protocol through the environment, never through a transcript', async () => {
+  it('binds the worker to its node through the prompt, never through a transcript', async () => {
     const h = harness({ default: { outcome: 'SUBMITTED' } });
     const adapter = cliAdapter();
     const handle = adapter.spawn(request(h));
     await adapter.wait(handle);
-    // The fake executable only knows the node id through MYCELINK_NODE_ID.
+    // The fake executable only knows the node id from the pack in its prompt.
     const result = JSON.parse(readFileSync(h.resultPath, 'utf8')) as { node_id: string };
     expect(result.node_id).toBe('FEAT-101.core.publish.impl');
   });

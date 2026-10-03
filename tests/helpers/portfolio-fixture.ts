@@ -148,8 +148,8 @@ mkdirSync(fixtures, { recursive: true });
 console.log('fixture reset');
 `;
 
-export function createPortfolio(): Portfolio {
-  const root = makeTmpDir('portfolio-');
+/** `root` lets a test place the portfolio under another spelling of a scratch dir. */
+export function createPortfolio(root: string = makeTmpDir('portfolio-')): Portfolio {
   const control = join(root, 'control');
   const core = join(root, 'core');
   const api = join(root, 'api');

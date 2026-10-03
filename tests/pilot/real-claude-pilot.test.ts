@@ -6,6 +6,11 @@
  * unique model turns, token usage, wall-clock, hook bytes and verifier
  * quality.
  *
+ * Passing requires a structured worker result with verified RED/GREEN
+ * evidence, or a justified product decision; RESULT_MISSING fails the pilot
+ * even when the session exited cleanly (rule in verdict.ts, unit-tested in
+ * tests/unit/pilot-verdict.test.ts).
+ *
  * This is the only suite that can incur model usage. It is skipped unless
  * MYCELINK_REAL_CLAUDE_PILOT=1 is set, and `npm test` excludes tests/pilot
  * entirely. Run it with: npm run test:pilot
@@ -28,6 +33,8 @@ import { loadState } from '../../src/state/feature-state.js';
 import { runSummary } from '../../src/loops/runs.js';
 import { featurePaths } from '../../src/workspace/paths.js';
 import { claudeAvailable, claudeVersion } from '../helpers/isolated-profile.js';
+import { loadRegistry } from '../../src/sessions/registry.js';
+import { pilotVerdict, type PilotWorkerResult } from './verdict.js';
 
 const ENABLED = process.env['MYCELINK_REAL_CLAUDE_PILOT'] === '1';
 const NODE_ID = `${FEATURE_ID}.core.publish.impl`;
@@ -64,9 +71,18 @@ describePilot('real-Claude pilot: one representative node', () => {
     async () => {
       p = createPortfolio();
       writePrd(p);
+      // The fixture's worker budget (20 counted turns, 2 minutes) is sized for
+      // the fake. A real session counts every tool call as a turn, so the
+      // pilot node gets a budget a real TDD loop can finish inside.
+      const graph = portfolioGraph() as { nodes: { id: string; worker: Record<string, unknown> }[] };
+      const pilotNode = graph.nodes.find((n) => n.id === NODE_ID);
+      if (pilotNode) {
+        pilotNode.worker['max_turns'] = 80;
+        pilotNode.worker['max_wall_clock_minutes'] = 15;
+      }
       writeFileSync(
         join(p.featureDir, 'PORTFOLIO-GRAPH.yaml'),
-        YAML.stringify(portfolioGraph(), { lineWidth: 0 }),
+        YAML.stringify(graph, { lineWidth: 0 }),
         'utf8',
       );
       mkdirSync(join(p.featureDir, 'e2e'), { recursive: true });
@@ -77,6 +93,26 @@ describePilot('real-Claude pilot: one representative node', () => {
       ) as Record<string, unknown>;
       config['claude_executable'] = 'claude';
       config['session_adapter'] = 'claude-background';
+      config['session_timeout_ms'] = 15 * 60 * 1000;
+      // The operator's least-privilege grant for this node type (see
+      // docs/PERMISSION_MODEL.md): edit inside the fence, run the declared
+      // verifier, and commit. The result file and the exact `mycelink tdd`
+      // gate lines are pre-approved by the controller itself.
+      config['claude_extra_args'] = [
+        '--allowed-tools',
+        'Read',
+        'Glob',
+        'Grep',
+        'Edit(./src/**)',
+        'Edit(./tests/**)',
+        'Bash(node tests/run.mjs)',
+        'Bash(git status:*)',
+        'Bash(git diff:*)',
+        'Bash(git add:*)',
+        'Bash(git commit:*)',
+        'Bash(git rev-parse:*)',
+        'Bash(git log:*)',
+      ];
       writeFileSync(
         join(p.control, 'mycelink.config.json'),
         JSON.stringify(config, null, 2),
@@ -92,12 +128,46 @@ describePilot('real-Claude pilot: one representative node', () => {
 
       const state = loadState(p.featureDir)?.data;
       const runtime = state?.nodes[NODE_ID];
-      const summary = runSummary(featurePaths(p.control, FEATURE_ID).runs, NODE_ID);
+      const paths = featurePaths(p.control, FEATURE_ID);
+      const summary = runSummary(paths.runs, NODE_ID);
+      const outcome = JSON.parse(run.out) as { detail?: string };
+
+      // The structured result the controller accepted, from its own copy.
+      const session = Object.values(loadRegistry(paths.sessionsRegistry).sessions)
+        .filter((s) => s.node_id === NODE_ID)
+        .sort((a, b) => a.started_at.localeCompare(b.started_at))
+        .pop();
+      const workerResult =
+        session?.result_path && existsSync(session.result_path)
+          ? (JSON.parse(readFileSync(session.result_path, 'utf8')) as PilotWorkerResult & {
+              commands?: unknown;
+              commit_sha?: string | null;
+              failure_fingerprint?: string | null;
+            })
+          : null;
+
+      const verdict = pilotVerdict({
+        final_state: runtime?.state,
+        detail: outcome.detail ?? '',
+        worker_result: workerResult,
+        red: runtime?.evidence.red ?? null,
+        green: runtime?.evidence.green ?? null,
+      });
 
       const measurements = {
         claude: claudeVersion(),
         node_id: NODE_ID,
-        outcome: JSON.parse(run.out) as unknown,
+        verdict,
+        outcome,
+        worker_result: workerResult
+          ? {
+              outcome: workerResult.outcome,
+              commit_sha: workerResult.commit_sha ?? null,
+              failure_fingerprint: workerResult.failure_fingerprint ?? null,
+              decision_request: workerResult.decision_request ?? null,
+            }
+          : null,
+        session_log: session?.log_path ?? null,
         final_state: runtime?.state,
         attempts: runtime?.attempts,
         model_turns: runtime?.usage.model_turns,
@@ -135,17 +205,11 @@ describePilot('real-Claude pilot: one representative node', () => {
       expect(measurements.sessions).toBeGreaterThanOrEqual(1);
       expect(measurements.model_turns).toBeGreaterThan(0);
 
-      // A real session must still obey every gate: no unverified completion.
-      if (runtime?.state === 'DONE') {
-        expect(runtime.evidence.red?.red_reason).toBe('behaviour-missing');
-        expect(runtime.evidence.green?.exit_code).toBe(0);
-        expect(runtime.evidence.green?.command).toEqual(runtime.evidence.red?.command);
-      } else {
-        // Not done is an acceptable pilot result; silently passing is not.
-        expect(['READY', 'BLOCKED', 'NEEDS_DECISION', 'BUDGET_EXHAUSTED', 'INVALIDATED']).toContain(
-          runtime?.state,
-        );
-      }
+      // The node is implementable. Only a structured result with verified
+      // RED/GREEN, or a justified product decision, is a passing pilot;
+      // RESULT_MISSING and every other non-ending fail it (see verdict.ts).
+      expect(verdict.reasons).toEqual([]);
+      expect(verdict.ok).toBe(true);
     },
     30 * 60 * 1000,
   );
