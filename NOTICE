@@ -1,0 +1,12 @@
+Mycelink
+Copyright 2026 Mycelink Contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The runtime bundle dist/mycelink.mjs includes third-party software that is
+licensed under its own terms; see THIRD_PARTY_NOTICES.md. Those components
+remain the property of their respective copyright holders.
+
+Mycelink is an independent, third-party project. It is not affiliated with,
+endorsed by, or sponsored by Anthropic. "Claude" and "Claude Code" are used
+only to describe compatibility.

@@ -84,8 +84,9 @@ describeIfClaude('isolated plugin harness', () => {
     expect(existsSync(join(profile.source, 'skills', 'node-worker', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(profile.source, 'agents', 'module-worker.md'))).toBe(true);
     expect(existsSync(join(profile.source, 'bin', 'mycelink.mjs'))).toBe(true);
-    // The build output must travel with it, or mycelink cannot run.
-    expect(existsSync(join(profile.source, 'dist', 'index.js'))).toBe(true);
+    // The committed runtime bundle travels with it; node_modules does not.
+    expect(existsSync(join(profile.source, 'dist', 'mycelink.mjs'))).toBe(true);
+    expect(existsSync(join(profile.source, 'node_modules'))).toBe(false);
   });
 
   it('passes the CLI plugin validator', () => {

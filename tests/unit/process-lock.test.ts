@@ -14,7 +14,8 @@ import {
 
 afterAll(() => cleanupTmpRoots());
 
-const DIST = resolve(process.cwd(), 'dist');
+// Child processes load the per-module tsc output, not the single runtime bundle.
+const DIST = resolve(process.cwd(), 'build');
 
 describe('process-lock', () => {
   it('acquires an uncontended lock and reports it held', () => {

@@ -2,9 +2,10 @@
   "name": "mycelink",
   "version": "0.2.0-beta.1",
   "description": "Connect repositories. Coordinate agents. Ship one feature.",
-  "type": "module",
   "license": "Apache-2.0",
+  "author": "Mycelink Contributors",
   "private": true,
+  "type": "module",
   "engines": {
     "node": "^22.12.0 || ^24.0.0"
   },
@@ -12,14 +13,19 @@
     "mycelink": "bin/mycelink.mjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
+    "build:check": "node scripts/build.mjs && git diff --exit-code -- dist THIRD_PARTY_NOTICES.md",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:security": "vitest run tests/security",
     "test:fixture": "vitest run tests/fixtures",
+    "test:release": "vitest run tests/release",
     "test:plugin": "vitest run tests/plugin-e2e",
     "test:pilot": "vitest run --config vitest.pilot.config.ts",
+    "package": "node scripts/package.mjs",
+    "validate:plugin": "claude plugin validate --strict .",
     "verify": "npm run typecheck && npm run build && vitest run"
   },
   "dependencies": {
@@ -29,9 +35,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "esbuild": "0.28.2",
     "typescript": "^5.7.2",
     "vite": "^8.3.2",
     "vitest": "^5.0.3"
-  },
-  "author": "Mycelink Contributors"
+  }
 }

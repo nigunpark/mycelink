@@ -13,7 +13,8 @@ import {
 
 afterAll(() => cleanupTmpRoots());
 
-const DIST = resolve(process.cwd(), 'dist');
+// Child processes load the per-module tsc output, not the single runtime bundle.
+const DIST = resolve(process.cwd(), 'build');
 
 describe('event-log', () => {
   it('appends a single parseable JSONL record', () => {

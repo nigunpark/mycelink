@@ -45,6 +45,13 @@ import { memoryCommand } from '../knowledge/cli.js';
 import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
 import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
+import { packageRoot } from '../util/paths.js';
+
+/** The installed package version, from the package.json that ships with it. */
+export function packageVersion(): string {
+  const pkg = JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as { version?: string };
+  return pkg.version ?? '0.0.0';
+}
 
 export interface CliIo {
   out: (text: string) => void;
@@ -59,8 +66,9 @@ const defaultIo: CliIo = {
 
 const USAGE = `mycelink <group> <command> [options]
 
+  version | --version                        print the installed version
   doctor                                     environment and workspace health
-  init <control-repo-path>                   create an control repository
+  init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
   graph compile|validate|ready|import|adapters  portfolio graph operations
@@ -136,6 +144,11 @@ function requirePositional(args: ParsedArgs, index: number, name: string): strin
 export async function main(argv: string[], io: CliIo = defaultIo): Promise<number> {
   const args = parseArgs(argv);
   const group = args.positional[0];
+
+  if (group === 'version' || (group === undefined && flagBool(args, 'version'))) {
+    io.out(packageVersion());
+    return 0;
+  }
 
   if (group === undefined || group === 'help' || flagBool(args, 'help')) {
     io.out(USAGE);

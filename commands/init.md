@@ -1,5 +1,5 @@
 ---
-description: Create or adopt an control repository for multi-repository orchestration
+description: Create or adopt a control repository for multi-repository orchestration
 argument-hint: <control-repo-path>
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
