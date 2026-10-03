@@ -21,6 +21,7 @@ import { hashGraph } from '../../src/graph/validate.js';
 import { clone, VALID_GRAPH } from '../helpers/graph-fixtures.js';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { makeGitRepo } from '../helpers/git-fixture.js';
+import { minimalPack, writePack } from '../helpers/context-pack.js';
 import type { PortfolioGraph } from '../../src/model/types.js';
 
 const SECRET = 'S3cr3t-Value-For-Redaction-0123456789';
@@ -138,7 +139,7 @@ describe('durable artifacts', () => {
     const scenario = join(dir, 'scenario.json');
     writeFileSync(scenario, JSON.stringify({ default: { outcome: 'SUBMITTED', turns: 1, print_env: [ENV_NAME] } }));
     const pack = join(dir, 'pack.json');
-    writeFileSync(pack, '{}');
+    writePack(pack, minimalPack({ feature_id: 'FEAT-1', node_id: 'FEAT-1.core.x.impl', claim_id: 'c' }));
     mkdirSync(join(dir, 's'), { recursive: true });
     const adapter = new ClaudeCliAdapter({
       executable: process.execPath,

@@ -8,6 +8,16 @@ Node 22.12.0 and 24), with CodeQL (`37137320292`) and OpenSSF Scorecard
 (`37137320290`) also passing on the same commit. Branch protection and the
 beta GitHub Release/tag remain; nothing has been tagged or released.
 
+**New beta blocker found and fixed locally (not yet pushed or CI-verified).**
+The first real-Claude pilot showed that real worker sessions could not start
+any node: the worker was denied every attempt to read the context pack and
+result path from environment variables and exited 0 with `RESULT_MISSING`.
+The worker transport was redesigned on branch
+`fix/real-worker-context-transport`, and the real pilot now reaches `DONE`
+with a structured result and verified RED/GREEN evidence (see *Real-Claude
+pilot*). The public CI status above is for `41b99d8`, which does **not**
+contain this fix.
+
 This file records what was verified, how, and what remains. It is not
 shipped in the release archive.
 
@@ -96,6 +106,11 @@ files are unchanged.
 
 ## Test totals
 
+With the worker-transport fix (local branch, not yet in CI): 617 tests in
+38 files, 616 passed, 0 failed, 1 skipped on Windows (Node 24.14.1). The 24
+new tests are in `tests/integration` (+17) and `tests/unit` (+7). The figures
+below are for `41b99d8`.
+
 593 tests in 36 files: locally on Windows (Node 24.14.1) 592 passed,
 0 failed, 1 skipped (the POSIX-only bundle-mode test). CI run `37137320314`
 ran the same 593 on all six legs with no failures (see *CI confirmation*). The 583-test pass recorded
@@ -166,13 +181,121 @@ not file contents.
   It is an orphan history (single root commit `35ad200`, no ancestry from the
   reference implementation or the internal bootstrap work) and is **the
   branch to push**.
-- No other local branches, tags, worktrees or stashes. On GitHub, `main` is
+- Locally, `fix/real-worker-context-transport` (branched from `3575483`)
+  carries the worker-transport fix; it has not been pushed. No other local
+  branches, tags, worktrees or stashes. On GitHub, `main` is
   pushed at `41b99d8`; the only other remote branches are Dependabot update
   branches (open pull requests #1 and #2). No tags exist.
 - Authorship was rewritten before publication: every reachable commit has
   author and committer `nigunpark` with the GitHub no-reply address, and no
   reachable commit carries a personal e-mail address. New commits use the
   same configured identity.
+
+## Real-Claude pilot and the worker-transport fix
+
+**First run (failed).** `MYCELINK_REAL_CLAUDE_PILOT=1 npm run test:pilot`
+exited 0, but only because the pilot accepted a non-`DONE` ending.
+`implementation/PILOT-MEASUREMENTS.json` recorded outcome `RETRY`, final state
+`READY`, detail `RESULT_MISSING`, no RED or GREEN evidence. The durable
+transcript showed the cause. The prompt told the worker to read
+`$MYCELINK_CONTEXT_PACK` and write `$MYCELINK_RESULT_PATH`. Claude Code
+2.1.288 in print mode denied every form of reading them: Bash `$VAR` ("a
+variable in this command can't be checked before it runs"), PowerShell
+`$env:`, `[Environment]::GetEnvironmentVariable`, and `Env:` provider paths.
+The pack lived outside the worktree, where reads need an approval nobody can
+give, so the worker never learned its node and wrote no result. The pilot's
+pass was false, and real workers could not do any work.
+
+**Fix.** The worker no longer discovers anything; see `CHANGELOG.md`
+(*Unreleased → Fixed*) and `docs/PERMISSION_MODEL.md`. In summary:
+
+- the validated, redacted, byte-bounded pack goes inline in a prompt sent on
+  stdin;
+- results come back through a git-ignored `.mycelink-worker/result.json` in
+  the worktree, pre-approved as that one file and collected with link, size,
+  schema and identity checks;
+- the controller offers the `mycelink tdd` gates as exact, pre-approved
+  command lines.
+
+Before building on them, each Claude Code behavior this relies on was checked
+against the real CLI (2.1.288, `haiku`, throwaway repositories):
+
+- a stdin prompt with `-p` and `stream-json` works;
+- `Edit(./<file>)` permits writing that one file and still denies a sibling
+  path (`Write(./<file>)` does not match);
+- an exact `Bash(<line>)` rule permits that line and denies the same line with
+  one extra argument;
+- repeated `--allowed-tools` flags merge.
+
+**Regression tests (RED verified first).** 24 new tests:
+
+- `tests/integration/worker-transport.test.ts` (15). It covers prompt-only
+  delivery, no `MYCELINK_CONTEXT_PACK`/`MYCELINK_RESULT_PATH` in the worker
+  environment, and stdin rather than argv. It covers exact grants, the
+  git-ignored slot, and stale-result rejection. It covers rejection of an
+  identity mismatch, an oversized result, a junction-redirected slot, an
+  invalid/oversized/foreign pack, and an unsafe gate argument. It also covers
+  result redaction, pack text that cannot close its block or forge protocol
+  lines, and a prompt-only worker reaching `DONE` through the orchestrator
+  with a behaviour-missing RED and a same-command GREEN.
+- `tests/integration/hooks.test.ts` (+2): the result file is writable before
+  RED and outside the fence; no other file in the slot is.
+- `tests/unit/pilot-verdict.test.ts` (7): the pilot's pass rule.
+
+The fake `claude` was tightened to the real worker's constraints. It reads its
+brief only from the prompt, and it may write the result or run a gate only
+when that exact grant is present. Against the old code, 25 tests failed on
+assertions, including `expected 'RESULT_MISSING' to be null`, which reproduces
+the pilot exactly.
+
+**Pilot strengthened.** `tests/pilot/verdict.ts` now passes the pilot only on:
+
+- a structured worker result with a behaviour-missing RED and a passing GREEN
+  on the same command; or
+- `NEEDS_DECISION` with a real question and at least two options.
+
+`RESULT_MISSING`, `READY`, `BLOCKED` and `BUDGET_EXHAUSTED` fail it. The pilot
+also sets two things that only it uses. One is an operator-style
+least-privilege grant through `claude_extra_args`: `Read`, `Glob`, `Grep`,
+`Edit(./src/**)`, `Edit(./tests/**)`, `Bash(node tests/run.mjs)` and scoped
+`git` commands. The other is a realistic budget for the pilot node (80
+counted turns, 15 minutes); the fixture default of 20 turns and 2 minutes is
+sized for the fake.
+
+**Second run (passed), Claude Code 2.1.288, worker model `sonnet`.**
+
+- **Result:** `DONE` in 1 attempt, 1 session, 8 counted turns, about 26 s
+  wall clock, 2,582 output tokens. The worker returned a structured
+  `SUBMITTED` result with commit `5b705ea`.
+- **Evidence:** RED exit 1, `behaviour-missing`. GREEN, regression and
+  fresh-checkout verification all exit 0 on the same `node tests/run.mjs`.
+  Verdict `ok`.
+- **What the worker did** (from its durable transcript): it read only the
+  worktree, ran the offered `tdd red`, wrote `src/publish.js`, ran `tdd green`
+  and `tdd regression`, committed, and wrote the result file.
+- **One denial:** it first appended `; echo EXIT $?` to the red line. That
+  no longer matched the exact grant and was denied, and it retried with the
+  line as written.
+- **Limits:** this is one node and one run, not a distribution.
+- **Not verified:** whether the control repository's project hooks were
+  active inside the worker worktree. Fence enforcement in this run rests on
+  Claude Code's scoped grants and the controller's fresh-checkout diff check.
+
+**Other local verification at this change (Windows 11, Node 24.14.1):**
+
+- `npm test`: 617 tests in 38 files, 616 passed, 0 failed, 1 skipped
+  (POSIX-only).
+- By suite: unit 199, integration 119, security 179, fixtures 17, release 82
+  (1 skipped), plugin-e2e 21.
+- `npm run typecheck` is clean.
+- `npm run build:check` is clean: the rebuilt bundle is byte-identical to the
+  committed one.
+- `claude plugin validate --strict .` passed.
+- Two packages built with the same `SOURCE_DATE_EPOCH` are byte-identical:
+  58 files, SHA-256 `c27c97b6…f9c5f5`.
+
+**Not yet done:** push the branch and get green CI on all six legs for this
+commit.
 
 ## Remaining before publishing
 
@@ -196,6 +319,10 @@ not file contents.
 7. **Beta GitHub Release and tag** `v0.2.0-beta.1` (see *Exact release
    commands*). Not yet created; `CHANGELOG.md` still carries the fixes under
    *Unreleased*.
+8. **Land the worker-transport fix.** Commit it on
+   `fix/real-worker-context-transport` (local; not pushed), merge it to
+   `main`, and get CI green on all six legs. The tag must not be cut from a
+   commit without it, because real workers cannot start a node without it.
 
 ## Known limitations
 
@@ -205,7 +332,13 @@ not file contents.
 - The ECC adapter is validated against the documented artifact shape only, not
   a live ECC installation; ECC is optional.
 - The real-Claude pilot (`MYCELINK_REAL_CLAUDE_PILOT=1 npm run test:pilot`)
-  was not run for this release; it incurs model usage.
+  covers one representative node. It passed once after the transport fix (see
+  *Real-Claude pilot*), and it incurs model usage. Workers need
+  operator-granted tools (`claude_extra_args`) to edit and commit; without
+  them, a worker should return `BLOCKED` with `PERMISSION_DENIED:<tool>`. That
+  path is covered by the prompt but not exercised by a real run.
+- Turn counting is per stream event, so every tool call counts as a turn;
+  set `max_turns` with that in mind.
 - Claude Code has no `--max-turns`; the controller enforces turn ceilings by
   counting stream events.
 - Shell mode is unsupported for E2E runtime steps; on Windows, batch-shim

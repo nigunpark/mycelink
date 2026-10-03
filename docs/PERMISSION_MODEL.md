@@ -21,7 +21,8 @@ Who may do what, and where the switch for it lives.
 | Shell execution of verifiers | off | `allow_shell_commands: true` **and** `shell: true` on the verifier | operator (config) + graph author |
 | Shell execution of E2E runtime steps | never | — | nobody |
 | Worker permission bypass (`--dangerously-skip-permissions`, `bypassPermissions`) | refused | `allow_dangerous_permission_bypass: true` | operator (config) |
-| Worker tool permissions | Claude Code defaults for print mode | `claude_extra_args`, e.g. `--allowed-tools` | operator (config) |
+| Worker tool permissions | Claude Code defaults for print mode, plus the controller's protocol grants below | `claude_extra_args`, e.g. `--allowed-tools` | operator (config) |
+| Controller protocol grants | `Edit(./.mycelink-worker/result.json)` and the exact `mycelink tdd red/green/regression` lines for the node | — | nobody (controller-built, not graph-authored) |
 | Raw `git push` / `merge` / `rebase` / `cherry-pick` / `worktree add|remove` in a session | blocked by hook | — | nobody (use the `mycelink` equivalents) |
 | Automatic push, force-push, fetch | never performed | — | nobody |
 | Repository discovery | none; only `repositories.yaml` entries | `mycelink repo register` | operator |
@@ -53,6 +54,29 @@ can only use tools allowed by Claude Code's settings and by
   "claude_extra_args": ["--allowed-tools", "Read", "Edit", "Write", "Glob", "Grep", "Bash(npm test:*)"]
 }
 ```
+
+Prefer path- and command-scoped rules when you can, as the real-Claude
+pilot does: `Edit(./src/**)`, `Edit(./tests/**)`, `Bash(node tests/run.mjs)`,
+`Bash(git add:*)`, `Bash(git commit:*)`. Repeated `--allowed-tools` flags
+merge, so these combine with the controller's own grants.
+
+The controller adds exactly two kinds of grant itself, because the worker
+protocol cannot work without them and print mode cannot ask:
+
+- `Edit(./.mycelink-worker/result.json)` — the one result file, relative to
+  the worktree. Verified on Claude Code 2.1.288 to permit that file and
+  nothing else. The PreToolUse hook also exempts exactly that path from the
+  ownership fence and the RED gate.
+- `Bash(<exact line>)` for each `mycelink tdd red|green|regression` call the
+  node requires, built from controller-known argv with no `-- <command>`
+  passthrough, so each runs only the node's declared verifier. An exact rule
+  does not match any other command line. Arguments that a shell could
+  reinterpret (quotes, `$`, backticks, backslashes, newlines) are refused
+  rather than escaped.
+
+Workers never receive the context-pack path or a controller path in their
+environment, and are never asked to expand a variable or read outside their
+worktree.
 
 Bypassing permissions turns every worker into an unrestricted process with
 your privileges; Mycelink refuses it unless you opt in, and you should opt in

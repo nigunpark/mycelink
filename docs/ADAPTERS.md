@@ -79,7 +79,15 @@ Worker sessions sit behind `SessionAdapter` in `src/sessions/adapter.ts`:
 - `ClaudeCliAdapter` — spawns real Claude Code print-mode sessions
   (`-p --output-format stream-json --verbose`), enforces wall-clock, stall and
   turn ceilings, redacts the session log and validates the structured result
-  file.
+  file. The worker transport (`src/sessions/worker-protocol.ts`) needs no
+  environment-variable expansion and no reads outside the worktree: the
+  validated, redacted, byte-bounded context pack goes inline on **stdin**
+  (escaped so pack text cannot close its data block), gate commands are
+  offered verbatim and pre-approved as exact lines, and the worker writes
+  `.mycelink-worker/result.json` inside its worktree — git-ignored,
+  pre-approved as that one file, and collected with link, size, schema and
+  node/claim identity checks before a redacted copy is stored under the
+  feature's `sessions/` directory.
 - `FakeInProcessAdapter` — scripted, for loop tests.
 
 The automated suite drives `ClaudeCliAdapter` with

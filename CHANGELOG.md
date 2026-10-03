@@ -8,6 +8,14 @@ under **Breaking**.
 
 ## [Unreleased]
 
+### Breaking
+
+- Worker sessions receive their brief on stdin and write their result to
+  `.mycelink-worker/result.json` in the worktree. Custom worker agents or
+  skills that read `$MYCELINK_CONTEXT_PACK` or write `$MYCELINK_RESULT_PATH`
+  must follow the bundled `module-worker` agent and `node-worker` skill
+  instead; those variables are no longer set.
+
 ### Changed
 
 - Repository metadata now points at the public GitHub repository
@@ -24,6 +32,38 @@ under **Breaking**.
 
 ### Fixed
 
+- **Real worker sessions could never start their node (beta blocker).** The
+  worker prompt told Claude Code to read `$MYCELINK_CONTEXT_PACK` and write
+  `$MYCELINK_RESULT_PATH`. In print mode Claude Code's permission checks deny
+  shell expansion of variables, and the pack lived outside the worktree, so
+  the first real-Claude pilot's worker was denied on every attempt and exited
+  0 with no result (`RESULT_MISSING`, no RED/GREEN evidence). The worker
+  transport no longer depends on the worker discovering anything:
+  - the validated, redacted, byte-bounded context pack is inlined in the
+    prompt, which is sent on **stdin** (no command-line length limit, no
+    batch-shim expansion). Pack text is JSON with `<`, `>`, `&` and backticks
+    `\u`-escaped, so it cannot close its data block or forge protocol lines.
+    A pack that is schema-invalid, over its byte budget, or for another
+    feature, node or claim fails the attempt (`CONTEXT_PACK_INVALID`) without
+    starting a worker;
+  - the worker writes `.mycelink-worker/result.json` inside its own worktree.
+    The controller creates that slot with a self-ignoring `.gitignore`,
+    pre-approves exactly that file (`--allowed-tools
+    Edit(./.mycelink-worker/result.json)`), and after the session collects it
+    with link, size (256 KiB), schema and node/claim identity checks
+    (`RESULT_PATH_ESCAPE`, `RESULT_TOO_LARGE`, `RESULT_SCHEMA_INVALID`,
+    `RESULT_IDENTITY_MISMATCH`), stores a redacted copy under the feature's
+    `sessions/` directory, and removes the worker's copy;
+  - the controller offers the node's `mycelink tdd red|green|regression`
+    calls as exact command lines (no `--` passthrough, so each runs the
+    declared verifier) and pre-approves only those exact lines;
+  - `MYCELINK_CONTEXT_PACK` and `MYCELINK_RESULT_PATH` are no longer set for
+    workers; the PreToolUse hook exempts exactly the result file from the
+    ownership fence and the RED gate.
+- The real-Claude pilot no longer passes on a non-result. It now requires a
+  structured worker result plus either a behaviour-missing RED and a passing
+  GREEN on the same command, or a `NEEDS_DECISION` with a real question and at
+  least two options; `RESULT_MISSING`, `READY`, `BLOCKED` and the rest fail it.
 - Windows: node and integration worktrees were matched against `git worktree
   list` by path text. When the configured location used an 8.3 short name
   (for example the `RUNNER~1` user directory on GitHub-hosted runners), the

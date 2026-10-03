@@ -54,6 +54,7 @@ import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { integrateNodeBranch } from '../git/integrate.js';
 import { commitAll, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
+import { mycelinkCliPath } from '../workspace/hook-settings.js';
 import { runVerification } from '../evidence/runner.js';
 import { appendEvent } from '../state/event-log.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
@@ -277,6 +278,27 @@ export class Orchestrator {
     return { claimId, worktree, branch };
   }
 
+  /**
+   * The `mycelink tdd` calls a worker must make, as exact argv.
+   *
+   * No `-- <command>` passthrough: each gate runs the node's declared
+   * verifier, so pre-approving the line grants nothing the graph did not
+   * already declare. Paths use forward slashes so the line reads the same in
+   * every shell a worker might use.
+   */
+  gateCommands(nodeId: string): NonNullable<SpawnRequest['gateCommands']> {
+    const node = this.node(nodeId);
+    if (node.verification_commands.length === 0) return [];
+    const launcher = mycelinkCliPath().replace(/\\/g, '/');
+    const controlRoot = this.controlRoot.replace(/\\/g, '/');
+    return (['red', 'green', 'regression'] as const)
+      .filter((gate) => node.required_evidence.includes(gate))
+      .map((gate) => ({
+        gate,
+        argv: ['node', launcher, 'tdd', gate, this.featureId, nodeId, '--control-root', controlRoot],
+      }));
+  }
+
   /** Write the node's context pack and return its path. */
   writeContextPack(nodeId: string, claimId: string): string {
     const graph = this.graph();
@@ -479,6 +501,7 @@ export class Orchestrator {
           this.workspace.config.session_timeout_ms,
         ),
         stallMs: Math.max(30_000, Math.floor(node.worker.max_wall_clock_minutes * 60_000 * 0.4)),
+        gateCommands: this.gateCommands(nodeId),
         env: {
           MYCELINK_CONTROL_ROOT: this.controlRoot,
           MYCELINK_BRANCH: branch ?? '',
