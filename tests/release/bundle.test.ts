@@ -6,7 +6,7 @@
  * runtime needs neither.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { builtinModules } from 'node:module';
@@ -65,6 +65,23 @@ describe('runtime bundle', () => {
     const version = spawnSync(process.execPath, [join(copy, 'bin', 'mycelink.mjs'), '--version'], { encoding: 'utf8' });
     expect(version.status).toBe(0);
     expect(version.stdout.trim()).toBe(JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version);
+  });
+
+  it.skipIf(process.platform === 'win32')('is rebuilt with the executable bit git tracks for it', () => {
+    // Windows has no executable bit to compare; Linux and macOS do, and CI's
+    // `git diff --exit-code -- dist` fails on a mode flip alone.
+    const dir = makeTmpDir('bundle-mode-');
+    const outfile = join(dir, 'mycelink.mjs');
+    const build = spawnSync(
+      process.execPath,
+      [join(ROOT, 'scripts', 'build.mjs'), '--outfile', outfile, '--notices', join(dir, 'NOTICES.md')],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    expect(build.status, build.stderr).toBe(0);
+    const ls = spawnSync('git', ['ls-files', '-s', '--', 'dist/mycelink.mjs'], { cwd: ROOT, encoding: 'utf8' });
+    const trackedExecutable = ls.stdout.startsWith('100755 ');
+    expect((statSync(outfile).mode & 0o111) !== 0).toBe(trackedExecutable);
+    expect(statSync(outfile).mode & 0o777).toBe(0o755);
   });
 
   it('the launcher explains a missing bundle instead of crashing', () => {

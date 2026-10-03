@@ -15,6 +15,7 @@ import {
   runGit,
 } from './git.js';
 import { assertFeatureId, assertNodeId } from '../security/names.js';
+import { samePath } from '../security/paths.js';
 
 export class AllowedPathViolationError extends Error {
   readonly violations: string[];
@@ -88,7 +89,10 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
 
   mkdirSync(args.worktreeRoot, { recursive: true });
 
-  const registered = listWorktrees(repo).find((w) => w.path === target);
+  // Match by location, not text: git records its own canonical form of the
+  // path (long names, not 8.3 aliases), so a textual miss here would delete a
+  // live worktree below and then fail to re-add it.
+  const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && existsSync(target)) {
     return { worktree: target, branch, base: args.baseBranch, created: false };
   }

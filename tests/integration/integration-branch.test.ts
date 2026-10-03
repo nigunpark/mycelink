@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
-import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
+import { readFileSync, rmSync } from 'node:fs';
+import { makeTmpDir, cleanupTmpRoots, windowsShortPathAlias } from '../helpers/tmp.js';
 import { commitAll, makeGitRepo, writeFiles } from '../helpers/git-fixture.js';
 import { branchExists, isWorktreeClean, resolveRef, isAncestor } from '../../src/git/git.js';
 import { createWorkerWorktree, integrationBranchName } from '../../src/git/worktree.js';
@@ -184,5 +184,21 @@ describe('repository integration branch', () => {
         integrationRoot: root,
       }),
     ).toThrow(/dirty/i);
+  });
+
+  it('recreates a deleted integration worktree under a Windows 8.3 short-name alias', (ctx) => {
+    const repo = coreRepo();
+    const shortRoot = windowsShortPathAlias(makeTmpDir('integration-root-long-name-'));
+    if (shortRoot === null) return ctx.skip();
+    const args = { repoPath: repo, featureId: 'FEAT-101', baseBranch: 'main', integrationRoot: shortRoot };
+    const a = workOnNode(repo, shortRoot, 'FEAT-101.core.a.impl', { 'src/publish.js': 'v1\n' });
+    const first = integrateNodeBranch({ ...args, nodeBranch: a });
+
+    // Deleted outside git: git still holds the long-form registration.
+    rmSync(first.integrationWorktree, { recursive: true, force: true });
+    const b = workOnNode(repo, shortRoot, 'FEAT-101.core.b.impl', { 'src/other.js': 'v2\n' });
+    const second = integrateNodeBranch({ ...args, nodeBranch: b });
+    expect(second.strategy).toBe('merge');
+    expect(readFileSync(join(second.integrationWorktree, 'src', 'publish.js'), 'utf8')).toBe('v1\n');
   });
 });

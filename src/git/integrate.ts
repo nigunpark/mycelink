@@ -18,6 +18,7 @@ import {
   runGit,
 } from './git.js';
 import { integrationBranchName } from './worktree.js';
+import { samePath } from '../security/paths.js';
 
 export class IntegrationConflictError extends Error {
   readonly conflicts: string[];
@@ -79,7 +80,8 @@ export function ensureIntegrationWorktree(args: IntegrateArgs): { path: string; 
 
   mkdirSync(args.integrationRoot, { recursive: true });
 
-  const registered = listWorktrees(repo).find((w) => w.path === target);
+  // Match by location, not text (see createWorkerWorktree).
+  const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && !existsSync(target)) {
     runGit(repo, ['worktree', 'prune'], { allowFail: true });
   }

@@ -130,6 +130,19 @@ export function realpathDeepest(p: string): string {
   }
 }
 
+/**
+ * True when `a` and `b` name the same filesystem location. Path text is not
+ * identity: Windows hands out 8.3 short names (`C:\Users\RUNNER~1`) and is
+ * case-insensitive, links alias directories, and git records its own
+ * canonical form. Both sides are reduced to their real path first, so this
+ * matches a location, never a mere prefix or spelling.
+ */
+export function samePath(a: string, b: string): boolean {
+  const ra = realpathDeepest(a);
+  const rb = realpathDeepest(b);
+  return process.platform === 'win32' ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+}
+
 function lexicallyInside(root: string, target: string): boolean {
   const rel = relative(root, target);
   if (rel === '') return true;

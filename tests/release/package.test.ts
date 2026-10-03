@@ -64,6 +64,28 @@ describe('npm run package', () => {
     expect(names).toEqual([...names].sort());
   });
 
+  it('tracks every shipped file in git with the same executable bit as the archive', () => {
+    // A clone (marketplace install) and the ZIP must agree, and CI's rebuild
+    // on Linux/macOS must not flip the tracked mode of the bundle.
+    const ls = spawnSync('git', ['ls-files', '-s', '--', '.'], { cwd: ROOT, encoding: 'utf8' });
+    expect(ls.status, ls.stderr).toBe(0);
+    const tracked = new Map<string, string>();
+    for (const line of ls.stdout.split('\n')) {
+      const m = /^(\d{6}) [0-9a-f]+ \d\t(.+)$/.exec(line);
+      if (m) tracked.set(m[2] as string, m[1] as string);
+    }
+    const mismatched: string[] = [];
+    for (const entry of readZip(first.zip)) {
+      const indexMode = tracked.get(entry.name);
+      if (indexMode === undefined) continue; // generated (package.json)
+      const zipExecutable = ((entry.externalAttributes >>> 16) & 0o111) !== 0;
+      if ((indexMode === '100755') !== zipExecutable) mismatched.push(`${entry.name}: git ${indexMode}`);
+    }
+    expect(mismatched).toEqual([]);
+    expect(tracked.get('bin/mycelink.mjs')).toBe('100755');
+    expect(tracked.get('dist/mycelink.mjs')).toBe('100755');
+  });
+
   it('contains only runtime and public files', () => {
     const names = readZip(first.zip).map((e) => e.name);
     for (const required of [

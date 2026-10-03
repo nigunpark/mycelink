@@ -15668,6 +15668,11 @@ function realpathDeepest(p) {
     current = parent;
   }
 }
+function samePath(a, b) {
+  const ra = realpathDeepest(a);
+  const rb = realpathDeepest(b);
+  return process.platform === "win32" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+}
 function lexicallyInside(root, target) {
   const rel = relative(root, target);
   if (rel === "") return true;
@@ -17665,7 +17670,7 @@ function createWorkerWorktree(args) {
   const name = worktreeDirName(args.repositoryName ?? baseName(repo), args.nodeId);
   const target = resolve7(join11(args.worktreeRoot, name));
   mkdirSync5(args.worktreeRoot, { recursive: true });
-  const registered = listWorktrees(repo).find((w) => w.path === target);
+  const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && existsSync8(target)) {
     return { worktree: target, branch, base: args.baseBranch, created: false };
   }
@@ -17776,7 +17781,7 @@ function ensureIntegrationWorktree(args) {
   const branch = integrationBranchName(args.featureId);
   const target = integrationWorktreeDir(args.integrationRoot, repoName, args.featureId);
   mkdirSync6(args.integrationRoot, { recursive: true });
-  const registered = listWorktrees(repo).find((w) => w.path === target);
+  const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && !existsSync9(target)) {
     runGit(repo, ["worktree", "prune"], { allowFail: true });
   }

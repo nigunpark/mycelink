@@ -17,6 +17,20 @@ under **Breaking**.
   command, and the SECURITY/SUPPORT/issue-template links.
 - `GOVERNANCE.md` lists `@nigunpark` as maintainer, and `.github/CODEOWNERS`
   assigns all paths to `@nigunpark`.
+- `bin/mycelink.mjs` and `dist/mycelink.mjs` are tracked in git as executable
+  (`100755`), matching the modes already used in the release archive, and
+  `npm run build` sets the bundle's mode explicitly. Before this, rebuilding
+  on Linux or macOS flipped the bundle's mode and failed the CI build check.
+
+### Fixed
+
+- Windows: node and integration worktrees were matched against `git worktree
+  list` by path text. When the configured location used an 8.3 short name
+  (for example the `RUNNER~1` user directory on GitHub-hosted runners), the
+  existing worktree was not recognized: its directory was deleted and
+  re-adding it failed with "missing but already registered worktree".
+  Worktrees are now matched by real location (8.3 names expanded,
+  case-insensitive on Windows). Found by the first public CI run.
 
 ## [0.2.0-beta.1]
 
