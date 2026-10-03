@@ -189,17 +189,16 @@ The repository is its own single-plugin marketplace (`mycelink-marketplace`).
 
 ### From GitHub
 
-Once the repository is published, replace `<owner>` with its GitHub owner:
-
 ```bash
-claude plugin marketplace add <owner>/mycelink
+claude plugin marketplace add nigunpark/mycelink
 claude plugin install mycelink@mycelink-marketplace
 ```
 
 ### From a release ZIP
 
 ```bash
-# download mycelink-<version>.zip and mycelink-<version>.zip.sha256 from the release
+# download mycelink-<version>.zip and mycelink-<version>.zip.sha256 from
+# https://github.com/nigunpark/mycelink/releases
 sha256sum -c mycelink-0.2.0-beta.1.zip.sha256        # PowerShell: Get-FileHash
 unzip mycelink-0.2.0-beta.1.zip -d mycelink
 claude plugin marketplace add ./mycelink

@@ -6,6 +6,8 @@
   "author": {
     "name": "Mycelink Contributors"
   },
+  "homepage": "https://github.com/nigunpark/mycelink#readme",
+  "repository": "https://github.com/nigunpark/mycelink",
   "license": "Apache-2.0",
   "keywords": [
     "multi-repo",

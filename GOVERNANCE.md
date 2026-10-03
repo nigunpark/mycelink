@@ -15,11 +15,9 @@ Contributors. It is not affiliated with or endorsed by Anthropic.
 
 | GitHub handle | Areas |
 |---|---|
-| _to be filled in when the public repository owner is established_ | all |
+| [@nigunpark](https://github.com/nigunpark) | all |
 
-Until this table is filled in, the owner of the public GitHub repository acts
-as the sole maintainer. `.github/CODEOWNERS` is intentionally not committed
-yet for the same reason; add it together with this table.
+`.github/CODEOWNERS` mirrors this table; update both together.
 
 ## Decisions
 

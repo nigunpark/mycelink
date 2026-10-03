@@ -13,6 +13,7 @@ const prose = (rel: string): string =>
   read(rel).replace(/^>\s?/gm, '').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const json = <T = Record<string, unknown>>(rel: string): T => JSON.parse(read(rel)) as T;
 
+const REPO_URL = 'https://github.com/nigunpark/mycelink';
 const pkg = json<{ name: string; version: string; license: string; private: boolean; author: string; engines: { node: string } }>('package.json');
 const lock = json<{ version: string; packages: Record<string, { version?: string; license?: string }> }>('package-lock.json');
 const plugin = json<Record<string, unknown>>('.claude-plugin/plugin.json');
@@ -43,14 +44,16 @@ describe('identity and version', () => {
     expect(pkg.engines.node).toBe('^22.12.0 || ^24.0.0');
   });
 
-  it('credits Mycelink Contributors and declares no fake URLs', () => {
+  it('credits Mycelink Contributors and points at the real GitHub repository', () => {
     expect(pkg.author).toBe('Mycelink Contributors');
     expect((plugin['author'] as { name: string }).name).toBe('Mycelink Contributors');
     expect(market.owner.name).toBe('Mycelink Contributors');
-    for (const key of ['repository', 'homepage', 'bugs', 'support']) {
-      expect(plugin[key], `plugin.json ${key}`).toBeUndefined();
-      expect((pkg as Record<string, unknown>)[key], `package.json ${key}`).toBeUndefined();
-    }
+    const raw = pkg as Record<string, unknown>;
+    expect(raw['homepage']).toBe(`${REPO_URL}#readme`);
+    expect(raw['repository']).toEqual({ type: 'git', url: `git+${REPO_URL}.git` });
+    expect(raw['bugs']).toEqual({ url: `${REPO_URL}/issues` });
+    expect(plugin['homepage']).toBe(`${REPO_URL}#readme`);
+    expect(plugin['repository']).toBe(REPO_URL);
     const all = read('.claude-plugin/plugin.json') + read('.claude-plugin/marketplace.json') + read('package.json');
     expect(all).not.toMatch(/example\.com|your-org|<owner>|TODO/i);
   });
@@ -108,6 +111,7 @@ describe('public documentation and community files', () => {
     '.github/ISSUE_TEMPLATE/config.yml',
     '.github/pull_request_template.md',
     '.github/dependabot.yml',
+    '.github/CODEOWNERS',
   ])('%s exists', (rel) => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
   });
@@ -139,9 +143,21 @@ describe('public documentation and community files', () => {
     expect(config).toMatch(/SECURITY\.md|security\/advisories/);
   });
 
-  it('CODEOWNERS is absent until a real owner handle exists, and that is documented', () => {
-    expect(existsSync(join(ROOT, '.github', 'CODEOWNERS'))).toBe(false);
-    expect(read('GOVERNANCE.md')).toMatch(/CODEOWNERS/);
+  it('CODEOWNERS and the GOVERNANCE maintainers table name the same owner', () => {
+    expect(read('.github/CODEOWNERS')).toMatch(/^\*\s+@nigunpark\s*$/m);
+    const governance = read('GOVERNANCE.md');
+    expect(governance).toMatch(/^\| \[@nigunpark\]\(https:\/\/github\.com\/nigunpark\) \| all \|$/m);
+    expect(governance).toMatch(/CODEOWNERS/);
+    expect(governance).not.toMatch(/to be filled in/i);
+  });
+
+  it('install instructions and community links use the real repository, not a placeholder', () => {
+    const readme = read('README.md');
+    expect(readme).toContain('claude plugin marketplace add nigunpark/mycelink');
+    expect(readme).not.toMatch(/<owner>/);
+    expect(read('SECURITY.md')).toContain(`${REPO_URL}/security/advisories/new`);
+    expect(read('SUPPORT.md')).toContain(`${REPO_URL}/issues`);
+    expect(read('.github/ISSUE_TEMPLATE/config.yml')).toContain(`${REPO_URL}/security/advisories/new`);
   });
 
   it('documents ECC as optional and unverified against a live installation', () => {

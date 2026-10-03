@@ -8,6 +8,16 @@ under **Breaking**.
 
 ## [Unreleased]
 
+### Changed
+
+- Repository metadata now points at the public GitHub repository
+  `nigunpark/mycelink`: `homepage`, `repository` and `bugs` in `package.json`
+  (also carried in the release archive's `package.json`), `homepage` and
+  `repository` in the plugin manifest, the README's *From GitHub* install
+  command, and the SECURITY/SUPPORT/issue-template links.
+- `GOVERNANCE.md` lists `@nigunpark` as maintainer, and `.github/CODEOWNERS`
+  assigns all paths to `@nigunpark`.
+
 ## [0.2.0-beta.1]
 
 First public beta.
