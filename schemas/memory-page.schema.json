@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:memory-page",
+  "title": "LLM Wiki Brain memory page frontmatter",
+  "type": "object",
+  "required": ["id", "title", "type", "status", "created_at", "updated_at", "source_refs", "verification"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "title": { "type": "string", "minLength": 1 },
+    "type": {
+      "enum": ["policy", "procedure", "episode", "decision", "concept", "pitfall", "code-module", "code-contract", "code-flow"]
+    },
+    "status": {
+      "enum": ["verified", "instructed_not_verified", "partial", "stale", "contested", "superseded", "invalid", "archived"]
+    },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "source_refs": {
+      "type": "array",
+      "description": "Provenance pointers. A code fact without a source path/symbol/hash is rejected.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "ref"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "enum": ["user_instruction", "source", "evidence", "decision", "episode", "doc"] },
+          "ref": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string" },
+          "symbol": { "type": "string" }
+        }
+      }
+    },
+    "related": { "type": "array", "items": { "type": "string" } },
+    "supersedes": { "type": "array", "items": { "type": "string" } },
+    "superseded_by": { "type": "array", "items": { "type": "string" } },
+    "watch": { "type": "array", "items": { "type": "string" } },
+    "triggers": { "type": "array", "items": { "type": "string" } },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "verified_commit": { "type": ["string", "null"] },
+    "verification": {
+      "type": "object",
+      "required": ["structural", "references", "build", "tests", "runtime"],
+      "additionalProperties": false,
+      "properties": {
+        "structural": { "enum": ["passed", "failed", "not_run"] },
+        "references": { "enum": ["passed", "failed", "not_run"] },
+        "build": { "enum": ["passed", "failed", "not_run"] },
+        "tests": { "enum": ["passed", "failed", "not_run"] },
+        "runtime": { "enum": ["passed", "failed", "not_run"] }
+      }
+    }
+  }
+}

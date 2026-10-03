@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:state",
+  "title": "Feature runtime state (STATE.json)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "feature_id",
+    "feature_state",
+    "graph_hash",
+    "created_at",
+    "updated_at",
+    "nodes",
+    "usage",
+    "budget"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "feature_id": { "type": "string" },
+    "feature_state": {
+      "enum": [
+        "DRAFT",
+        "PRD_APPROVED",
+        "PLAN_APPROVED",
+        "GRAPH_VALIDATED",
+        "RUNNING",
+        "CANDIDATE_READY",
+        "E2E_RUNNING",
+        "VERIFIED",
+        "COMPLETED",
+        "PAUSED",
+        "BLOCKED",
+        "NEEDS_DECISION",
+        "BUDGET_EXHAUSTED",
+        "CANCELLED"
+      ]
+    },
+    "graph_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "nodes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/nodeRuntime" } },
+    "usage": { "$ref": "#/$defs/usage" },
+    "budget": {
+      "type": "object",
+      "required": [
+        "max_total_model_turns",
+        "max_total_wall_clock_ms",
+        "max_total_sessions",
+        "max_writer_concurrency",
+        "max_same_failure"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "max_total_model_turns": { "type": "integer", "minimum": 1 },
+        "max_total_wall_clock_ms": { "type": "integer", "minimum": 1 },
+        "max_total_sessions": { "type": "integer", "minimum": 1 },
+        "max_writer_concurrency": { "type": "integer", "minimum": 1 },
+        "max_same_failure": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "blocked_reason": { "type": ["string", "null"] },
+    "pending_decisions": { "type": "array", "items": { "type": "string" } },
+    "candidates": { "type": "array", "items": { "type": "string" } },
+    "current_candidate": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "usage": {
+      "type": "object",
+      "required": ["model_turns", "wall_clock_ms", "input_tokens", "output_tokens", "sessions"],
+      "additionalProperties": false,
+      "properties": {
+        "model_turns": { "type": "integer", "minimum": 0 },
+        "wall_clock_ms": { "type": "integer", "minimum": 0 },
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "sessions": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "nodeRuntime": {
+      "type": "object",
+      "required": ["state", "attempts", "claim", "evidence", "failure_counts", "usage", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "PLANNED",
+            "READY",
+            "CLAIMED",
+            "RED_PENDING",
+            "RED_VERIFIED",
+            "GREEN_PENDING",
+            "GREEN_VERIFIED",
+            "REFACTOR_VERIFIED",
+            "REGRESSION_VERIFIED",
+            "REVIEW_VERIFIED",
+            "INTEGRATED",
+            "DONE",
+            "BLOCKED",
+            "NEEDS_DECISION",
+            "BUDGET_EXHAUSTED",
+            "INVALIDATED",
+            "PAUSED",
+            "EXCLUDED"
+          ]
+        },
+        "attempts": { "type": "integer", "minimum": 0 },
+        "claim": {
+          "type": ["object", "null"],
+          "required": ["claim_id", "owner", "claimed_at"],
+          "additionalProperties": false,
+          "properties": {
+            "claim_id": { "type": "string" },
+            "owner": { "type": "string" },
+            "worktree": { "type": ["string", "null"] },
+            "branch": { "type": ["string", "null"] },
+            "claimed_at": { "type": "string" }
+          }
+        },
+        "evidence": { "type": "object", "additionalProperties": true },
+        "failure_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "last_failure_fingerprint": { "type": ["string", "null"] },
+        "integrated_sha": { "type": ["string", "null"] },
+        "blocked_reason": { "type": ["string", "null"] },
+        "usage": { "$ref": "#/$defs/usage" },
+        "updated_at": { "type": "string" }
+      }
+    }
+  }
+}

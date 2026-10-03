@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:portfolio-graph",
+  "title": "Cross-repository portfolio feature graph",
+  "description": "Four-layer decomposition: feature -> repository slice -> capability -> executable node.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "feature_id",
+    "title",
+    "acceptance_criteria",
+    "resources",
+    "repositories",
+    "capabilities",
+    "nodes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "feature_id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
+    "title": { "type": "string", "minLength": 1 },
+    "prd": { "type": "string" },
+    "plan": { "type": "string" },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^AC-[A-Za-z0-9_.-]+$" },
+          "text": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["capacity"],
+        "additionalProperties": false,
+        "properties": {
+          "capacity": { "type": "integer", "minimum": 1 },
+          "description": { "type": "string" },
+          "exclusive_with": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "repository", "title"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "repository": { "type": "string" },
+          "title": { "type": "string", "minLength": 1 },
+          "acceptance_criteria": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "level",
+        "node_type",
+        "depends_on",
+        "allowed_paths",
+        "required_resources",
+        "required_evidence",
+        "verification_commands",
+        "worker"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+\\.[A-Za-z0-9_.-]+$" },
+        "level": { "const": "executable-node" },
+        "repository": { "type": ["string", "null"] },
+        "capability": { "type": ["string", "null"] },
+        "node_type": {
+          "enum": [
+            "contract-lock",
+            "red-test",
+            "implementation",
+            "refactor",
+            "regression",
+            "review",
+            "integration",
+            "candidate-build",
+            "runtime-deploy",
+            "e2e-scenario",
+            "knowledge"
+          ]
+        },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "allowed_paths": { "type": "array", "items": { "type": "string" } },
+        "forbidden_paths": { "type": "array", "items": { "type": "string" } },
+        "contract_inputs": { "type": "array", "items": { "type": "string" } },
+        "contract_outputs": { "type": "array", "items": { "type": "string" } },
+        "required_resources": { "type": "array", "items": { "type": "string" } },
+        "required_evidence": {
+          "type": "array",
+          "items": { "enum": ["red", "green", "refactor", "regression", "review", "e2e", "candidate"] }
+        },
+        "verification_commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "command"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "expect_exit": { "type": "integer" }
+            }
+          }
+        },
+        "worker": {
+          "type": "object",
+          "required": [
+            "model",
+            "max_turns",
+            "max_wall_clock_minutes",
+            "max_attempts",
+            "nested_delegation"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "model": { "type": "string", "minLength": 1 },
+            "effort": { "enum": ["low", "medium", "high"] },
+            "max_turns": { "type": "integer" },
+            "max_wall_clock_minutes": { "type": "integer" },
+            "max_attempts": { "type": "integer" },
+            "max_same_failure": { "type": "integer", "minimum": 1 },
+            "nested_delegation": { "type": "boolean" }
+          }
+        },
+        "invalidation_rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["when", "action"],
+            "additionalProperties": false,
+            "properties": {
+              "when": { "type": "string", "minLength": 1 },
+              "action": { "enum": ["INVALIDATE", "BLOCK", "RERUN_REGRESSION"] }
+            }
+          }
+        },
+        "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+        "e2e_scenario": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+# A browser E2E scenario.
+#
+# Declare isolation honestly. Claiming `unique` when the test hard-codes a
+# shared account does not make it parallel-safe; it makes someone else's run
+# flaky. Check the plan with: mycelink e2e plan <feature-id>
+schema_version: 1
+id: E2E-FEAT-101-create
+title: Operator sees a newly created order status
+depends_on: []
+acceptance_criteria: [AC-1, AC-2, AC-3]
+
+resources: [browser-worker]
+
+isolation:
+  browser_profile: unique      # unique | shared
+  account: unique              # unique | shared | global-admin
+  data_namespace: unique       # unique | shared
+  global_fixture_reset: false
+  mutates_global_state: false
+  order_dependent: false
+  # Every logical data owner this scenario writes.
+  writes: ['db:jobs', 'queue:job:result:*']
+
+conflicts_with: []
+
+setup_command: []
+# The test must read E2E_DATA_NAMESPACE, E2E_ACCOUNT, E2E_BROWSER_PROFILE_DIR,
+# E2E_TRACE_DIR and E2E_SCREENSHOT_DIR from the environment rather than
+# hard-coding anything.
+test_command: [npx, playwright, test, tests/e2e/create.spec.ts]
+cleanup_command: []
+
+# Fill this in. Without it a failure is attributed to the whole feature and
+# the diagnosis is lost.
+attributed_nodes:
+  - FEAT-101.core.publish.impl
+  - FEAT-101.api.consume.impl
+
+evidence:
+  screenshots: true
+  trace: true
+  junit: true

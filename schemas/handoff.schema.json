@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:handoff",
+  "title": "Cross-repository contract handoff",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "feature_id",
+    "producer_repository",
+    "consumer_repository",
+    "producer_commit",
+    "contract_type",
+    "contract_hash",
+    "changed_contracts",
+    "breaking_changes",
+    "consumer_required_changes",
+    "verification_evidence",
+    "approved"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "feature_id": { "type": "string" },
+    "producer_repository": { "type": "string" },
+    "consumer_repository": { "type": "string" },
+    "producer_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "contract_type": {
+      "enum": ["openapi", "json-schema", "db-migration", "message-event", "native-abi", "file-format", "shared-dto"]
+    },
+    "contract_path": { "type": "string" },
+    "contract_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "changed_contracts": { "type": "array", "items": { "type": "string" } },
+    "breaking_changes": { "type": "array", "items": { "type": "string" } },
+    "consumer_required_changes": { "type": "array", "items": { "type": "string" } },
+    "verification_evidence": { "type": "array", "items": { "type": "string" } },
+    "approved": { "type": "boolean" },
+    "approved_at": { "type": ["string", "null"] },
+    "approved_by": { "type": ["string", "null"] }
+  }
+}

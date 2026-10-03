@@ -1,0 +1,19 @@
+{
+  "name": "mycelink",
+  "displayName": "Mycelink",
+  "version": "0.2.0-beta.1",
+  "description": "Connect repositories. Coordinate agents. Ship one feature. Turns one approved PRD into dependency-aware work across multiple Git repositories, isolated worker worktrees, per-repository integration branches, one immutable cross-repository candidate, and evidence-based completion.",
+  "author": {
+    "name": "Mycelink Contributors"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "multi-repo",
+    "orchestration",
+    "worktrees",
+    "tdd",
+    "dependency-graph",
+    "e2e",
+    "agents"
+  ]
+}

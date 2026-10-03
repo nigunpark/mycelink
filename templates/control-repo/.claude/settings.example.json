@@ -1,0 +1,141 @@
+{
+  "_comment": [
+    "You do not normally write this by hand. `mycelink init <control-repo>`",
+    "generates it with absolute paths to the installed plugin, and re-running",
+    "init updates the harness entries without touching your own hooks or",
+    "permissions. This file shows what it produces, with <PLUGIN> standing in",
+    "for the plugin's installed directory.",
+    "",
+    "These hooks are project-scoped on purpose. They must run in control",
+    "repositories and worker worktrees and nowhere else: a plugin-scoped hook",
+    "would run a Node process on every tool call in every unrelated project.",
+    "",
+    "A successful hook writes nothing. A block writes at most 1 KiB to stderr",
+    "and exits 2. No hook ever invokes a model."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook user-prompt-submit",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook pre-compact",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook post-compact",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook task-created",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook task-completed",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook subagent-stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook session-end",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<PLUGIN>/bin/mycelink.mjs\" hook stop",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

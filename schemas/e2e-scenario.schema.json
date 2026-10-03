@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:e2e-scenario",
+  "title": "Browser E2E scenario",
+  "type": "object",
+  "required": ["schema_version", "id", "resources", "isolation", "test_command"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "depends_on": { "type": "array", "items": { "type": "string" } },
+    "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+    "resources": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "isolation": {
+      "type": "object",
+      "required": ["browser_profile", "account", "data_namespace"],
+      "additionalProperties": false,
+      "properties": {
+        "browser_profile": { "enum": ["unique", "shared"] },
+        "account": { "enum": ["unique", "shared", "global-admin"] },
+        "data_namespace": { "enum": ["unique", "shared"] },
+        "global_fixture_reset": { "type": "boolean" },
+        "mutates_global_state": { "type": "boolean" },
+        "order_dependent": { "type": "boolean" },
+        "writes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Logical data owners touched (db table, queue key prefix, global setting)."
+        }
+      }
+    },
+    "conflicts_with": { "type": "array", "items": { "type": "string" } },
+    "setup_command": { "type": "array", "items": { "type": "string" } },
+    "test_command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "cleanup_command": { "type": "array", "items": { "type": "string" } },
+    "attributed_nodes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Graph nodes this scenario exercises; used for failure back-propagation."
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "screenshots": { "type": "boolean" },
+        "trace": { "type": "boolean" },
+        "junit": { "type": "boolean" }
+      }
+    }
+  }
+}
