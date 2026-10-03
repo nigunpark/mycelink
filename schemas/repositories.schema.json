@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:repositories",
+  "title": "Portfolio repository manifest",
+  "type": "object",
+  "required": ["schema_version", "repositories"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/repository" }
+    }
+  },
+  "$defs": {
+    "repository": {
+      "type": "object",
+      "required": ["name", "path", "base_branch", "commands"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "maxLength": 64 },
+        "path": { "type": "string", "minLength": 1 },
+        "base_branch": { "type": "string", "minLength": 1 },
+        "role": { "type": "string" },
+        "description": { "type": "string" },
+        "baseline_failures": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tests known to fail before the feature starts; excluded from regression attribution."
+        },
+        "commands": {
+          "type": "object",
+          "required": ["test"],
+          "additionalProperties": false,
+          "properties": {
+            "build": { "$ref": "#/$defs/argv" },
+            "test": { "$ref": "#/$defs/argv" },
+            "lint": { "$ref": "#/$defs/argv" },
+            "regression": { "$ref": "#/$defs/argv" },
+            "start": { "$ref": "#/$defs/argv" },
+            "stop": { "$ref": "#/$defs/argv" },
+            "healthcheck": { "$ref": "#/$defs/argv" }
+          }
+        }
+      }
+    },
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "argv form only. A shell string is rejected so arguments are never re-split."
+    }
+  }
+}

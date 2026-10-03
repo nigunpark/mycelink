@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:session-registry",
+  "title": "Worker session registry",
+  "type": "object",
+  "required": ["schema_version", "sessions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "sessions": { "type": "object", "additionalProperties": { "$ref": "#/$defs/session" } }
+  },
+  "$defs": {
+    "session": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "feature_id",
+        "node_id",
+        "claim_id",
+        "status",
+        "started_at",
+        "last_progress_at",
+        "turns",
+        "usage",
+        "adapter"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": { "type": "string" },
+        "feature_id": { "type": "string" },
+        "node_id": { "type": "string" },
+        "claim_id": { "type": "string" },
+        "repository": { "type": ["string", "null"] },
+        "worktree": { "type": ["string", "null"] },
+        "branch": { "type": ["string", "null"] },
+        "status": {
+          "enum": ["spawning", "working", "stalled", "done", "failed", "blocked", "needs-decision", "stopped", "budget-exhausted"]
+        },
+        "started_at": { "type": "string" },
+        "last_progress_at": { "type": "string" },
+        "finished_at": { "type": ["string", "null"] },
+        "turns": { "type": "integer", "minimum": 0 },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "model_turns": { "type": "integer", "minimum": 0 },
+            "wall_clock_ms": { "type": "integer", "minimum": 0 },
+            "input_tokens": { "type": "integer", "minimum": 0 },
+            "output_tokens": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "adapter": { "enum": ["fake-claude", "claude-background"] },
+        "pid": { "type": ["integer", "null"] },
+        "log_path": { "type": ["string", "null"] },
+        "result_path": { "type": ["string", "null"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "replaces_session_id": { "type": ["string", "null"] },
+        "attempt": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

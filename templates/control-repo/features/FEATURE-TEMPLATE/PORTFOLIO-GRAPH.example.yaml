@@ -1,0 +1,178 @@
+# Four-layer portfolio graph.
+#
+#   feature -> repository slice -> capability -> executable node
+#
+# Validate with: mycelink graph validate <feature-id>
+schema_version: 1
+feature_id: FEAT-101
+title: Order status notifications
+prd: PRD.md
+plan: PLAN.md
+
+acceptance_criteria:
+  - id: AC-1
+    text: The core publishes a order-status event at the contracted version.
+  - id: AC-2
+    text: The API consumes that event and exposes the result.
+  - id: AC-3
+    text: The Windows app renders the result for the operator.
+
+# full-runtime, deploy-slot and fixture-global-reset are always capacity 1.
+# Start browser-worker at 2 and raise it only with measured isolation.
+resources:
+  full-runtime: { capacity: 1 }
+  deploy-slot: { capacity: 1 }
+  browser-worker: { capacity: 2 }
+  fixture-global-reset: { capacity: 1 }
+
+repositories: [core, api, web]
+
+capabilities:
+  - id: CAP-CORE-PUBLISH
+    repository: core
+    title: Publish order-status events
+    acceptance_criteria: [AC-1]
+  - id: CAP-API-CONSUME
+    repository: api
+    title: Consume order-status events
+    acceptance_criteria: [AC-2]
+  - id: CAP-APP-RENDER
+    repository: web
+    title: Render the order status
+    acceptance_criteria: [AC-3]
+
+nodes:
+  - id: FEAT-101.core.publish.impl
+    level: executable-node
+    repository: core
+    capability: CAP-CORE-PUBLISH
+    node_type: implementation
+    depends_on: []
+    allowed_paths: ['src/publish/**', 'tests/publish/**']
+    forbidden_paths: []
+    contract_inputs: []
+    contract_outputs: ['contracts/order-status.schema.json']
+    required_resources: []
+    required_evidence: [red, green, regression]
+    verification_commands:
+      - id: targeted
+        command: [npm, test, --, publish]
+    worker:
+      model: sonnet
+      effort: high
+      max_turns: 30
+      max_wall_clock_minutes: 45
+      max_attempts: 2
+      nested_delegation: false
+    invalidation_rules: []
+    acceptance_criteria: [AC-1]
+
+  # A consumer MUST depend on its producer; the validator enforces it.
+  - id: FEAT-101.api.consume.impl
+    level: executable-node
+    repository: api
+    capability: CAP-API-CONSUME
+    node_type: implementation
+    depends_on: [FEAT-101.core.publish.impl]
+    allowed_paths: ['app/orders/**', 'tests/orders/**']
+    forbidden_paths: []
+    contract_inputs: ['contracts/order-status.schema.json']
+    contract_outputs: []
+    required_resources: []
+    required_evidence: [red, green, regression]
+    verification_commands:
+      - id: targeted
+        command: [python, -m, pytest, tests/orders]
+    worker:
+      model: sonnet
+      effort: high
+      max_turns: 30
+      max_wall_clock_minutes: 45
+      max_attempts: 2
+      nested_delegation: false
+    invalidation_rules: []
+    acceptance_criteria: [AC-2]
+
+  - id: FEAT-101.web.render.impl
+    level: executable-node
+    repository: web
+    capability: CAP-APP-RENDER
+    node_type: implementation
+    depends_on: [FEAT-101.api.consume.impl]
+    allowed_paths: ['src/views/**', 'tests/views/**']
+    forbidden_paths: []
+    contract_inputs: []
+    contract_outputs: []
+    required_resources: []
+    required_evidence: [red, green, regression]
+    verification_commands:
+      - id: targeted
+        command: [npm, test, --, order-status-view]
+    worker:
+      model: sonnet
+      effort: high
+      max_turns: 30
+      max_wall_clock_minutes: 45
+      max_attempts: 2
+      nested_delegation: false
+    invalidation_rules: []
+    acceptance_criteria: [AC-3]
+
+  # Executed by the controller, not by a worker session.
+  - id: FEAT-101.release.candidate.build
+    level: executable-node
+    repository: null
+    capability: null
+    node_type: candidate-build
+    depends_on:
+      - FEAT-101.core.publish.impl
+      - FEAT-101.api.consume.impl
+      - FEAT-101.web.render.impl
+    allowed_paths: []
+    forbidden_paths: []
+    contract_inputs: []
+    contract_outputs: []
+    required_resources: []
+    required_evidence: [candidate]
+    verification_commands:
+      - id: candidate
+        command: [mycelink, candidate, verify, FEAT-101]
+    worker:
+      model: sonnet
+      effort: low
+      max_turns: 1
+      max_wall_clock_minutes: 10
+      max_attempts: 2
+      nested_delegation: false
+    invalidation_rules: []
+    acceptance_criteria: []
+
+  # The runtime sequence is part of the graph, not a hidden flag.
+  - id: FEAT-101.release.acceptance.e2e
+    level: executable-node
+    repository: null
+    capability: null
+    node_type: e2e-scenario
+    depends_on: [FEAT-101.release.candidate.build]
+    allowed_paths: []
+    forbidden_paths: []
+    contract_inputs: []
+    contract_outputs: []
+    required_resources: [full-runtime]
+    required_evidence: [e2e]
+    verification_commands:
+      - id: deploy
+        command: [node, scripts/deploy-candidate.mjs]
+      - id: healthcheck
+        command: [node, scripts/healthcheck.mjs]
+      - id: fixture-reset
+        command: [node, scripts/reset-fixture.mjs]
+    worker:
+      model: sonnet
+      effort: low
+      max_turns: 1
+      max_wall_clock_minutes: 60
+      max_attempts: 1
+      nested_delegation: false
+    invalidation_rules: []
+    acceptance_criteria: [AC-1, AC-2, AC-3]

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:context-pack",
+  "title": "Bounded worker context pack",
+  "description": "What a worker session receives instead of a transcript. IDs, paths, hashes and fingerprints only; never file bodies, diffs or logs.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "feature_id",
+    "node_id",
+    "claim_id",
+    "generated_at",
+    "node_contract",
+    "acceptance_criteria",
+    "allowed_paths",
+    "forbidden_paths",
+    "verification_commands",
+    "next_required_gate",
+    "budget",
+    "byte_budget"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "feature_id": { "type": "string" },
+    "node_id": { "type": "string" },
+    "claim_id": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "repository": { "type": ["string", "null"] },
+    "worktree": { "type": ["string", "null"] },
+    "branch": { "type": ["string", "null"] },
+    "node_contract": {
+      "type": "object",
+      "required": ["node_type", "goal"],
+      "additionalProperties": false,
+      "properties": {
+        "node_type": { "type": "string" },
+        "goal": { "type": "string", "maxLength": 2000 },
+        "capability": { "type": ["string", "null"] }
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "additionalProperties": false,
+        "properties": { "id": { "type": "string" }, "text": { "type": "string" } }
+      }
+    },
+    "allowed_paths": { "type": "array", "items": { "type": "string" } },
+    "forbidden_paths": { "type": "array", "items": { "type": "string" } },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "direction"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string" },
+          "direction": { "enum": ["input", "output"] }
+        }
+      }
+    },
+    "handoffs": { "type": "array", "items": { "type": "string" } },
+    "last_checkpoint_sha": { "type": ["string", "null"] },
+    "latest_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "exit_code", "output_path"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "type": "string" },
+          "exit_code": { "type": "integer" },
+          "output_path": { "type": "string" },
+          "output_sha256": { "type": "string" }
+        }
+      }
+    },
+    "last_failure_fingerprint": { "type": ["string", "null"] },
+    "verification_commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "command"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "command": { "type": "array", "items": { "type": "string" } },
+          "cwd": { "type": "string" }
+        }
+      }
+    },
+    "memory": {
+      "type": "array",
+      "description": "Bounded LLM Wiki Brain recall: IDs, status and a one-to-three line summary only.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "status", "summary", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "status": { "type": "string" },
+          "summary": { "type": "string", "maxLength": 400 },
+          "path": { "type": "string" },
+          "warning": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "next_required_gate": { "type": "string" },
+    "budget": {
+      "type": "object",
+      "required": ["max_turns", "max_wall_clock_minutes", "max_attempts", "attempt"],
+      "additionalProperties": false,
+      "properties": {
+        "max_turns": { "type": "integer" },
+        "max_wall_clock_minutes": { "type": "integer" },
+        "max_attempts": { "type": "integer" },
+        "attempt": { "type": "integer" }
+      }
+    },
+    "byte_budget": { "type": "integer", "minimum": 1 },
+    "rules": { "type": "array", "items": { "type": "string", "maxLength": 300 } }
+  }
+}

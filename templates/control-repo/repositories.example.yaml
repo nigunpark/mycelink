@@ -1,0 +1,35 @@
+# Portfolio manifest.
+#
+# Every command here must be one you have actually run. Read the repository's
+# package.json, build file or CI config; do not trust a README.
+schema_version: 1
+repositories:
+  - name: core
+    path: ../core
+    base_branch: main
+    role: producer
+    description: Owns the order-status contract and publishes events.
+    # Tests already failing before this feature started. They are excluded
+    # from regression verdicts so a pre-existing break is never charged here.
+    baseline_failures: []
+    commands:
+      build: [npm, run, build]
+      test: [npm, test]
+
+  - name: api
+    path: ../api
+    base_branch: main
+    role: service
+    commands:
+      test: [python, -m, pytest]
+      regression: [python, -m, pytest, --strict-markers]
+      start: [python, -m, app]
+      healthcheck: [curl, -fsS, 'http://localhost:8080/health']
+
+  - name: web
+    path: ../web
+    base_branch: main
+    role: client
+    commands:
+      build: [npm, run, build]
+      test: [npm, test]

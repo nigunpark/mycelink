@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:candidate",
+  "title": "Immutable cross-repository candidate manifest",
+  "description": "Binds one exact commit per repository plus artifact and contract hashes. Any change to a bound SHA requires a new candidate id.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "feature_id",
+    "created_at",
+    "control_commit",
+    "repositories",
+    "contracts",
+    "created_from_clean_worktrees",
+    "manifest_sha256"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "candidate_id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+-C[0-9]{3,}$" },
+    "feature_id": { "type": "string" },
+    "created_at": { "type": "string" },
+    "control_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "repositories": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["sha", "branch"],
+        "additionalProperties": false,
+        "properties": {
+          "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "branch": { "type": "string" },
+          "clean": { "type": "boolean" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "database_migrations": { "type": "array", "items": { "type": "string" } },
+    "created_from_clean_worktrees": { "const": true },
+    "superseded_by": { "type": ["string", "null"] },
+    "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

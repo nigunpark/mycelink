@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:node-result",
+  "title": "Worker session result",
+  "description": "What a worker session returns. A natural-language completion claim is not accepted; only commands, exit codes, SHAs and evidence pointers.",
+  "type": "object",
+  "required": ["schema_version", "node_id", "claim_id", "outcome", "commands", "evidence_paths"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "node_id": { "type": "string" },
+    "claim_id": { "type": "string" },
+    "outcome": { "enum": ["SUBMITTED", "RETRYABLE", "BLOCKED", "NEEDS_DECISION", "BUDGET_EXHAUSTED"] },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "exit_code"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "exit_code": { "type": "integer" },
+          "cwd": { "type": "string" }
+        }
+      }
+    },
+    "commit_sha": { "type": ["string", "null"] },
+    "branch": { "type": ["string", "null"] },
+    "changed_paths": { "type": "array", "items": { "type": "string" } },
+    "evidence_paths": { "type": "array", "items": { "type": "string" } },
+    "failure_fingerprint": { "type": ["string", "null"] },
+    "decision_request": {
+      "type": ["object", "null"],
+      "required": ["question", "options"],
+      "additionalProperties": false,
+      "properties": {
+        "question": { "type": "string", "minLength": 1 },
+        "options": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+        "category": {
+          "enum": [
+            "acceptance-conflict",
+            "contract-compatibility",
+            "data-migration",
+            "security-privacy",
+            "scope-change",
+            "budget-increase",
+            "design-tradeoff"
+          ]
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_turns": { "type": "integer", "minimum": 0 },
+        "wall_clock_ms": { "type": "integer", "minimum": 0 },
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "notes": { "type": "string", "maxLength": 1024 }
+  }
+}
