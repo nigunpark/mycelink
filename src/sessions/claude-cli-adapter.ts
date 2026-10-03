@@ -32,6 +32,8 @@ import {
 } from './adapter.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import type { UsageTotals } from '../model/types.js';
+import { LineRedactor } from '../security/redact.js';
+import { planCommand } from '../security/exec.js';
 
 export interface ClaudeCliAdapterOptions {
   /** The executable to run. `claude` in production. */
@@ -126,9 +128,14 @@ export class ClaudeCliAdapter implements SessionAdapter {
       result_path: request.resultPath,
     };
 
-    const child = spawn(this.options.executable, this.buildArgs(request, sessionId), {
+    // The configured executable is a file name, never a shell string; on
+    // Windows an npm-installed claude.cmd goes through the batch-shim rules.
+    const plan = planCommand([this.options.executable, ...this.buildArgs(request, sessionId)]);
+    const child = spawn(plan.file, plan.args, {
       cwd: request.cwd,
       windowsHide: true,
+      windowsVerbatimArguments: plan.windowsVerbatimArguments,
+      shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
@@ -171,11 +178,17 @@ export class ClaudeCliAdapter implements SessionAdapter {
     this.runs.set(sessionId, state);
 
     const log = createWriteStream(resolve(request.logPath), { flags: 'a' });
+    // The session log is durable: secrets echoed by tools or tests are
+    // redacted line by line before they reach disk.
+    const outRedactor = new LineRedactor();
+    const errRedactor = new LineRedactor();
+    child.stdout.on('end', () => log.write(outRedactor.flush()));
+    child.stderr.on('end', () => log.write(errRedactor.flush()));
     let buffer = '';
 
     child.stdout.on('data', (chunk: Buffer) => {
       state.lastProgressMs = Date.now();
-      log.write(chunk);
+      log.write(outRedactor.push(chunk.toString('utf8')));
       buffer += chunk.toString('utf8');
       let idx: number;
       while ((idx = buffer.indexOf('\n')) !== -1) {
@@ -186,7 +199,7 @@ export class ClaudeCliAdapter implements SessionAdapter {
     });
     child.stderr.on('data', (chunk: Buffer) => {
       state.lastProgressMs = Date.now();
-      log.write(chunk);
+      log.write(errRedactor.push(chunk.toString('utf8')));
     });
 
     const watchdog = setInterval(() => {

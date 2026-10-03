@@ -15,6 +15,7 @@ import YAML from 'yaml';
 import type { EvidenceRecord, PortfolioGraph, ResourceDecl } from '../model/types.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { runVerification } from '../evidence/runner.js';
+import { redactValue } from '../security/redact.js';
 import { acquireResource, releaseResource, type Lease } from '../resources/leases.js';
 import { attributeFailure, planShards, type AttributionResult, type E2EPlan, type E2EScenario } from './scheduler.js';
 import type { CandidateManifest } from '../git/candidate.js';
@@ -81,7 +82,8 @@ export interface E2ERunArgs {
 export function isolationEnv(candidateId: string, scenario: E2EScenario, root: string): Record<string, string> {
   const slug = scenario.id.replace(/[^A-Za-z0-9._-]/g, '_');
   const ns = `${candidateId}__${slug}`.toLowerCase();
-  return {
+  // Screenshot and trace metadata is persisted with the evidence.
+  return redactValue({
     E2E_SCENARIO_ID: scenario.id,
     E2E_CANDIDATE_ID: candidateId,
     E2E_DATA_NAMESPACE: scenario.isolation.data_namespace === 'unique' ? ns : 'shared',
@@ -92,7 +94,7 @@ export function isolationEnv(candidateId: string, scenario: E2EScenario, root: s
         : join(root, 'profiles', 'shared'),
     E2E_TRACE_DIR: join(root, 'traces', slug),
     E2E_SCREENSHOT_DIR: join(root, 'screenshots', slug),
-  };
+  });
 }
 
 /**

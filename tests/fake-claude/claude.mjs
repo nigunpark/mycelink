@@ -79,6 +79,14 @@ emit({
   tools: [],
 });
 
+// Echo selected environment values, the way a careless tool or test runner
+// might, so the suite can prove they never reach a session log.
+for (const name of scenario.print_env ?? []) {
+  const value = process.env[name] ?? '';
+  emit({ type: 'system', subtype: 'debug', text: `${name}=${value}` });
+  process.stderr.write(`env ${name}=${value}\n`);
+}
+
 if (scenario.stall_ms) {
   // Produce no further output: the controller must detect the lack of progress.
   sleepSync(scenario.stall_ms);

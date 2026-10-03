@@ -43,7 +43,7 @@ export const VALID_GRAPH = {
   prd: 'PRD.md',
   plan: 'PLAN.md',
   acceptance_criteria: [
-    { id: 'AC-1', text: 'Engine publishes a order-status event' },
+    { id: 'AC-1', text: 'Core publishes an order-status event' },
     { id: 'AC-2', text: 'API consumes the event and exposes it' },
   ],
   resources: {

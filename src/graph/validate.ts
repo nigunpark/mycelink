@@ -14,6 +14,8 @@ import type {
   ValidationResult,
 } from '../model/types.js';
 import { validateAgainstSchema } from '../schema/registry.js';
+import { nodeIdProblem, refNameProblem } from '../security/names.js';
+import { classifyLocationPath, classifyRelativePath } from '../security/paths.js';
 
 export interface GraphValidationContext {
   repositories?: unknown;
@@ -60,6 +62,22 @@ export function validateRepositories(value: unknown): ValidationResult {
   const manifest = value as RepositoryManifest;
   const seen = new Set<string>();
   manifest.repositories.forEach((repo, i) => {
+    const refProblem = refNameProblem(repo.base_branch);
+    if (refProblem !== null) {
+      problems.push({
+        code: 'UNSAFE_REF_NAME',
+        path: `/repositories/${i}/base_branch`,
+        detail: `Repository "${repo.name}" base branch ${JSON.stringify(repo.base_branch)} is not a safe git ref name: ${refProblem}.`,
+      });
+    }
+    const pathProblem = classifyLocationPath(repo.path);
+    if (pathProblem !== null) {
+      problems.push({
+        code: 'UNSAFE_REPOSITORY_PATH',
+        path: `/repositories/${i}/path`,
+        detail: `Repository "${repo.name}" path is not allowed (${pathProblem}); use a local relative or absolute path.`,
+      });
+    }
     if (seen.has(repo.name)) {
       problems.push({
         code: 'DUPLICATE_REPOSITORY',
@@ -72,22 +90,12 @@ export function validateRepositories(value: unknown): ValidationResult {
   return { ok: problems.length === 0, problems, graphHash: hashGraph(value) };
 }
 
-/** A declared path must stay inside its repository and must not be absolute. */
+/**
+ * A declared path must stay inside its repository: not absolute, not a UNC,
+ * device or extended-length path, not a reserved device name, no traversal.
+ */
 function pathEscapes(p: string): boolean {
-  if (p === '') return true;
-  if (/^[A-Za-z]:[\\/]/.test(p)) return true; // C:\...
-  if (p.startsWith('/') || p.startsWith('\\')) return true;
-  const parts = p.replace(/\\/g, '/').split('/');
-  let depth = 0;
-  for (const part of parts) {
-    if (part === '..') {
-      depth--;
-      if (depth < 0) return true;
-    } else if (part !== '.' && part !== '' && part !== '**') {
-      depth++;
-    }
-  }
-  return false;
+  return classifyRelativePath(p) !== null;
 }
 
 function findCycle(nodes: { id: string; depends_on: string[] }[]): string[] | null {
@@ -239,6 +247,15 @@ export function validateGraph(
     }
     nodeIds.add(node.id);
 
+    const idProblem = nodeIdProblem(node.id);
+    if (idProblem !== null) {
+      problems.push({
+        code: 'UNSAFE_NODE_ID',
+        path: at('/id'),
+        detail: `Node id ${JSON.stringify(node.id)} is unsafe as a branch or directory name: ${idProblem}.`,
+      });
+    }
+
     if (!node.id.startsWith(graph.feature_id + '.')) {
       problems.push({
         code: 'NODE_ID_FEATURE_MISMATCH',
@@ -352,6 +369,26 @@ export function validateGraph(
           code: 'PATH_ESCAPES_REPOSITORY',
           path: at('/allowed_paths'),
           detail: `Node "${node.id}" declares path "${p}", which is absolute or escapes the repository root.`,
+        });
+      }
+    }
+
+    for (const v of node.verification_commands) {
+      if (v.cwd !== undefined && pathEscapes(v.cwd)) {
+        problems.push({
+          code: 'PATH_ESCAPES_REPOSITORY',
+          path: at('/verification_commands'),
+          detail: `Node "${node.id}" verifier "${v.id}" runs in "${v.cwd}", which is absolute or escapes the repository.`,
+        });
+      }
+    }
+
+    for (const p of [...(node.contract_inputs ?? []), ...(node.contract_outputs ?? [])]) {
+      if (pathEscapes(p)) {
+        problems.push({
+          code: 'PATH_ESCAPES_CONTROL_REPOSITORY',
+          path: at('/contract_inputs'),
+          detail: `Node "${node.id}" declares contract "${p}", which is absolute or escapes the control repository.`,
         });
       }
     }

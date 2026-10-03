@@ -5,6 +5,7 @@
  * here, so there is exactly one definition of where state lives.
  */
 import { join, resolve } from 'node:path';
+import { assertFeatureId } from '../security/names.js';
 
 export interface ControlPaths {
   controlRoot: string;
@@ -62,6 +63,8 @@ export function controlPaths(controlRoot: string): ControlPaths {
 }
 
 export function featurePaths(controlRoot: string, featureId: string): FeaturePaths {
+  // The id becomes a directory name under features/; refuse anything else.
+  assertFeatureId(featureId);
   const dir = join(controlPaths(controlRoot).featuresDir, featureId);
   return {
     featureId,

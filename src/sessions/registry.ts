@@ -149,6 +149,30 @@ export function liveSessions(file: string): SessionRecord[] {
   return Object.values(loadRegistry(file).sessions).filter((s) => !TERMINAL.has(s.status));
 }
 
+export interface OrphanOptions {
+  /** Whether a PID currently names a live process on this machine. */
+  isAlive: (pid: number) => boolean;
+  /**
+   * A session silent for longer than this is orphaned even if its PID is
+   * alive: PIDs are reused, so liveness alone is not proof of ownership.
+   */
+  staleAfterMs: number;
+  now?: number;
+}
+
+/** Ids of non-terminal sessions whose worker is gone or presumed gone. */
+export function findOrphanedSessions(records: SessionRecord[], options: OrphanOptions): string[] {
+  const now = options.now ?? Date.now();
+  return records
+    .filter((s) => !TERMINAL.has(s.status))
+    .filter((s) => {
+      if (s.pid === null || !options.isAlive(s.pid)) return true;
+      const last = Date.parse(s.last_progress_at || s.started_at);
+      return Number.isNaN(last) || now - last > options.staleAfterMs;
+    })
+    .map((s) => s.session_id);
+}
+
 export function sessionsForNode(file: string, nodeId: string): SessionRecord[] {
   return Object.values(loadRegistry(file).sessions)
     .filter((s) => s.node_id === nodeId)

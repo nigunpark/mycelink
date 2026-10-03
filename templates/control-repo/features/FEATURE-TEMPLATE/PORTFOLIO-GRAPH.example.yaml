@@ -11,7 +11,7 @@ plan: PLAN.md
 
 acceptance_criteria:
   - id: AC-1
-    text: The core publishes a order-status event at the contracted version.
+    text: The core publishes an order-status event at the contracted version.
   - id: AC-2
     text: The API consumes that event and exposes the result.
   - id: AC-3
