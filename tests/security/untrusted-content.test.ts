@@ -138,6 +138,17 @@ describe('hooks treat payload text as data', () => {
     expect(r.code).toBe(2);
   });
 
+  it('a model cannot edit the security configuration or the hook registration', () => {
+    for (const target of [join(p.control, 'mycelink.config.json'), join(p.control, '.claude', 'settings.json')]) {
+      const r = hook('pre-tool-use', {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Edit',
+        tool_input: { file_path: target },
+      });
+      expect(`${target}:${r.code}`).toBe(`${target}:2`);
+    }
+  });
+
   it('a write through a junction/symlink inside the worktree that points outside is blocked', async () => {
     expect(await main(['node', 'claim', FEATURE_ID, node, '--control-root', p.control], io)).toBe(0);
     const worktree = join(p.control, '.mycelink', 'worktrees', `core__${node.replace(/[^\w.-]/g, '_')}`);

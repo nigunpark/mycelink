@@ -47,6 +47,30 @@ export interface ClaudeCliAdapterOptions {
   mode?: 'print' | 'background';
   /** Permission mode passed through to the CLI. Never bypassPermissions by default. */
   permissionMode?: string;
+  /** From `allow_dangerous_permission_bypass`; required for any bypass flag. */
+  allowPermissionBypass?: boolean;
+}
+
+export class PermissionPolicyError extends Error {
+  constructor(detail: string) {
+    super(
+      `${detail} disables Claude Code's permission system for every worker session. ` +
+        'Set allow_dangerous_permission_bypass: true in mycelink.config.json only if workers run in a disposable sandbox.',
+    );
+    this.name = 'PermissionPolicyError';
+  }
+}
+
+/** The first argv element that would bypass permission checks, if any. */
+export function permissionBypassFlag(args: readonly string[], permissionMode?: string): string | null {
+  if (permissionMode === 'bypassPermissions') return '--permission-mode bypassPermissions';
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string;
+    if (a === '--dangerously-skip-permissions' || a === '--allow-dangerously-skip-permissions') return a;
+    if (a === '--permission-mode=bypassPermissions') return a;
+    if (a === '--permission-mode' && args[i + 1] === 'bypassPermissions') return `${a} ${args[i + 1]}`;
+  }
+  return null;
 }
 
 type WorkerChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -87,6 +111,11 @@ export class ClaudeCliAdapter implements SessionAdapter {
   private readonly runs = new Map<string, RunState>();
 
   constructor(options: ClaudeCliAdapterOptions) {
+    const bypass = permissionBypassFlag(
+      [...(options.prefixArgs ?? []), ...(options.extraArgs ?? [])],
+      options.permissionMode,
+    );
+    if (bypass !== null && options.allowPermissionBypass !== true) throw new PermissionPolicyError(bypass);
     this.options = options;
     this.name = options.adapterName ?? 'claude-background';
   }

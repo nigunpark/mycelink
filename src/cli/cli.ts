@@ -124,6 +124,7 @@ function adapterFor(controlRoot: string): ClaudeCliAdapter {
   return new ClaudeCliAdapter({
     executable: config.claude_executable,
     extraArgs: config.claude_extra_args,
+    allowPermissionBypass: config.allow_dangerous_permission_bypass === true,
     adapterName: 'claude-background',
     mode: 'print',
   });
