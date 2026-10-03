@@ -38,14 +38,15 @@ run on GitHub is green on all six legs.
 
 No test incurs model usage.
 
-## Verification commands and results (final run at commit `3e55527`)
+## Verification commands and results (before the publication-metadata commit)
 
-`3e55527` is the last commit that changes shipped files (it updated
-`CHANGELOG.md`). Typecheck, build check, the full test suite, strict plugin
-validation and the double package run were repeated there. `npm ci`,
-`npm audit`, `actionlint` and the manual ZIP install were last run at
-`57aff36`. Since then the only change is to `CHANGELOG.md`, so dependencies,
-workflows and runtime files are unchanged.
+This table records the full verification pass on the tree immediately before
+the publication-metadata commit. Typecheck, build check, the full test suite,
+strict plugin validation and the double package run were last repeated after
+the final `CHANGELOG.md` change; `npm ci`, `npm audit`, `actionlint` and the
+manual ZIP install were run one commit earlier, and the only change between
+the two was to `CHANGELOG.md`, so dependencies, workflows and runtime files
+were unchanged. The current results are in the next section.
 
 | Command | Result |
 |---|---|
@@ -61,7 +62,7 @@ workflows and runtime files are unchanged.
 | `actionlint` 1.7.12 on all workflows | no findings |
 | Manual ZIP install in an isolated profile (`CLAUDE_CONFIG_DIR` in a temp dir) | strict validation ✔, marketplace add ✔, install ✔ (`0.2.0-beta.1`, enabled, under the isolated config), installed `mycelink --version` ✔, `init` ✔, `doctor` hooks ✔ pointing at the installed copy, uninstall ✔, control repo untouched; no `node_modules`, no `src`, no build step |
 | Secret / personal-path scan of tracked files | no personal paths, no real e-mail addresses, no secret-like values (only synthetic `*@example.invalid` fixtures and a `c:/Users/someone` path-rejection test vector) |
-| History scan of `main` (`git log -p HEAD`) | no personal paths or e-mail addresses in file contents |
+| History scan of `main` (`git log -p --all`) | no personal paths or personal e-mail addresses in file contents (the only real address is a third-party copyright line in `THIRD_PARTY_NOTICES.md`) |
 | `git status --short` | clean |
 
 The zip hash covers file contents only; it is unaffected by commits that do
@@ -69,7 +70,7 @@ not touch shipped files (this document is not shipped). The SBOM embeds the
 creation time (`SOURCE_DATE_EPOCH`, else the HEAD commit time) and the zip
 hash, so it changes with the commit time by design.
 
-### Re-verification after the publication-metadata commit
+### Re-verification after the publication-metadata commit (current `main`, `9902b06`)
 
 The commit that adds the `nigunpark/mycelink` URLs, CODEOWNERS and the
 maintainers table changes shipped files (`package.json`, plugin manifest,
@@ -79,20 +80,22 @@ run` 36 files, 585 passed (two metadata tests added); `claude plugin validate
 --strict .` and `.claude-plugin/plugin.json` ✔; `npm run package` twice with
 the same `SOURCE_DATE_EPOCH` produced byte-identical zips, sha256
 `d981e03581a7460adb471c49388d01494972f37b48afa42038e751de6d8840fc`
-(supersedes the hash above).
+(supersedes the hash above). After the authorship rewrite (see below),
+`npx vitest run` (36 files, 585 passed) and the double package run (same
+sha256) were repeated at `9902b06`; the rewrite changed commit metadata only,
+not file contents.
 
 ## Repository and history
 
-- **`main` is the clean public history** and the only local branch. It is an
-  orphan history (single root commit `9fb32f3`, no ancestry from the
+- **`main` is the clean public history** and the only ref in the repository.
+  It is an orphan history (single root commit `35ad200`, no ancestry from the
   reference implementation or the internal bootstrap work) and is **the
   branch to push**.
-- The internal bootstrap branch and the temporary worktree branches have
-  been deleted; no other local branches, worktrees or stashes remain.
-- Commits on `main` carry the local Git author identity configured
-  on this machine (name and e-mail). Decide before publishing whether to keep
-  it or rewrite the branch's authorship to a GitHub no-reply address; this
-  was deliberately not changed without your decision.
+- No other branches, tags, worktrees, stashes or reflog entries remain.
+- Authorship was rewritten before publication: every reachable commit has
+  author and committer `nigunpark` with the GitHub no-reply address, and no
+  reachable commit carries a personal e-mail address. New commits use the
+  same configured identity.
 
 ## Remaining before publishing
 
@@ -109,7 +112,6 @@ the same `SOURCE_DATE_EPOCH` produced byte-identical zips, sha256
 5. Let the first CI run finish green on all six matrix legs (Windows, Ubuntu,
    macOS × Node 22.12.0, 24), plus CodeQL and Scorecard. Fix any
    Linux/macOS-specific failures before tagging.
-6. Optionally set the commit authorship (see above).
 
 ## Known limitations
 
