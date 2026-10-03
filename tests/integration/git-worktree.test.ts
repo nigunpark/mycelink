@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
+import { makeTmpDir, cleanupTmpRoots, windowsShortPathAlias } from '../helpers/tmp.js';
+import { samePath } from '../../src/security/paths.js';
 import { commitAll, git, headSha, makeGitRepo, writeFiles } from '../helpers/git-fixture.js';
 import {
   branchExists,
@@ -75,7 +76,7 @@ describe('worker worktrees', () => {
 
     expect(existsSync(join(wt.worktree, 'src', 'publish.js'))).toBe(true);
     expect(currentBranch(wt.worktree)).toBe('wip/FEAT-101/core.publish.impl');
-    expect(listWorktrees(repo).some((w) => w.path === wt.worktree)).toBe(true);
+    expect(listWorktrees(repo).some((w) => samePath(w.path, wt.worktree))).toBe(true);
 
     // The parent checkout is untouched by work in the worktree.
     writeFiles(wt.worktree, { 'src/publish.js': 'export function publish() { return 1; }\n' });
@@ -97,6 +98,37 @@ describe('worker worktrees', () => {
     const second = createWorkerWorktree(args);
     expect(second.worktree).toBe(first.worktree);
     expect(second.created).toBe(false);
+  });
+
+  it('reuses a worktree whose root was given as a Windows 8.3 short-name alias', (ctx) => {
+    // GitHub-hosted Windows runners expose the temp dir as C:\Users\RUNNER~1\...,
+    // while `git worktree list` reports the long form of the same directory.
+    const repo = repoWithSource();
+    const longRoot = makeTmpDir('worktree-root-long-name-');
+    const shortRoot = windowsShortPathAlias(longRoot);
+    if (shortRoot === null) return ctx.skip();
+    const args = {
+      repoPath: repo,
+      featureId: 'FEAT-101',
+      nodeId: 'FEAT-101.core.publish.impl',
+      baseBranch: 'main',
+      worktreeRoot: shortRoot,
+    };
+    const first = createWorkerWorktree(args);
+    expect(listWorktrees(repo).some((w) => samePath(w.path, first.worktree))).toBe(true);
+    // Uncommitted worker output must survive re-attachment.
+    writeFiles(first.worktree, { 'src/draft.js': 'draft\n' });
+
+    const second = createWorkerWorktree(args);
+    expect(second.created).toBe(false);
+    expect(second.worktree).toBe(first.worktree);
+    expect(readFileSync(join(second.worktree, 'src', 'draft.js'), 'utf8')).toBe('draft\n');
+
+    // Deleted outside git under the alias: the stale long-form registration is pruned.
+    rmSync(second.worktree, { recursive: true, force: true });
+    const third = createWorkerWorktree(args);
+    expect(third.created).toBe(true);
+    expect(existsSync(join(third.worktree, 'src', 'publish.js'))).toBe(true);
   });
 
   it('gives two nodes in the same repository fully separate worktrees', () => {
@@ -135,7 +167,7 @@ describe('worker worktrees', () => {
     });
     removeWorkerWorktree(repo, wt.worktree);
     expect(existsSync(wt.worktree)).toBe(false);
-    expect(listWorktrees(repo).some((w) => w.path === wt.worktree)).toBe(false);
+    expect(listWorktrees(repo).some((w) => samePath(w.path, wt.worktree))).toBe(false);
     // The branch survives so verified work is not lost.
     expect(branchExists(repo, wt.branch)).toBe(true);
   });

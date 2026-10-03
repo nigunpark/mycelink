@@ -14,7 +14,7 @@
  * Usage: node scripts/build.mjs [--outfile <path>] [--notices <path>]
  */
 import { build } from 'esbuild';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { thirdPartyNotices } from './lib/notices.mjs';
@@ -66,6 +66,12 @@ for (const input of Object.keys(result.metafile.inputs)) {
   const m = /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(input.replace(/\\/g, '/'));
   if (m) bundled.add(m[1]);
 }
+
+// The bundle starts with a hashbang, so esbuild already writes it executable
+// on Linux and macOS (subject to umask). Pin the mode explicitly: git tracks
+// it as 100755 to match the release ZIP, and a rebuild must not flip it.
+// No-op on Windows, which has no executable bit.
+chmodSync(outfile, 0o755);
 
 writeFileSync(noticesFile, thirdPartyNotices(root, [...bundled].sort()), 'utf8');
 

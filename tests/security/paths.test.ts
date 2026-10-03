@@ -13,11 +13,12 @@ import {
   classifyRelativePath,
   isInsideReal,
   resolveInside,
+  samePath,
   UnsafePathError,
 } from '../../src/security/paths.js';
 import { validateGraph } from '../../src/graph/validate.js';
 import { validateRepositories } from '../../src/graph/validate.js';
-import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { cleanupTmpRoots, makeTmpDir, windowsShortPathAlias } from '../helpers/tmp.js';
 import { clone, VALID_GRAPH } from '../helpers/graph-fixtures.js';
 
 afterEach(() => cleanupTmpRoots());
@@ -128,6 +129,40 @@ describe('symlink and junction escapes', () => {
     const root = makeTmpDir('paths-');
     expect(() => resolveInside(root, '../x')).toThrow(/TRAVERSAL/);
     expect(() => resolveInside(root, '\\\\server\\share')).toThrow(/UNC/);
+  });
+});
+
+describe('path identity', () => {
+  it('treats a linked alias of a directory as the same path', () => {
+    const base = makeTmpDir('paths-');
+    mkdirSync(join(base, 'real', 'wt'), { recursive: true });
+    linkDir(join(base, 'real'), join(base, 'alias'));
+    expect(samePath(join(base, 'alias', 'wt'), join(base, 'real', 'wt'))).toBe(true);
+    // A not-yet-existing leaf below the alias resolves the same way.
+    expect(samePath(join(base, 'alias', 'new'), join(base, 'real', 'new'))).toBe(true);
+  });
+
+  it('keeps distinct directories distinct, including a linked one', () => {
+    const base = makeTmpDir('paths-');
+    mkdirSync(join(base, 'a'), { recursive: true });
+    mkdirSync(join(base, 'b'), { recursive: true });
+    linkDir(join(base, 'b'), join(base, 'link-to-b'));
+    expect(samePath(join(base, 'a'), join(base, 'b'))).toBe(false);
+    expect(samePath(join(base, 'a'), join(base, 'link-to-b'))).toBe(false);
+    expect(samePath(join(base, 'a'), join(base, 'a-sibling'))).toBe(false);
+  });
+
+  it.runIf(process.platform === 'win32')('ignores letter case on Windows', () => {
+    const dir = makeTmpDir('paths-case-');
+    expect(samePath(dir.toUpperCase(), dir.toLowerCase())).toBe(true);
+  });
+
+  it('treats a Windows 8.3 short-name alias as the same path', (ctx) => {
+    const dir = makeTmpDir('paths-long-directory-name-');
+    const short = windowsShortPathAlias(dir);
+    if (short === null) return ctx.skip();
+    expect(samePath(short, dir)).toBe(true);
+    expect(samePath(join(short, 'not-yet'), join(dir, 'not-yet'))).toBe(true);
   });
 });
 

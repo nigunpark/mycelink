@@ -1,8 +1,11 @@
 # Public readiness — Mycelink 0.2.0-beta.1
 
-**Status: VERIFIED_PUBLIC_READY** for the local verification scope below.
-Publication still needs the remaining repository-setup steps listed under
-*Remaining before publishing*; nothing has been pushed or published.
+**Status: CI_FIX_PENDING_CONFIRMATION.** `main` is public at
+`nigunpark/mycelink`. The first public CI run (`37105450954`) failed on all
+six matrix legs (CodeQL and Scorecard passed); see *First public CI run*. The
+fix is committed locally and verified on Windows, including under an 8.3
+short-name temp directory that reproduces the runner, but it has not yet been
+pushed or confirmed by CI. Nothing has been tagged or released.
 
 This file records what was verified, how, and what remains. It is not
 shipped in the release archive.
@@ -13,27 +16,81 @@ shipped in the release archive.
 |---|---|---|
 | Windows 11 Pro (x64) | 24.14.1 | full suite 583/583, strict plugin validation, packaging ×2, ZIP install/update/uninstall in an isolated Claude profile |
 | Windows 11 Pro (x64) | 22.12.0 (official portable build, SHA-256 checked) | full suite 583/583; runtime bundle rebuilt under 22.12.0 is byte-identical to the committed one |
-| Ubuntu (latest) | 22.12.0, 24 | **configured in `ci.yml`, not yet executed** (no remote repository exists yet; no local Linux environment) |
-| macOS (latest) | 22.12.0, 24 | **configured in `ci.yml`, not yet executed** (same reason) |
+| Ubuntu (latest) | 22.12.0, 24 | **not yet verified**: first CI run stopped at the build check (bundle mode flip), before `npm test`; the test suite has never run on Linux |
+| macOS (latest) | 22.12.0, 24 | **not yet verified**: same as Ubuntu |
+| Windows (GitHub-hosted) | 22.12.0, 24 | **not yet verified**: first CI run failed in `npm test` (8.3 temp-path worktree identity); fixed locally, awaiting CI |
 
 Tooling used locally: Git 2.53.0.windows.2, npm 11.19.0, Claude Code 2.1.288
 (the CI pins the same CLI version). The README's Linux/macOS support claim is
-backed by the CI matrix definition; treat it as unproven until the first CI
-run on GitHub is green on all six legs.
+backed by the CI matrix definition; treat it as unproven until a CI run on
+GitHub is green on all six legs.
+
+## First public CI run (`37105450954`): failure and fix
+
+CodeQL and Scorecard passed; all six `test` legs failed, for two independent
+reasons.
+
+1. **Ubuntu and macOS: bundle mode flip in the build check.** `src/index.ts`
+   starts with a hashbang, and esbuild writes hashbang outputs executable on
+   POSIX, so the rebuilt `dist/mycelink.mjs` was mode 755 while git tracked
+   it as `100644` (the repository was authored on Windows with
+   `core.filemode=false`, which never recorded an executable bit). `git diff
+   --exit-code -- dist` reported `old mode 100644 / new mode 100755`.
+   *Fix:* `bin/mycelink.mjs` and `dist/mycelink.mjs` are now tracked as
+   `100755`, matching the release ZIP (which `scripts/package.mjs` already
+   stamps `0755`), and `scripts/build.mjs` sets `0755` explicitly instead of
+   relying on esbuild and the umask. The ZIP's entry modes are unchanged.
+   *Tests:* `tests/release/package.test.ts` checks, on every platform, that
+   each shipped file's tracked mode agrees with its archive mode (RED before
+   the index change: `bin/` and `dist/` were `100644`).
+   `tests/release/bundle.test.ts` rebuilds to a temp file and compares its
+   executable bit with the tracked mode; it runs on Linux/macOS only (Windows
+   has no executable bit) and so has **not been observed locally**. CI will
+   be its first run.
+2. **Windows: worktree identity under an 8.3 temp path.** The runner's temp
+   directory is under the 8.3 alias `RUNNER~1`; `git worktree list --porcelain`
+   reports the long form of the same directory. `createWorkerWorktree` and
+   `ensureIntegrationWorktree` matched registrations by path text, missed
+   the existing worktree, **deleted its directory** (`rmSync`), then `git
+   worktree add` failed with `missing but already registered worktree`. That
+   caused the git-worktree test failures and the three-repo E2E failures on
+   Node 22.12 and 24. *Fix:* `samePath()` in `src/security/paths.ts`
+   compares the real paths of both sides (`realpathSync.native` on the
+   deepest existing ancestor, which expands 8.3 names; case-insensitive on
+   Windows), and both call sites use it. Containment checks
+   (`isInsideReal`, `resolveInside`) are unchanged, so symlink/junction
+   escape protection is unaffected. *Tests:* `samePath` unit tests for link
+   aliases, distinct and linked-distinct directories, case, and a real 8.3
+   alias; worker-worktree and integration-worktree regressions with a real
+   8.3 alias root. All were RED with the CI error text before the fix. The
+   pre-fix code run under `TMP`/`TEMP` set to an 8.3 alias reproduced the CI
+   cascade (three-repo E2E steps 10, 12, 13 and the git-worktree tests). The
+   fixed code passes the full suite under the same alias (591 passed at that
+   point; the release mode tests were added afterwards).
+
+Local verification of the fix (Windows 11, Node 24.14.1): `npm run typecheck`
+exit 0; `npm run build:check` exit 0; `npm test` 36 files, 592 passed,
+1 skipped (the POSIX-only mode test); `claude plugin validate --strict .` ✔;
+`npm run package` twice with the same `SOURCE_DATE_EPOCH` gave byte-identical
+zips and SBOMs, zip sha256
+`ecd6c876c34b0d8aedadd2f44d843b84c1d3717b73a936c9a1083957759855de` (the
+bundle changed, so this supersedes the hashes below). Node 22.12.0 was not
+re-run locally for this fix.
 
 ## Test totals
 
-583 tests in 36 files, 583 passed, 0 failed, 0 skipped (Node 24.14.1 and
-22.12.0). The reference implementation had 312; all were ported and adapted
-(none deleted), and 271 were added.
+593 tests in 36 files: on Windows (Node 24.14.1) 592 passed, 0 failed,
+1 skipped (the POSIX-only bundle-mode test). The 583-test pass recorded
+below also passed on Node 22.12.0. The reference implementation had 312; all
+were ported and adapted (none deleted), and 281 were added.
 
 | Suite | Tests | What it covers |
 |---|---|---|
 | `tests/unit` | 192 | state, locks, event log, graph validation, scheduler, leases, transitions, context packs, E2E scheduler, loops, Brain, ECC adapter, adapter registry |
-| `tests/integration` | 100 | git worktrees, integration branches, candidates, evidence runner, session adapter (fake Claude), hooks as real processes, README walkthrough, doctor hook health |
-| `tests/security` | 175 | path/UNC/device/extended-length/reserved-name refusal, symlink and junction escapes, malicious ids and ref names, argv/shell/batch-shim command policy, secret redaction in every durable artifact, PID reuse and lock-token mismatch, candidate tampering, untrusted PRD/graph content, permission-bypass refusal, protected configuration |
+| `tests/integration` | 102 | git worktrees (including 8.3 short-path aliases), integration branches, candidates, evidence runner, session adapter (fake Claude), hooks as real processes, README walkthrough, doctor hook health |
+| `tests/security` | 179 | path/UNC/device/extended-length/reserved-name refusal, symlink and junction escapes, path identity across aliases, malicious ids and ref names, argv/shell/batch-shim command policy, secret redaction in every durable artifact, PID reuse and lock-token mismatch, candidate tampering, untrusted PRD/graph content, permission-bypass refusal, protected configuration |
 | `tests/fixtures` | 17 | three real repositories end to end: schedule, TDD gates, integration, candidate, E2E, invalidation, decisions |
-| `tests/release` | 78 | bundle self-containment, third-party notices, reproducible packaging, archive allowlist and secret/personal-path scan, SPDX SBOM, run-from-ZIP, metadata/version/license consistency, workflow hardening policy |
+| `tests/release` | 82 | bundle self-containment, third-party notices, reproducible packaging, tracked vs. archived executable modes, archive allowlist and secret/personal-path scan, SPDX SBOM, run-from-ZIP, metadata/version/license consistency, workflow hardening policy |
 | `tests/plugin-e2e` | 21 | real Claude Code CLI in GUID-scoped isolated profiles: validation, `--plugin-dir`, marketplace install, component inventory, installed controller, init, uninstall; release-ZIP install → update → re-init → uninstall with control-repo data preserved |
 
 No test incurs model usage.
@@ -99,7 +156,8 @@ not file contents.
 
 ## Remaining before publishing
 
-1. Create the GitHub repository and push `main`.
+1. ~~Create the GitHub repository and push `main`.~~ Done; the first CI run
+   failed (see *First public CI run*).
 2. ~~Add real URLs once the owner is known.~~ Done for `nigunpark/mycelink`:
    `package.json`, `.claude-plugin/plugin.json`, README install snippet,
    SECURITY/SUPPORT and issue-template links.
@@ -109,14 +167,16 @@ not file contents.
 4. Repository settings: enable **private vulnerability reporting** (SECURITY.md
    depends on it), Dependabot alerts/updates, code scanning, and branch
    protection for `main` requiring the CI checks.
-5. Let the first CI run finish green on all six matrix legs (Windows, Ubuntu,
-   macOS × Node 22.12.0, 24), plus CodeQL and Scorecard. Fix any
-   Linux/macOS-specific failures before tagging.
+5. Push the CI fix and get a run that is green on all six matrix legs
+   (Windows, Ubuntu, macOS × Node 22.12.0, 24), plus CodeQL and Scorecard.
+   The first run never reached `npm test` on Linux/macOS, so failures specific
+   to those platforms may still appear; fix them before tagging.
 
 ## Known limitations
 
 - Beta: schemas and CLI flags may change before 1.0.
-- Linux and macOS are CI-configured but not yet executed.
+- The test suite has not yet run on Linux or macOS (the first CI run stopped
+  at the build check there).
 - Worker branches use `wip/<feature>/<node>` (Git refs cannot nest under
   `feature/<feature>`).
 - The ECC adapter is validated against the documented artifact shape only, not
