@@ -13,7 +13,7 @@ A verified map of past knowledge. Never the territory.
 the user's current instruction and organisation policy
 > approved PRD / PLAN / DECISIONS
 > source code plus real build, test and runtime evidence
-> harness canonical files (GRAPH, STATE, evidence)
+> Mycelink canonical files (GRAPH, STATE, evidence)
 > verified Brain pages
 > partial, stale or contested pages
 > conversation history and auto memory

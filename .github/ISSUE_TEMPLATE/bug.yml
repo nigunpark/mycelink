@@ -1,0 +1,59 @@
+name: Bug report
+description: Something Mycelink does is wrong or broken.
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security vulnerabilities must not be reported here** — see SECURITY.md.
+        Please remove secrets, private paths and private repository names from everything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Exact commands (CLI or slash commands), and the smallest graph / repositories.yaml that shows the problem.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `mycelink doctor --json`
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: Mycelink version
+      placeholder: "0.2.0-beta.1 (from `mycelink --version`)"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Linux, macOS, Other]
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Node.js, Git and Claude Code versions
+      placeholder: "node v24.x, git 2.4x, claude 2.x"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I removed secrets and private information from this report.
+          required: true
