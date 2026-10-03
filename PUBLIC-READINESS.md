@@ -38,7 +38,14 @@ run on GitHub is green on all six legs.
 
 No test incurs model usage.
 
-## Verification commands and results (final run at commit `57aff36`)
+## Verification commands and results (final run at commit `3e55527`)
+
+`3e55527` is the last commit that changes shipped files (it updated
+`CHANGELOG.md`). Typecheck, build check, the full test suite, strict plugin
+validation and the double package run were repeated there. `npm ci`,
+`npm audit`, `actionlint` and the manual ZIP install were last run at
+`57aff36`. Since then the only change is to `CHANGELOG.md`, so dependencies,
+workflows and runtime files are unchanged.
 
 | Command | Result |
 |---|---|
@@ -50,7 +57,7 @@ No test incurs model usage.
 | `npx vitest run` | 36 files, 583 passed |
 | `claude plugin validate --strict .` | ✔ Validation passed |
 | `claude plugin validate --strict .claude-plugin/plugin.json` | ✔ Validation passed |
-| `node scripts/package.mjs` twice | identical: zip `985c660d2edafb559cf8bf5149bf4871b9885dc9c9f0eb5425b4c35a2d0c6450` (1 018 640 bytes); SBOM identical for the same `SOURCE_DATE_EPOCH` |
+| `node scripts/package.mjs` twice | identical: zip `8eab660cce50392c42c62c114cc986c15932b37169494a32451ee09125650003` (1 018 941 bytes); SBOM identical for the same `SOURCE_DATE_EPOCH` |
 | `actionlint` 1.7.12 on all workflows | no findings |
 | Manual ZIP install in an isolated profile (`CLAUDE_CONFIG_DIR` in a temp dir) | strict validation ✔, marketplace add ✔, install ✔ (`0.2.0-beta.1`, enabled, under the isolated config), installed `mycelink --version` ✔, `init` ✔, `doctor` hooks ✔ pointing at the installed copy, uninstall ✔, control repo untouched; no `node_modules`, no `src`, no build step |
 | Secret / personal-path scan of tracked files | no personal paths, no real e-mail addresses, no secret-like values (only synthetic `*@example.invalid` fixtures and a `c:/Users/someone` path-rejection test vector) |
