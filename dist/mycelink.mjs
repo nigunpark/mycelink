@@ -21650,10 +21650,11 @@ function doctor(args, io) {
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  if (existsSync19(paths.repositoriesManifest)) {
-    const result = validateRepositories(
-      import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8"))
-    );
+  const rawManifest = existsSync19(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : null;
+  if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
+    repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
+  } else if (existsSync19(paths.repositoriesManifest)) {
+    const result = validateRepositories(rawManifest);
     repoOk = result.ok;
     repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
   }

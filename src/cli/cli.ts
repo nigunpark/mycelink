@@ -228,10 +228,13 @@ function doctor(args: ParsedArgs, io: CliIo): number {
 
   let repoOk = false;
   let repoDetail = 'repositories.yaml missing';
-  if (existsSync(paths.repositoriesManifest)) {
-    const result = validateRepositories(
-      YAML.parse(readFileSync(paths.repositoriesManifest, 'utf8')),
-    );
+  const rawManifest = existsSync(paths.repositoriesManifest)
+    ? (YAML.parse(readFileSync(paths.repositoriesManifest, 'utf8')) as { repositories?: unknown[] } | null)
+    : null;
+  if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
+    repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
+  } else if (existsSync(paths.repositoriesManifest)) {
+    const result = validateRepositories(rawManifest);
     repoOk = result.ok;
     repoDetail = result.ok
       ? `${(YAML.parse(readFileSync(paths.repositoriesManifest, 'utf8')) as { repositories: unknown[] }).repositories.length} repositories`
