@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only token for every job; no job in this workflow needs to write.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Claude Code CLI used for strict plugin validation and the
+  # isolated-profile plugin tests. These commands never invoke a model.
+  CLAUDE_CODE_VERSION: 2.1.288
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.12.0', '24']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Configure git identity for test fixtures
+        run: |
+          git config --global user.name "Mycelink CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+          git config --global core.autocrlf false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Audit all dependencies
+        run: npm audit --audit-level=high
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build and check the committed bundle is current
+        run: |
+          npm run build
+          git diff --exit-code -- dist THIRD_PARTY_NOTICES.md
+
+      - name: Install Claude Code CLI (validation only, no model usage)
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Test (unit, integration, security, fixture, release, plugin-e2e)
+        run: npm test
+        env:
+          ANTHROPIC_API_KEY: ''
+
+      - name: Validate plugin (strict)
+        run: claude plugin validate --strict .
+
+      - name: Package twice and compare hashes
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          npm run package -- --out artifacts/a
+          npm run package -- --out artifacts/b
+          VERSION="$(node -p "require('./package.json').version")"
+          cmp "artifacts/a/mycelink-${VERSION}.zip" "artifacts/b/mycelink-${VERSION}.zip"
+          cmp artifacts/a/SBOM.spdx.json artifacts/b/SBOM.spdx.json
+          cat "artifacts/a/mycelink-${VERSION}.zip.sha256"
+
+      - name: Upload package (one matrix leg)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mycelink-package
+          path: artifacts/a/
+          if-no-files-found: error
+          retention-days: 14
