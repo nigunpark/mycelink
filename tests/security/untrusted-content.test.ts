@@ -14,7 +14,7 @@ import YAML from 'yaml';
 import { validateGraph, hashGraph } from '../../src/graph/validate.js';
 import { initialState, DEFAULT_BUDGET } from '../../src/state/feature-state.js';
 import { buildContextPack, WORKER_RULES } from '../../src/sessions/context-pack.js';
-import { EccApprovalError, parsePlan, parsePrd } from '../../src/ecc/plan-adapter.js';
+import { EccApprovalError, parsePlan, parsePrd } from '../../src/adapters/ecc/plan-adapter.js';
 import { main, type CliIo } from '../../src/cli/cli.js';
 import { clone, VALID_GRAPH } from '../helpers/graph-fixtures.js';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';

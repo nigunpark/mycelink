@@ -4,7 +4,7 @@ import {
   compileDraftGraph,
   parsePlan,
   parsePrd,
-} from '../../src/ecc/plan-adapter.js';
+} from '../../src/adapters/ecc/plan-adapter.js';
 import { validateGraph } from '../../src/graph/validate.js';
 import { VALID_REPOSITORIES } from '../helpers/graph-fixtures.js';
 
