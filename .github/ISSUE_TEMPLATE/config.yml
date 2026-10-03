@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability (private)
-    url: ../../security/advisories/new
+    url: https://github.com/nigunpark/mycelink/security/advisories/new
     about: Do not open a public issue for security problems. Use GitHub private vulnerability reporting as described in SECURITY.md.
   - name: Security policy
-    url: ../../blob/main/SECURITY.md
+    url: https://github.com/nigunpark/mycelink/blob/main/SECURITY.md
     about: How security reports are handled.
   - name: Getting help
-    url: ../../blob/main/SUPPORT.md
+    url: https://github.com/nigunpark/mycelink/blob/main/SUPPORT.md
     about: Where to ask questions.

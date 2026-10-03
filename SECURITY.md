@@ -14,15 +14,17 @@ requests or discussions.**
 
 Report them privately through GitHub's private vulnerability reporting:
 
-1. Open the repository's **Security** tab.
-2. Choose **Report a vulnerability** (GitHub Security Advisories).
+1. Open
+   [github.com/nigunpark/mycelink/security/advisories/new](https://github.com/nigunpark/mycelink/security/advisories/new)
+   (the repository's **Security** tab → **Report a vulnerability**, GitHub
+   Security Advisories).
 3. Describe the issue, affected versions, and a minimal reproduction. Please
    do not include real credentials or private repository content; redact
    them, or describe their shape instead.
 
 There is deliberately no security e-mail address. If private vulnerability
 reporting is not yet enabled on the repository you are looking at, open a
-public issue that says only "please enable private vulnerability reporting"
+[public issue](https://github.com/nigunpark/mycelink/issues/new/choose) that says only "please enable private vulnerability reporting"
 — without any details — and a maintainer will enable it and follow up.
 
 ## What to expect

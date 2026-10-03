@@ -4,6 +4,14 @@
   "description": "Connect repositories. Coordinate agents. Ship one feature.",
   "license": "Apache-2.0",
   "author": "Mycelink Contributors",
+  "homepage": "https://github.com/nigunpark/mycelink#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nigunpark/mycelink.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nigunpark/mycelink/issues"
+  },
   "private": true,
   "type": "module",
   "engines": {

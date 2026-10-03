@@ -1,7 +1,7 @@
 # Public readiness — Mycelink 0.2.0-beta.1
 
 **Status: VERIFIED_PUBLIC_READY** for the local verification scope below.
-Publication still needs the GitHub-owner-dependent steps listed under
+Publication still needs the remaining repository-setup steps listed under
 *Remaining before publishing*; nothing has been pushed or published.
 
 This file records what was verified, how, and what remains. It is not
@@ -69,6 +69,18 @@ not touch shipped files (this document is not shipped). The SBOM embeds the
 creation time (`SOURCE_DATE_EPOCH`, else the HEAD commit time) and the zip
 hash, so it changes with the commit time by design.
 
+### Re-verification after the publication-metadata commit
+
+The commit that adds the `nigunpark/mycelink` URLs, CODEOWNERS and the
+maintainers table changes shipped files (`package.json`, plugin manifest,
+README, SECURITY, SUPPORT, GOVERNANCE, CHANGELOG), so the checks were re-run
+on it: `npm run typecheck` exit 0; `npm run build:check` exit 0; `npx vitest
+run` 36 files, 585 passed (two metadata tests added); `claude plugin validate
+--strict .` and `.claude-plugin/plugin.json` ✔; `npm run package` twice with
+the same `SOURCE_DATE_EPOCH` produced byte-identical zips, sha256
+`d981e03581a7460adb471c49388d01494972f37b48afa42038e751de6d8840fc`
+(supersedes the hash above).
+
 ## Repository and history
 
 - **`main` is the clean public history** and the only local branch. It is an
@@ -82,17 +94,15 @@ hash, so it changes with the commit time by design.
   it or rewrite the branch's authorship to a GitHub no-reply address; this
   was deliberately not changed without your decision.
 
-## Remaining before publishing (GitHub-owner-dependent)
+## Remaining before publishing
 
 1. Create the GitHub repository and push `main`.
-2. Add real URLs once the owner is known — intentionally absent now (no fake
-   placeholders): `repository`, `homepage` and `bugs` in `package.json`;
-   `repository`/`homepage` in `.claude-plugin/plugin.json` (re-run
-   `claude plugin validate --strict .`); replace `<owner>` in the README's
-   *From GitHub* install snippet.
-3. Fill the maintainers table in `GOVERNANCE.md` and add `.github/CODEOWNERS`
-   (then update `tests/release/metadata.test.ts`, which currently asserts
-   CODEOWNERS is absent).
+2. ~~Add real URLs once the owner is known.~~ Done for `nigunpark/mycelink`:
+   `package.json`, `.claude-plugin/plugin.json`, README install snippet,
+   SECURITY/SUPPORT and issue-template links.
+3. ~~Fill the maintainers table in `GOVERNANCE.md` and add
+   `.github/CODEOWNERS`.~~ Done (`@nigunpark`); `tests/release/metadata.test.ts`
+   now asserts both.
 4. Repository settings: enable **private vulnerability reporting** (SECURITY.md
    depends on it), Dependabot alerts/updates, code scanning, and branch
    protection for `main` requiring the CI checks.
@@ -124,7 +134,7 @@ hash, so it changes with the commit time by design.
 
 ```bash
 # one-time: publish `main` to the new remote
-git remote add origin https://github.com/<owner>/mycelink.git
+git remote add origin https://github.com/nigunpark/mycelink.git
 git push -u origin main
 
 # every release (see docs/RELEASING.md)
