@@ -106,9 +106,11 @@ files are unchanged.
 
 ## Test totals
 
-With the worker-transport fix (local branch, not yet in CI): 617 tests in
-38 files, 616 passed, 0 failed, 1 skipped on Windows (Node 24.14.1). The 24
-new tests are in `tests/integration` (+17) and `tests/unit` (+7). The figures
+With the worker-transport fix and the PR #3 CI/CodeQL fixes (local branch,
+not yet in CI): 657 tests in 40 files, 656 passed, 0 failed, 1 skipped on
+Windows (Node 24.14.1). The worker-transport fix added 24 tests, in
+`tests/integration` (+17) and `tests/unit` (+7). The CI/CodeQL fixes added
+40 more, in `tests/security` (+39) and `tests/integration` (+1). The figures
 below are for `41b99d8`.
 
 593 tests in 36 files: locally on Windows (Node 24.14.1) 592 passed,
@@ -294,8 +296,99 @@ sized for the fake.
 - Two packages built with the same `SOURCE_DATE_EPOCH` are byte-identical:
   58 files, SHA-256 `c27c97b6…f9c5f5`.
 
-**Not yet done:** push the branch and get green CI on all six legs for this
-commit.
+**CI on the pull request (PR #3, head `31db246`): blocked.** Ubuntu and
+macOS passed on Node 22.12.0 and 24. Both Windows legs failed 12 tests, and
+CodeQL reported 5 alerts; see the next section.
+
+## PR #3 CI run: Windows gate failure and CodeQL alerts
+
+**Windows (12 failures, CI run `37139719553`).** On the runner, every worker
+attempt failed before it started. The error was `WORKER_PROTOCOL_INVALID:
+gate argument "C:/Users/RUNNER~1/AppData/Local/Temp/mycelink-tests/portfolio-…/control"
+could be reinterpreted by a shell`. The orchestrator offers
+`--control-root` with forward slashes, and the runner's temp directory is the
+8.3 alias `RUNNER~1`. `renderGateCommand` did not accept `~` in any form, so
+three-repo E2E steps 5–7 and 9–16 and the orchestrator transport test
+failed. Locally the temp directory is a long path, which is why those tests
+passed here.
+*Fix:* a tilde is accepted only in the quoted form. Probes on this machine
+showed bash expands an unquoted `~` at the start of a word and after `=`
+(`a=~/x` → `a=/c/Users/…/x`), while a double-quoted tilde is literal in sh,
+bash, cmd.exe and PowerShell. The same probes showed cmd.exe expanding
+`"%OS%"` inside double quotes and PowerShell dropping an unquoted `@x`
+(splatting). `%` is therefore now refused, and a leading `@` is offered
+quoted.
+*Tests (RED verified first):*
+
+- `tests/security/gate-command.test.ts` (30 tests). It checks that the CI
+  path renders quoted and that `~` is never offered unquoted. It runs a real
+  local 8.3 alias (`…/MYCELI~1/GATE-L~1/control`) through cmd.exe and Git
+  Bash and gets the same argv back. It also checks 24 refused metacharacter
+  cases. RED: 7 failed, including the CI error text with the real alias.
+- `tests/integration/worker-transport.test.ts` (+1). A prompt-only worker
+  reaches `DONE` with the whole portfolio under a real 8.3 alias. RED:
+  `WORKER_PROTOCOL_INVALID`, as in CI.
+
+**CodeQL (analysis on `refs/pull/3/merge`).** These alerts were reproduced
+locally with CodeQL 2.27.1 (`javascript-security-extended`), and the
+SARIF code flows were read before anything was changed.
+
+- **#18, #19 `js/file-system-race` (high), `worker-protocol.ts` 88 and
+  269.** The pack and the result were checked by `statSync`/`lstatSync` and
+  then read by path.
+  *Fix:* open once, then check (`fstat`) and read through that descriptor
+  with a byte bound. The result is opened with `O_NOFOLLOW` where the
+  platform has it. Its device and inode must match `lstat` of the slot path,
+  and it must have `nlink === 1`.
+  *Tests:* `tests/security/worker-protocol-race.test.ts` makes the swap
+  deterministic by replacing the file right after the check. RED results:
+  the swapped oversized pack was parsed; the swapped result leaked
+  `"TOP-SECRET"…` through `RESULT_UNREADABLE`; a hard-linked result leaked
+  the same way.
+- **Found while fixing the race:** the slot's `.gitignore` was written
+  through a symlink left by an earlier attempt, overwriting a file outside
+  the worktree. RED in the same file. It is now removed and created with
+  `wx`.
+- **#8, #9, #17 command construction (medium), `exec.ts` 192–202 and
+  `claude-cli-adapter.ts` 237–244.** The flows ran from `process.argv` (the
+  `tdd -- <argv>` passthrough) and from absolute paths into `planCommand`,
+  which returned either an argv plan or `/bin/sh -c` / `cmd /c`. Every argv
+  therefore reached a value that might be shell-interpreted, guarded only by
+  a runtime `shell` flag. The interpreter also came from `ComSpec` in the
+  command's own environment.
+  *Fix:* shell scripts have their own planner, runner and spawn.
+  `RunVerificationArgs` takes `command` or `shellScript`, so the passthrough
+  can only be argv. Batch arguments are quoted only after an anchored
+  allowlist test. The Windows interpreter is always
+  `%SystemRoot%\System32\cmd.exe`.
+  *Tests:* `tests/security/exec-policy.test.ts` (+2 RED: an argv planned as
+  `/bin/sh`; a `ComSpec` of `C:\evil\cmd.exe` honoured), plus the shell-mode
+  tests moved to the new entry points with the same assertions.
+- **Local CodeQL after the fix:** 18 results fell to 8, with none added. All
+  five PR alerts are gone, and so is pre-existing #16 (`exec.ts`, same root
+  cause). The remaining 8 predate this branch:
+  - #15 `workspace.ts:161` (an `existsSync` check before writing an empty
+    `.gitkeep`) and its copy in `dist/`;
+  - five `js/insecure-temporary-file` results in test helpers;
+  - one result in `tests/fake-claude`.
+
+**Local verification at this change (Windows 11, Node 24.14.1):**
+
+- `npm test`: 657 tests in 40 files, 656 passed, 1 skipped (POSIX-only).
+- By suite: unit 199, integration 120, security 218, fixtures 17, release 82
+  (1 skipped), plugin-e2e 21.
+- `npm run typecheck` is clean, and `npm run build:check` is clean after
+  commit.
+- `claude plugin validate --strict .` passed.
+- Two packages with `SOURCE_DATE_EPOCH=1791072000` are byte-identical: 58
+  files, zip SHA-256
+  `7bfb7323c22a9e5da47a9d627746d1561676ba2cf0f25d0b5bc1955938be8792`.
+- **Real-Claude pilot re-run** (transport code changed), Claude Code
+  2.1.288: verdict `ok`, `DONE` in 1 attempt, 1 session, 9 turns, about 28 s,
+  2,497 output tokens, worker result `SUBMITTED`, and fresh GREEN and
+  regression exit 0.
+
+**Not yet done:** push the branch and get CI and CodeQL green on PR #3.
 
 ## Remaining before publishing
 
@@ -319,9 +412,11 @@ commit.
 7. **Beta GitHub Release and tag** `v0.2.0-beta.1` (see *Exact release
    commands*). Not yet created; `CHANGELOG.md` still carries the fixes under
    *Unreleased*.
-8. **Land the worker-transport fix.** Commit it on
-   `fix/real-worker-context-transport` (local; not pushed), merge it to
-   `main`, and get CI green on all six legs. The tag must not be cut from a
+8. **Land the worker-transport fix.** It is on PR #3
+   (`fix/real-worker-context-transport`). The Windows 8.3 gate failure and
+   the five CodeQL alerts found by its first CI run are fixed locally and
+   not pushed. Push, get CI and CodeQL green on all six legs, and merge to
+   `main`. The tag must not be cut from a
    commit without it, because real workers cannot start a node without it.
 
 ## Known limitations

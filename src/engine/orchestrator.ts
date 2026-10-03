@@ -55,7 +55,7 @@ import { integrateNodeBranch } from '../git/integrate.js';
 import { commitAll, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
-import { runVerification } from '../evidence/runner.js';
+import { runVerification, verifierInvocation } from '../evidence/runner.js';
 import { appendEvent } from '../state/event-log.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
 import type { NodeResult, SessionAdapter, SpawnRequest } from '../sessions/adapter.js';
@@ -389,12 +389,11 @@ export class Orchestrator {
           kind: 'green',
           nodeId,
           repository: node.repository,
-          command: verifier.command,
+          ...verifierInvocation(verifier),
           cwd: verifier.cwd ? join(verifyDir, verifier.cwd) : verifyDir,
           evidenceDir,
           label: `fresh-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
-          shell: verifier.shell === true,
           allowShell: this.workspace.config.allow_shell_commands,
           ...(verifier.expect_exit !== undefined ? { expectExit: verifier.expect_exit } : {}),
         });

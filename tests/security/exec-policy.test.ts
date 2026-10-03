@@ -12,10 +12,14 @@ import { join } from 'node:path';
 import {
   CommandPolicyError,
   planCommand,
+  planShellScript,
   runCommandSync,
+  runShellScriptSync,
+  shellScriptOf,
   validateArgv,
+  windowsCommandInterpreter,
 } from '../../src/security/exec.js';
-import { runVerification } from '../../src/evidence/runner.js';
+import { runVerification, verifierInvocation } from '../../src/evidence/runner.js';
 import { DEFAULT_CONFIG } from '../../src/workspace/workspace.js';
 import { validateGraph } from '../../src/graph/validate.js';
 import { clone, VALID_GRAPH } from '../helpers/graph-fixtures.js';
@@ -65,19 +69,24 @@ describe('argv mode never involves a shell', () => {
 describe('explicit shell mode', () => {
   it('is refused unless the control-repo configuration allows it', () => {
     expect(DEFAULT_CONFIG.allow_shell_commands).toBe(false);
-    expect(() => planCommand(['echo a && echo b'], { shell: true, allowShell: false })).toThrow(
-      /SHELL_NOT_ALLOWED/,
-    );
+    expect(() => planShellScript('echo a && echo b', { allowShell: false })).toThrow(/SHELL_NOT_ALLOWED/);
+    expect(() => planShellScript('echo a && echo b')).toThrow(/SHELL_NOT_ALLOWED/);
   });
 
   it('requires exactly one script element', () => {
-    expect(() => planCommand(['echo', 'a'], { shell: true, allowShell: true })).toThrow(
-      /SHELL_SCRIPT_SHAPE/,
-    );
+    expect(() => shellScriptOf(['echo', 'a'])).toThrow(/SHELL_SCRIPT_SHAPE/);
+    expect(() => verifierInvocation({ command: ['echo', 'a'], shell: true })).toThrow(/SHELL_SCRIPT_SHAPE/);
+    expect(() => shellScriptOf(['echo a\u0000b'])).toThrow(/NUL_BYTE/);
+  });
+
+  it('runs a Windows script through the system cmd.exe, never ComSpec', () => {
+    const plan = planShellScript('echo a&& echo b', { allowShell: true, platform: 'win32' });
+    expect(plan.file).toMatch(/^[A-Za-z]:\\.+\\System32\\cmd\.exe$/i);
+    expect(plan.args).toEqual(['/d', '/s', '/c', '"echo a&& echo b"']);
   });
 
   it('runs through the platform shell when allowed', () => {
-    const r = runCommandSync(['echo first&& echo second'], { cwd: makeTmpDir('exec-'), shell: true, allowShell: true });
+    const r = runShellScriptSync('echo first&& echo second', { cwd: makeTmpDir('exec-'), allowShell: true });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toMatch(/first/);
     expect(r.stdout).toMatch(/second/);
@@ -96,13 +105,26 @@ describe('explicit shell mode', () => {
         kind: 'green',
         nodeId: 'FEAT-101.core.publish.impl',
         repository: 'core',
-        command: ['echo hi && echo there'],
-        shell: true,
+        ...verifierInvocation(v as { command: string[]; shell: boolean }),
         allowShell: DEFAULT_CONFIG.allow_shell_commands,
         cwd: dir,
         evidenceDir: join(dir, 'evidence'),
       }),
     ).toThrow(CommandPolicyError);
+  });
+
+  it('an argv command stays argv in verification even when shell is allowed', () => {
+    const dir = makeTmpDir('exec-');
+    const record = runVerification({
+      kind: 'green',
+      nodeId: 'FEAT-101.core.publish.impl',
+      repository: 'core',
+      command: [node, '-e', 'process.exit(process.argv[1] === "a && b" ? 0 : 3)', 'a && b'],
+      allowShell: true,
+      cwd: dir,
+      evidenceDir: join(dir, 'evidence'),
+    });
+    expect(record.exit_code).toBe(0);
   });
 });
 
@@ -115,7 +137,7 @@ describe('Windows batch shims (npm.cmd, yarn.cmd, ...)', () => {
       resolveExecutable: resolveCmd,
       env: { ComSpec: 'C:\\Windows\\system32\\cmd.exe' },
     });
-    expect(plan.file).toBe('C:\\Windows\\system32\\cmd.exe');
+    expect(plan.file).toBe(windowsCommandInterpreter());
     expect(plan.windowsVerbatimArguments).toBe(true);
     expect(plan.args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
     expect(plan.args[3]).toBe('""C:\\tools\\nodejs\\npm.cmd" "test" "--" "my filter""');
@@ -144,5 +166,30 @@ describe('Windows batch shims (npm.cmd, yarn.cmd, ...)', () => {
   it('on POSIX, argv is passed through untouched', () => {
     const plan = planCommand(['npm', 'test', 'a&b'], { platform: 'linux', env: {} });
     expect(plan).toMatchObject({ file: 'npm', args: ['test', 'a&b'], shell: false });
+  });
+});
+
+describe('argv and shell scripts are separate types (CodeQL js/*-command-injection)', () => {
+  // Argv, including an operator's `-- <argv>` passthrough, used to flow into
+  // the same plan a shell script did, separated only by a runtime flag. An
+  // argv command must have no path to a shell at all.
+  it('never plans an argv command as a shell, whatever options are passed', () => {
+    const options = { shell: true, allowShell: true, platform: 'linux' } as unknown as Parameters<
+      typeof planCommand
+    >[1];
+    const plan = planCommand(['echo a && echo b'], options);
+    expect(plan.file).toBe('echo a && echo b');
+    expect(plan.args).toEqual([]);
+    expect(plan.file).not.toBe('/bin/sh');
+  });
+
+  it('runs a batch shim through the system cmd.exe, never one named by the command environment', () => {
+    const plan = planCommand(['npm', 'test'], {
+      platform: 'win32',
+      resolveExecutable: () => 'C:\\tools\\nodejs\\npm.cmd',
+      env: { ComSpec: 'C:\\evil\\cmd.exe', COMSPEC: 'C:\\evil\\cmd.exe' },
+    });
+    expect(plan.file).toMatch(/^[A-Za-z]:\\.+\\System32\\cmd\.exe$/i);
+    expect(plan.file).not.toContain('evil');
   });
 });

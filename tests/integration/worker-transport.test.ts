@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
-import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
+import { makeTmpDir, cleanupTmpRoots, windowsShortPathAlias } from '../helpers/tmp.js';
 import { makeGitRepo, git } from '../helpers/git-fixture.js';
 import { minimalPack, writePack } from '../helpers/context-pack.js';
 import {
@@ -351,5 +351,69 @@ describe('worker transport through the orchestrator', () => {
     expect(runtime?.evidence.red?.exit_code).not.toBe(0);
     expect(runtime?.evidence.green?.exit_code).toBe(0);
     expect(runtime?.evidence.green?.command).toEqual(runtime?.evidence.red?.command);
+  });
+});
+
+describe('worker transport under a Windows 8.3 short-name alias', () => {
+  // GitHub-hosted Windows runners hand out the temp dir as C:\Users\RUNNER~1\...;
+  // the orchestrator offers the control root with forward slashes, so the gate
+  // line carries a `~`. The first public CI run failed every attempt here with
+  // WORKER_PROTOCOL_INVALID before the worker started.
+  const NODE = `${FEATURE_ID}.core.publish.impl`;
+
+  it('a prompt-only worker reaches DONE when the control root is an 8.3 alias', async (ctx) => {
+    const alias = windowsShortPathAlias(makeTmpDir('transport-long-directory-name-'));
+    if (alias === null) return ctx.skip();
+    const p = createPortfolio(alias);
+    expect(p.control.replace(/\\/g, '/')).toMatch(/~\d/);
+    const cli = async (argv: string[]): Promise<{ code: number; out: string }> => {
+      let out = '';
+      const io: CliIo = { out: (t) => (out += t + '\n'), err: () => {} };
+      const code = await main([...argv, '--control-root', p.control], io);
+      return { code, out };
+    };
+    writePrd(p);
+    writeFileSync(
+      join(p.featureDir, 'PORTFOLIO-GRAPH.yaml'),
+      YAML.stringify(portfolioGraph(), { lineWidth: 0 }),
+      'utf8',
+    );
+    mkdirSync(join(p.featureDir, 'e2e'), { recursive: true });
+    commitControl(p, 'transport scaffold');
+    expect((await cli(['feature', 'init', FEATURE_ID])).code).toBe(0);
+    writeFileSync(
+      p.scenarioFile,
+      JSON.stringify({
+        nodes: {
+          [NODE]: {
+            outcome: 'SUBMITTED',
+            turns: 3,
+            steps: [
+              { gate: 'red', expect_exit: 0 },
+              { write_files: { 'src/publish.js': 'export const JOB_RESULT_V2 = true;\n' } },
+              { git_commit: 'implement publish' },
+              { gate: 'green', expect_exit: 0 },
+              { gate: 'regression', expect_exit: 0 },
+            ],
+          },
+        },
+      }),
+      'utf8',
+    );
+    const previous = process.env['FAKE_CLAUDE_SCENARIO'];
+    process.env['FAKE_CLAUDE_SCENARIO'] = p.scenarioFile;
+    try {
+      const run = await cli(['session', 'spawn', FEATURE_ID, NODE, '--json']);
+      const report = JSON.parse(run.out) as { outcome: string; detail: string };
+      expect(report.detail).not.toMatch(/WORKER_PROTOCOL_INVALID/);
+      expect(report.outcome).toBe('DONE');
+    } finally {
+      if (previous === undefined) delete process.env['FAKE_CLAUDE_SCENARIO'];
+      else process.env['FAKE_CLAUDE_SCENARIO'] = previous;
+    }
+    const runtime = loadState(p.featureDir)?.data.nodes[NODE];
+    expect(runtime?.state).toBe('DONE');
+    expect(runtime?.evidence.red?.red_reason).toBe('behaviour-missing');
+    expect(runtime?.evidence.green?.exit_code).toBe(0);
   });
 });

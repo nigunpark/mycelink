@@ -7,18 +7,34 @@
  * and classifies whether a RED failed for the right reason.
  */
 import { createHash } from 'node:crypto';
-import { runCommandSync } from '../security/exec.js';
+import { runCommandSync, runShellScriptSync, shellScriptOf } from '../security/exec.js';
 import { redactText } from '../security/redact.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { EvidenceKind, EvidenceRecord } from '../model/types.js';
 import { resolveRef } from '../git/git.js';
 
-export interface RunVerificationArgs {
+/**
+ * What a verification runs: an argv command, or (opted in per command and
+ * enabled only by the control repository) one shell script. They are
+ * separate fields so an argv, such as an operator's `-- <argv>`, can never be
+ * handed to a shell by a flag.
+ */
+export type VerificationInvocation =
+  | { command: string[]; shellScript?: undefined }
+  | { shellScript: string; command?: undefined };
+
+/** The invocation for a declared verifier: its script if it asks for a shell. */
+export function verifierInvocation(verifier: { command: string[]; shell?: boolean }): VerificationInvocation {
+  return verifier.shell === true ? { shellScript: shellScriptOf(verifier.command) } : { command: verifier.command };
+}
+
+export type RunVerificationArgs = VerificationInvocation & VerificationOptions;
+
+interface VerificationOptions {
   kind: EvidenceKind;
   nodeId: string;
   repository: string | null;
-  command: string[];
   cwd: string;
   evidenceDir: string;
   /** Exit code that counts as success. Default 0. */
@@ -31,8 +47,6 @@ export interface RunVerificationArgs {
   label?: string;
   candidateId?: string | null;
   scenarioId?: string | null;
-  /** Run `command[0]` as a shell script. Refused unless `allowShell`. */
-  shell?: boolean;
   /** From the control repository's `allow_shell_commands`; never from a graph. */
   allowShell?: boolean;
 }
@@ -185,21 +199,19 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
 
   const startedAt = new Date();
   const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const first = args.command[0];
-  if (first === undefined) throw new Error('A verification command must have at least one element.');
+  const command = args.shellScript !== undefined ? [args.shellScript] : args.command;
+  if (command[0] === undefined) throw new Error('A verification command must have at least one element.');
 
   // Throws CommandPolicyError before anything runs if the command is unsafe
   // or asks for a shell the control repository has not allowed.
-  const proc = runCommandSync(args.command, {
-    cwd,
-    timeoutMs,
-    env: args.env ?? {},
-    shell: args.shell ?? false,
-    allowShell: args.allowShell ?? false,
-  });
+  const runOptions = { cwd, timeoutMs, env: args.env ?? {} };
+  const proc =
+    args.shellScript !== undefined
+      ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false })
+      : runCommandSync(args.command, runOptions);
   const finishedAt = new Date();
 
-  let output = `$ ${args.command.join(' ')}\n(cwd: ${cwd})\n\n`;
+  let output = `$ ${command.join(' ')}\n(cwd: ${cwd})\n\n`;
   output += proc.stdout;
   output += proc.stderr;
   if (proc.timedOut) output += `\n[mycelink] command timed out after ${timeoutMs} ms\n`;
@@ -231,7 +243,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   const record: EvidenceRecord = {
     kind: args.kind,
     node_id: args.nodeId,
-    command: args.command.map((part) => redactText(part)),
+    command: command.map((part) => redactText(part)),
     exit_code: exitCode,
     started_at: startedAt.toISOString(),
     finished_at: finishedAt.toISOString(),

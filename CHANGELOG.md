@@ -73,6 +73,44 @@ under **Breaking**.
   case-insensitive on Windows). Found by the first public CI run.
 - CI: both fixes above are confirmed by a run that passes on Windows, Ubuntu
   and macOS with Node.js 22.12.0 and 24.
+- Windows: every worker attempt failed with `WORKER_PROTOCOL_INVALID: gate
+  argument "C:/Users/RUNNER~1/..." could be reinterpreted by a shell` when the
+  control repository lived under an 8.3 short name, because `~` was not an
+  accepted gate-argument character. A tilde is now accepted, but only inside
+  double quotes, where every shell treats it as literal (an unquoted `~` is
+  expanded by bash at the start of a word and after `=`). The gate-argument
+  rules were also tightened: `%` is refused (cmd.exe expands `%VAR%` even
+  inside double quotes), and a leading `@` (PowerShell splatting) is offered
+  quoted. Found by the CI run for the worker-transport fix.
+
+### Security
+
+These issues were found by CodeQL on the worker-transport pull request.
+
+- The worker result and the context pack were checked through one path
+  lookup and read through another (CodeQL `js/file-system-race`). A file
+  swapped in between was parsed without its size or link checks, and the
+  first bytes of a non-JSON file outside the worktree could surface in the
+  `RESULT_UNREADABLE` parse error. Both are now opened once, checked through
+  that descriptor (`fstat`), and read with a byte bound. The result is opened
+  without following a final link where the platform supports it. It must be
+  the same file the slot path names, and it must have exactly one link, so a
+  hard link to a file outside the worktree is also refused
+  (`RESULT_PATH_ESCAPE`).
+- The result slot's `.gitignore` was written through whatever stood at that
+  path, so a link left by an earlier attempt redirected the controller's
+  write outside the worktree. It is now removed and recreated exclusively.
+- Argv commands and opted-in shell scripts went through one planning
+  function and one spawn, separated only by a runtime flag (CodeQL
+  `js/shell-command-injection-from-environment`,
+  `js/indirect-command-line-injection`). Shell scripts now have their own
+  entry points (`planShellScript`, `runShellScriptSync`) and their own spawn.
+  Verification takes either `command` (argv) or `shellScript`, never both,
+  so an operator's `-- <argv>` cannot reach a shell. Batch-shim arguments
+  are quoted only after passing an allowlist check.
+- On Windows, batch shims and shell scripts run through the system
+  `%SystemRoot%\System32\cmd.exe`. Before, they used `ComSpec`, which could
+  come from a command's own environment.
 
 ## [0.2.0-beta.1]
 

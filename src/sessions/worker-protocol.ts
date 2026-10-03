@@ -18,13 +18,16 @@
  *    at the controller-owned path.
  */
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  readSync,
   rmdirSync,
   rmSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -71,21 +74,47 @@ export interface WorkerIdentity {
   claimId: string;
 }
 
+/**
+ * Read at most `limit` bytes from an open file. Checks and reads go through
+ * one descriptor, so nothing swapped in at the path after the check is ever
+ * read, and a file that grows after its size was checked stays bounded.
+ */
+function readBounded(fd: number, limit: number): Buffer {
+  const buf = Buffer.alloc(limit);
+  let total = 0;
+  while (total < limit) {
+    const n = readSync(fd, buf, total, limit - total, null);
+    if (n === 0) break;
+    total += n;
+  }
+  return buf.subarray(0, total);
+}
+
 /** Read, validate, bind and redact the pack the controller wrote for this claim. */
 export function loadPromptPack(file: string, expected: WorkerIdentity, env: Env = process.env): ContextPack {
   const fail = (detail: string): never => {
     throw new WorkerProtocolError('CONTEXT_PACK_INVALID', detail);
   };
-  let size: number;
+  let fd: number;
   try {
-    size = statSync(file).size;
-  } catch {
-    return fail('context pack is missing');
+    fd = openSync(file, 'r');
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+    return fail(missing ? 'context pack is missing' : 'context pack is unreadable');
   }
-  if (size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${size} bytes`);
+  let raw: Buffer;
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) fail('context pack is not a regular file');
+    if (st.size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${st.size} bytes`);
+    raw = readBounded(fd, MAX_PROMPT_PACK_BYTES + 1);
+  } finally {
+    closeSync(fd);
+  }
+  if (raw.length > MAX_PROMPT_PACK_BYTES) fail(`context pack is over ${MAX_PROMPT_PACK_BYTES} bytes`);
   let pack: ContextPack;
   try {
-    pack = JSON.parse(readFileSync(file, 'utf8')) as ContextPack;
+    pack = JSON.parse(raw.toString('utf8')) as ContextPack;
   } catch (err) {
     return fail(`context pack is not JSON (${(err as Error).message})`);
   }
@@ -111,15 +140,19 @@ export function encodePackForPrompt(pack: ContextPack): string {
   );
 }
 
-const PLAIN_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
-const QUOTABLE_ARG = /^[A-Za-z0-9_@%+=:,./ ()-]+$/;
+const PLAIN_ARG = /^[A-Za-z0-9_+=:,./-]+$/;
+const QUOTABLE_ARG = /^[A-Za-z0-9_@+=:,./ ()~-]+$/;
 
 /**
  * Render controller-built argv as the one shell line the worker may run.
  *
  * Only arguments that mean the same thing to every shell are accepted; a
- * value carrying quotes, `$`, backticks, backslashes or newlines is refused
- * rather than escaped, because the line is also a permission rule.
+ * value carrying quotes, `$`, `%`, backticks, backslashes or newlines is
+ * refused rather than escaped, because the line is also a permission rule
+ * (cmd.exe expands `%VAR%` even inside double quotes). A tilde, which 8.3
+ * short names such as `C:/Users/RUNNER~1` carry, and a leading `@`, which
+ * PowerShell splats, are literal only inside double quotes, so they are
+ * always offered quoted.
  */
 export function renderGateCommand(argv: readonly string[]): string {
   if (argv.length === 0) throw new WorkerProtocolError('WORKER_PROTOCOL_INVALID', 'empty gate command');
@@ -213,7 +246,11 @@ export function prepareResultSlot(cwd: string): string {
     throw new WorkerProtocolError('WORKER_PROTOCOL_INVALID', 'result slot resolves outside the worktree');
   }
   // Ignores itself and everything beside it, so `git add -A` never commits a result.
-  writeFileSync(join(dir, '.gitignore'), '*\n', 'utf8');
+  // Recreated exclusively: a link an earlier attempt left in its place is
+  // removed, never written through.
+  const ignore = join(dir, '.gitignore');
+  rmSync(ignore, { force: true, recursive: true });
+  writeFileSync(ignore, '*\n', { encoding: 'utf8', flag: 'wx' });
   const file = join(dir, WORKER_RESULT_FILE);
   // A stale result from a previous attempt must never be mistaken for this one's.
   rmSync(file, { force: true });
@@ -237,6 +274,12 @@ export type CollectedResult = { result: NodeResult; failure: null } | { result: 
  * worktree, under the size ceiling, schema-valid and bound to this node and
  * claim. A redacted copy is written to `controllerPath`; the worker's copy is
  * always removed so the next attempt starts empty.
+ *
+ * The file is opened once (without following a final link where the platform
+ * allows) and every check and the read go through that descriptor. Its
+ * identity must match what the slot path names without following links, and
+ * it must have exactly one name, so neither a swap after the checks nor a
+ * hard link to a file outside the worktree is ever read.
  */
 export function collectWorkerResult(
   cwd: string,
@@ -247,26 +290,46 @@ export function collectWorkerResult(
   const dir = join(cwd, WORKER_RESULT_DIR);
   const file = join(dir, WORKER_RESULT_FILE);
   const fail = (failure: string): CollectedResult => ({ result: null, failure });
+  const notRegular = (): CollectedResult => fail('RESULT_PATH_ESCAPE: the result is not a regular file');
 
   if (isLink(dir) || (existsSync(dir) && !isInsideReal(cwd, file))) {
     return fail('RESULT_PATH_ESCAPE: the result slot was replaced by a link');
   }
-  let st;
+  let fd: number | null = null;
   try {
-    st = lstatSync(file);
-  } catch {
-    return fail('RESULT_MISSING');
-  }
-  try {
-    if (st.isSymbolicLink() || !st.isFile()) {
-      return fail('RESULT_PATH_ESCAPE: the result is not a regular file');
+    try {
+      fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return fail('RESULT_MISSING');
+      return notRegular(); // ELOOP: the result itself is a link.
     }
-    if (st.size > MAX_WORKER_RESULT_BYTES) {
+    const st = fstatSync(fd, { bigint: true });
+    let named;
+    try {
+      named = lstatSync(file, { bigint: true });
+    } catch {
+      return notRegular();
+    }
+    if (
+      named.isSymbolicLink() ||
+      !st.isFile() ||
+      named.dev !== st.dev ||
+      named.ino !== st.ino ||
+      st.nlink !== 1n
+    ) {
+      return notRegular();
+    }
+    if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
+    }
+    const bytes = readBounded(fd, MAX_WORKER_RESULT_BYTES + 1);
+    if (bytes.length > MAX_WORKER_RESULT_BYTES) {
+      return fail(`RESULT_TOO_LARGE: over ${MAX_WORKER_RESULT_BYTES} bytes`);
     }
     let parsed: NodeResult;
     try {
-      parsed = JSON.parse(readFileSync(file, 'utf8')) as NodeResult;
+      parsed = JSON.parse(bytes.toString('utf8')) as NodeResult;
     } catch (err) {
       return fail(`RESULT_UNREADABLE: ${(err as Error).message}`);
     }
@@ -279,6 +342,7 @@ export function collectWorkerResult(
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + '\n');
     return { result, failure: null };
   } finally {
+    if (fd !== null) closeSync(fd);
     rmSync(file, { force: true });
   }
 }

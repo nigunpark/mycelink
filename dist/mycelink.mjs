@@ -7746,11 +7746,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -7767,10 +7767,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -7831,8 +7831,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -7861,12 +7861,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          if (n.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -7919,12 +7919,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -7947,10 +7947,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -7986,10 +7986,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -8031,11 +8031,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a, _b;
-        super.optimizeNames(names, constants);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -8336,7 +8336,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -8351,14 +8351,14 @@ var require_codegen = __commonJS({
         return items2;
       }, []));
       function replaceName(n) {
-        const c = constants[n.str];
+        const c = constants2[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -15361,7 +15361,7 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync20, mkdirSync as mkdirSync14, readFileSync as readFileSync15, readdirSync as readdirSync8 } from "node:fs";
+import { existsSync as existsSync20, mkdirSync as mkdirSync14, readFileSync as readFileSync14, readdirSync as readdirSync8 } from "node:fs";
 import { dirname as dirname8, join as join21, resolve as resolve16 } from "node:path";
 
 // src/cli/args.ts
@@ -17159,7 +17159,7 @@ import { createHash as createHash2 } from "node:crypto";
 // src/security/exec.ts
 import { spawnSync } from "node:child_process";
 import { existsSync as existsSync6, statSync as statSync3 } from "node:fs";
-import { delimiter, extname, isAbsolute as isAbsolute2, join as join9 } from "node:path";
+import { delimiter, extname, isAbsolute as isAbsolute2, join as join9, win32 } from "node:path";
 var CommandPolicyError = class extends Error {
   code;
   constructor(code, detail) {
@@ -17185,7 +17185,28 @@ function validateArgv(argv) {
     throw new CommandPolicyError("CONTROL_CHARACTER", "the executable contains a control character");
   }
 }
-var BATCH_FORBIDDEN = /[&|<>^"%!\r\n]/;
+function shellScriptOf(command) {
+  if (!Array.isArray(command) || command.length !== 1 || typeof command[0] !== "string") {
+    throw new CommandPolicyError("SHELL_SCRIPT_SHAPE", "a shell command must be exactly one script string");
+  }
+  const script = command[0];
+  if (script.trim() === "") throw new CommandPolicyError("EMPTY_COMMAND", "the shell script is empty");
+  if (script.includes("\0")) throw new CommandPolicyError("NUL_BYTE", "the shell script must not contain NUL");
+  return script;
+}
+var BATCH_SAFE_ARG = /^[^&|<>^"%!\r\n]*$/;
+var SAFE_SYSTEM_ROOT = /^[A-Za-z]:\\[A-Za-z0-9 ._()\\-]+$/;
+function windowsCommandInterpreter() {
+  const root = process.env["SystemRoot"] ?? "";
+  return win32.join(SAFE_SYSTEM_ROOT.test(root) ? root : "C:\\Windows", "System32", "cmd.exe");
+}
+function quoteBatchArg(part, batchFile) {
+  if (BATCH_SAFE_ARG.test(part) && !part.endsWith("\\")) return `"${part}"`;
+  throw new CommandPolicyError(
+    "BATCH_METACHARACTER",
+    `${JSON.stringify(part)} would be reinterpreted by cmd.exe when running the batch file ${batchFile}; call the underlying executable directly (for example node <script>) or remove the character`
+  );
+}
 function resolveWindowsExecutable(exe, env) {
   const exts = (env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
   const isFile = (p) => {
@@ -17215,23 +17236,6 @@ function planCommand(argv, options = {}) {
   validateArgv(argv);
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
-  if (options.shell) {
-    if (!options.allowShell) {
-      throw new CommandPolicyError(
-        "SHELL_NOT_ALLOWED",
-        "this command requests shell mode, but the control repository does not set allow_shell_commands: true"
-      );
-    }
-    if (argv.length !== 1) {
-      throw new CommandPolicyError("SHELL_SCRIPT_SHAPE", "a shell command must be exactly one script string");
-    }
-    const script = argv[0];
-    if (platform === "win32") {
-      const comspec = env["ComSpec"] ?? env["COMSPEC"] ?? "cmd.exe";
-      return { file: comspec, args: ["/d", "/s", "/c", `"${script}"`], shell: false, windowsVerbatimArguments: true, display: script };
-    }
-    return { file: "/bin/sh", args: ["-c", script], shell: false, windowsVerbatimArguments: false, display: script };
-  }
   const [exe, ...rest] = argv;
   const display = argv.join(" ");
   if (platform === "win32") {
@@ -17239,26 +17243,40 @@ function planCommand(argv, options = {}) {
     const resolved = resolver(exe, env);
     const ext = resolved ? extname(resolved).toLowerCase() : "";
     if (resolved && (ext === ".cmd" || ext === ".bat")) {
-      for (const part of [resolved, ...rest]) {
-        if (BATCH_FORBIDDEN.test(part) || part.endsWith("\\")) {
-          throw new CommandPolicyError(
-            "BATCH_METACHARACTER",
-            `${JSON.stringify(part)} would be reinterpreted by cmd.exe when running the batch file ${resolved}; call the underlying executable directly (for example node <script>) or remove the character`
-          );
-        }
-      }
-      const comspec = env["ComSpec"] ?? env["COMSPEC"] ?? "cmd.exe";
-      const line = [resolved, ...rest].map((p) => `"${p}"`).join(" ");
-      return { file: comspec, args: ["/d", "/s", "/c", `"${line}"`], shell: false, windowsVerbatimArguments: true, display };
+      const line = [resolved, ...rest].map((p) => quoteBatchArg(p, resolved)).join(" ");
+      return {
+        file: windowsCommandInterpreter(),
+        args: ["/d", "/s", "/c", `"${line}"`],
+        shell: false,
+        windowsVerbatimArguments: true,
+        display
+      };
     }
     return { file: resolved ?? exe, args: rest, shell: false, windowsVerbatimArguments: false, display };
   }
   return { file: exe, args: rest, shell: false, windowsVerbatimArguments: false, display };
 }
-function runCommandSync(argv, options) {
-  const env = { ...process.env, ...options.env ?? {} };
-  const plan = planCommand(argv, { shell: options.shell ?? false, allowShell: options.allowShell ?? false, env });
-  const proc = spawnSync(plan.file, plan.args, {
+function planShellScript(script, options = {}) {
+  if (!options.allowShell) {
+    throw new CommandPolicyError(
+      "SHELL_NOT_ALLOWED",
+      "this command requests shell mode, but the control repository does not set allow_shell_commands: true"
+    );
+  }
+  shellScriptOf([script]);
+  if ((options.platform ?? process.platform) === "win32") {
+    return {
+      file: windowsCommandInterpreter(),
+      args: ["/d", "/s", "/c", `"${script}"`],
+      shell: false,
+      windowsVerbatimArguments: true,
+      display: script
+    };
+  }
+  return { file: "/bin/sh", args: ["-c", script], shell: false, windowsVerbatimArguments: false, display: script };
+}
+function spawnOptions(plan, env, options) {
+  return {
     cwd: options.cwd,
     encoding: "utf8",
     timeout: options.timeoutMs ?? 20 * 60 * 1e3,
@@ -17268,7 +17286,9 @@ function runCommandSync(argv, options) {
     env,
     shell: false,
     ...options.input !== void 0 ? { input: options.input } : {}
-  });
+  };
+}
+function toRunResult(proc, plan) {
   const timedOut = proc.error !== void 0 && proc.error.code === "ETIMEDOUT";
   const spawnFailed = proc.error !== void 0 && !timedOut;
   return {
@@ -17279,6 +17299,16 @@ function runCommandSync(argv, options) {
     spawnError: spawnFailed ? String(proc.error?.message) : null,
     display: plan.display
   };
+}
+function runCommandSync(argv, options) {
+  const env = { ...process.env, ...options.env ?? {} };
+  const plan = planCommand(argv, { env });
+  return toRunResult(spawnSync(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
+}
+function runShellScriptSync(script, options) {
+  const env = { ...process.env, ...options.env ?? {} };
+  const plan = planShellScript(script, { allowShell: options.allowShell ?? false });
+  return toRunResult(spawnSync(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
 }
 
 // src/security/redact.ts
@@ -17462,6 +17492,9 @@ function isAncestor(repo, ancestor, descendant) {
 }
 
 // src/evidence/runner.ts
+function verifierInvocation(verifier) {
+  return verifier.shell === true ? { shellScript: shellScriptOf(verifier.command) } : { command: verifier.command };
+}
 var DEFAULT_TIMEOUT_MS = 20 * 60 * 1e3;
 var SIGNAL = [
   /assertion/i,
@@ -17562,17 +17595,12 @@ function runVerification(args) {
   mkdirSync4(evidenceDir, { recursive: true });
   const startedAt = /* @__PURE__ */ new Date();
   const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const first = args.command[0];
-  if (first === void 0) throw new Error("A verification command must have at least one element.");
-  const proc = runCommandSync(args.command, {
-    cwd,
-    timeoutMs,
-    env: args.env ?? {},
-    shell: args.shell ?? false,
-    allowShell: args.allowShell ?? false
-  });
+  const command = args.shellScript !== void 0 ? [args.shellScript] : args.command;
+  if (command[0] === void 0) throw new Error("A verification command must have at least one element.");
+  const runOptions = { cwd, timeoutMs, env: args.env ?? {} };
+  const proc = args.shellScript !== void 0 ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false }) : runCommandSync(args.command, runOptions);
   const finishedAt = /* @__PURE__ */ new Date();
-  let output = `$ ${args.command.join(" ")}
+  let output = `$ ${command.join(" ")}
 (cwd: ${cwd})
 
 `;
@@ -17598,7 +17626,7 @@ function runVerification(args) {
   const record = {
     kind: args.kind,
     node_id: args.nodeId,
-    command: args.command.map((part) => redactText(part)),
+    command: command.map((part) => redactText(part)),
     exit_code: exitCode,
     started_at: startedAt.toISOString(),
     finished_at: finishedAt.toISOString(),
@@ -19217,12 +19245,11 @@ var Orchestrator = class {
           kind: "green",
           nodeId,
           repository: node.repository,
-          command: verifier.command,
+          ...verifierInvocation(verifier),
           cwd: verifier.cwd ? join17(verifyDir, verifier.cwd) : verifyDir,
           evidenceDir,
           label: `fresh-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
-          shell: verifier.shell === true,
           allowShell: this.workspace.config.allow_shell_commands,
           ...verifier.expect_exit !== void 0 ? { expectExit: verifier.expect_exit } : {}
         });
@@ -19878,13 +19905,16 @@ function zeroObservationUsage() {
 
 // src/sessions/worker-protocol.ts
 import {
+  closeSync as closeSync4,
+  constants,
   existsSync as existsSync15,
+  fstatSync,
   lstatSync,
   mkdirSync as mkdirSync11,
-  readFileSync as readFileSync10,
+  openSync as openSync4,
+  readSync,
   rmdirSync,
   rmSync as rmSync5,
-  statSync as statSync4,
   unlinkSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
@@ -19905,20 +19935,40 @@ var WorkerProtocolError = class extends Error {
     this.code = code;
   }
 };
+function readBounded(fd, limit) {
+  const buf = Buffer.alloc(limit);
+  let total = 0;
+  while (total < limit) {
+    const n = readSync(fd, buf, total, limit - total, null);
+    if (n === 0) break;
+    total += n;
+  }
+  return buf.subarray(0, total);
+}
 function loadPromptPack(file, expected, env = process.env) {
   const fail = (detail) => {
     throw new WorkerProtocolError("CONTEXT_PACK_INVALID", detail);
   };
-  let size;
+  let fd;
   try {
-    size = statSync4(file).size;
-  } catch {
-    return fail("context pack is missing");
+    fd = openSync4(file, "r");
+  } catch (err) {
+    const missing = err.code === "ENOENT";
+    return fail(missing ? "context pack is missing" : "context pack is unreadable");
   }
-  if (size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${size} bytes`);
+  let raw;
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) fail("context pack is not a regular file");
+    if (st.size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${st.size} bytes`);
+    raw = readBounded(fd, MAX_PROMPT_PACK_BYTES + 1);
+  } finally {
+    closeSync4(fd);
+  }
+  if (raw.length > MAX_PROMPT_PACK_BYTES) fail(`context pack is over ${MAX_PROMPT_PACK_BYTES} bytes`);
   let pack;
   try {
-    pack = JSON.parse(readFileSync10(file, "utf8"));
+    pack = JSON.parse(raw.toString("utf8"));
   } catch (err) {
     return fail(`context pack is not JSON (${err.message})`);
   }
@@ -19937,8 +19987,8 @@ function encodePackForPrompt(pack) {
     (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")
   );
 }
-var PLAIN_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
-var QUOTABLE_ARG = /^[A-Za-z0-9_@%+=:,./ ()-]+$/;
+var PLAIN_ARG = /^[A-Za-z0-9_+=:,./-]+$/;
+var QUOTABLE_ARG = /^[A-Za-z0-9_@+=:,./ ()~-]+$/;
 function renderGateCommand(argv) {
   if (argv.length === 0) throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", "empty gate command");
   return argv.map((arg) => {
@@ -20011,7 +20061,9 @@ function prepareResultSlot(cwd) {
   if (!isInsideReal(cwd, dir)) {
     throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", "result slot resolves outside the worktree");
   }
-  writeFileSync3(join18(dir, ".gitignore"), "*\n", "utf8");
+  const ignore = join18(dir, ".gitignore");
+  rmSync5(ignore, { force: true, recursive: true });
+  writeFileSync3(ignore, "*\n", { encoding: "utf8", flag: "wx" });
   const file = join18(dir, WORKER_RESULT_FILE);
   rmSync5(file, { force: true });
   return file;
@@ -20027,25 +20079,39 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
   const dir = join18(cwd, WORKER_RESULT_DIR);
   const file = join18(dir, WORKER_RESULT_FILE);
   const fail = (failure) => ({ result: null, failure });
+  const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
   if (isLink(dir) || existsSync15(dir) && !isInsideReal(cwd, file)) {
     return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
   }
-  let st;
+  let fd = null;
   try {
-    st = lstatSync(file);
-  } catch {
-    return fail("RESULT_MISSING");
-  }
-  try {
-    if (st.isSymbolicLink() || !st.isFile()) {
-      return fail("RESULT_PATH_ESCAPE: the result is not a regular file");
+    try {
+      fd = openSync4(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    } catch (err) {
+      const code = err.code;
+      if (code === "ENOENT") return fail("RESULT_MISSING");
+      return notRegular();
     }
-    if (st.size > MAX_WORKER_RESULT_BYTES) {
+    const st = fstatSync(fd, { bigint: true });
+    let named;
+    try {
+      named = lstatSync(file, { bigint: true });
+    } catch {
+      return notRegular();
+    }
+    if (named.isSymbolicLink() || !st.isFile() || named.dev !== st.dev || named.ino !== st.ino || st.nlink !== 1n) {
+      return notRegular();
+    }
+    if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
+    }
+    const bytes = readBounded(fd, MAX_WORKER_RESULT_BYTES + 1);
+    if (bytes.length > MAX_WORKER_RESULT_BYTES) {
+      return fail(`RESULT_TOO_LARGE: over ${MAX_WORKER_RESULT_BYTES} bytes`);
     }
     let parsed;
     try {
-      parsed = JSON.parse(readFileSync10(file, "utf8"));
+      parsed = JSON.parse(bytes.toString("utf8"));
     } catch (err) {
       return fail(`RESULT_UNREADABLE: ${err.message}`);
     }
@@ -20058,6 +20124,7 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + "\n");
     return { result, failure: null };
   } finally {
+    if (fd !== null) closeSync4(fd);
     rmSync5(file, { force: true });
   }
 }
@@ -20369,7 +20436,7 @@ var ClaudeCliAdapter = class {
 
 // src/loops/contracts.ts
 var import_yaml4 = __toESM(require_dist(), 1);
-import { existsSync as existsSync17, readFileSync as readFileSync11 } from "node:fs";
+import { existsSync as existsSync17, readFileSync as readFileSync10 } from "node:fs";
 function validateLoops(value) {
   const problems = [];
   const parsed = value;
@@ -20417,7 +20484,7 @@ function loadLoops(file) {
       loops: []
     };
   }
-  return validateLoops(import_yaml4.default.parse(readFileSync11(file, "utf8")));
+  return validateLoops(import_yaml4.default.parse(readFileSync10(file, "utf8")));
 }
 function defaultLoops(featureId, mycelink) {
   const base = {
@@ -20545,7 +20612,7 @@ function writeLoops(file, loops) {
 }
 
 // src/hooks/entrypoint.ts
-import { existsSync as existsSync18, readFileSync as readFileSync12, readdirSync as readdirSync6 } from "node:fs";
+import { existsSync as existsSync18, readFileSync as readFileSync11, readdirSync as readdirSync6 } from "node:fs";
 import { join as join19, relative as relative3, resolve as resolve13, sep as sep3 } from "node:path";
 import { createHash as createHash6 } from "node:crypto";
 var MAX_BLOCK_BYTES = 1024;
@@ -20586,7 +20653,7 @@ function readStdin(io) {
 }
 function readAllStdinSync() {
   try {
-    return readFileSync12(0, "utf8");
+    return readFileSync11(0, "utf8");
   } catch {
     return "";
   }
@@ -20959,12 +21026,12 @@ function stopGuard(ctx, io, input) {
 }
 
 // src/knowledge/cli.ts
-import { readFileSync as readFileSync14 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 import { resolve as resolve15 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync19, mkdirSync as mkdirSync13, readFileSync as readFileSync13, readdirSync as readdirSync7, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync19, mkdirSync as mkdirSync13, readFileSync as readFileSync12, readdirSync as readdirSync7, statSync as statSync4 } from "node:fs";
 import { join as join20, relative as relative4, resolve as resolve14 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
@@ -21089,7 +21156,7 @@ function writePage(root, frontmatter, body) {
 }
 function readPage(file) {
   if (!existsSync19(file)) return null;
-  const parsed = parseFrontmatter(readFileSync13(file, "utf8"));
+  const parsed = parseFrontmatter(readFileSync12(file, "utf8"));
   if (parsed === null) return null;
   const problems = validateAgainstSchema("memory-page", parsed.frontmatter);
   if (problems.length > 0) return null;
@@ -21105,7 +21172,7 @@ function listPages(root) {
   const walk = (dir) => {
     for (const entry of readdirSync7(dir).sort()) {
       const full = join20(dir, entry);
-      if (statSync5(full).isDirectory()) {
+      if (statSync4(full).isDirectory()) {
         if (entry === "archive") continue;
         walk(full);
       } else if (entry.endsWith(".md") && entry !== "SCHEMA.md" && entry !== "index.md") {
@@ -21296,7 +21363,7 @@ function memoryCommand(args, io, controlRoot) {
       const title = flagString(args, "title", id);
       const status = flagString(args, "status", "instructed_not_verified");
       const bodyFile = args.flags["body-file"];
-      const body = typeof bodyFile === "string" ? readFileSync14(resolve15(bodyFile), "utf8") : flagString(args, "body", "");
+      const body = typeof bodyFile === "string" ? readFileSync13(resolve15(bodyFile), "utf8") : flagString(args, "body", "");
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const frontmatter = {
         id,
@@ -21722,7 +21789,7 @@ registerAdapter(eccAdapter);
 
 // src/cli/cli.ts
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync15(join21(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync14(join21(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -21877,13 +21944,13 @@ function doctor(args, io) {
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync20(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync20(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync14(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
   } else if (existsSync20(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
-    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
+    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync14(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
   }
   push("repositories.yaml", repoOk, repoDetail);
   if (repoOk) {
@@ -21966,7 +22033,7 @@ function repoGroup(args, io) {
     const path = flagString(args, "path");
     const baseBranch = flagString(args, "base-branch", "main");
     const testCommand = args.passthrough.length > 0 ? args.passthrough : ["npm", "test"];
-    const manifest = existsSync20(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync20(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync14(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     manifest.repositories = manifest.repositories.filter((r) => r["name"] !== name);
     manifest.repositories.push({
       name,
@@ -22039,7 +22106,7 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync15(resolve16(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync14(resolve16(graphPath), "utf8"));
     }
     if (!existsSync20(paths.graph)) {
       io.err(
@@ -22186,7 +22253,7 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync15(resolve16(file), "utf8");
+      files[role] = readFileSync14(resolve16(file), "utf8");
     }
     const repositories = existsSync20(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
@@ -22220,7 +22287,7 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync15(resolve16(source), "utf8"));
+    const parsed = import_yaml7.default.parse(readFileSync14(resolve16(source), "utf8"));
     const repositories = existsSync20(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
@@ -22477,9 +22544,10 @@ function tddGroup(args, io) {
   const runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
   const declared = node.verification_commands[0];
-  const usePassthrough = args.passthrough.length > 0;
-  const command = usePassthrough ? args.passthrough : declared?.command ?? [];
-  if (command.length === 0) throw new Error("No command given and the node declares no verifier.");
+  let invocation;
+  if (args.passthrough.length > 0) invocation = { command: args.passthrough };
+  else if (declared !== void 0 && declared.command.length > 0) invocation = verifierInvocation(declared);
+  else throw new Error("No command given and the node declares no verifier.");
   const cwd = typeof args.flags["cwd"] === "string" ? resolve16(String(args.flags["cwd"])) : runtime.claim?.worktree ?? controlRoot;
   const repoDecl = node.repository ? loadRepositories(controlRoot).repositories.find((r) => r.name === node.repository) : void 0;
   const kind = phase === "red" ? "red" : phase === "green" ? "green" : "regression";
@@ -22487,14 +22555,11 @@ function tddGroup(args, io) {
     kind,
     nodeId,
     repository: node.repository,
-    command,
+    ...invocation,
     cwd,
     evidenceDir: nodeEvidenceDir(controlRoot, featureId, nodeId),
     ...phase === "red" ? { expectExit: -1 } : {},
     baselineFailures: repoDecl?.baseline_failures ?? [],
-    // An explicit `-- <argv>` from the operator is always argv; a declared
-    // verifier may ask for a shell, which the control-repo config must allow.
-    shell: !usePassthrough && declared?.shell === true,
     allowShell: loadConfig(controlRoot).allow_shell_commands
   });
   mutateState(paths.featureDir, (s) => {
@@ -22848,7 +22913,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync20(paths.decisions) ? readFileSync15(paths.decisions, "utf8") : "";
+    const body = existsSync20(paths.decisions) ? readFileSync14(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -22930,7 +22995,7 @@ function checkpointGroup(args, io) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync15(join21(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync14(join21(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -22945,7 +23010,7 @@ function checkpointGroup(args, io) {
     const name = requirePositional(args, 3, "checkpoint-file");
     assertPlainFileName(name);
     const file = join21(paths.checkpointsDir, name);
-    const checkpoint = JSON.parse(readFileSync15(file, "utf8"));
+    const checkpoint = JSON.parse(readFileSync14(file, "utf8"));
     saveState(paths.featureDir, checkpoint.state);
     emit2(io, args, { restored: name }, () => `Restored ${name}.`);
     return 0;
