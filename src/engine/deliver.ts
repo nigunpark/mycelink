@@ -27,6 +27,7 @@ import { writeTextAtomic } from '../state/atomic-json.js';
 import { appendEvent } from '../state/event-log.js';
 import { assertCandidateId } from '../security/names.js';
 import { featureVerifyProblems } from './feature-verify.js';
+import { withLock } from '../state/process-lock.js';
 
 export type DeliveryStatus = 'DELIVERING' | 'DELIVERED' | 'ROLLED_BACK' | 'ACCEPTED' | 'ACCEPTANCE_FAILED';
 type Method = 'fast-forward-checkout' | 'update-ref' | 'already-delivered';
@@ -101,6 +102,18 @@ export function deliverFeature(
   featureId: string,
   options: { candidateId?: string } = {},
 ): DeliveryResult {
+  // One delivery per feature at a time: a concurrent run's rollback must
+  // never undo another run's fast-forwards.
+  const lockDir = join(featurePaths(controlRoot, featureId).featureDir, 'deliveries');
+  mkdirSync(lockDir, { recursive: true });
+  return withLock(join(lockDir, 'deliver.lock'), () => deliverLocked(controlRoot, featureId, options), {
+    timeoutMs: 2_000,
+    pollMs: 50,
+    purpose: 'feature delivery',
+  });
+}
+
+function deliverLocked(controlRoot: string, featureId: string, options: { candidateId?: string }): DeliveryResult {
   const workspace = loadWorkspace(controlRoot);
   const paths = featurePaths(controlRoot, featureId);
   const state = loadState(paths.featureDir)?.data;
@@ -204,6 +217,10 @@ export function deliverFeature(
       const step = plan[name] as DeliveredRepository;
       const repo = repositoryPath(workspace, name);
       if (step.method === 'fast-forward-checkout') {
+        // merge has no compare-and-swap: re-check the base right before it,
+        // so a base that moved since the precheck is never overwritten.
+        const now = resolveRef(repo, step.base_branch);
+        if (now !== step.before) throw new Error(`${name} ${step.base_branch} moved to ${now} after the precheck`);
         runGit(step.checkout as string, ['merge', '--ff-only', '--quiet', step.target]);
         moved.push(name);
       } else if (step.method === 'update-ref') {

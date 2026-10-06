@@ -7,7 +7,7 @@
  * bound SHA requires a new candidate id — never an edit in place.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 import { dirtyPaths, isWorktreeClean, resolveRef, runGit } from './git.js';
@@ -127,6 +127,8 @@ const BOOKKEEPING: readonly RegExp[] = [
   /^features\/[^/]+\/(events|RUNS)(\.\d{5})?\.jsonl$/,
   /^features\/[^/]+\/(evidence|sessions|context-packs|checkpoints|candidates|metrics|deliveries)\//,
   /\.lock$/,
+  // writeTextAtomic's temp files, mid-write or left by a crash.
+  /\.tmp-\d+-[0-9a-f]+$/,
   /(^|\/)\.gitkeep$/,
   /^\.mycelink\//,
   /(^|\/)\.mycelink-worker\//,
@@ -173,20 +175,21 @@ export function controlInputs(controlRepo: string, featureId: string): { path: s
     const path = rel.replace(/\\/g, '/');
     if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
     const full = join(control, ...path.split('/'));
-    // Deleted-but-tracked files and links are not content.
-    if (!isRegularFile(full)) continue;
+    let st;
+    try {
+      st = lstatSync(full);
+    } catch {
+      continue; // Deleted but still tracked: not content.
+    }
+    if (st.isSymbolicLink()) {
+      // A link's meaning is where it points; re-pointing it is drift.
+      out.push({ path, sha256: createHash('sha256').update(`link:${readlinkSync(full)}`).digest('hex') });
+      continue;
+    }
+    if (!st.isFile()) continue;
     out.push({ path, sha256: STRUCTURED.test(path) ? canonicalHash(full) : textHash(full) });
   }
   return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-}
-
-function isRegularFile(p: string): boolean {
-  try {
-    const st = lstatSync(p);
-    return st.isFile() && !st.isSymbolicLink();
-  } catch {
-    return false;
-  }
 }
 
 /** Hash of the manifest content excluding the hash field itself. */

@@ -50,6 +50,8 @@ export interface IntegrateArgs {
   /** Where integration worktrees live (one per repository + feature). */
   integrationRoot: string;
   repositoryName?: string;
+  /** The commit fresh verification checked; the branch must still be there. */
+  expectedSha?: string;
 }
 
 export interface IntegrateResult {
@@ -112,6 +114,11 @@ export function integrateNodeBranch(args: IntegrateArgs): IntegrateResult {
   }
 
   const nodeSha = resolveRef(repo, args.nodeBranch);
+  if (args.expectedSha !== undefined && nodeSha !== args.expectedSha) {
+    throw new Error(
+      `NODE_BRANCH_MOVED: ${args.nodeBranch} is at ${nodeSha}, but fresh verification checked ${args.expectedSha}; the newer commit was never verified.`,
+    );
+  }
   const headSha = resolveRef(worktree, 'HEAD');
 
   if (isAncestor(worktree, nodeSha, headSha)) {

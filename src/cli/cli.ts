@@ -46,7 +46,7 @@ import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
 import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
-import { assertDecisionRecorded } from '../state/decisions.js';
+import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
 import { preflightAdapter } from '../sessions/preflight.js';
 import { featureVerifyProblems } from '../engine/feature-verify.js';
 import { deliverFeature } from '../engine/deliver.js';
@@ -113,7 +113,7 @@ const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
   repo: new Set(['register', 'lock']),
   graph: new Set(['compile', 'import']),
   feature: new Set(['init', 'cancel']),
-  node: new Set(['claim', 'block', 'invalidate', 'release']),
+  node: new Set(['claim', 'block', 'invalidate', 'release', 'verify']),
   session: new Set(['spawn', 'reconcile', 'stop']),
   evidence: new Set(['migrate']),
   branch: new Set(['create', 'integrate']),
@@ -494,7 +494,8 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
             'Pass --decision <recorded decision id> to start over deliberately.',
         );
       }
-      assertDecisionRecorded(paths.events, decisionId);
+      assertDecisionUsable(paths.events, decisionId);
+      markDecisionApplied(paths.events, featureId, decisionId, 'feature init');
     }
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags['graph'];
@@ -763,12 +764,14 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       // Cascades: a downstream node's evidence was produced against the old
       // upstream, so leaving it DONE would let a stale candidate look verified.
       const decisionId = typeof args.flags['decision'] === 'string' ? args.flags['decision'] : undefined;
-      if (decisionId !== undefined) assertDecisionRecorded(featurePaths(controlRoot, featureId).events, decisionId);
+      const eventsLog = featurePaths(controlRoot, featureId).events;
+      if (decisionId !== undefined) assertDecisionUsable(eventsLog, decisionId);
       const invalidated = orchestrator.invalidateWithDependents(
         nodeId,
         flagString(args, 'reason', 'invalidated'),
         decisionId !== undefined ? { decisionId } : {},
       );
+      if (decisionId !== undefined) markDecisionApplied(eventsLog, featureId, decisionId, `node invalidate ${nodeId}`);
       emit(io, args, { node_id: nodeId, invalidated }, () =>
         `INVALIDATED: ${invalidated.join(', ')}`,
       );
@@ -784,7 +787,8 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       return report.outcome === 'DONE' ? 0 : 1;
     }
     case 'verify': {
-      const result = orchestrator.freshVerify(nodeId);
+      // A diagnostic: its logs never replace the evidence a settle recorded.
+      const result = orchestrator.freshVerify(nodeId, { labelPrefix: 'check' });
       emit(io, args, result, () =>
         `${result.ok ? 'ok  ' : 'FAIL'} ${nodeId}: ${result.detail}`,
       );
@@ -950,6 +954,12 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
 
   if (sub === 'record') {
     const kind = flagString(args, 'kind') as EvidenceKind;
+    // A worker may attest only what it does itself. Regression, review, E2E
+    // and candidate evidence come from controller paths (fresh verification,
+    // the E2E runner, candidate builds), never from a claim holder's argv.
+    if (!WORKER_EVIDENCE_KINDS.has(kind)) {
+      throw new Error(`EVIDENCE_KIND_NOT_ALLOWED: "${kind}" evidence is recorded by the controller, not by evidence record.`);
+    }
     const capability = presentedCapability(args);
     const runtime = loadState(paths.featureDir)?.data.nodes[nodeId];
     assertClaimCapability(nodeId, runtime, capability);
@@ -1076,6 +1086,8 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
  * Where a worker-scoped command runs: the claim's worktree, or a `--cwd`
  * inside it. A gate run somewhere else would prove nothing about the claim.
  */
+const WORKER_EVIDENCE_KINDS: ReadonlySet<string> = new Set(['red', 'green', 'refactor']);
+
 function claimedCwd(worktree: string | null, args: ParsedArgs, controlRoot: string): string {
   const base = worktree ?? controlRoot;
   if (typeof args.flags['cwd'] !== 'string') return base;
@@ -1495,7 +1507,7 @@ function decisionGroup(args: ParsedArgs, io: CliIo): number {
   if (sub === 'apply') {
     assertControllerRole(args, 'decision apply');
     const decisionId = requirePositional(args, 3, 'decision-id');
-    assertDecisionRecorded(paths.events, decisionId);
+    assertDecisionUsable(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
     const unblocked: string[] = [];
     mutateState(paths.featureDir, (s) => {
@@ -1515,6 +1527,7 @@ function decisionGroup(args: ParsedArgs, io: CliIo): number {
       }
       return next;
     });
+    markDecisionApplied(paths.events, featureId, decisionId, 'decision apply');
     emit(io, args, { decision_id: decisionId, unblocked }, () =>
       `Applied ${decisionId}; unblocked ${unblocked.join(', ') || '(none)'}.`,
     );
@@ -1575,9 +1588,26 @@ function checkpointGroup(args: ParsedArgs, io: CliIo): number {
     assertControllerRole(args, 'checkpoint restore');
     const name = requirePositional(args, 3, 'checkpoint-file');
     assertPlainFileName(name);
+    // Restoring rewrites STATE.json wholesale, outside the state machine:
+    // it could unblock parked nodes or revive invalidated work, so it needs
+    // a recorded decision, like any other way out of a parked state.
+    const decisionId = args.flags['decision'];
+    if (typeof decisionId !== 'string') {
+      throw new Error('DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.');
+    }
+    assertDecisionUsable(paths.events, decisionId);
     const file = join(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync(file, 'utf8')) as { state: Parameters<typeof saveState>[1] };
-    saveState(paths.featureDir, checkpoint.state);
+    const restored = structuredClone(checkpoint.state);
+    // No claim survives a restore: its capability may since have been
+    // rotated or abandoned, and its holder is not this checkpoint.
+    for (const runtime of Object.values(restored.nodes)) {
+      if (runtime.claim !== null && IN_FLIGHT_STATES.has(runtime.state)) runtime.state = 'READY';
+      runtime.claim = null;
+    }
+    saveState(paths.featureDir, restored);
+    for (const nodeId of Object.keys(restored.nodes)) releaseAllForNode(paths.featureDir, nodeId);
+    markDecisionApplied(paths.events, featureId, decisionId, `checkpoint restore ${name}`);
     emit(io, args, { restored: name }, () => `Restored ${name}.`);
     return 0;
   }

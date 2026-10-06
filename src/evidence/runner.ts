@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { runCommandSync, runShellScriptSync, shellScriptOf } from '../security/exec.js';
 import { redactText } from '../security/redact.js';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { EvidenceKind, EvidenceRecord } from '../model/types.js';
 import { resolveRef } from '../git/git.js';
@@ -231,7 +231,10 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
 
   const label = args.label ?? args.kind;
   const outputPath = join(evidenceDir, `${safe(args.nodeId)}.${safe(label)}.log`);
-  writeFileSync(outputPath, output, 'utf8');
+  // Remove whatever is at the path (a planted link is unlinked, never
+  // followed) and create the file exclusively.
+  rmSync(outputPath, { force: true });
+  writeFileSync(outputPath, output, { encoding: 'utf8', flag: 'wx' });
   const outputSha = createHash('sha256').update(Buffer.from(output, 'utf8')).digest('hex');
 
   const baseline = args.baselineFailures ?? [];

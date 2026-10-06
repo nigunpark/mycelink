@@ -251,8 +251,10 @@ export class ClaudeCliAdapter implements SessionAdapter {
     const log = createWriteStream(resolve(request.logPath), { flags: 'a' });
     // The session log is durable: secrets echoed by tools or tests are
     // redacted line by line before they reach disk.
-    const outRedactor = new LineRedactor();
-    const errRedactor = new LineRedactor();
+    // The worker's environment, not the controller's: it carries the claim
+    // capability (MYCELINK_CLAIM_TOKEN), which tool calls echo into the stream.
+    const outRedactor = new LineRedactor(workerEnv);
+    const errRedactor = new LineRedactor(workerEnv);
     child.stdout.on('end', () => log.write(outRedactor.flush()));
     child.stderr.on('end', () => log.write(errRedactor.flush()));
     let buffer = '';

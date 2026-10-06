@@ -17476,7 +17476,7 @@ var LineRedactor = class {
 };
 
 // src/evidence/runner.ts
-import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { mkdirSync as mkdirSync4, rmSync as rmSync3, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join10, resolve as resolve7 } from "node:path";
 
 // src/git/git.ts
@@ -17786,7 +17786,8 @@ function runVerification(args) {
   const expectExit = args.expectExit ?? 0;
   const label = args.label ?? args.kind;
   const outputPath = join10(evidenceDir, `${safe(args.nodeId)}.${safe(label)}.log`);
-  writeFileSync2(outputPath, output, "utf8");
+  rmSync3(outputPath, { force: true });
+  writeFileSync2(outputPath, output, { encoding: "utf8", flag: "wx" });
   const outputSha = createHash3("sha256").update(Buffer.from(output, "utf8")).digest("hex");
   const baseline = args.baselineFailures ?? [];
   const { text: filtered, matched } = stripBaselineFailures(output, baseline);
@@ -17836,15 +17837,15 @@ function safeHead(cwd) {
 // src/git/candidate.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash4 } from "node:crypto";
-import { existsSync as existsSync10, lstatSync as lstatSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync as readdirSync2 } from "node:fs";
+import { existsSync as existsSync10, lstatSync as lstatSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, readlinkSync } from "node:fs";
 import { basename as basename2, join as join13, relative as relative3, resolve as resolve10 } from "node:path";
 
 // src/git/integrate.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync6, rmSync as rmSync4 } from "node:fs";
+import { existsSync as existsSync9, mkdirSync as mkdirSync6, rmSync as rmSync5 } from "node:fs";
 import { join as join12, resolve as resolve9 } from "node:path";
 
 // src/git/worktree.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync5, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync8, mkdirSync as mkdirSync5, rmSync as rmSync4 } from "node:fs";
 import { join as join11, resolve as resolve8 } from "node:path";
 var AllowedPathViolationError = class extends Error {
   violations;
@@ -17883,7 +17884,7 @@ function createWorkerWorktree(args) {
     runGit(repo, ["worktree", "prune"], { allowFail: true });
   }
   if (existsSync8(target)) {
-    rmSync3(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    rmSync4(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
   if (branchExists(repo, branch)) {
     runGit(repo, ["worktree", "add", target, branch]);
@@ -17902,7 +17903,7 @@ function removeWorkerWorktree(repoPath, worktree) {
   const repo = resolve8(repoPath);
   runGit(repo, ["worktree", "remove", "--force", resolve8(worktree)], { allowFail: true });
   if (existsSync8(worktree)) {
-    rmSync3(worktree, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    rmSync4(worktree, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
   runGit(repo, ["worktree", "prune"], { allowFail: true });
 }
@@ -17991,7 +17992,7 @@ function ensureIntegrationWorktree(args) {
     runGit(repo, ["worktree", "prune"], { allowFail: true });
   }
   if (!existsSync9(target)) {
-    if (existsSync9(target)) rmSync4(target, { recursive: true, force: true });
+    if (existsSync9(target)) rmSync5(target, { recursive: true, force: true });
     if (branchExists(repo, branch)) {
       runGit(repo, ["worktree", "add", target, branch]);
     } else {
@@ -18012,6 +18013,11 @@ function integrateNodeBranch(args) {
     throw new DirtyWorktreeError(worktree, dirtyPaths(worktree));
   }
   const nodeSha = resolveRef(repo, args.nodeBranch);
+  if (args.expectedSha !== void 0 && nodeSha !== args.expectedSha) {
+    throw new Error(
+      `NODE_BRANCH_MOVED: ${args.nodeBranch} is at ${nodeSha}, but fresh verification checked ${args.expectedSha}; the newer commit was never verified.`
+    );
+  }
   const headSha = resolveRef(worktree, "HEAD");
   if (isAncestor(worktree, nodeSha, headSha)) {
     return { sha: headSha, branch, strategy: "already-integrated", integrationWorktree: worktree };
@@ -18114,6 +18120,8 @@ var BOOKKEEPING = [
   /^features\/[^/]+\/(events|RUNS)(\.\d{5})?\.jsonl$/,
   /^features\/[^/]+\/(evidence|sessions|context-packs|checkpoints|candidates|metrics|deliveries)\//,
   /\.lock$/,
+  // writeTextAtomic's temp files, mid-write or left by a crash.
+  /\.tmp-\d+-[0-9a-f]+$/,
   /(^|\/)\.gitkeep$/,
   /^\.mycelink\//,
   /(^|\/)\.mycelink-worker\//
@@ -18142,18 +18150,20 @@ function controlInputs(controlRepo, featureId) {
     const path = rel.replace(/\\/g, "/");
     if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
     const full = join13(control, ...path.split("/"));
-    if (!isRegularFile(full)) continue;
+    let st;
+    try {
+      st = lstatSync3(full);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) {
+      out.push({ path, sha256: createHash4("sha256").update(`link:${readlinkSync(full)}`).digest("hex") });
+      continue;
+    }
+    if (!st.isFile()) continue;
     out.push({ path, sha256: STRUCTURED.test(path) ? canonicalHash(full) : textHash(full) });
   }
   return out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-}
-function isRegularFile(p) {
-  try {
-    const st = lstatSync3(p);
-    return st.isFile() && !st.isSymbolicLink();
-  } catch {
-    return false;
-  }
 }
 function computeManifestHash(manifest) {
   return createHash4("sha256").update(stableStringify(manifest)).digest("hex");
@@ -18453,7 +18463,7 @@ import {
   readSync,
   renameSync as renameSync2,
   rmdirSync,
-  rmSync as rmSync5,
+  rmSync as rmSync6,
   unlinkSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
@@ -18795,17 +18805,17 @@ function prepareResultSlot(cwd) {
   if (existsSync11(dir) || isLink(dir)) {
     const st = lstatSync4(dir);
     if (st.isSymbolicLink()) removeLink(dir);
-    else if (!st.isDirectory()) rmSync5(dir, { force: true });
+    else if (!st.isDirectory()) rmSync6(dir, { force: true });
   }
   mkdirSync8(dir, { recursive: true });
   if (!isInsideReal(cwd, dir)) {
     throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", "result slot resolves outside the worktree");
   }
   const ignore = join14(dir, ".gitignore");
-  rmSync5(ignore, { force: true, recursive: true });
+  rmSync6(ignore, { force: true, recursive: true });
   writeFileSync3(ignore, "*\n", { encoding: "utf8", flag: "wx" });
   const file = join14(dir, WORKER_RESULT_FILE);
-  rmSync5(file, { force: true });
+  rmSync6(file, { force: true });
   return file;
 }
 function isLink(path) {
@@ -20015,7 +20025,8 @@ var Orchestrator = class {
    * worker left in its own working directory can make a failing suite look
    * green. Also re-checks the ownership fence against a real diff.
    */
-  freshVerify(nodeId) {
+  freshVerify(nodeId, options = {}) {
+    const labelPrefix = options.labelPrefix ?? "fresh";
     const node = this.node(nodeId);
     const evidence = [];
     if (node.repository === null) {
@@ -20027,10 +20038,13 @@ var Orchestrator = class {
     const branch = workerBranchName(this.featureId, nodeId);
     const verifyRoot = join18(this.workspace.paths.workDir, "verify");
     mkdirSync11(verifyRoot, { recursive: true });
-    const verifyDir = join18(verifyRoot, `${node.repository}__${nodeId.replace(/[^\w.-]/g, "_")}`);
-    runGit(repoPath, ["worktree", "remove", "--force", verifyDir], { allowFail: true });
+    const verifyDir = join18(
+      verifyRoot,
+      `${node.repository}__${nodeId.replace(/[^\w.-]/g, "_")}__${randomUUID2().slice(0, 8)}`
+    );
+    const sha = resolveRef(repoPath, branch);
     runGit(repoPath, ["worktree", "prune"], { allowFail: true });
-    runGit(repoPath, ["worktree", "add", "--detach", verifyDir, branch]);
+    runGit(repoPath, ["worktree", "add", "--detach", verifyDir, sha]);
     runGit(verifyDir, ["config", "core.autocrlf", "false"], { allowFail: true });
     try {
       const base = resolveRef(repoPath, baseBranch);
@@ -20042,6 +20056,7 @@ var Orchestrator = class {
         return {
           ok: false,
           evidence,
+          sha,
           detail: `OWNERSHIP_VIOLATION: ${fence.violations.slice(0, 10).join(", ")}`
         };
       }
@@ -20054,7 +20069,7 @@ var Orchestrator = class {
           ...verifierInvocation(verifier),
           cwd: verifier.cwd ? join18(verifyDir, verifier.cwd) : verifyDir,
           evidenceDir,
-          label: `fresh-${verifier.id}`,
+          label: `${labelPrefix}-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
           allowShell: this.workspace.config.allow_shell_commands,
           pathBase: this.controlRoot,
@@ -20079,7 +20094,7 @@ var Orchestrator = class {
             command,
             cwd: verifyDir,
             evidenceDir,
-            label: "fresh-regression",
+            label: `${labelPrefix}-regression`,
             baselineFailures: repoDecl?.baseline_failures ?? [],
             pathBase: this.controlRoot
           });
@@ -20093,14 +20108,14 @@ var Orchestrator = class {
           }
         }
       }
-      return { ok: true, evidence, detail: "fresh verification passed" };
+      return { ok: true, evidence, sha, detail: "fresh verification passed" };
     } finally {
       runGit(repoPath, ["worktree", "remove", "--force", verifyDir], { allowFail: true });
       runGit(repoPath, ["worktree", "prune"], { allowFail: true });
     }
   }
   /** Merge a verified node branch into its repository integration branch. */
-  integrate(nodeId) {
+  integrate(nodeId, expectedSha) {
     const node = this.node(nodeId);
     if (node.repository === null) return null;
     const repoPath = repositoryPath(this.workspace, node.repository);
@@ -20111,7 +20126,8 @@ var Orchestrator = class {
       nodeBranch: workerBranchName(this.featureId, nodeId),
       baseBranch: repoDecl?.base_branch ?? "main",
       integrationRoot: this.workspace.paths.integrationDir,
-      repositoryName: node.repository
+      repositoryName: node.repository,
+      ...expectedSha !== void 0 ? { expectedSha } : {}
     });
     this.event("node.integrated", nodeId, {
       repository: node.repository,
@@ -20283,7 +20299,7 @@ var Orchestrator = class {
     try {
       if (this.state().nodes[nodeId]?.state !== "INTEGRATED") {
         this.advanceVerifiedGates(nodeId);
-        const sha = this.integrate(nodeId);
+        const sha = this.integrate(nodeId, verification.sha);
         this.transition(nodeId, "INTEGRATED", sha !== null ? { integratedSha: sha } : {});
       }
     } catch (err) {
@@ -21193,7 +21209,7 @@ function isProcessAlive(pid) {
 
 // src/sessions/claude-cli-adapter.ts
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync as existsSync16, mkdirSync as mkdirSync12, rmSync as rmSync6 } from "node:fs";
+import { createWriteStream, existsSync as existsSync16, mkdirSync as mkdirSync12, rmSync as rmSync7 } from "node:fs";
 import { dirname as dirname8, resolve as resolve13 } from "node:path";
 import { randomUUID as randomUUID3 } from "node:crypto";
 var PermissionPolicyError = class extends Error {
@@ -21257,7 +21273,7 @@ var ClaudeCliAdapter = class {
     const sessionId = randomUUID3();
     mkdirSync12(dirname8(resolve13(request.logPath)), { recursive: true });
     mkdirSync12(dirname8(resolve13(request.resultPath)), { recursive: true });
-    if (existsSync16(request.resultPath)) rmSync6(request.resultPath, { force: true });
+    if (existsSync16(request.resultPath)) rmSync7(request.resultPath, { force: true });
     const handle = {
       session_id: sessionId,
       adapter: this.name,
@@ -21332,8 +21348,8 @@ var ClaudeCliAdapter = class {
     });
     child.stdin.end(prompt, "utf8");
     const log = createWriteStream(resolve13(request.logPath), { flags: "a" });
-    const outRedactor = new LineRedactor();
-    const errRedactor = new LineRedactor();
+    const outRedactor = new LineRedactor(workerEnv);
+    const errRedactor = new LineRedactor(workerEnv);
     child.stdout.on("end", () => log.write(outRedactor.flush()));
     child.stderr.on("end", () => log.write(errRedactor.flush()));
     let buffer = "";
@@ -22864,6 +22880,32 @@ var DecisionNotRecordedError = class extends Error {
     this.name = "DecisionNotRecordedError";
   }
 };
+var DecisionAlreadyAppliedError = class extends Error {
+  constructor(decisionId) {
+    super(
+      `DECISION_ALREADY_APPLIED: decision "${decisionId}" was already used to unblock work; record a new decision for a new problem.`
+    );
+    this.name = "DecisionAlreadyAppliedError";
+  }
+};
+function isDecisionApplied(eventsLog, decisionId) {
+  return readEvents(eventsLog, { includeRotated: true, type: "decision.applied" }).some(
+    (e) => e.data?.decision_id === decisionId
+  );
+}
+function assertDecisionUsable(eventsLog, decisionId) {
+  assertDecisionRecorded(eventsLog, decisionId);
+  if (isDecisionApplied(eventsLog, decisionId)) throw new DecisionAlreadyAppliedError(decisionId);
+}
+function markDecisionApplied(eventsLog, featureId, decisionId, use) {
+  appendEvent(eventsLog, {
+    idempotency_key: `decision.applied:${decisionId}`,
+    type: "decision.applied",
+    actor: "mycelink",
+    feature_id: featureId,
+    data: { decision_id: decisionId, use }
+  });
+}
 function isDecisionRecorded(eventsLog, decisionId) {
   return readEvents(eventsLog, { includeRotated: true, type: "decision.recorded" }).some(
     (e) => e.data?.decision_id === decisionId
@@ -23023,6 +23065,15 @@ function save3(file, manifest) {
   writeTextAtomic(file, JSON.stringify(manifest, null, 2) + "\n");
 }
 function deliverFeature(controlRoot, featureId, options = {}) {
+  const lockDir = join22(featurePaths(controlRoot, featureId).featureDir, "deliveries");
+  mkdirSync14(lockDir, { recursive: true });
+  return withLock(join22(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
+    timeoutMs: 2e3,
+    pollMs: 50,
+    purpose: "feature delivery"
+  });
+}
+function deliverLocked(controlRoot, featureId, options) {
   const workspace = loadWorkspace(controlRoot);
   const paths = featurePaths(controlRoot, featureId);
   const state = loadState(paths.featureDir)?.data;
@@ -23115,6 +23166,8 @@ function deliverFeature(controlRoot, featureId, options = {}) {
       const step = plan[name];
       const repo = repositoryPath(workspace, name);
       if (step.method === "fast-forward-checkout") {
+        const now = resolveRef(repo, step.base_branch);
+        if (now !== step.before) throw new Error(`${name} ${step.base_branch} moved to ${now} after the precheck`);
         runGit(step.checkout, ["merge", "--ff-only", "--quiet", step.target]);
         moved.push(name);
       } else if (step.method === "update-ref") {
@@ -23248,7 +23301,7 @@ var CONTROLLER_ONLY = {
   repo: /* @__PURE__ */ new Set(["register", "lock"]),
   graph: /* @__PURE__ */ new Set(["compile", "import"]),
   feature: /* @__PURE__ */ new Set(["init", "cancel"]),
-  node: /* @__PURE__ */ new Set(["claim", "block", "invalidate", "release"]),
+  node: /* @__PURE__ */ new Set(["claim", "block", "invalidate", "release", "verify"]),
   session: /* @__PURE__ */ new Set(["spawn", "reconcile", "stop"]),
   evidence: /* @__PURE__ */ new Set(["migrate"]),
   branch: /* @__PURE__ */ new Set(["create", "integrate"]),
@@ -23576,7 +23629,8 @@ function featureGroup(args, io) {
           `STATE_EXISTS: ${featureId} already has progressed state; re-initialising would erase it. Pass --decision <recorded decision id> to start over deliberately.`
         );
       }
-      assertDecisionRecorded(paths.events, decisionId);
+      assertDecisionUsable(paths.events, decisionId);
+      markDecisionApplied(paths.events, featureId, decisionId, "feature init");
     }
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
@@ -23836,12 +23890,14 @@ capability: ${claim.capability} (pass it as --capability to tdd and node finaliz
     case "invalidate": {
       assertControllerRole(args, "node invalidate");
       const decisionId = typeof args.flags["decision"] === "string" ? args.flags["decision"] : void 0;
-      if (decisionId !== void 0) assertDecisionRecorded(featurePaths(controlRoot, featureId).events, decisionId);
+      const eventsLog = featurePaths(controlRoot, featureId).events;
+      if (decisionId !== void 0) assertDecisionUsable(eventsLog, decisionId);
       const invalidated = orchestrator.invalidateWithDependents(
         nodeId,
         flagString(args, "reason", "invalidated"),
         decisionId !== void 0 ? { decisionId } : {}
       );
+      if (decisionId !== void 0) markDecisionApplied(eventsLog, featureId, decisionId, `node invalidate ${nodeId}`);
       emit2(
         io,
         args,
@@ -23861,7 +23917,7 @@ capability: ${claim.capability} (pass it as --capability to tdd and node finaliz
       return report.outcome === "DONE" ? 0 : 1;
     }
     case "verify": {
-      const result = orchestrator.freshVerify(nodeId);
+      const result = orchestrator.freshVerify(nodeId, { labelPrefix: "check" });
       emit2(
         io,
         args,
@@ -24016,6 +24072,9 @@ function evidenceGroup(args, io) {
   }
   if (sub === "record") {
     const kind = flagString(args, "kind");
+    if (!WORKER_EVIDENCE_KINDS.has(kind)) {
+      throw new Error(`EVIDENCE_KIND_NOT_ALLOWED: "${kind}" evidence is recorded by the controller, not by evidence record.`);
+    }
     const capability = presentedCapability(args);
     const runtime = loadState(paths.featureDir)?.data.nodes[nodeId];
     assertClaimCapability(nodeId, runtime, capability);
@@ -24114,6 +24173,7 @@ function tddGroup(args, io) {
   );
   return 0;
 }
+var WORKER_EVIDENCE_KINDS = /* @__PURE__ */ new Set(["red", "green", "refactor"]);
 function claimedCwd(worktree, args, controlRoot) {
   const base = worktree ?? controlRoot;
   if (typeof args.flags["cwd"] !== "string") return base;
@@ -24479,7 +24539,7 @@ ${answer}
   if (sub === "apply") {
     assertControllerRole(args, "decision apply");
     const decisionId = requirePositional(args, 3, "decision-id");
-    assertDecisionRecorded(paths.events, decisionId);
+    assertDecisionUsable(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
     const unblocked = [];
     mutateState(paths.featureDir, (s) => {
@@ -24499,6 +24559,7 @@ ${answer}
       }
       return next;
     });
+    markDecisionApplied(paths.events, featureId, decisionId, "decision apply");
     emit2(
       io,
       args,
@@ -24556,9 +24617,21 @@ function checkpointGroup(args, io) {
     assertControllerRole(args, "checkpoint restore");
     const name = requirePositional(args, 3, "checkpoint-file");
     assertPlainFileName(name);
+    const decisionId = args.flags["decision"];
+    if (typeof decisionId !== "string") {
+      throw new Error("DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.");
+    }
+    assertDecisionUsable(paths.events, decisionId);
     const file = join23(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync16(file, "utf8"));
-    saveState(paths.featureDir, checkpoint.state);
+    const restored = structuredClone(checkpoint.state);
+    for (const runtime of Object.values(restored.nodes)) {
+      if (runtime.claim !== null && IN_FLIGHT_STATES.has(runtime.state)) runtime.state = "READY";
+      runtime.claim = null;
+    }
+    saveState(paths.featureDir, restored);
+    for (const nodeId of Object.keys(restored.nodes)) releaseAllForNode(paths.featureDir, nodeId);
+    markDecisionApplied(paths.events, featureId, decisionId, `checkpoint restore ${name}`);
     emit2(io, args, { restored: name }, () => `Restored ${name}.`);
     return 0;
   }

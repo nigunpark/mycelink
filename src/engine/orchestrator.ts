@@ -646,7 +646,11 @@ export class Orchestrator {
    * worker left in its own working directory can make a failing suite look
    * green. Also re-checks the ownership fence against a real diff.
    */
-  freshVerify(nodeId: string): { ok: boolean; evidence: EvidenceRecord[]; detail: string } {
+  freshVerify(
+    nodeId: string,
+    options: { labelPrefix?: string } = {},
+  ): { ok: boolean; evidence: EvidenceRecord[]; detail: string; sha?: string } {
+    const labelPrefix = options.labelPrefix ?? 'fresh';
     const node = this.node(nodeId);
     const evidence: EvidenceRecord[] = [];
     if (node.repository === null) {
@@ -660,12 +664,19 @@ export class Orchestrator {
 
     const verifyRoot = join(this.workspace.paths.workDir, 'verify');
     mkdirSync(verifyRoot, { recursive: true });
-    const verifyDir = join(verifyRoot, `${node.repository}__${nodeId.replace(/[^\w.-]/g, '_')}`);
+    // One directory per verification, so a concurrent check never removes
+    // the checkout another verification is using.
+    const verifyDir = join(
+      verifyRoot,
+      `${node.repository}__${nodeId.replace(/[^\w.-]/g, '_')}__${randomUUID().slice(0, 8)}`,
+    );
 
-    // A clean checkout of exactly the node branch.
-    runGit(repoPath, ['worktree', 'remove', '--force', verifyDir], { allowFail: true });
+    // A clean checkout of exactly the commit the branch names now. That SHA
+    // is what gets integrated: a commit landing on the branch afterwards was
+    // never verified.
+    const sha = resolveRef(repoPath, branch);
     runGit(repoPath, ['worktree', 'prune'], { allowFail: true });
-    runGit(repoPath, ['worktree', 'add', '--detach', verifyDir, branch]);
+    runGit(repoPath, ['worktree', 'add', '--detach', verifyDir, sha]);
     runGit(verifyDir, ['config', 'core.autocrlf', 'false'], { allowFail: true });
 
     try {
@@ -678,6 +689,7 @@ export class Orchestrator {
         return {
           ok: false,
           evidence,
+          sha,
           detail: `OWNERSHIP_VIOLATION: ${fence.violations.slice(0, 10).join(', ')}`,
         };
       }
@@ -691,7 +703,7 @@ export class Orchestrator {
           ...verifierInvocation(verifier),
           cwd: verifier.cwd ? join(verifyDir, verifier.cwd) : verifyDir,
           evidenceDir,
-          label: `fresh-${verifier.id}`,
+          label: `${labelPrefix}-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
           allowShell: this.workspace.config.allow_shell_commands,
           pathBase: this.controlRoot,
@@ -717,7 +729,7 @@ export class Orchestrator {
             command,
             cwd: verifyDir,
             evidenceDir,
-            label: 'fresh-regression',
+            label: `${labelPrefix}-regression`,
             baselineFailures: repoDecl?.baseline_failures ?? [],
             pathBase: this.controlRoot,
           });
@@ -732,7 +744,7 @@ export class Orchestrator {
         }
       }
 
-      return { ok: true, evidence, detail: 'fresh verification passed' };
+      return { ok: true, evidence, sha, detail: 'fresh verification passed' };
     } finally {
       runGit(repoPath, ['worktree', 'remove', '--force', verifyDir], { allowFail: true });
       runGit(repoPath, ['worktree', 'prune'], { allowFail: true });
@@ -740,7 +752,7 @@ export class Orchestrator {
   }
 
   /** Merge a verified node branch into its repository integration branch. */
-  integrate(nodeId: string): string | null {
+  integrate(nodeId: string, expectedSha?: string): string | null {
     const node = this.node(nodeId);
     if (node.repository === null) return null;
     const repoPath = repositoryPath(this.workspace, node.repository);
@@ -752,6 +764,7 @@ export class Orchestrator {
       baseBranch: repoDecl?.base_branch ?? 'main',
       integrationRoot: this.workspace.paths.integrationDir,
       repositoryName: node.repository,
+      ...(expectedSha !== undefined ? { expectedSha } : {}),
     });
     this.event('node.integrated', nodeId, {
       repository: node.repository,
@@ -962,7 +975,7 @@ export class Orchestrator {
       // already happened (and integrating again would be a no-op anyway).
       if (this.state().nodes[nodeId]?.state !== 'INTEGRATED') {
         this.advanceVerifiedGates(nodeId);
-        const sha = this.integrate(nodeId);
+        const sha = this.integrate(nodeId, verification.sha);
         this.transition(nodeId, 'INTEGRATED', sha !== null ? { integratedSha: sha } : {});
       }
     } catch (err) {
