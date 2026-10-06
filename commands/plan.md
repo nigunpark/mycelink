@@ -38,4 +38,16 @@ Use the `portfolio-decomposition` and `graph-compilation` skills.
 7. Validate the loop contracts:
    `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" loop validate $0`
 
-Show the user the node list and the READY set. Do not start implementing.
+Show the user the node list and the READY set. This command plans only; it
+does not implement nodes itself.
+
+## When this is one phase of a run
+
+If this was invoked by `/mycelink:run`, or the user asked for the feature
+to be built or delivered end to end, do not stop here: hand control back
+and continue immediately with the dispatch loop of `/mycelink:run $0`
+(Phase 4) through to delivery. Only a real unresolved product decision
+pauses the run.
+
+Invoked on its own for just a plan, report the graph and the READY set and
+end there.

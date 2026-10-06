@@ -32,4 +32,17 @@ privacy, scope, budget, or a choice between two valid designs with different
 product meaning. Decide ordinary implementation details yourself by following
 the existing code.
 
-Stop when the PRD is written. Do not plan or implement.
+This command writes the PRD only; planning and implementation are the
+next phases. Commit `features/$0/PRD.md` in the control repository.
+
+## When this is one phase of a run
+
+If this was invoked by `/mycelink:run`, or the user asked for the feature
+to be built or delivered end to end, do not stop here: hand control back
+and continue immediately with `/mycelink:plan $0`, then the rest of the
+`/mycelink:run` phases. Only a real unresolved product decision (one of the
+kinds above, asked with AskUserQuestion) pauses the run, and it resumes once
+the user answers.
+
+Invoked on its own for just a PRD, report the PRD path and its open
+questions and end there.

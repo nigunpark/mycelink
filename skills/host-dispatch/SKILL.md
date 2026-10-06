@@ -71,7 +71,7 @@ repeat at most 3 × (number of graph nodes) times:
 
 | status | what to do |
 |---|---|
-| `ALL_SETTLED` | `M feature verify`, `M candidate verify`, then `M deliver <feature> --json --authority <key>` |
+| `ALL_SETTLED` | `M feature verify`, `M candidate verify` (no current candidate: `M candidate create <feature> --authority <key>`), then `M deliver <feature> --json --authority <key>` |
 | `WAITING` | an unsettled ticket exists: `M session reconcile <feature> --json --authority <key>`, then `M dispatch <feature> --resume <node> --json --authority <key>` |
 | `NEEDS_DECISION` | ask the user; `M decision record ... --authority <key>`, then `M decision apply ... --authority <key>` |
 | `BLOCKED` | report the fingerprint and evidence; do not unblock it yourself |
@@ -98,6 +98,29 @@ repeat at most 3 × (number of graph nodes) times:
   with the same capability completes it. A repeated settle of an already
   settled claim returns its receipt and changes nothing.
 - A node interrupted more than three times is parked BLOCKED.
+
+## Repair inside the same feature
+
+A check that fails after a node was DONE (a dependent's fresh verification,
+the E2E, `deliver` acceptance, the product's own acceptance suite on the
+delivered commits) is repaired in the same feature, never under a new
+feature id:
+
+```text
+M node rework <feature> <node-id> --reason "<failing check and why this node owns it>" --json --authority <key>
+```
+
+It reopens the attributed producer node and everything downstream (the
+candidate build and E2E included) in dependency order, keeps the node's
+attempts and failure fingerprints (no fresh budget) and its replaced work as
+history, archives its branch, and makes the current candidate stale. Then
+continue the loop: the node is dispatched from the current integration
+state, settle fences only the repair, and a new candidate binds every
+repository. It is refused, changing nothing, while work is in flight, when
+the node's budget or rework limit is spent, when a parked node would be
+reopened without `--decision <id>`, or when a delivered base has moved past
+the integration branch. A parked (BLOCKED) node is never reworked; it needs
+a recorded decision.
 
 ## Delivery
 

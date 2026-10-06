@@ -39,3 +39,11 @@ Do this in order, and do not skip verification.
 
 Report the exact commands you ran and their exit codes. Do not claim the
 control repository is ready unless `doctor` exited 0.
+
+## When this is one phase of a run
+
+If this was invoked by `/mycelink:run`, or the user asked for a feature to
+be built or delivered end to end, do not stop here once `doctor` exits 0:
+keep the controller key and continue immediately with `/mycelink:prd`, then
+the rest of the `/mycelink:run` phases. Only a failing check you cannot fix
+yourself, or a real unresolved decision, stops the run.
