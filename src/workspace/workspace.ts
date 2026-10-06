@@ -1,7 +1,18 @@
 /**
  * Loading and initialising a control repository.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
 import type {
@@ -159,7 +170,56 @@ export function initControlRepo(controlRoot: string, config: Partial<MycelinkCon
   }
   const keep = join(paths.featuresDir, '.gitkeep');
   if (!existsSync(keep)) writeFileSync(keep, '');
+  ensureScratchIgnored(paths.controlRoot);
   return paths;
+}
+
+/** The ignore line `init` writes: anchored, so only the root scratch area matches. */
+export const SCRATCH_IGNORE_ENTRY = '/.mycelink/';
+const EQUIVALENT_SCRATCH_ENTRIES = new Set(['.mycelink', '.mycelink/', '/.mycelink', '/.mycelink/']);
+
+/**
+ * Make sure `<control>/.gitignore` ignores the `.mycelink/` scratch area.
+ *
+ * Existing content is kept and the entry is appended once. The file is opened
+ * without following a final link, and a link, a non-regular file or a file
+ * with more than one name (a hard link to something outside the repository)
+ * is refused rather than written through.
+ */
+export function ensureScratchIgnored(controlRoot: string): void {
+  const file = join(controlRoot, '.gitignore');
+  const refuse = (why: string): never => {
+    throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
+  };
+  let st;
+  try {
+    st = lstatSync(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // 'wx' fails if something appeared in the meantime; it never follows a link.
+    writeFileSync(file, `${SCRATCH_IGNORE_ENTRY}\n`, { encoding: 'utf8', flag: 'wx' });
+    return;
+  }
+  if (st.isSymbolicLink()) refuse('it is a link');
+  if (!st.isFile()) refuse('it is not a regular file');
+
+  const fd = openSync(file, constants.O_RDWR | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = fstatSync(fd);
+    // Where the open follows links (Windows has no O_NOFOLLOW), a link swapped
+    // in after the lstat is caught here, before anything is written through it.
+    if (lstatSync(file).isSymbolicLink()) refuse('it is a link');
+    if (!opened.isFile()) refuse('it is not a regular file');
+    if (opened.nlink !== 1) refuse('it has more than one name (hard link)');
+    if (opened.size > 1024 * 1024) refuse('it is larger than 1 MiB');
+    const text = readFileSync(fd, 'utf8');
+    const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
+    if (present) return;
+    const prefix = text === '' || text.endsWith('\n') ? '' : '\n';
+    writeSync(fd, `${prefix}${SCRATCH_IGNORE_ENTRY}\n`);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Create the directory skeleton for one feature. */

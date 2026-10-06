@@ -52,7 +52,9 @@ describe('README walkthrough', () => {
     expect(existsSync(join(control, '.claude', 'settings.json'))).toBe(true);
     expect(existsSync(join(control, 'repositories.yaml'))).toBe(true);
 
-    makeGitRepo(control, { files: { '.gitignore': '.mycelink/\n' } });
+    // init already wrote the .mycelink/ ignore entry; nothing is added by hand.
+    expect(readFileSync(join(control, '.gitignore'), 'utf8')).toMatch(/^\/\.mycelink\/$/m);
+    makeGitRepo(control, { files: { 'README.md': '# control\n' } });
 
     // Step 1b: repo register, exactly as documented (argv after `--`)
     for (const [name, path] of [

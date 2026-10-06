@@ -7746,11 +7746,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants2);
+          this.rhs = optimizeExpr(this.rhs, names, constants3);
         return this;
       }
       get names() {
@@ -7767,10 +7767,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants2);
+        this.rhs = optimizeExpr(this.rhs, names, constants3);
         return this;
       }
       get names() {
@@ -7831,8 +7831,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants2) {
-        this.code = optimizeExpr(this.code, names, constants2);
+      optimizeNames(names, constants3) {
+        this.code = optimizeExpr(this.code, names, constants3);
         return this;
       }
       get names() {
@@ -7861,12 +7861,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants2))
+          if (n.optimizeNames(names, constants3))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -7919,12 +7919,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
-        if (!(super.optimizeNames(names, constants2) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants3);
+        if (!(super.optimizeNames(names, constants3) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants2);
+        this.condition = optimizeExpr(this.condition, names, constants3);
         return this;
       }
       get names() {
@@ -7947,10 +7947,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants2) {
-        if (!super.optimizeNames(names, constants2))
+      optimizeNames(names, constants3) {
+        if (!super.optimizeNames(names, constants3))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants2);
+        this.iteration = optimizeExpr(this.iteration, names, constants3);
         return this;
       }
       get names() {
@@ -7986,10 +7986,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants2) {
-        if (!super.optimizeNames(names, constants2))
+      optimizeNames(names, constants3) {
+        if (!super.optimizeNames(names, constants3))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants2);
+        this.iterable = optimizeExpr(this.iterable, names, constants3);
         return this;
       }
       get names() {
@@ -8031,11 +8031,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         var _a, _b;
-        super.optimizeNames(names, constants2);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
+        super.optimizeNames(names, constants3);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants3);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants3);
         return this;
       }
       get names() {
@@ -8336,7 +8336,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants2) {
+    function optimizeExpr(expr, names, constants3) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -8351,14 +8351,14 @@ var require_codegen = __commonJS({
         return items2;
       }, []));
       function replaceName(n) {
-        const c = constants2[n.str];
+        const c = constants3[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants3[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -15540,7 +15540,18 @@ function safeSegment(value) {
 
 // src/workspace/workspace.ts
 var import_yaml = __toESM(require_dist(), 1);
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync } from "node:fs";
+import {
+  closeSync as closeSync3,
+  constants,
+  existsSync as existsSync5,
+  fstatSync,
+  lstatSync,
+  mkdirSync as mkdirSync3,
+  openSync as openSync3,
+  readFileSync as readFileSync4,
+  writeFileSync,
+  writeSync as writeSync3
+} from "node:fs";
 import { join as join7, resolve as resolve4 } from "node:path";
 
 // src/graph/validate.ts
@@ -16546,7 +16557,43 @@ function initControlRepo(controlRoot, config = {}) {
   }
   const keep = join7(paths.featuresDir, ".gitkeep");
   if (!existsSync5(keep)) writeFileSync(keep, "");
+  ensureScratchIgnored(paths.controlRoot);
   return paths;
+}
+var SCRATCH_IGNORE_ENTRY = "/.mycelink/";
+var EQUIVALENT_SCRATCH_ENTRIES = /* @__PURE__ */ new Set([".mycelink", ".mycelink/", "/.mycelink", "/.mycelink/"]);
+function ensureScratchIgnored(controlRoot) {
+  const file = join7(controlRoot, ".gitignore");
+  const refuse = (why) => {
+    throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
+  };
+  let st;
+  try {
+    st = lstatSync(file);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+    writeFileSync(file, `${SCRATCH_IGNORE_ENTRY}
+`, { encoding: "utf8", flag: "wx" });
+    return;
+  }
+  if (st.isSymbolicLink()) refuse("it is a link");
+  if (!st.isFile()) refuse("it is not a regular file");
+  const fd = openSync3(file, constants.O_RDWR | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = fstatSync(fd);
+    if (lstatSync(file).isSymbolicLink()) refuse("it is a link");
+    if (!opened.isFile()) refuse("it is not a regular file");
+    if (opened.nlink !== 1) refuse("it has more than one name (hard link)");
+    if (opened.size > 1024 * 1024) refuse("it is larger than 1 MiB");
+    const text = readFileSync4(fd, "utf8");
+    const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
+    if (present) return;
+    const prefix = text === "" || text.endsWith("\n") ? "" : "\n";
+    writeSync3(fd, `${prefix}${SCRATCH_IGNORE_ENTRY}
+`);
+  } finally {
+    closeSync3(fd);
+  }
 }
 function initFeatureDirs(controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
@@ -18677,7 +18724,7 @@ function hookHealth(controlRoot) {
 }
 
 // src/state/event-log.ts
-import { appendFileSync, closeSync as closeSync3, existsSync as existsSync13, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync3, readFileSync as readFileSync8, readdirSync as readdirSync4, renameSync as renameSync2, writeSync as writeSync3 } from "node:fs";
+import { appendFileSync, closeSync as closeSync4, existsSync as existsSync13, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync4, readFileSync as readFileSync8, readdirSync as readdirSync4, renameSync as renameSync2, writeSync as writeSync4 } from "node:fs";
 import { basename as basename3, dirname as dirname5, join as join16 } from "node:path";
 import { createHash as createHash4 } from "node:crypto";
 var EventTooLargeError = class extends Error {
@@ -18732,12 +18779,12 @@ function repairTornTail(log) {
   const lastNewline = raw.lastIndexOf("\n");
   const keep = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
   retrySync(() => {
-    const fd = openSync3(log, "r+");
+    const fd = openSync4(log, "r+");
     try {
       ftruncateSync(fd, Buffer.byteLength(keep, "utf8"));
       fsyncSync2(fd);
     } finally {
-      closeSync3(fd);
+      closeSync4(fd);
     }
   });
   return true;
@@ -18799,11 +18846,11 @@ function appendEvent(log, input, options = {}) {
       const line = JSON.stringify(event) + "\n";
       retrySync(() => appendFileSync(log, line, "utf8"));
       bestEffortSync(() => {
-        const fd = openSync3(log, "r+");
+        const fd = openSync4(log, "r+");
         try {
           fsyncSync2(fd);
         } finally {
-          closeSync3(fd);
+          closeSync4(fd);
         }
       });
       return { appended: true, event };
@@ -19905,14 +19952,14 @@ function zeroObservationUsage() {
 
 // src/sessions/worker-protocol.ts
 import {
-  closeSync as closeSync4,
-  constants,
+  closeSync as closeSync5,
+  constants as constants2,
   existsSync as existsSync15,
-  fstatSync,
-  lstatSync,
+  fstatSync as fstatSync2,
+  lstatSync as lstatSync2,
   mkdirSync as mkdirSync11,
   mkdtempSync,
-  openSync as openSync4,
+  openSync as openSync5,
   readdirSync as readdirSync6,
   readSync,
   renameSync as renameSync3,
@@ -19954,19 +20001,19 @@ function loadPromptPack(file, expected, env = process.env) {
   };
   let fd;
   try {
-    fd = openSync4(file, "r");
+    fd = openSync5(file, "r");
   } catch (err) {
     const missing = err.code === "ENOENT";
     return fail(missing ? "context pack is missing" : "context pack is unreadable");
   }
   let raw;
   try {
-    const st = fstatSync(fd);
+    const st = fstatSync2(fd);
     if (!st.isFile()) fail("context pack is not a regular file");
     if (st.size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${st.size} bytes`);
     raw = readBounded(fd, MAX_PROMPT_PACK_BYTES + 1);
   } finally {
-    closeSync4(fd);
+    closeSync5(fd);
   }
   if (raw.length > MAX_PROMPT_PACK_BYTES) fail(`context pack is over ${MAX_PROMPT_PACK_BYTES} bytes`);
   let pack;
@@ -20056,7 +20103,7 @@ function removeLink(path) {
 function prepareResultSlot(cwd) {
   const dir = join18(cwd, WORKER_RESULT_DIR);
   if (existsSync15(dir) || isLink(dir)) {
-    const st = lstatSync(dir);
+    const st = lstatSync2(dir);
     if (st.isSymbolicLink()) removeLink(dir);
     else if (!st.isDirectory()) rmSync5(dir, { force: true });
   }
@@ -20073,7 +20120,7 @@ function prepareResultSlot(cwd) {
 }
 function isLink(path) {
   try {
-    return lstatSync(path).isSymbolicLink();
+    return lstatSync2(path).isSymbolicLink();
   } catch {
     return false;
   }
@@ -20095,7 +20142,7 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
       if (err.code === "ENOENT") return fail("RESULT_MISSING");
       return captureFailed("the result slot", err);
     }
-    const dirSt = lstatSync(capturedDir);
+    const dirSt = lstatSync2(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
@@ -20115,13 +20162,13 @@ function readCapturedResult(captured, expected, controllerPath, env) {
   const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
   let fd;
   try {
-    fd = openSync4(captured, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    fd = openSync5(captured, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0));
   } catch {
     return notRegular();
   }
   try {
-    const st = fstatSync(fd, { bigint: true });
-    if (lstatSync(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
+    const st = fstatSync2(fd, { bigint: true });
+    if (lstatSync2(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
     }
@@ -20144,13 +20191,13 @@ function readCapturedResult(captured, expected, controllerPath, env) {
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + "\n");
     return { result, failure: null };
   } finally {
-    closeSync4(fd);
+    closeSync5(fd);
   }
 }
 function removeTree(path) {
   let st;
   try {
-    st = lstatSync(path);
+    st = lstatSync2(path);
   } catch {
     return;
   }

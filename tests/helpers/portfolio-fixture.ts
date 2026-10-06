@@ -11,6 +11,7 @@ import YAML from 'yaml';
 import { makeGitRepo, commitAll, git } from './git-fixture.js';
 import { makeTmpDir } from './tmp.js';
 import { buildHookSettings } from '../../src/workspace/hook-settings.js';
+import { ensureScratchIgnored } from '../../src/workspace/workspace.js';
 
 export const FEATURE_ID = 'FEAT-901';
 
@@ -238,8 +239,8 @@ export function createPortfolio(root: string = makeTmpDir('portfolio-')): Portfo
           { lineWidth: 0 },
         ),
       // Feature state is tracked, as the design requires. Only the scratch
-      // worktree/integration/deploy area is ignored.
-      '.gitignore': '.mycelink/\n',
+      // worktree/integration/deploy area is ignored, by the same writer
+      // `mycelink init` uses (below), not by a fixture-only file.
       'scripts/deploy-candidate.mjs': DEPLOY_SCRIPT,
       'scripts/healthcheck.mjs': HEALTHCHECK_SCRIPT,
       'scripts/reset-fixture.mjs': RESET_SCRIPT,
@@ -256,6 +257,9 @@ export function createPortfolio(root: string = makeTmpDir('portfolio-')): Portfo
         ) + '\n',
     },
   });
+
+  ensureScratchIgnored(control);
+  commitAll(control, 'ignore the mycelink scratch area');
 
   const featureDir = join(control, 'features', FEATURE_ID);
   mkdirSync(featureDir, { recursive: true });
