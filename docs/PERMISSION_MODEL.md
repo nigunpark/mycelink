@@ -128,7 +128,11 @@ session's permissions, and `mycelink settle` takes the result back.
   reopened only with a recorded decision that is consumed once, the number of
   reworks per node is bounded, and it is refused while anything is in
   flight or when a delivered base branch moved past the integration branch.
-  `feature supersede` likewise requires the old feature to be at rest.
+  `feature supersede` likewise requires the old feature to be at rest, and
+  its replacement to be usable: initialised, not itself superseded, not
+  cancelled, with a graph that validates and still matches its STATE.json
+  (`SUPERSEDING_FEATURE_NOT_VIABLE`), never in a cycle. It holds both
+  features' delivery locks, in a fixed order.
   Delivery, rework, supersede and every candidate cut (the candidate node
   and `candidate create`) hold the feature's delivery lock, so the current
   candidate never changes under a running delivery or across a rework

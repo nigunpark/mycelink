@@ -24737,40 +24737,55 @@ function featureGroup(args, io) {
       throw new Error(`SUPERSEDING_FEATURE_MISSING: --by must name another initialised feature (got ${typeof by === "string" ? by : "nothing"}).`);
     }
     if (reason === "") throw new Error("SUPERSEDE_REASON_REQUIRED: say why the feature is replaced (--reason).");
-    const seen = /* @__PURE__ */ new Set([featureId]);
-    for (let next = by; typeof next === "string"; ) {
-      if (seen.has(next)) throw new Error(`SUPERSEDE_CYCLE: ${by} is already superseded, directly or not, by ${featureId}.`);
-      seen.add(next);
-      next = loadState(featurePaths(controlRoot, next).featureDir)?.data.superseded_by;
-    }
-    const current = loadState(paths.featureDir)?.data;
-    if (!current) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
-    if (current.superseded_by === by) {
+    const first = loadState(paths.featureDir)?.data;
+    if (!first) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+    if (first.superseded_by === by) {
       emit2(io, args, { feature_id: featureId, superseded_by: by, idempotent: true }, () => `${featureId} is already superseded by ${by}.`);
       return 0;
     }
-    if (typeof current.superseded_by === "string") {
-      throw new Error(`ALREADY_SUPERSEDED: ${featureId} is superseded by ${current.superseded_by}.`);
-    }
-    const busy = [
-      ...Object.entries(current.nodes).filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state)).map(([id, rt]) => `${id}=${rt.state}`),
-      ...Object.entries(leaseStatus(paths.featureDir)).filter(([, st]) => st.held > 0).map(([resource]) => `lease ${resource}`),
-      ...liveSessions(paths.sessionsRegistry).map((x) => `session ${x.session_id}`)
-    ];
-    if (busy.length > 0) {
-      throw new Error(`FEATURE_NOT_QUIESCENT: ${featureId} still has work in flight (${busy.join(", ")}); settle, reconcile or cancel it first.`);
-    }
-    mkdirSync16(join25(paths.featureDir, "deliveries"), { recursive: true });
-    withLock(join25(paths.featureDir, "deliveries", "deliver.lock"), () => mutateState(paths.featureDir, (s) => {
-      const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
-      if (started) throw new Error(`FEATURE_NOT_QUIESCENT: ${started[0]} started meanwhile.`);
-      if (s.feature_state !== "COMPLETED") s.feature_state = "CANCELLED";
-      s.blocked_reason = `superseded by ${by}: ${reason}`;
-      s.superseded_by = by;
-      s.superseded_reason = reason;
-      s.superseded_at = (/* @__PURE__ */ new Date()).toISOString();
-      return s;
-    }), { timeoutMs: 2e3, pollMs: 50, purpose: "feature supersede" });
+    const [lockA, lockB] = [featureId, by].sort();
+    withFeatureLock(
+      featurePaths(controlRoot, lockA).featureDir,
+      "feature supersede",
+      () => withFeatureLock(featurePaths(controlRoot, lockB).featureDir, "feature supersede", () => {
+        const seen = /* @__PURE__ */ new Set([featureId]);
+        for (let next = by; typeof next === "string"; ) {
+          if (seen.has(next)) throw new Error(`SUPERSEDE_CYCLE: ${by} is already superseded, directly or not, by ${featureId}.`);
+          seen.add(next);
+          next = loadState(featurePaths(controlRoot, next).featureDir)?.data.superseded_by;
+        }
+        const target = loadState(featurePaths(controlRoot, by).featureDir)?.data;
+        const unusable = !target ? "it has no STATE.json" : typeof target.superseded_by === "string" ? `it is itself superseded by ${target.superseded_by}` : target.feature_state === "CANCELLED" ? "it is cancelled" : null;
+        const validation = unusable === null ? validateFeatureGraph(controlRoot, by) : null;
+        const invalid = unusable ?? (validation && validation.problems.length > 0 ? `its graph does not validate (${validation.problems.map((p) => p.code).join(", ")})` : validation && target && target.graph_hash !== validation.graphHash ? "its graph changed since its STATE.json was created" : null);
+        if (invalid !== null) {
+          throw new Error(`SUPERSEDING_FEATURE_NOT_VIABLE: ${by} cannot replace ${featureId}: ${invalid}.`);
+        }
+        const current = loadState(paths.featureDir)?.data;
+        if (!current) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+        if (typeof current.superseded_by === "string" && current.superseded_by !== by) {
+          throw new Error(`ALREADY_SUPERSEDED: ${featureId} is superseded by ${current.superseded_by}.`);
+        }
+        const busy = [
+          ...Object.entries(current.nodes).filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state)).map(([id, rt]) => `${id}=${rt.state}`),
+          ...Object.entries(leaseStatus(paths.featureDir)).filter(([, st]) => st.held > 0).map(([resource]) => `lease ${resource}`),
+          ...liveSessions(paths.sessionsRegistry).map((x) => `session ${x.session_id}`)
+        ];
+        if (busy.length > 0) {
+          throw new Error(`FEATURE_NOT_QUIESCENT: ${featureId} still has work in flight (${busy.join(", ")}); settle, reconcile or cancel it first.`);
+        }
+        mutateState(paths.featureDir, (s) => {
+          const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
+          if (started) throw new Error(`FEATURE_NOT_QUIESCENT: ${started[0]} started meanwhile.`);
+          if (s.feature_state !== "COMPLETED") s.feature_state = "CANCELLED";
+          s.blocked_reason = `superseded by ${by}: ${reason}`;
+          s.superseded_by = by;
+          s.superseded_reason = reason;
+          s.superseded_at = (/* @__PURE__ */ new Date()).toISOString();
+          return s;
+        });
+      })
+    );
     appendEvent(paths.events, {
       idempotency_key: `feature.superseded:${featureId}:${by}`,
       type: "feature.superseded",

@@ -9,7 +9,7 @@
  * verify as complete and cannot be dispatched again.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
@@ -18,18 +18,20 @@ import { cli, cliRaw, dispatch, hostGraph, hostPortfolio } from '../helpers/host
 import { loadState } from '../../src/state/feature-state.js';
 import { readEvents } from '../../src/state/event-log.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { acquireLock } from '../../src/state/process-lock.js';
 
 afterAll(() => cleanupTmpRoots());
 
 const NEXT = 'FEAT-902';
+const THIRD = 'FEAT-903';
 
-async function planNext(p: Portfolio): Promise<void> {
-  const dir = join(p.control, 'features', NEXT);
+async function planNext(p: Portfolio, id: string = NEXT): Promise<void> {
+  const dir = join(p.control, 'features', id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'PRD.md'), `# ${NEXT}\n\n- AC-1: a.\n- AC-2: b.\n- AC-3: c.\n`);
-  const g = JSON.parse(JSON.stringify(hostGraph()).replaceAll(FEATURE_ID, NEXT)) as Record<string, unknown>;
+  writeFileSync(join(dir, 'PRD.md'), `# ${id}\n\n- AC-1: a.\n- AC-2: b.\n- AC-3: c.\n`);
+  const g = JSON.parse(JSON.stringify(hostGraph()).replaceAll(FEATURE_ID, id)) as Record<string, unknown>;
   writeFileSync(join(dir, 'PORTFOLIO-GRAPH.yaml'), YAML.stringify(g, { lineWidth: 0 }));
-  const r = await cli(p, ['feature', 'init', NEXT]);
+  const r = await cli(p, ['feature', 'init', id]);
   expect(r.err).toBe('');
   commitControl(p, 'next feature');
 }
@@ -70,5 +72,47 @@ describe('feature supersede', () => {
     const busy = await cli(p, ['feature', 'supersede', FEATURE_ID, '--by', NEXT, '--reason', 'x']);
     expect(busy.err).toContain('FEATURE_NOT_QUIESCENT');
     expect(loadState(p.featureDir)!.data.superseded_by ?? null).toBeNull();
+  });
+
+  it('refuses a replacement that is itself superseded or cancelled', async () => {
+    const p = await hostPortfolio();
+    await planNext(p);
+    await planNext(p, THIRD);
+    // Superseded: history cannot replace anything.
+    expect((await cli(p, ['feature', 'supersede', NEXT, '--by', THIRD, '--reason', 'replanned'])).code).toBe(0);
+    const superseded = await cli(p, ['feature', 'supersede', FEATURE_ID, '--by', NEXT, '--reason', 'x']);
+    expect(superseded.err).toContain('SUPERSEDING_FEATURE_NOT_VIABLE');
+    // Cancelled: a stopped feature replaces nothing.
+    expect((await cli(p, ['feature', 'cancel', THIRD, '--reason', 'dropped'])).code).toBe(0);
+    const cancelled = await cli(p, ['feature', 'supersede', FEATURE_ID, '--by', THIRD, '--reason', 'x']);
+    expect(cancelled.err).toContain('SUPERSEDING_FEATURE_NOT_VIABLE');
+    expect(loadState(p.featureDir)!.data.superseded_by ?? null).toBeNull();
+  });
+
+  it('refuses a replacement whose graph no longer matches its state', async () => {
+    const p = await hostPortfolio();
+    await planNext(p);
+    const file = join(p.control, 'features', NEXT, 'PORTFOLIO-GRAPH.yaml');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('order-status event at the contracted version', 'something else entirely'));
+    const r = await cli(p, ['feature', 'supersede', FEATURE_ID, '--by', NEXT, '--reason', 'x']);
+    expect(r.err).toContain('SUPERSEDING_FEATURE_NOT_VIABLE');
+    expect(loadState(p.featureDir)!.data.superseded_by ?? null).toBeNull();
+  });
+
+  it("holds the replacement's delivery lock too, so two supersedes cannot cross into a cycle", async () => {
+    const p = await hostPortfolio();
+    await planNext(p);
+    const dir = join(p.control, 'features', NEXT, 'deliveries');
+    mkdirSync(dir, { recursive: true });
+    const lock = acquireLock(join(dir, 'deliver.lock'), { purpose: 'test: NEXT is being superseded' });
+    let r;
+    try {
+      r = await cli(p, ['feature', 'supersede', FEATURE_ID, '--by', NEXT, '--reason', 'x']);
+    } finally {
+      lock.release();
+    }
+    expect(r.err).toContain('FEATURE_BUSY');
+    expect(loadState(p.featureDir)!.data.superseded_by ?? null).toBeNull();
+    expect((await cli(p, ['feature', 'supersede', FEATURE_ID, '--by', NEXT, '--reason', 'x'])).code).toBe(0);
   });
 });

@@ -129,7 +129,10 @@ under **Breaking**.
   limit, or when a delivered base moved past the integration branch.
 - `mycelink feature supersede <old> --by <new> --reason <why>`: an explicit,
   audited `superseded_by` for a feature at rest; a superseded feature never
-  verifies as complete.
+  verifies as complete. The replacement must be usable (not superseded, not
+  cancelled, its graph valid and unchanged since init:
+  `SUPERSEDING_FEATURE_NOT_VIABLE`), never in a cycle, and both features'
+  delivery locks are held while it is recorded.
 - `/mycelink:run` chains every phase (init, PRD, plan, dispatch, settle,
   candidate, deliver) without stopping between them, and documents rework.
 - `mycelink dispatch <feature> [--resume <node>]`: runs due controller nodes
