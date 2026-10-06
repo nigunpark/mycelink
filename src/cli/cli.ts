@@ -346,6 +346,8 @@ features. Conversation history is never the source of truth.
 - A node advances only on a real exit code recorded as evidence.
 - RED must fail because the behaviour is missing, not because of setup.
 - Only one full runtime may exist; E2E holds a capacity-1 lease.
+- Run features with \`/mycelink:run\` (dispatch, Agent, settle, deliver).
+  Never hand-progress nodes or do a worker's job in the host session.
 - Ask the user only for product decisions, recorded in \`DECISIONS.md\`.
 `;
 

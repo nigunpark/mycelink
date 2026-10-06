@@ -10,8 +10,9 @@ Feature: `$0`
 
 1. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" checkpoint create $0`
 2. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" feature cancel $0 --reason "$1"`
-3. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" session reconcile $0`
+3. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" session reconcile $0 --abandon-dispatches`
 4. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" resource status $0`
 
-Confirm to the user that no lease is still held and no worker is still
-running. Report the checkpoint path so the feature can be resumed.
+Confirm to the user that no lease is still held, no worker is still
+running and no dispatch ticket is still outstanding. Report the checkpoint
+path so the feature can be resumed.

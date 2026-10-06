@@ -42,7 +42,30 @@ trusted to that degree, prefer a script file in the repository invoked via
 argv (`[node, scripts/verify.mjs]`) instead, and keep it off in shared or
 automated environments.
 
-## Worker sessions
+## Host-dispatched workers (primary path)
+
+Inside Claude Code, `/mycelink:run` does not start worker processes.
+`mycelink dispatch` claims one node and prints a ticket; the host session's
+own Agent tool runs the `module-worker` subagent on it, under the host
+session's permissions, and `mycelink settle` takes the result back.
+
+- Each claim has a random 256-bit capability. Only its SHA-256 is stored;
+  the raw value is printed once in the ticket and appears in the gate
+  commands the subagent runs. Gates, evidence, finalize and settle require
+  the current claim's capability; a stale (rotated or abandoned) one fails
+  closed. Controller-only commands (claim, dispatch, integrate, candidate,
+  deliver, orchestrate, decision apply, feature init/cancel, checkpoint
+  restore, reconcile) refuse anyone presenting a capability.
+- The result slot is `<worktree>/.mycelink-worker/result.json`. Settle moves
+  it into a controller-owned quarantine before reading it and applies the
+  same link, hard-link, size, schema and identity checks as print mode; the
+  capability is redacted from every kept copy.
+- Within one OS user, capabilities and roles stop confused or shortcut-taking
+  agents (the host claiming work by hand, a worker integrating its own
+  branch); they are not a boundary against hostile code running as that
+  user.
+
+## Worker sessions (standalone CLI adapter)
 
 Worker sessions run `claude -p` in print mode with the node's worktree as
 working directory. Print mode cannot ask for interactive approval, so a worker

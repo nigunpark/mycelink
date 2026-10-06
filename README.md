@@ -248,14 +248,28 @@ mycelink doctor      --control-root ../control
 # 2. Write features/FEAT-101/PRD.md and PORTFOLIO-GRAPH.yaml
 #    (/mycelink:prd and /mycelink:plan do this with you; see templates/).
 
-# 3. Validate, initialise, inspect, run, prove.
+# 3. Validate, initialise, inspect.
 mycelink graph validate     FEAT-101 --control-root ../control
 mycelink feature init       FEAT-101 --control-root ../control
 mycelink orchestrate ready  FEAT-101 --control-root ../control
-mycelink orchestrate run    FEAT-101 --control-root ../control --json
+
+# 4. Run: the host loop /mycelink:run drives inside Claude Code.
+mycelink dispatch FEAT-101 --control-root ../control --json
+#    -> {"status": "DISPATCHED", "ticket": {...}}: give ticket.prompt to the
+#       Agent tool (subagent mycelink:module-worker); it writes ticket.result_slot.
+mycelink settle   FEAT-101 <node-id> --capability <ticket.capability> --control-root ../control --json
+#    ... repeat dispatch/settle until dispatch reports ALL_SETTLED.
+
+# 5. Prove and deliver.
 mycelink feature verify     FEAT-101 --control-root ../control
 mycelink candidate verify   FEAT-101 --control-root ../control
+mycelink deliver            FEAT-101 --control-root ../control --json
 ```
+
+Outside Claude Code, `mycelink orchestrate run FEAT-101 --json` drives the
+same cycle with the standalone CLI adapter, which spawns `claude -p`
+workers itself; `mycelink doctor` reports whether that executable can start.
+Neither `dispatch` nor `deliver` ever pushes.
 
 `--control-root` can be omitted when you run from inside the control
 repository (it is found by walking up to `mycelink.config.json`) or when

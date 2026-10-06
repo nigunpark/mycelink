@@ -44,8 +44,14 @@ Your prompt lists the exact gate commands, for example:
 ```
 
 Run them with the Bash tool exactly as written. Each runs the node's declared
-verifier and is pre-approved only in that exact form; any variation needs an
-approval nobody is there to give.
+verifier in your worktree and carries your claim's capability; in print mode
+it is pre-approved only in that exact form. Do not copy the capability
+anywhere else, and never run settle, dispatch, finalize, candidate, deliver or
+claim commands yourself.
+
+When your prompt gives an absolute `Worktree:`, your working directory is not
+that worktree: use absolute paths under it for every edit, and run git as
+`git -C "<worktree>" ...`.
 
 - RED must fail because the **behaviour is missing**. A missing module, a
   syntax error, a broken fixture or an unreachable service is not a RED, and
@@ -59,9 +65,10 @@ approval nobody is there to give.
 ## Finishing
 
 Write your result with the Write tool to the `Result file:` your prompt names,
-`.mycelink-worker/result.json` relative to your worktree. That one file is
-pre-approved and git-ignored; the controller collects it, checks it and
-removes it. If a tool you need is denied, still write the result, with
+exactly as written: an absolute path when the host dispatched you through its
+Agent tool, `.mycelink-worker/result.json` relative to your worktree when you
+run as a standalone print-mode session. That one file is git-ignored; the
+controller collects it, checks it and removes it. If a tool you need is denied, still write the result, with
 `outcome: BLOCKED` and `failure_fingerprint: "PERMISSION_DENIED:<tool>"`.
 
 ```json

@@ -10,6 +10,30 @@ under **Breaking**.
 
 ### Breaking
 
+- **Host-native execution is the plugin's primary path.** `/mycelink:run`
+  now loops `mycelink dispatch` → the host's Agent tool with the
+  `module-worker` subagent → `mycelink settle`, then `mycelink deliver`.
+  It no longer runs `orchestrate run`, which spawns a nested `claude` that
+  could not start in the 2026-10-06 eval sandbox. `orchestrate run` remains
+  as the standalone CLI adapter.
+- Claims carry a random capability (only its SHA-256 is stored). `tdd`,
+  `evidence record`, `node begin`, `node finalize` and `settle` require
+  it (`--capability` or `MYCELINK_CLAIM_TOKEN`); controller-only commands
+  refuse anyone presenting one. `node claim` now goes through the scheduler
+  and prints the capability once.
+- Leaving BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED by any route
+  (including INVALIDATED, PAUSED, EXCLUDED and re-running `feature init`)
+  needs a decision recorded with `decision record`; the failure history is
+  kept.
+- Evidence `output_path` is stored relative to the control root; run
+  `mycelink evidence migrate <feature>` for older absolute records.
+- Candidates pin canonical content hashes of the control repository's
+  semantic inputs instead of control HEAD (`CONTROL_INPUT_DRIFT`,
+  `CONTROL_INPUT_MISSING`, `CONTROL_INPUT_ADDED`). Older candidates keep the
+  strict HEAD check.
+- Slash-command arguments are numbered from `$0`, as current Claude Code
+  numbers them.
+
 - Worker sessions receive their brief on stdin and write their result to
   `.mycelink-worker/result.json` in the worktree. Custom worker agents or
   skills that read `$MYCELINK_CONTEXT_PACK` or write `$MYCELINK_RESULT_PATH`
@@ -30,7 +54,36 @@ under **Breaking**.
   `npm run build` sets the bundle's mode explicitly. Before this, rebuilding
   on Linux or macOS flipped the bundle's mode and failed the CI build check.
 
+### Added
+
+- `mycelink dispatch <feature> [--resume <node>]`: runs due controller nodes
+  inline and claims the next schedulable worker node for the host, printing
+  a JSON ticket (capability, ids, attempt, worktree, allowed paths,
+  verification and gate commands, result slot, settle command, bounded
+  prompt). It never spawns a process.
+- `mycelink settle <feature> <node> --capability <c>`: quarantines and
+  validates the result slot, then parks, records a failure, or fresh-verifies,
+  integrates and marks the node DONE. Idempotent per claim.
+- `mycelink node finalize`: the same deterministic tail for manually driven
+  nodes, so nothing is stranded at REGRESSION_VERIFIED.
+- `mycelink deliver <feature>`: fast-forwards every base branch to exactly
+  the candidate SHA after checking every repository first, journals a
+  delivery manifest, rolls back on a mid-way failure, runs final acceptance,
+  and never pushes. `/mycelink:deliver` and the `host-dispatch` skill.
+- Adapter preflight (`doctor` and before `orchestrate run` claims anything):
+  resolves the worker executable as the shell-less spawn would and probes
+  `--version`.
+
 ### Fixed
+
+- Spawn failures and claim-setup failures are infrastructure: the claim is
+  released with its attempt refunded, nothing is BLOCKED, and the run stops
+  with the resumable `ADAPTER_UNAVAILABLE`.
+- Reconcile tells abandoned host dispatches, dead settles and orphaned
+  sessions (interruptions, no failure recorded) from task failures.
+- `init` writes a safe `/.mycelink/` entry to the control repository's
+  `.gitignore`.
+- Worker worktrees are removed when a node reaches DONE.
 
 - **Real worker sessions could never start their node (beta blocker).** The
   worker prompt told Claude Code to read `$MYCELINK_CONTEXT_PACK` and write
