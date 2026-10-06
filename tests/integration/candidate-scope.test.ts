@@ -126,6 +126,8 @@ describe('a candidate binds the whole registered portfolio', () => {
     git(p.core, ['checkout', '-q', 'main']);
     mutateState(p.featureDir, (s) => {
       for (const rt of Object.values(s.nodes)) rt.state = 'DONE';
+      // As the controller records it when it integrates core's node.
+      s.nodes[`${FEATURE_ID}.core.publish.impl`]!.integrated_sha = git(p.core, ['rev-parse', integrationBranchName(FEATURE_ID)]);
       return s;
     });
   });

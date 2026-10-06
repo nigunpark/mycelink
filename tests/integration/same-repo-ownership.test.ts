@@ -194,6 +194,19 @@ describe('same-repository ownership is checked against the node own delta', () =
     expect(String(settled['detail'])).toContain('src/planted.js');
   });
 
+  it('an integration branch moved outside the controller refuses the next claim, charging nothing', async () => {
+    const p = await hostPortfolio(sameRepoGraph());
+    await runA(p);
+    const integration = join(p.control, '.mycelink', 'integration', `integration__core__${FEATURE_ID}`);
+    writeFileSync(join(integration, 'src', 'planted.js'), 'export const PLANTED = 1;\n');
+    git(integration, ['add', '-A']);
+    git(integration, ['commit', '-q', '-m', 'planted']);
+    const d = await dispatch(p);
+    expect(d.status).toBe('INFRASTRUCTURE_FAILURE');
+    expect(d.detail).toContain('INTEGRATION_BRANCH_MOVED');
+    expect(loadState(p.featureDir)!.data.nodes[B]).toMatchObject({ state: 'READY', attempts: 0, failure_counts: {} });
+  });
+
   it('an abandoned dispatch reclaimed later keeps the base its branch was created from', async () => {
     const p = await hostPortfolio(sameRepoGraph(true));
     await cli(p, ['feature', 'init', FEATURE_ID, '--writer-concurrency', '2']);

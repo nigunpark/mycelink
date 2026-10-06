@@ -104,10 +104,18 @@ session's permissions, and `mycelink settle` takes the result back.
   was created from is pinned in the claim (`base_sha`), and fresh
   verification diffs from there, advanced only to integration commits the
   controller itself recorded in STATE.json. Work an upstream node
-  integrated is not the dependent's; a commit placed on the integration
-  branch any other way stays in the node's diff, and a branch that no longer
-  contains its base fails closed (`BASE_NOT_ANCESTOR`). Same-user code that
-  rewrites STATE.json is outside this, as above.
+  integrated is not the dependent's, and a branch that no longer contains
+  its base fails closed (`BASE_NOT_ANCESTOR`). The integration branch itself
+  is trusted only at the head the controller recorded (the newest
+  integrated commit in that repository, or the base branch when nothing was
+  integrated there): a new worker branch, an integration and a candidate
+  all refuse a `feature/<id>` branch moved any other way, including a
+  pre-existing one in a repository no node touches
+  (`INTEGRATION_BRANCH_MOVED`). Same-user code that rewrites STATE.json is
+  outside this, as above.
+- A candidate pins the global configuration and its own feature's files. A
+  verifier, scenario or contract stored under another feature's directory is
+  not pinned; keep shared files outside `features/`.
 - `node rework` is controller-only and never a way to buy budget: the
   reopened node keeps its attempts and failure fingerprints, a parked node is
   never its target (that needs a recorded decision), a parked dependent is

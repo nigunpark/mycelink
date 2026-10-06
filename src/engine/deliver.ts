@@ -374,7 +374,8 @@ function deliverLocked(controlRoot: string, featureId: string, options: { candid
     if (passed) accepted[candidateId] = manifestSha;
     else delete accepted[candidateId];
     s.accepted_deliveries = accepted;
-    if (passed) s.feature_state = 'COMPLETED';
+    // Only while this candidate is still the feature's current one.
+    if (passed && s.current_candidate === candidateId && typeof s.superseded_by !== 'string') s.feature_state = 'COMPLETED';
     return s;
   });
   return { ...manifest, ok: passed, idempotent: false };

@@ -49,6 +49,7 @@ import { packageRoot } from '../util/paths.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
 import { preflightAdapter } from '../sessions/preflight.js';
 import { featureVerifyProblems } from '../engine/feature-verify.js';
+import { withLock } from '../state/process-lock.js';
 import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
@@ -677,14 +678,19 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
     if (busy.length > 0) {
       throw new Error(`FEATURE_NOT_QUIESCENT: ${featureId} still has work in flight (${busy.join(', ')}); settle, reconcile or cancel it first.`);
     }
+    // Not while a delivery of it runs, and re-checked under the state lock.
+    mkdirSync(join(paths.featureDir, 'deliveries'), { recursive: true });
+    withLock(join(paths.featureDir, 'deliveries', 'deliver.lock'), () =>
     mutateState(paths.featureDir, (s) => {
+      const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
+      if (started) throw new Error(`FEATURE_NOT_QUIESCENT: ${started[0]} started meanwhile.`);
       if (s.feature_state !== 'COMPLETED') s.feature_state = 'CANCELLED';
       s.blocked_reason = `superseded by ${by}: ${reason}`;
       s.superseded_by = by;
       s.superseded_reason = reason;
       s.superseded_at = new Date().toISOString();
       return s;
-    });
+    }), { timeoutMs: 2_000, pollMs: 50, purpose: 'feature supersede' });
     appendEvent(paths.events, {
       idempotency_key: `feature.superseded:${featureId}:${by}`,
       type: 'feature.superseded',
@@ -1299,6 +1305,10 @@ function branchGroup(args: ParsedArgs, io: CliIo): number {
       integrationRoot: workspace.paths.integrationDir,
       repositoryName: node.repository,
     });
+    mutateState(featurePaths(controlRoot, featureId).featureDir, (s) => {
+      s.integration_heads = { ...(s.integration_heads ?? {}), [node.repository as string]: result.sha };
+      return s;
+    });
     emit(io, args, result, () => `${result.strategy} -> ${result.sha}`);
     return 0;
   }
@@ -1343,7 +1353,9 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
   if (sub === 'create') {
     assertControllerRole(args, 'candidate create');
     const graph = loadGraph(controlRoot, featureId);
-    const unfinished = Object.entries(loadState(paths.featureDir)?.data.nodes ?? {})
+    const state = loadState(paths.featureDir)?.data;
+    if (!state) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+    const unfinished = Object.entries(state.nodes)
       .filter(([id, rt]) => {
         const type = graph.nodes.find((n) => n.id === id)?.node_type;
         if (type === 'candidate-build' || type === 'e2e-scenario') return false;
@@ -1362,7 +1374,8 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
       featureId,
-      repositories: portfolioRefs(workspace, featureId, { create: true }),
+      // Only integration branches exactly where the controller left them.
+      repositories: portfolioRefs(workspace, featureId, { create: true, trust: { graph, state } }),
       contracts,
     });
     mutateState(paths.featureDir, (s) => {

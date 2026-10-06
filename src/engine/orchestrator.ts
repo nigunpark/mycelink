@@ -83,7 +83,8 @@ import {
   worktreeDirName,
 } from '../git/worktree.js';
 import { createCandidate, loadCandidate } from '../git/candidate.js';
-import { portfolioRefs } from './portfolio.js';
+import { portfolioRefs, trustedIntegrationHead } from './portfolio.js';
+import { withLock } from '../state/process-lock.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { DirtyWorktreeError, integrateNodeBranch } from '../git/integrate.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
@@ -512,6 +513,9 @@ export class Orchestrator {
       if (STOPPED_FEATURE_STATES.has(s.feature_state)) {
         throw new NotSchedulableError(nodeId, 'FEATURE_STOPPED', `feature is ${s.feature_state}`);
       }
+      if (typeof s.superseded_by === 'string') {
+        throw new NotSchedulableError(nodeId, 'FEATURE_STOPPED', `feature is superseded by ${s.superseded_by}`);
+      }
       const check = canSchedule(graph, s, nodeId, { writerConcurrency: s.budget.max_writer_concurrency });
       if (!check.ok) throw new NotSchedulableError(nodeId, check.reason, check.detail);
       let next = s;
@@ -591,10 +595,13 @@ export class Orchestrator {
     if (node.repository === null) throw new Error(`${nodeId} has no repository.`);
     const repoPath = repositoryPath(this.workspace, node.repository);
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-    const integration = integrationBranchName(this.featureId);
     // A rework replaces the branch: its old commits are kept under an
     // archive ref and the node starts again from the integration head.
     if (this.state().nodes[nodeId]?.fresh_branch_required === true) this.archiveWorkerBranch(nodeId);
+    // Only the integration head the controller itself recorded is a start
+    // point; a branch moved any other way refuses the claim.
+    const trusted = trustedIntegrationHead(this.workspace, this.featureId, node.repository, { graph: this.graph(), state: this.state() });
+    const startPoint = trusted ?? resolveRef(repoPath, `refs/heads/${repoDecl?.base_branch ?? 'main'}`);
     const created = createWorkerWorktree({
       repoPath,
       featureId: this.featureId,
@@ -602,15 +609,23 @@ export class Orchestrator {
       baseBranch: repoDecl?.base_branch ?? 'main',
       worktreeRoot: this.workspace.paths.worktreesDir,
       repositoryName: node.repository,
-      ...(branchExists(repoPath, integration) ? { startPoint: integration } : {}),
+      startPoint,
     });
-    let baseSha: string | null = created.startSha;
+    // An existing branch with no recorded base (made by `branch create`, or
+    // before bases were recorded) is fenced from where it meets the start point.
+    const adopted =
+      created.startSha === null && !this.state().nodes[nodeId]?.branch_base_sha
+        ? runGit(repoPath, ['merge-base', created.branch, startPoint], { allowFail: true }).stdout.trim() || null
+        : null;
+    let baseSha: string | null = created.startSha ?? adopted;
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
       if (!rt) return s;
       if (created.startSha !== null) {
         rt.branch_base_sha = created.startSha;
         delete rt.fresh_branch_required;
+      } else if (adopted !== null && !rt.branch_base_sha) {
+        rt.branch_base_sha = adopted;
       }
       baseSha = rt.branch_base_sha ?? null;
       const claim = rt.claim;
@@ -879,6 +894,20 @@ export class Orchestrator {
     if (node.repository === null) return null;
     const repoPath = repositoryPath(this.workspace, node.repository);
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+    try {
+      trustedIntegrationHead(this.workspace, this.featureId, node.repository, { graph: this.graph(), state: this.state() });
+    } catch (err) {
+      // A finalize that died after merging this very commit left the branch
+      // one step past the recorded head; that resumes. Anything else refuses.
+      const head = resolveRef(repoPath, integrationBranchName(this.featureId));
+      const resumed =
+        expectedSha !== undefined &&
+        isAncestor(repoPath, expectedSha, head) &&
+        (head === expectedSha ||
+          runGit(repoPath, ['rev-parse', '--verify', '--quiet', `${head}^1`], { allowFail: true }).stdout.trim() ===
+            (err as { expected?: string }).expected);
+      if (!resumed) throw err;
+    }
     const result = integrateNodeBranch({
       repoPath,
       featureId: this.featureId,
@@ -887,6 +916,11 @@ export class Orchestrator {
       integrationRoot: this.workspace.paths.integrationDir,
       repositoryName: node.repository,
       ...(expectedSha !== undefined ? { expectedSha } : {}),
+    });
+    const repository = node.repository;
+    mutateState(this.paths.featureDir, (s) => {
+      s.integration_heads = { ...(s.integration_heads ?? {}), [repository]: result.sha };
+      return s;
     });
     this.event('node.integrated', nodeId, {
       repository: node.repository,
@@ -1248,6 +1282,7 @@ export class Orchestrator {
 
       if (state.feature_state === 'BUDGET_EXHAUSTED') return stop('BUDGET_EXHAUSTED', state.blocked_reason ?? '');
       if (state.feature_state === 'CANCELLED') return stop('CANCELLED', state.blocked_reason ?? '');
+      if (typeof state.superseded_by === 'string') return stop('CANCELLED', `superseded by ${state.superseded_by}`);
       const nodes = Object.values(state.nodes);
       if (nodes.every((n) => n.state === 'DONE' || n.state === 'EXCLUDED')) {
         this.promoteSettledFeature();
@@ -1795,6 +1830,17 @@ export class Orchestrator {
    * rework before the node is DONE again changes nothing.
    */
   rework(nodeId: string, options: { reason: string; decisionId?: string }): ReworkReport {
+    // Never concurrently with a delivery of this feature (or a supersede).
+    const lockDir = join(this.paths.featureDir, 'deliveries');
+    mkdirSync(lockDir, { recursive: true });
+    return withLock(join(lockDir, 'deliver.lock'), () => this.reworkLocked(nodeId, options), {
+      timeoutMs: 2_000,
+      pollMs: 50,
+      purpose: 'feature rework',
+    });
+  }
+
+  private reworkLocked(nodeId: string, options: { reason: string; decisionId?: string }): ReworkReport {
     const reason = options.reason.trim();
     const decisionId = options.decisionId ?? null;
     if (reason === '') throw new ReworkRefusedError('REWORK_REASON_REQUIRED', `${nodeId}: say why the node's DONE work is wrong (--reason).`);
@@ -1822,16 +1868,21 @@ export class Orchestrator {
         !IN_FLIGHT_STATES.has(runtime.state)
       ) {
         // The same rework again (a retried command): finish what it started.
-        const archived = record.reopened.map((id) => this.archiveWorkerBranch(id)).filter((r): r is string => r !== null);
-        return { feature_id: this.featureId, ...record, idempotent: true, archived_refs: archived };
+        // Marking the decision is idempotent by key, so a rework that died
+        // after its STATE.json write still consumes it.
+        if (record.decision_id !== null) markDecisionApplied(this.paths.events, this.featureId, record.decision_id, `node rework ${nodeId}`);
+        return { feature_id: this.featureId, ...record, idempotent: true, archived_refs: this.plannedArchives(record.reopened) };
       }
       throw new ReworkRefusedError(
         'REWORK_NOT_DONE',
         `${nodeId} is ${runtime.state}; only DONE work is reworked. A parked node is resumed with a recorded decision (decision apply), never by a rework.`,
       );
     }
-    if (state.feature_state === 'CANCELLED' || state.feature_state === 'BUDGET_EXHAUSTED') {
-      throw new ReworkRefusedError('REWORK_FEATURE_STOPPED', `${this.featureId} is ${state.feature_state}.`);
+    if (state.feature_state === 'CANCELLED' || state.feature_state === 'BUDGET_EXHAUSTED' || typeof state.superseded_by === 'string') {
+      throw new ReworkRefusedError(
+        'REWORK_FEATURE_STOPPED',
+        `${this.featureId} is ${typeof state.superseded_by === 'string' ? `superseded by ${state.superseded_by}` : state.feature_state}.`,
+      );
     }
     const busy = Object.entries(state.nodes)
       .filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state))
@@ -1907,6 +1958,7 @@ export class Orchestrator {
     mutateState(this.paths.featureDir, (s) => {
       // Re-checked under the lock: nothing may have started meanwhile.
       if (s.nodes[nodeId]?.state !== 'DONE') throw new ReworkRefusedError('REWORK_NOT_DONE', `${nodeId} changed while it was being reworked.`);
+      if (typeof s.superseded_by === 'string') throw new ReworkRefusedError('REWORK_FEATURE_STOPPED', `${this.featureId} was superseded meanwhile.`);
       const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
       if (started) throw new ReworkRefusedError('REWORK_IN_FLIGHT', `${started[0]} started while the rework was prepared.`);
       let next = s;
@@ -1954,7 +2006,9 @@ export class Orchestrator {
       delivered,
       archived_ref: entry.archived_ref,
     });
-    const archived = reopened.map((id) => this.archiveWorkerBranch(id)).filter((r): r is string => r !== null);
+    // The branches are archived by the next claim of each node (under its
+    // claim, so never racing a dispatch); report where they will go.
+    const archived = this.plannedArchives(reopened);
     return {
       feature_id: this.featureId,
       node_id: nodeId,
@@ -2024,6 +2078,19 @@ export class Orchestrator {
     return moved;
   }
 
+  /** The archive refs the reopened worker nodes' current branches go to on their next claim. */
+  private plannedArchives(nodeIds: string[]): string[] {
+    const out: string[] = [];
+    for (const id of nodeIds) {
+      const node = this.node(id);
+      if (node.repository === null || CONTROLLER_NODE_TYPES.has(node.node_type)) continue;
+      const repoPath = repositoryPath(this.workspace, node.repository);
+      const branch = workerBranchName(this.featureId, id);
+      if (branchExists(repoPath, branch)) out.push(this.archiveRefName(id, resolveRef(repoPath, branch)));
+    }
+    return out;
+  }
+
   private archiveRefName(nodeId: string, head: string): string {
     const suffix = workerBranchName(this.featureId, nodeId).slice(`wip/${this.featureId}/`.length);
     return `refs/mycelink/archive/${this.featureId}/${suffix}/${head}`;
@@ -2048,7 +2115,8 @@ export class Orchestrator {
     for (const w of listWorktrees(repoPath)) {
       if (w.branch === branch || resolve(w.path) === expected) removeWorkerWorktree(repoPath, w.path);
     }
-    runGit(repoPath, ['branch', '-D', branch]);
+    // Compare-and-swap: only the branch head that was archived is deleted.
+    runGit(repoPath, ['update-ref', '-d', `refs/heads/${branch}`, head]);
     return ref;
   }
 
@@ -2103,7 +2171,7 @@ export class Orchestrator {
 
   /** Every registered repository on this feature's integration branch, created at its base where missing. */
   private integrationRefs(): { name: string; path: string; branch: string }[] {
-    return portfolioRefs(this.workspace, this.featureId, { create: true });
+    return portfolioRefs(this.workspace, this.featureId, { create: true, trust: { graph: this.graph(), state: this.state() } });
   }
 
   /**

@@ -67,6 +67,10 @@
     "pending_decisions": { "type": "array", "items": { "type": "string" } },
     "candidates": { "type": "array", "items": { "type": "string" } },
     "current_candidate": { "type": ["string", "null"] },
+    "integration_heads": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
+    },
     "superseded_by": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
     "superseded_reason": { "type": "string", "minLength": 1 },
     "superseded_at": { "type": "string" },

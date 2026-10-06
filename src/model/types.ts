@@ -320,6 +320,12 @@ export interface FeatureState_ {
   /** Controller-authorized reworks within this feature, oldest first. */
   reworks?: ReworkRecord[];
   /**
+   * Where the controller left each repository's integration branch after
+   * its last integration. Survives invalidation; the branch is trusted only
+   * at this head.
+   */
+  integration_heads?: Record<string, string>;
+  /**
    * The feature that replaced this one (`feature supersede`). A superseded
    * feature is quiescent history: never the delivered feature.
    */
