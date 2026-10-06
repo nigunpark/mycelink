@@ -11,7 +11,7 @@
  *   3. export commits with `ls-tree` + `cat-file`, which apply no filters.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
@@ -88,22 +88,48 @@ export function safeGit(cwd, args, { input, encoding = 'utf8', env = {} } = {}) 
   };
 }
 
+/**
+ * Open `path` once and classify it through that descriptor, so the type check
+ * and the read cannot be split by a swap of the path in between:
+ * `{ kind: 'missing' }`, `{ kind: 'directory' }`, `{ kind: 'file', text }`, or
+ * `{ kind: 'other' }` (devices, FIFOs, ... — never read). Errors other than
+ * "does not exist" propagate so callers fail closed.
+ */
+export function readEntry(path) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return { kind: 'missing' };
+    throw error;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (st.isDirectory()) return { kind: 'directory' };
+    if (!st.isFile()) return { kind: 'other' };
+    return { kind: 'file', text: readFileSync(fd, 'utf8') };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** The repository's git dir and common dir (handles `.git` files of worktrees). */
 export function gitDirs(repo) {
   const dotGit = join(repo, '.git');
-  if (!existsSync(dotGit)) return null;
-  let gitDir = dotGit;
-  if (statSync(dotGit).isFile()) {
-    const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
+  const entry = readEntry(dotGit);
+  let gitDir;
+  if (entry.kind === 'directory') gitDir = dotGit;
+  else if (entry.kind === 'file') {
+    const m = /^gitdir:\s*(.+)\s*$/m.exec(entry.text);
     if (!m) return null;
     gitDir = isAbsolute(m[1]) ? m[1] : resolve(repo, m[1]);
-  }
+  } else return null;
   let commonDir = gitDir;
-  const commonFile = join(gitDir, 'commondir');
-  if (existsSync(commonFile)) {
-    const rel = readFileSync(commonFile, 'utf8').trim();
+  const common = readEntry(join(gitDir, 'commondir'));
+  if (common.kind === 'file') {
+    const rel = common.text.trim();
     commonDir = isAbsolute(rel) ? rel : resolve(gitDir, rel);
-  }
+  } else if (common.kind !== 'missing') return null;
   return { gitDir, commonDir };
 }
 
@@ -154,14 +180,21 @@ export function unsafeGitConfig(repo) {
   const problems = [];
   const files = [join(dirs.commonDir, 'config'), join(dirs.gitDir, 'config.worktree'), join(dirs.commonDir, 'config.worktree')];
   for (const file of new Set(files)) {
-    if (!existsSync(file)) continue;
-    for (const key of configKeys(readFileSync(file, 'utf8'))) {
+    const entry = readEntry(file);
+    if (entry.kind === 'missing') continue;
+    if (entry.kind !== 'file') {
+      problems.push(`${file} (not a regular file)`);
+      continue;
+    }
+    for (const key of configKeys(entry.text)) {
       if (!SAFE_KEYS.some((re) => re.test(key))) problems.push(key);
     }
   }
   for (const dir of new Set([dirs.gitDir, dirs.commonDir])) {
-    const attrs = join(dir, 'info', 'attributes');
-    if (existsSync(attrs) && /\b(filter|diff|merge)\s*=/.test(readFileSync(attrs, 'utf8'))) problems.push('info/attributes (filter/diff/merge drivers)');
+    const attrs = readEntry(join(dir, 'info', 'attributes'));
+    if (attrs.kind === 'missing') continue;
+    if (attrs.kind !== 'file') problems.push('info/attributes (not a regular file)');
+    else if (/\b(filter|diff|merge)\s*=/.test(attrs.text)) problems.push('info/attributes (filter/diff/merge drivers)');
   }
   return [...new Set(problems)];
 }

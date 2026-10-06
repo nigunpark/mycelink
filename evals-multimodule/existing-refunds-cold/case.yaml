@@ -48,7 +48,7 @@ graders:
   - name: acceptance-suite-pristine
     type: regex
     target: {source: file, path: acceptance-results/SUMMARY.txt}
-    pattern: '^suite_sha256: b31a10b27a0793d000380c0ef0e230249d03fc389dd75f53402a69b1dcd4c364$'
+    pattern: '^suite_sha256: 2fa903dd8ce11b381dbc6f3214cdf800d2a51a72918f3d2401751237f21e5490$'
     flags: m
     weight: 2
   - name: all-acceptance-tests-pass

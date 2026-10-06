@@ -23,7 +23,10 @@
  *      config would execute programs is refused without running them; every
  *      execution.env key in each case.yaml begins EVAL_; every prompt carries
  *      the exact Mycelink availability-conditional instruction, and the cold
- *      and informed prompts are identical.
+ *      and informed prompts are identical;
+ *  10. git-safe classifies .git, commondir, config and info/attributes through
+ *      a single open descriptor (no stat-then-read race) and fails closed on
+ *      redirected, non-regular or missing git metadata.
  *
  *   node evals-multimodule/tools/selftest.mjs [--write-baseline] [--keep] [--json <file>]
  *
@@ -31,7 +34,7 @@
  * intentional fixture change). Exit 0 only when every check passes.
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -378,6 +381,53 @@ try {
     v = verifier(ws);
     record('negative: rewritten history (baseline not an ancestor) is rejected', v.code === 1 && Boolean(failedCheck(v, 'history-preserved:core')));
     git(join(ws, 'repos', 'core'), ['checkout', '--quiet', '--force', coreHead]);
+  }
+
+  // ------------- 6b. git-safe reads git metadata through one descriptor ----
+  {
+    const { gitDirs, readEntry, unsafeGitConfig } = await import(pathToFileURL(join(LIB, 'acceptance', 'lib', 'git-safe.mjs')).href);
+    const root = dirname(freshDir('gitsafe'));
+    const evilConfig = '[core]\n\trepositoryformatversion = 0\n\tfsmonitor = node evil.cjs\n';
+    const repo = join(root, 'repo');
+    const real = join(root, 'real-gitdir');
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(real, { recursive: true });
+    writeFileSync(join(real, 'config'), evilConfig);
+
+    writeFileSync(join(repo, '.git'), `gitdir: ${real}\n`);
+    record('git-safe: a .git file redirecting to a gitdir with an executing config is refused', unsafeGitConfig(repo).includes('core.fsmonitor'), JSON.stringify(unsafeGitConfig(repo)));
+
+    rmSync(join(repo, '.git'));
+    mkdirSync(join(repo, '.git'));
+    writeFileSync(join(repo, '.git', 'config'), evilConfig);
+    const asDir = gitDirs(repo);
+    record('git-safe: .git as a directory is classified by the open descriptor and still refused', asDir?.gitDir === join(repo, '.git') && unsafeGitConfig(repo).includes('core.fsmonitor'));
+
+    rmSync(join(repo, '.git', 'config'));
+    mkdirSync(join(repo, '.git', 'config'));
+    record('git-safe: a config path that is not a regular file fails closed', unsafeGitConfig(repo).some((p) => /not a regular file/.test(p)), JSON.stringify(unsafeGitConfig(repo)));
+    rmSync(join(repo, '.git'), { recursive: true });
+
+    writeFileSync(join(repo, '.git'), `gitdir: ${real}\n`);
+    mkdirSync(join(real, 'commondir'));
+    record('git-safe: a commondir that is not a regular file fails closed', gitDirs(repo) === null && unsafeGitConfig(repo).includes('<no git directory>'));
+    rmSync(join(real, 'commondir'), { recursive: true });
+
+    writeFileSync(join(repo, '.git'), 'not a gitdir pointer\n');
+    record('git-safe: a .git file without a gitdir pointer fails closed', unsafeGitConfig(repo).includes('<no git directory>'));
+    rmSync(join(repo, '.git'));
+    record('git-safe: a missing .git fails closed', unsafeGitConfig(repo).includes('<no git directory>') && readEntry(join(repo, '.git')).kind === 'missing');
+
+    // A symlinked .git pointer is still followed and inspected, not skipped.
+    const pointer = join(root, 'pointer');
+    writeFileSync(pointer, `gitdir: ${real}\n`);
+    let linked = true;
+    try {
+      symlinkSync(pointer, join(repo, '.git'), 'file');
+    } catch {
+      linked = false;
+    }
+    if (linked) record('git-safe: a symlinked .git pointer is followed and the executing config refused', unsafeGitConfig(repo).includes('core.fsmonitor'));
   }
 
   // ------------------- 8. genuine Mycelink orchestration (fake Claude) ----
