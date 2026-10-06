@@ -22,6 +22,17 @@ significant. It does show specific, reproducible defects (see
 [Defect priorities](#defect-priorities)), and a 0/3 full-success result is
 enough to rule out calling the current release reliable.
 
+> **Correction (2026-10-06, after a read-only trace and source review).** An
+> earlier version of this report said that `mycelink orchestrate run` was
+> never invoked. That was wrong. The session traces show `orchestrate run`
+> was **attempted in all three WITH sessions**: twice in existing-cold, once
+> in existing-informed and once in greenfield. Every attempt stopped with
+> `stop: BLOCKED`. The raw grader value `mycelink-orchestrate-run = false`
+> is kept unchanged below. It means the grader found **no recognized
+> successful invocation**. It does not mean nobody tried. The workers never
+> ran because the worker process could not be spawned (see
+> [Root-cause review](#root-cause-review-trace-and-source)).
+
 ## What was evaluated
 
 Three `claude plugin eval` cases. Each uses a scaffolded Ledgerline workspace:
@@ -101,10 +112,15 @@ available, proceed directly without it."*
 |---|---|---|---|
 | `mycelink-skill-invoked` | ✅ Skill 6× | ✅ Skill 6× | ✅ Skill 4× |
 | `mycelink-controller-used` | ✅ 29 launcher calls | ✅ 8 | ✅ 15 |
-| `mycelink-orchestrate-run` | ❌ 0× | ❌ 0× | ❌ 0× |
+| `mycelink-orchestrate-run` (raw grader) | ❌ 0× | ❌ 0× | ❌ 0× |
+| `orchestrate run` attempts in trace (not graded) | 2, each `BLOCKED` | 1, `BLOCKED` | 1, `BLOCKED` |
 | `mycelink-control-plane-created` | ✅ | ✅ | ✅ |
 | `mycelink-feature-state-recorded` | ✅ | ✅ | ✅ |
 | `mycelink-candidate-created` | ✅ | ❌ | ❌ |
+
+The raw `mycelink-orchestrate-run` grader reads 0× in every WITH run. The
+trace row shows that this does not mean "not attempted". Every attempt
+returned `BLOCKED`, so none counted as a recognized successful invocation.
 
 ### Per-case results
 
@@ -145,25 +161,35 @@ Notes on the plugin-eval score:
   preserved baseline in each of the four modules. The in-run report matches
   the delivered HEADs.
 - Orchestration ❌:
-  - `mycelink orchestrate run` was never invoked (`mycelink-orchestrate-run` 0×).
+  - `mycelink orchestrate run` was attempted twice. Both attempts stopped
+    `BLOCKED` because the worker process could not be spawned. The raw grader
+    still reads 0×, meaning no recognized successful invocation. The session
+    then progressed the nodes by hand with CLI primitives and wrote the code
+    itself.
   - Implementation nodes were left at `REGRESSION_VERIFIED`, not `DONE`
     (`LEDGER-142.{core.refund-defs,api.refunds,worker.settle,cli.refunds}.impl`).
     The candidate node `LEDGER-142.release.candidate.build` was `INVALIDATED`.
+    No CLI primitive can move a node from `REGRESSION_VERIFIED` to `DONE`;
+    only the orchestrator's `runNode` path does that (root cause A4).
   - `evidence-files`: 12 evidence records exist, but their red / green /
     regression outputs are missing on disk for all four implementation
-    nodes.
+    nodes. The records store absolute output paths, which no longer resolve
+    once the run's workspace is sealed and kept (root cause A5).
   - `feature verify` failed with `NODE_NOT_DONE` for all five nodes, even
     though the feature state reads `CANDIDATE_READY`.
   - `candidate verify` failed with `CONTROL_SHA_DRIFT`: "Control repository
     is at f7b415fed680…, candidate bound 52774685cee6…". Candidate
     `LEDGER-142-C001` does bind all four modules at exactly the delivered
-    SHAs.
+    SHAs. The candidate pins the control-repository HEAD and then keeps its
+    state in that same repository, so committing that state moves HEAD away
+    from the pin (root cause A6).
   - Leases empty; 4 sessions, 0 live; control repository clean.
 
 **existing-refunds-informed WITH: not completed, no valid candidate.**
 
-- Node states: `LEDGER-142.core.refund-definitions.impl=BLOCKED`. The other
-  four nodes stayed `PLANNED`. Feature state `RUNNING`, current candidate
+- `orchestrate run` was attempted once and stopped `BLOCKED`. Node states:
+  `LEDGER-142.core.refund-definitions.impl=BLOCKED` (worker spawn failed
+  twice with the same fingerprint). The other four nodes stayed `PLANNED`. Feature state `RUNNING`, current candidate
   *(none)*, 0 evidence records.
 - `module-changed`: 0 commits on top of the baseline in all four modules.
 - Trusted acceptance re-run: **FAIL — acceptance: 16 failing of 23**. That is
@@ -171,12 +197,15 @@ Notes on the plugin-eval score:
   module tests were added, and `ledger-core` is still 1.4.0 (AC-11 requires a
   new minor release).
 - The in-run acceptance report was never written. The control repository
-  has 31 uncommitted paths.
+  has 31 uncommitted paths. `mycelink init` writes no `.gitignore` for the
+  `.mycelink/` runtime directory, although the test fixtures add one
+  (root cause A7).
 
 **greenfield-refunds WITH: not completed, no valid candidate.**
 
-- Node states: `LEDGER-100.core.storage.impl=BLOCKED`. The other seven nodes
-  stayed `PLANNED`. Feature state `RUNNING`, current candidate *(none)*,
+- `orchestrate run` was attempted once and stopped `BLOCKED`. Node states:
+  `LEDGER-100.core.storage.impl=BLOCKED` (worker spawn failed twice with the
+  same fingerprint). The other seven nodes stayed `PLANNED`. Feature state `RUNNING`, current candidate *(none)*,
   0 evidence records.
 - `module-changed`: 0 commits in all four modules.
 - Trusted acceptance re-run: **FAIL — every module "has no passing tests of
@@ -199,33 +228,134 @@ clean commit per module, and more module tests than at baseline.
   self-test shows that this accounting path does report non-zero usage when
   a (fake) Claude worker actually runs (`model_turns 12`,
   `input_tokens 1200`, `output_tokens 600`).
-- Together with `orchestrate run` never being called, this indicates that
-  **orchestration did not dispatch any model workers**. Whatever code was
-  delivered (existing-cold WITH) was written by the top-level session. In
-  this pilot, the WITH cost figures are therefore complete, not
+- **The zero tokens are explained by worker spawn failure**, not by a
+  missing `orchestrate run` call. Each orchestrated attempt claimed a node
+  and tried to spawn the worker executable. The spawn failed at once, the
+  adapter recorded a failed session (`SPAWN_FAILED`), and no model turn ran.
+  The recorded session counts match this: 4 sessions in existing-cold (two
+  `orchestrate run` attempts × two node attempts each), and 2 each in
+  existing-informed and greenfield. Total wall clock was 19–42 ms.
+- So **no model worker was ever dispatched successfully**. Whatever code
+  was delivered (existing-cold WITH) was written by the top-level session.
+  In this pilot, the WITH cost figures are therefore complete, not
   under-counted.
+
+## Root-cause review (trace and source)
+
+A read-only review compared the session traces with the Mycelink source at
+`531a8bf`. No product code or eval behaviour was changed. Source locations
+are repository-relative.
+
+**Failure chain in all three WITH runs.** The session ran `orchestrate run`.
+The orchestrator claimed the first ready node (`CLAIMED` increments
+`attempts`, `src/state/transition.ts`) and tried to spawn the worker. The
+spawn failed (`src/sessions/claude-cli-adapter.ts`: the child-process
+`error` handler records `SPAWN_FAILED: <spawn error>` and settles the
+session as `failed`). `failAttempt` recorded the failure fingerprint
+(`src/engine/orchestrator.ts`). The second identical fingerprint reached
+`max_same_failure` (default 2, `src/state/feature-state.ts`) and moved the
+node to `BLOCKED` with reason *"Same failure fingerprint … reached the limit
+of 2"* (`src/state/transition.ts`). With nothing else schedulable,
+`runToCompletion` stopped with `stop_reason` `BLOCKED`. The human-readable
+output of `orchestrate run` omits the per-node detail, so the
+`SPAWN_FAILED` cause shows only with `--json`.
+
+In existing-cold the session then drove the nodes by hand (`node claim`,
+`tdd red/green/regression`, `node invalidate`, `candidate create`) and wrote
+the code itself. In existing-informed and greenfield it stopped.
+
+Confirmed root causes:
+
+| ID | Class | Root cause | Source evidence |
+|---|---|---|---|
+| A1 | A | The worker executable is not visible to the controller, and `doctor` does not preflight it | Default `claude_executable: 'claude'` (`src/workspace/workspace.ts`) is resolved from the controller's `PATH` and spawned with `shell: false`; `doctor` (`src/cli/cli.ts`) only reports the adapter name |
+| A2 | A | Infrastructure spawn errors consume node retries and `BLOCK` the node after two | `SPAWN_FAILED` goes through the same `failAttempt` → `recordFailure` path as a real worker failure; limit `max_same_failure: 2` |
+| A3 | A | `node claim` bypasses readiness and dependency checks, and `BLOCKED` can be laundered through `INVALIDATED` | `node claim` calls `orchestrator.claim()` directly, not `src/scheduler/ready.ts`; `BLOCKED → INVALIDATED → READY` needs no justification, and entering `INVALIDATED` resets `attempts` and failure counts (`src/state/transition.ts`) |
+| A4 | A/B | CLI primitives cannot move `REGRESSION_VERIFIED` to `DONE`; only `runNode` does | `REVIEW_VERIFIED`, `INTEGRATED` and `DONE` are set only inside the orchestrator (`advanceVerifiedGates`, `runNode`); the `tdd` commands stop at `REGRESSION_VERIFIED` |
+| A5 | A | Absolute evidence paths break after the workspace is sealed | `src/evidence/runner.ts` stores resolved absolute `cwd` and `output_path`; `feature verify` checks `existsSync(record.output_path)` and reports `MISSING_OUTPUT` |
+| A6 | A/B | The candidate pins control-repository HEAD, then Mycelink state is written into that same repository, so committing it causes self-drift | `src/git/candidate.ts` records `control_commit` as HEAD and writes the manifest into the tracked feature folder; `candidate verify` fails `CONTROL_SHA_DRIFT` once HEAD moves. Mycelink does not commit by itself, but the design tracks feature state, and committing that state moves HEAD |
+| A7 | A | `init` omits the `.mycelink/` `.gitignore` entry that the tests add | `cmdInit` / `initControlRepo` write no `.gitignore`; `tests/helpers/portfolio-fixture.ts` and `tests/integration/readme-walkthrough.test.ts` add `.mycelink/` by hand; `candidate create` counts untracked files as dirty |
+| A8 | A | Slash-command argument templates are off by one | `commands/*.md` use `$1` for the first argument and `$2` for the second (for example `commands/run.md`, `commands/cancel.md`, `commands/decision.md`), while Claude Code numbers positional arguments from `$0` |
+| A9 | A/B | No base-branch delivery step | `src/git/integrate.ts` merges node branches only into `feature/<id>`; nothing in `src/` fast-forwards or merges into a module base branch, and `commands/run.md` ends at `feature verify` |
+
+## Architecture assessment
+
+**Category B: moderate workflow and interface redesign, plus category A
+local defects. Not category C (fundamentally unsound).** The state machine,
+evidence gates, candidate binding and verifier-side checks behaved as
+designed: they refused to call invalid work done. The failures come from how
+workers are dispatched in a sandboxed host, from CLI primitives that are
+both too permissive and incomplete, and from where run state lives.
+
+**Minimal A fixes** (local, each small):
+
+- Preflight the worker executable in `doctor` and before the first claim
+  (A1).
+- Classify spawn and other infrastructure errors separately, so they do not
+  consume node attempts or same-failure counts. Report them as environment
+  errors (A2).
+- Route `node claim` through the readiness check. Require a justification
+  and keep the attempt history when a node leaves `BLOCKED` through
+  `INVALIDATED` (A3).
+- Store evidence paths relative to the control repository (A5).
+- Write `.mycelink/` to `.gitignore` in `init` (A7).
+- Fix the argument indices in `commands/*.md` (A8).
+- Print the per-node `BLOCKED` detail in the human `orchestrate run` output.
+
+**Key B redesign:**
+
+- **R1: host-native worker dispatch.** Replace nested `claude -p` spawning
+  with a dispatch *ticket* that the host session fulfils through its own
+  Agent tool, followed by a *settle* command that ingests the result. An
+  external worker daemon is the alternative. Either removes the dependency
+  on a worker executable being visible inside the sandbox.
+- **Role-scoped claim capabilities.** Separate controller, worker and
+  verifier permissions, so a host session cannot hand-progress nodes past
+  the gates. Give the legitimate path a complete set of transitions to
+  `DONE` (A4).
+- **State outside the pinned tree.** Keep run state outside the
+  control-repository tree that the candidate pins, or bind the candidate to
+  a content hash of its inputs instead of HEAD (A6).
+- **Detached, durable runs.** Let a run outlive the host turn, and have the
+  skill wait on or resume it instead of abandoning a `RUNNING` feature.
+- **Delivery step.** Add an explicit, verified fast-forward or merge of the
+  candidate into each module's base branch (A9).
+
+**Outlook.** The following are judgements, not measurements:
+
+- A-only fixes **cannot make nested workers work in the current sandbox**.
+  They turn the failure into an early, clear and honest error, but the
+  worker executable still cannot run there.
+- A + R1 + delivery makes **3/3 plausible but unproven**. The estimate is
+  about **50–65%** full Mycelink success after one or two iteration rounds.
+  This percentage is an engineering judgement, not a measured rate. It
+  needs a re-run with ≥ 10 runs per case per arm to confirm.
 
 ## Defect priorities
 
 Ordered by impact on the end-to-end goal. Each item cites the evidence above.
 
-| # | Priority | Defect | Evidence | Suggested action |
-|---|---|---|---|---|
-| 1 | P0 | The agent drives Mycelink through the controller but never runs `orchestrate run`, so no model worker is dispatched | 0/3 `orchestrate run`; 0 worker tokens / turns in all WITH runs | Make the skill's primary path a single `orchestrate run` after planning. Have the controller refuse, or loudly warn about, manual state progression that bypasses orchestration. |
-| 2 | P0 | The first implementation node goes `BLOCKED` and the session ends with no code written | informed and greenfield WITH: first node BLOCKED, rest PLANNED, 0 commits, 11–29 turns | Surface the blocking reason in controller output and in `STATE.json`. Give a documented recovery command. The skill must not end the turn while the feature is `RUNNING` / `BLOCKED` without either resolving it or falling back to direct delivery. |
-| 3 | P1 | Candidate invalidated by control-repository drift | cold WITH: `CONTROL_SHA_DRIFT`, candidate node `INVALIDATED` | Bind the candidate after the final control-plane commit, or exclude Mycelink's own bookkeeping commits from the drift check. Add a regression test for "commit control state after candidate build". |
-| 4 | P1 | Inconsistent state: feature `CANDIDATE_READY` while every node fails `feature verify` and evidence outputs are missing on disk | cold WITH: nodes `REGRESSION_VERIFIED`, 12 records without on-disk outputs | Gate the `CANDIDATE_READY` transition on `feature verify`. Write evidence output files atomically with their records. |
-| 5 | P1 | Control repository left dirty | informed WITH: 31 uncommitted control-repo paths | Ensure `mycelink init` / state writes either commit or `.gitignore` runtime state, so candidate-build preconditions can hold. |
-| 6 | P2 | No activation on neutral prompts | Stage 1: 0/3 activation on a multi-repository task | Improve the skill description and triggers for multi-repository feature work. The current suite works around this with an explicit instruction. |
-| 7 | P2 | Overhead when it does work | cold WITH: 76 turns, $2.14, 417 s vs WITHOUT 15 turns, $0.59, 138 s, with equal functional outcome | Re-measure after #1–#4. Overhead is only justified if orchestration delivers verified, evidence-backed candidates. |
+| # | Priority | Defect | Root cause | Evidence | Suggested action |
+|---|---|---|---|---|---|
+| 1 | P0 | Workers are never dispatched in the sandbox: every `orchestrate run` attempt (4 in total) stopped `BLOCKED` on a worker spawn failure | A1, A2; needs R1 | Traces: cold 2, informed 1, greenfield 1 attempts, all `BLOCKED`; 0 worker tokens and turns; 4 / 2 / 2 failed sessions in 19–42 ms | Short term: preflight the worker in `doctor`, treat spawn errors as environment errors that do not consume attempts, and show the cause in human output. Real fix: host-native dispatch ticket/settle (R1) or an external daemon. |
+| 2 | P0 | After `BLOCKED`, the session either stops with no code (informed, greenfield) or hand-progresses nodes outside orchestration (cold) | A3, A4; needs role-scoped capabilities and durable runs | informed and greenfield WITH: first node `BLOCKED`, rest `PLANNED`, 0 commits. cold WITH: nodes stuck at `REGRESSION_VERIFIED`, candidate node `INVALIDATED` | Route `claim` through readiness and stop `BLOCKED` laundering through `INVALIDATED`. Scope claim capabilities by role. Give the skill a documented recovery or an honest fallback, and never end the turn silently on a `RUNNING` / `BLOCKED` feature. |
+| 3 | P1 | Candidate invalidated by control-repository self-drift | A6 | cold WITH: `CONTROL_SHA_DRIFT`, candidate node `INVALIDATED` | Keep run state outside the pinned tree, or bind the candidate to a content hash. Add a regression test for "commit control state after candidate build". |
+| 4 | P1 | Evidence outputs missing at verification | A5 | cold WITH: 12 records, outputs missing for all four implementation nodes | Store repository-relative evidence paths. Gate `CANDIDATE_READY` on `feature verify`. |
+| 5 | P1 | Control repository left dirty | A7 | informed WITH: 31 uncommitted control-repo paths | Have `init` write `.mycelink/` to `.gitignore`, as the test fixtures do. |
+| 6 | P1 | No delivery to module base branches | A9 | Source: integration stops at `feature/<id>`; `commands/run.md` ends at `feature verify` | Add a verified delivery step: fast-forward or merge the candidate into each base branch. |
+| 7 | P2 | Slash-command arguments off by one | A8 | `commands/*.md` use `$1` / `$2` for the first / second argument | Renumber from `$0` and add a template test. |
+| 8 | P2 | No activation on neutral prompts | — | Stage 1: 0/3 activation on a multi-repository task | Improve the skill description and triggers for multi-repository feature work. The current suite works around this with an explicit instruction. |
+| 9 | P2 | Overhead when it does work | — | cold WITH: 76 turns, $2.14, 417 s vs WITHOUT 15 turns, $0.59, 138 s, with equal functional outcome | Re-measure after #1–#6. Overhead is only justified if orchestration delivers verified, evidence-backed candidates. |
 
 Eval-side follow-ups (not Mycelink defects):
 
 - `summary-lists-delivered-commits` passes on any four hex strings. Tighten
   it to match the delivered HEADs, or move the check to the verifier.
-- `mycelink-orchestrate-run` matches only `mycelink.mjs … orchestrate run`.
-  The zero worker usage corroborates it here, but the grader should also
-  accept other launcher spellings.
+- `mycelink-orchestrate-run` reads 0× although the traces show four
+  `orchestrate run` attempts, all `BLOCKED`. Its 0× means "no recognized
+  successful invocation", not "no attempt". Split it into separate
+  *attempted* and *succeeded* indicators, accept other launcher spellings,
+  and record the `stop_reason`.
 - Activation indicators are unscored. The plugin-eval score alone rated
   cold WITH a full pass despite invalid orchestration, so always report the
   verifier alongside it.
@@ -266,8 +396,10 @@ removing that sentence from each `case.yaml` prompt.
 
 The summary JSON was derived by script from four local evidence files: the
 two plugin-eval aggregates, the verifier aggregate and the self-test output.
-A separate script cross-checked it against those files. Raw HTML reports,
-traces and workspaces are not included. Usernames, absolute paths, temporary
+A separate script cross-checked it against those files. The correction
+and the root-cause review also used the session traces and the Mycelink
+source at `531a8bf`. Raw HTML reports, traces and workspaces are not
+included. Usernames, absolute paths, temporary
 sandbox identifiers, session identifiers, e-mail addresses and credentials
 have been removed. Git SHAs that appear here are commits inside the synthetic
 fixture repositories.

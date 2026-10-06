@@ -344,6 +344,16 @@
                     "sessions": 4
                   }
                 }
+              },
+              "orchestrateRunTrace": {
+                "source": "session trace (not a grader)",
+                "attempts": 2,
+                "stopReasons": [
+                  "BLOCKED",
+                  "BLOCKED"
+                ],
+                "successfulInvocations": 0,
+                "blockCause": "worker spawn failure (SPAWN_FAILED) repeated to max_same_failure 2"
               }
             },
             "without": {
@@ -525,6 +535,15 @@
                     "sessions": 2
                   }
                 }
+              },
+              "orchestrateRunTrace": {
+                "source": "session trace (not a grader)",
+                "attempts": 1,
+                "stopReasons": [
+                  "BLOCKED"
+                ],
+                "successfulInvocations": 0,
+                "blockCause": "worker spawn failure (SPAWN_FAILED) repeated to max_same_failure 2"
               }
             },
             "without": {
@@ -709,6 +728,15 @@
                     "sessions": 2
                   }
                 }
+              },
+              "orchestrateRunTrace": {
+                "source": "session trace (not a grader)",
+                "attempts": 1,
+                "stopReasons": [
+                  "BLOCKED"
+                ],
+                "successfulInvocations": 0,
+                "blockCause": "worker spawn failure (SPAWN_FAILED) repeated to max_same_failure 2"
               }
             },
             "without": {
@@ -766,7 +794,13 @@
             }
           }
         }
-      ]
+      ],
+      "orchestrateRunTraceTotals": {
+        "attempts": 4,
+        "blocked": 4,
+        "succeeded": 0
+      },
+      "workerTokensZeroExplanation": "Every orchestrated node attempt failed to spawn the worker executable, so each recorded session settled as failed with no model turn (sessions 4/2/2, 19-42 ms wall clock)."
     }
   },
   "statisticalNote": "n=1 run per case per arm; pilot only, not statistically significant",
@@ -774,6 +808,227 @@
     "mycelinkVersion": "0.2.0-beta.1",
     "reliableForPerfectEndToEndCompletion": false,
     "comparedWithDirectClaude": "worse in this pilot",
-    "summary": "With Mycelink use required, the independent verifier found full Mycelink success (completion and valid orchestration) in 0/3 runs and completion in 1/3; direct Claude without the plugin completed 3/3."
-  }
+    "summary": "With Mycelink use required, the independent verifier found full Mycelink success (completion and valid orchestration) in 0/3 runs and completion in 1/3; direct Claude without the plugin completed 3/3. orchestrate run was attempted in all three WITH sessions but every attempt stopped BLOCKED because the worker process could not be spawned."
+  },
+  "correction": {
+    "date": "2026-10-06",
+    "basis": "read-only review of session traces and Mycelink source at 531a8bf",
+    "previousClaim": "mycelink orchestrate run was never invoked",
+    "corrected": "orchestrate run was attempted in all three WITH sessions (existing-cold twice, existing-informed once, greenfield once); every attempt stopped BLOCKED on a worker spawn failure",
+    "graderInterpretation": {
+      "grader": "mycelink-orchestrate-run",
+      "rawValuePreserved": false,
+      "meaning": "no recognized successful invocation; not evidence of no attempt"
+    }
+  },
+  "rootCauseReview": {
+    "productSourceChanged": false,
+    "rootCauses": [
+      {
+        "id": "A1",
+        "class": "A",
+        "summary": "worker executable not visible to the controller; doctor does not preflight it",
+        "source": [
+          "src/workspace/workspace.ts",
+          "src/sessions/claude-cli-adapter.ts",
+          "src/cli/cli.ts"
+        ]
+      },
+      {
+        "id": "A2",
+        "class": "A",
+        "summary": "infrastructure spawn errors consume node retries and BLOCK the node after two identical failures",
+        "source": [
+          "src/engine/orchestrator.ts",
+          "src/state/transition.ts",
+          "src/state/feature-state.ts"
+        ]
+      },
+      {
+        "id": "A3",
+        "class": "A",
+        "summary": "node claim bypasses readiness/dependency checks; BLOCKED can be laundered through INVALIDATED, which resets attempts",
+        "source": [
+          "src/cli/cli.ts",
+          "src/engine/orchestrator.ts",
+          "src/state/transition.ts",
+          "src/scheduler/ready.ts"
+        ]
+      },
+      {
+        "id": "A4",
+        "class": "A/B",
+        "summary": "CLI primitives cannot move REGRESSION_VERIFIED to DONE; only runNode does",
+        "source": [
+          "src/cli/cli.ts",
+          "src/engine/orchestrator.ts"
+        ]
+      },
+      {
+        "id": "A5",
+        "class": "A",
+        "summary": "absolute evidence paths break after the workspace is sealed",
+        "source": [
+          "src/evidence/runner.ts",
+          "src/cli/cli.ts"
+        ]
+      },
+      {
+        "id": "A6",
+        "class": "A/B",
+        "summary": "candidate pins control-repository HEAD while Mycelink state lives and is committed in the same repository, causing self-drift",
+        "source": [
+          "src/git/candidate.ts"
+        ]
+      },
+      {
+        "id": "A7",
+        "class": "A",
+        "summary": "init omits the .mycelink/ .gitignore entry that the tests add",
+        "source": [
+          "src/cli/cli.ts",
+          "src/workspace/workspace.ts",
+          "tests/helpers/portfolio-fixture.ts",
+          "tests/integration/readme-walkthrough.test.ts"
+        ]
+      },
+      {
+        "id": "A8",
+        "class": "A",
+        "summary": "slash-command argument templates are off by one ($1 used for the first argument)",
+        "source": [
+          "commands/"
+        ]
+      },
+      {
+        "id": "A9",
+        "class": "A/B",
+        "summary": "no base-branch delivery step; integration stops at feature/<id>",
+        "source": [
+          "src/git/integrate.ts",
+          "commands/run.md"
+        ]
+      }
+    ]
+  },
+  "architectureAssessment": {
+    "category": "B",
+    "description": "moderate workflow/interface redesign plus category A local defects; not fundamentally unsound (C)",
+    "minimalAFixes": [
+      "preflight worker executable in doctor and before first claim",
+      "classify spawn/infrastructure errors so they do not consume node attempts",
+      "route node claim through readiness; require justification and keep history when leaving BLOCKED via INVALIDATED",
+      "store repository-relative evidence paths",
+      "write .mycelink/ to .gitignore in init",
+      "fix slash-command argument indices",
+      "print per-node BLOCKED detail in human orchestrate run output"
+    ],
+    "keyBRedesign": [
+      {
+        "id": "R1",
+        "summary": "host-native worker dispatch via Agent-tool ticket/settle, or an external worker daemon"
+      },
+      {
+        "summary": "role-scoped claim capabilities with a complete legitimate path to DONE"
+      },
+      {
+        "summary": "run state outside the pinned control tree, or candidate bound to a content hash"
+      },
+      {
+        "summary": "detached durable runs that outlive the host turn"
+      },
+      {
+        "summary": "explicit verified delivery to module base branches"
+      }
+    ],
+    "outlook": {
+      "kind": "judgement, not measurement",
+      "aOnlyFixesEnableNestedWorkersInCurrentSandbox": false,
+      "aPlusR1PlusDelivery": "3/3 plausible but unproven",
+      "estimatedFullSuccessAfterOneOrTwoRounds": {
+        "low": 0.5,
+        "high": 0.65,
+        "measured": false
+      }
+    }
+  },
+  "defectPriorities": [
+    {
+      "rank": 1,
+      "priority": "P0",
+      "rootCauses": [
+        "A1",
+        "A2"
+      ],
+      "needs": [
+        "R1"
+      ],
+      "defect": "workers never dispatched in the sandbox; all 4 orchestrate run attempts stopped BLOCKED on worker spawn failure"
+    },
+    {
+      "rank": 2,
+      "priority": "P0",
+      "rootCauses": [
+        "A3",
+        "A4"
+      ],
+      "needs": [
+        "role-scoped claim capabilities",
+        "detached durable runs"
+      ],
+      "defect": "after BLOCKED the session stops with no code or hand-progresses nodes outside orchestration"
+    },
+    {
+      "rank": 3,
+      "priority": "P1",
+      "rootCauses": [
+        "A6"
+      ],
+      "defect": "candidate invalidated by control-repository self-drift"
+    },
+    {
+      "rank": 4,
+      "priority": "P1",
+      "rootCauses": [
+        "A5"
+      ],
+      "defect": "evidence outputs missing at verification"
+    },
+    {
+      "rank": 5,
+      "priority": "P1",
+      "rootCauses": [
+        "A7"
+      ],
+      "defect": "control repository left dirty"
+    },
+    {
+      "rank": 6,
+      "priority": "P1",
+      "rootCauses": [
+        "A9"
+      ],
+      "defect": "no delivery to module base branches"
+    },
+    {
+      "rank": 7,
+      "priority": "P2",
+      "rootCauses": [
+        "A8"
+      ],
+      "defect": "slash-command arguments off by one"
+    },
+    {
+      "rank": 8,
+      "priority": "P2",
+      "rootCauses": [],
+      "defect": "no activation on neutral prompts"
+    },
+    {
+      "rank": 9,
+      "priority": "P2",
+      "rootCauses": [],
+      "defect": "overhead when it does work"
+    }
+  ]
 }
