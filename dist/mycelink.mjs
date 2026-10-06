@@ -7746,11 +7746,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants5) {
+      optimizeNames(names, constants6) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants5);
+          this.rhs = optimizeExpr(this.rhs, names, constants6);
         return this;
       }
       get names() {
@@ -7767,10 +7767,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants5) {
+      optimizeNames(names, constants6) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants5);
+        this.rhs = optimizeExpr(this.rhs, names, constants6);
         return this;
       }
       get names() {
@@ -7831,8 +7831,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants5) {
-        this.code = optimizeExpr(this.code, names, constants5);
+      optimizeNames(names, constants6) {
+        this.code = optimizeExpr(this.code, names, constants6);
         return this;
       }
       get names() {
@@ -7861,12 +7861,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants5) {
+      optimizeNames(names, constants6) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants5))
+          if (n.optimizeNames(names, constants6))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -7919,12 +7919,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants5) {
+      optimizeNames(names, constants6) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants5);
-        if (!(super.optimizeNames(names, constants5) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants6);
+        if (!(super.optimizeNames(names, constants6) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants5);
+        this.condition = optimizeExpr(this.condition, names, constants6);
         return this;
       }
       get names() {
@@ -7947,10 +7947,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants5) {
-        if (!super.optimizeNames(names, constants5))
+      optimizeNames(names, constants6) {
+        if (!super.optimizeNames(names, constants6))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants5);
+        this.iteration = optimizeExpr(this.iteration, names, constants6);
         return this;
       }
       get names() {
@@ -7986,10 +7986,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants5) {
-        if (!super.optimizeNames(names, constants5))
+      optimizeNames(names, constants6) {
+        if (!super.optimizeNames(names, constants6))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants5);
+        this.iterable = optimizeExpr(this.iterable, names, constants6);
         return this;
       }
       get names() {
@@ -8031,11 +8031,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants5) {
+      optimizeNames(names, constants6) {
         var _a, _b;
-        super.optimizeNames(names, constants5);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants5);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants5);
+        super.optimizeNames(names, constants6);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants6);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants6);
         return this;
       }
       get names() {
@@ -8336,7 +8336,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants5) {
+    function optimizeExpr(expr, names, constants6) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -8351,14 +8351,14 @@ var require_codegen = __commonJS({
         return items2;
       }, []));
       function replaceName(n) {
-        const c = constants5[n.str];
+        const c = constants6[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants5[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants6[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -15541,13 +15541,13 @@ function safeSegment(value) {
 // src/workspace/workspace.ts
 var import_yaml = __toESM(require_dist(), 1);
 import {
-  closeSync as closeSync3,
-  constants,
+  closeSync as closeSync4,
+  constants as constants2,
   existsSync as existsSync5,
-  fstatSync,
+  fstatSync as fstatSync2,
   lstatSync as lstatSync2,
   mkdirSync as mkdirSync3,
-  openSync as openSync3,
+  openSync as openSync4,
   readFileSync as readFileSync4,
   writeFileSync,
   writeSync as writeSync3
@@ -15616,7 +15616,7 @@ function validateAgainstSchema(name, value) {
 }
 
 // src/security/paths.ts
-import { existsSync as existsSync2, lstatSync, realpathSync } from "node:fs";
+import { closeSync, constants, existsSync as existsSync2, fstatSync, lstatSync, openSync, realpathSync } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join4, relative, resolve as resolve3, sep as sep2 } from "node:path";
 var RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)$/i;
 function namespaceProblem(p) {
@@ -15695,13 +15695,34 @@ function isInsideReal(root, target) {
   return lexicallyInside(realpathDeepest(root), realpathDeepest(target));
 }
 function namesOpenedFile(path, opened) {
+  const before = plainFileAt(path, opened);
+  if (before === null) return false;
+  if (before.dev === opened.dev) return true;
+  if (before.dev !== 0n) return false;
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return false;
+  }
+  let reached;
+  try {
+    reached = fstatSync(fd, { bigint: true });
+  } finally {
+    closeSync(fd);
+  }
+  if (reached.dev !== opened.dev || reached.ino !== opened.ino) return false;
+  return plainFileAt(path, opened) !== null;
+}
+function plainFileAt(path, opened) {
   let now;
   try {
     now = lstatSync(path, { bigint: true });
   } catch {
-    return false;
+    return null;
   }
-  return !now.isSymbolicLink() && now.isFile() && now.dev === opened.dev && now.ino === opened.ino;
+  if (now.isSymbolicLink() || !now.isFile() || now.nlink !== 1n || now.ino !== opened.ino) return null;
+  return now;
 }
 
 // src/graph/validate.ts
@@ -16082,11 +16103,11 @@ import { join as join6 } from "node:path";
 
 // src/state/atomic-json.ts
 import {
-  closeSync as closeSync2,
+  closeSync as closeSync3,
   existsSync as existsSync4,
   fsyncSync,
   mkdirSync as mkdirSync2,
-  openSync as openSync2,
+  openSync as openSync3,
   readFileSync as readFileSync3,
   readdirSync,
   renameSync,
@@ -16099,10 +16120,10 @@ import { randomBytes as randomBytes2 } from "node:crypto";
 
 // src/state/process-lock.ts
 import {
-  closeSync,
+  closeSync as closeSync2,
   existsSync as existsSync3,
   mkdirSync,
-  openSync,
+  openSync as openSync2,
   readFileSync as readFileSync2,
   rmSync,
   statSync,
@@ -16160,7 +16181,7 @@ function tryCreate(file, owner) {
   mkdirSync(dirname3(file), { recursive: true });
   let fd;
   try {
-    fd = openSync(file, "wx");
+    fd = openSync2(file, "wx");
   } catch (err) {
     const code = err.code;
     if (code !== void 0 && NOT_OURS_YET.has(code)) return false;
@@ -16169,14 +16190,14 @@ function tryCreate(file, owner) {
   try {
     writeSync(fd, JSON.stringify(owner));
   } catch (err) {
-    closeSync(fd);
+    closeSync2(fd);
     try {
       rmSync(file, { force: true });
     } catch {
     }
     throw err;
   }
-  closeSync(fd);
+  closeSync2(fd);
   return true;
 }
 function tryRemove(file) {
@@ -16345,12 +16366,12 @@ function writeTextAtomic(file, text) {
   mkdirSync2(dir, { recursive: true });
   const tmp = file + tempSuffix();
   retrySync(() => {
-    const fd = openSync2(tmp, "wx");
+    const fd = openSync3(tmp, "wx");
     try {
       writeSync2(fd, text);
       fsyncSync(fd);
     } finally {
-      closeSync2(fd);
+      closeSync3(fd);
     }
   });
   try {
@@ -16576,8 +16597,8 @@ function ensureScratchIgnored(controlRoot) {
   const refuse = (why) => {
     throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
   };
-  const nofollow = constants.O_NOFOLLOW ?? 0;
-  const nonblock = constants.O_NONBLOCK ?? 0;
+  const nofollow = constants2.O_NOFOLLOW ?? 0;
+  const nonblock = constants2.O_NONBLOCK ?? 0;
   const isLink2 = () => {
     try {
       return lstatSync2(file).isSymbolicLink();
@@ -16588,14 +16609,14 @@ function ensureScratchIgnored(controlRoot) {
   let fd;
   let created = false;
   try {
-    fd = openSync3(file, constants.O_RDWR | constants.O_APPEND | nofollow | nonblock);
+    fd = openSync4(file, constants2.O_RDWR | constants2.O_APPEND | nofollow | nonblock);
   } catch (err) {
     const code = err.code;
     if (code === "ELOOP" || code === "EMLINK") refuse("it is a link");
     if (code === "EISDIR") refuse("it is not a regular file");
     if (code !== "ENOENT") throw err;
     try {
-      fd = openSync3(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | nofollow | nonblock, 438);
+      fd = openSync4(file, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | nofollow | nonblock, 438);
       created = true;
     } catch (createErr) {
       if (createErr.code !== "EEXIST") throw createErr;
@@ -16603,7 +16624,7 @@ function ensureScratchIgnored(controlRoot) {
     }
   }
   try {
-    const opened = fstatSync(fd, { bigint: true });
+    const opened = fstatSync2(fd, { bigint: true });
     if (!opened.isFile()) refuse("it is not a regular file");
     if (opened.nlink !== 1n) refuse("it has more than one name (hard link)");
     if (!namesOpenedFile(file, opened)) refuse(isLink2() ? "it is a link" : "it was replaced while it was opened");
@@ -16615,7 +16636,7 @@ function ensureScratchIgnored(controlRoot) {
     writeSync3(fd, `${prefix}${SCRATCH_IGNORE_ENTRY}
 `);
   } finally {
-    closeSync3(fd);
+    closeSync4(fd);
   }
 }
 function initFeatureDirs(controlRoot, featureId) {
@@ -17623,7 +17644,7 @@ function isAncestor(repo, ancestor, descendant) {
 
 // src/evidence/paths.ts
 import { createHash as createHash2 } from "node:crypto";
-import { closeSync as closeSync4, constants as constants2, fstatSync as fstatSync2, lstatSync as lstatSync3, openSync as openSync4, readFileSync as readFileSync5 } from "node:fs";
+import { closeSync as closeSync5, constants as constants3, fstatSync as fstatSync3, lstatSync as lstatSync3, openSync as openSync5, readFileSync as readFileSync5 } from "node:fs";
 import { relative as relative2, resolve as resolve6 } from "node:path";
 var MAX_EVIDENCE_BYTES = 64 * 1024 * 1024;
 function relativeInside(base, target) {
@@ -17669,7 +17690,7 @@ function checkEvidenceOutput(controlRoot, featureId, record) {
   const notRegular = `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
   let fd;
   try {
-    fd = openSync4(resolved.path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0));
+    fd = openSync5(resolved.path, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0) | (constants3.O_NONBLOCK ?? 0));
   } catch (err) {
     if (err.code !== "ENOENT") {
       return `UNSAFE_EVIDENCE_PATH: ${record.output_path} could not be opened without following a link`;
@@ -17681,7 +17702,7 @@ function checkEvidenceOutput(controlRoot, featureId, record) {
     }
   }
   try {
-    const opened = fstatSync2(fd, { bigint: true });
+    const opened = fstatSync3(fd, { bigint: true });
     if (!opened.isFile() || opened.nlink !== 1n || !namesOpenedFile(resolved.path, opened)) return notRegular;
     if (opened.size > BigInt(MAX_EVIDENCE_BYTES)) return `OUTPUT_TOO_LARGE: ${record.output_path}`;
     const sha = createHash2("sha256").update(readFileSync5(fd)).digest("hex");
@@ -17690,7 +17711,7 @@ function checkEvidenceOutput(controlRoot, featureId, record) {
     }
     return null;
   } finally {
-    closeSync4(fd);
+    closeSync5(fd);
   }
 }
 function evidenceOutputFile(pathBase, record) {
@@ -18524,14 +18545,14 @@ function assertClaimCapability(nodeId, runtime, raw) {
 
 // src/sessions/worker-protocol.ts
 import {
-  closeSync as closeSync5,
-  constants as constants3,
+  closeSync as closeSync6,
+  constants as constants4,
   existsSync as existsSync12,
-  fstatSync as fstatSync3,
+  fstatSync as fstatSync4,
   lstatSync as lstatSync5,
   mkdirSync as mkdirSync9,
   mkdtempSync,
-  openSync as openSync5,
+  openSync as openSync6,
   readdirSync as readdirSync4,
   readSync,
   renameSync as renameSync2,
@@ -18968,19 +18989,19 @@ function loadPromptPack(file, expected, env = process.env) {
   };
   let fd;
   try {
-    fd = openSync5(file, "r");
+    fd = openSync6(file, "r");
   } catch (err) {
     const missing = err.code === "ENOENT";
     return fail(missing ? "context pack is missing" : "context pack is unreadable");
   }
   let raw;
   try {
-    const st = fstatSync3(fd);
+    const st = fstatSync4(fd);
     if (!st.isFile()) fail("context pack is not a regular file");
     if (st.size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${st.size} bytes`);
     raw = readBounded(fd, MAX_PROMPT_PACK_BYTES + 1);
   } finally {
-    closeSync5(fd);
+    closeSync6(fd);
   }
   if (raw.length > MAX_PROMPT_PACK_BYTES) fail(`context pack is over ${MAX_PROMPT_PACK_BYTES} bytes`);
   let pack;
@@ -19226,12 +19247,12 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
   const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
   let fd;
   try {
-    fd = openSync5(captured, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0) | (constants3.O_NONBLOCK ?? 0));
+    fd = openSync6(captured, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0) | (constants4.O_NONBLOCK ?? 0));
   } catch {
     return notRegular();
   }
   try {
-    const st = fstatSync3(fd, { bigint: true });
+    const st = fstatSync4(fd, { bigint: true });
     if (lstatSync5(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
@@ -19259,7 +19280,7 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + "\n");
     return { result, failure: null };
   } finally {
-    closeSync5(fd);
+    closeSync6(fd);
   }
 }
 function removeTree(path) {
@@ -19303,7 +19324,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { closeSync as closeSync7, constants as fsConstants, fstatSync as fstatSync4, lstatSync as lstatSync6, openSync as openSync7 } from "node:fs";
+import { closeSync as closeSync8, constants as fsConstants, fstatSync as fstatSync5, lstatSync as lstatSync6, openSync as openSync8 } from "node:fs";
 import { hostname as hostname3 } from "node:os";
 
 // src/engine/portfolio.ts
@@ -19693,7 +19714,7 @@ async function runScenario(scenario, shardIndex, args, evidenceRoot) {
 }
 
 // src/state/event-log.ts
-import { appendFileSync, closeSync as closeSync6, existsSync as existsSync14, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync6, readFileSync as readFileSync9, readdirSync as readdirSync6, renameSync as renameSync3, writeSync as writeSync4 } from "node:fs";
+import { appendFileSync, closeSync as closeSync7, existsSync as existsSync14, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync7, readFileSync as readFileSync9, readdirSync as readdirSync6, renameSync as renameSync3, writeSync as writeSync4 } from "node:fs";
 import { basename as basename3, dirname as dirname6, join as join18 } from "node:path";
 import { createHash as createHash8 } from "node:crypto";
 var EventTooLargeError = class extends Error {
@@ -19748,12 +19769,12 @@ function repairTornTail(log) {
   const lastNewline = raw.lastIndexOf("\n");
   const keep = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
   retrySync(() => {
-    const fd = openSync6(log, "r+");
+    const fd = openSync7(log, "r+");
     try {
       ftruncateSync(fd, Buffer.byteLength(keep, "utf8"));
       fsyncSync2(fd);
     } finally {
-      closeSync6(fd);
+      closeSync7(fd);
     }
   });
   return true;
@@ -19815,11 +19836,11 @@ function appendEvent(log, input, options = {}) {
       const line = JSON.stringify(event) + "\n";
       retrySync(() => appendFileSync(log, line, "utf8"));
       bestEffortSync(() => {
-        const fd = openSync6(log, "r+");
+        const fd = openSync7(log, "r+");
         try {
           fsyncSync2(fd);
         } finally {
-          closeSync6(fd);
+          closeSync7(fd);
         }
       });
       return { appended: true, event };
@@ -22277,12 +22298,12 @@ function outcomeFromState(state) {
 function readControllerCopy(file, sha256, nodeId, claimId, dispatchId) {
   let fd;
   try {
-    fd = openSync7(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    fd = openSync8(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
   } catch {
     return null;
   }
   try {
-    const st = fstatSync4(fd);
+    const st = fstatSync5(fd);
     if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync6(file).isSymbolicLink()) return null;
     const bytes = readFileSync11(fd);
     if (sha256 !== null && createHash9("sha256").update(bytes).digest("hex") !== sha256) return null;
@@ -22294,7 +22315,7 @@ function readControllerCopy(file, sha256, nodeId, claimId, dispatchId) {
   } catch {
     return null;
   } finally {
-    closeSync7(fd);
+    closeSync8(fd);
   }
 }
 function sha256OfFile(file) {
@@ -23974,7 +23995,7 @@ function listAdapters() {
 registerAdapter(eccAdapter);
 
 // src/sessions/preflight.ts
-import { accessSync, constants as constants4, existsSync as existsSync21, statSync as statSync5 } from "node:fs";
+import { accessSync, constants as constants5, existsSync as existsSync21, statSync as statSync5 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter as delimiter2, isAbsolute as isAbsolute3, join as join23 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
@@ -23982,7 +24003,7 @@ var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
   try {
     if (!existsSync21(p) || !statSync5(p).isFile()) return false;
-    if (process.platform !== "win32") accessSync(p, constants4.X_OK);
+    if (process.platform !== "win32") accessSync(p, constants5.X_OK);
     return true;
   } catch {
     return false;
