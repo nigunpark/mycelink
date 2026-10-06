@@ -17887,7 +17887,7 @@ function createWorkerWorktree(args) {
   mkdirSync5(args.worktreeRoot, { recursive: true });
   const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && existsSync8(target)) {
-    return { worktree: target, branch, base: args.baseBranch, created: false };
+    return { worktree: target, branch, base: args.baseBranch, created: false, startSha: null };
   }
   if (registered && !existsSync8(target)) {
     runGit(repo, ["worktree", "prune"], { allowFail: true });
@@ -17895,14 +17895,16 @@ function createWorkerWorktree(args) {
   if (existsSync8(target)) {
     rmSync4(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
+  let startSha = null;
   if (branchExists(repo, branch)) {
     runGit(repo, ["worktree", "add", target, branch]);
   } else {
-    runGit(repo, ["worktree", "add", "-b", branch, target, args.baseBranch]);
+    startSha = resolveRef(repo, args.startPoint ?? args.baseBranch);
+    runGit(repo, ["worktree", "add", "-b", branch, target, startSha]);
   }
   runGit(target, ["config", "core.autocrlf", "false"]);
   runGit(target, ["config", "commit.gpgsign", "false"]);
-  return { worktree: target, branch, base: args.baseBranch, created: true };
+  return { worktree: target, branch, base: args.baseBranch, created: true, startSha };
 }
 function baseName(p) {
   const parts = resolve8(p).split(/[\\/]/);
@@ -19964,26 +19966,9 @@ var Orchestrator = class {
         });
       }
       if (node.repository !== null) {
-        const repoPath = repositoryPath(this.workspace, node.repository);
-        const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-        const created = createWorkerWorktree({
-          repoPath,
-          featureId: this.featureId,
-          nodeId,
-          baseBranch: repoDecl?.base_branch ?? "main",
-          worktreeRoot: this.workspace.paths.worktreesDir,
-          repositoryName: node.repository
-        });
+        const created = this.ensureWorktree(nodeId, claimId);
         worktree = created.worktree;
         branch = created.branch;
-        mutateState(this.paths.featureDir, (s) => {
-          const claim = s.nodes[nodeId]?.claim;
-          if (claim?.claim_id === claimId) {
-            claim.worktree = worktree;
-            claim.branch = branch;
-          }
-          return s;
-        });
       }
     } catch (err) {
       this.releaseForInfrastructure(nodeId, claimId, `claim setup failed: ${errorText(err)}`);
@@ -20001,6 +19986,68 @@ var Orchestrator = class {
       expiresAt,
       ...dispatchId !== void 0 ? { dispatchId, resultFile } : {}
     };
+  }
+  /**
+   * Create (or re-attach) the node's worktree for the claim `claimId` and pin
+   * the commit its branch started from in the claim and the node runtime.
+   *
+   * A new branch starts at the repository's integration head when anything
+   * has been integrated (so a dependent sees the work its upstream nodes
+   * landed, without merging it itself), otherwise at the base branch. A
+   * branch that already exists keeps its commits and the base recorded when
+   * it was created.
+   */
+  ensureWorktree(nodeId, claimId) {
+    const node = this.node(nodeId);
+    if (node.repository === null) throw new Error(`${nodeId} has no repository.`);
+    const repoPath = repositoryPath(this.workspace, node.repository);
+    const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const integration = integrationBranchName(this.featureId);
+    const created = createWorkerWorktree({
+      repoPath,
+      featureId: this.featureId,
+      nodeId,
+      baseBranch: repoDecl?.base_branch ?? "main",
+      worktreeRoot: this.workspace.paths.worktreesDir,
+      repositoryName: node.repository,
+      ...branchExists(repoPath, integration) ? { startPoint: integration } : {}
+    });
+    let baseSha = created.startSha;
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      if (!rt) return s;
+      if (created.startSha !== null) rt.branch_base_sha = created.startSha;
+      baseSha = rt.branch_base_sha ?? null;
+      const claim = rt.claim;
+      if (claim?.claim_id === claimId) {
+        claim.worktree = created.worktree;
+        claim.branch = created.branch;
+        if (baseSha !== null) claim.base_sha = baseSha;
+      }
+      return s;
+    });
+    return { worktree: created.worktree, branch: created.branch, baseSha };
+  }
+  /**
+   * The commit a node's fence is measured from: its pinned base, advanced
+   * to the newest integration commit this controller itself recorded (a
+   * node's integrated_sha in this repository) that the node's branch
+   * contains. A worker that merged the integration branch after it moved
+   * therefore owns only its own changes; a commit placed on the integration
+   * branch any other way stays in the node's diff. Returns null when the
+   * pinned base is not in the branch's history at all.
+   */
+  fenceBase(repository, repoPath, pinned, head) {
+    if (!isAncestor(repoPath, pinned, head)) return null;
+    const graph = this.graph();
+    let base = pinned;
+    for (const [id, rt] of Object.entries(this.state().nodes)) {
+      const sha = rt.integrated_sha;
+      if (!sha || graph.nodes.find((n) => n.id === id)?.repository !== repository) continue;
+      if (sha === base) continue;
+      if (isAncestor(repoPath, base, sha) && isAncestor(repoPath, sha, head)) base = sha;
+    }
+    return base;
   }
   /** How long a claim may stay unsettled before a host dispatch counts as abandoned. */
   claimTtlMs(node) {
@@ -20125,7 +20172,17 @@ var Orchestrator = class {
     runGit(repoPath, ["worktree", "add", "--detach", verifyDir, sha]);
     runGit(verifyDir, ["config", "core.autocrlf", "false"], { allowFail: true });
     try {
-      const base = resolveRef(repoPath, baseBranch);
+      const runtime = this.state().nodes[nodeId];
+      const pinned = runtime?.claim?.base_sha ?? runtime?.branch_base_sha ?? null;
+      const base = pinned === null ? resolveRef(repoPath, baseBranch) : this.fenceBase(node.repository, repoPath, pinned, sha);
+      if (base === null) {
+        return {
+          ok: false,
+          evidence,
+          sha,
+          detail: `OWNERSHIP_VIOLATION: BASE_NOT_ANCESTOR: ${branch} at ${sha.slice(0, 12)} no longer contains the commit ${String(pinned).slice(0, 12)} its worktree was created from`
+        };
+      }
       const fence = verifyChangedPaths(verifyDir, base, {
         allowed: node.allowed_paths,
         forbidden: node.forbidden_paths ?? []
@@ -20625,25 +20682,9 @@ var Orchestrator = class {
     });
     const held = claim;
     if (node.repository !== null && held.worktree === null) {
-      const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-      const created = createWorkerWorktree({
-        repoPath: repositoryPath(this.workspace, node.repository),
-        featureId: this.featureId,
-        nodeId,
-        baseBranch: repoDecl?.base_branch ?? "main",
-        worktreeRoot: this.workspace.paths.worktreesDir,
-        repositoryName: node.repository
-      });
+      const created = this.ensureWorktree(nodeId, held.claim_id);
       held.worktree = created.worktree;
       held.branch = created.branch;
-      mutateState(this.paths.featureDir, (s) => {
-        const c = s.nodes[nodeId]?.claim;
-        if (c?.claim_id === held.claim_id) {
-          c.worktree = created.worktree;
-          c.branch = created.branch;
-        }
-        return s;
-      });
     }
     const ticket = this.buildTicket(
       nodeId,
@@ -24707,13 +24748,16 @@ function branchGroup(args, io) {
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node?.repository) throw new Error(`Node "${nodeId}" has no repository.`);
     const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const repoPath = repositoryPath(workspace, node.repository);
+    const integration = integrationBranchName(featureId);
     const created = createWorkerWorktree({
-      repoPath: repositoryPath(workspace, node.repository),
+      repoPath,
       featureId,
       nodeId,
       baseBranch: repoDecl?.base_branch ?? "main",
       worktreeRoot: workspace.paths.worktreesDir,
-      repositoryName: node.repository
+      repositoryName: node.repository,
+      ...runGit(repoPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${integration}`], { allowFail: true }).exitCode === 0 ? { startPoint: integration } : {}
     });
     emit2(io, args, created, () => `${created.branch} -> ${created.worktree}`);
     return 0;

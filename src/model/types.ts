@@ -187,6 +187,13 @@ export interface NodeRuntime {
   interruptions?: number;
   /** Receipt of the last settled claim, so a repeated settle is answered, not re-run. */
   last_settlement?: SettlementReceipt | null;
+  /**
+   * The exact commit the node's worker branch was created from (the
+   * repository's integration head, or its base branch before anything was
+   * integrated). Kept while the branch lives, so a later claim on the same
+   * branch fences the same delta.
+   */
+  branch_base_sha?: string | null;
 }
 
 export type ClaimMode = 'adapter' | 'host' | 'manual' | 'controller';
@@ -220,6 +227,12 @@ export interface NodeClaim {
   usage_counted_for?: string;
   /** Failure fingerprints already counted for this claim (each counts once per claim). */
   counted_fingerprints?: string[];
+  /**
+   * The commit this claim's worktree branch started from. Fresh verification
+   * fences only what the node changed since it: work integrated by an
+   * upstream node is base, not this node's.
+   */
+  base_sha?: string;
   /** A capture that started: the controller copy it writes, so a settle that dies after writing it can finish. */
   capture_pending?: { file: string; dispatch_id: string } | null;
   /** Set while a settle is verifying, so a second settle cannot run concurrently. */

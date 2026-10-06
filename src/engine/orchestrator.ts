@@ -82,7 +82,7 @@ import {
 import { createCandidate, loadCandidate } from '../git/candidate.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { DirtyWorktreeError, integrateNodeBranch } from '../git/integrate.js';
-import { commitAll, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
+import { branchExists, commitAll, isAncestor, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
 import { runVerification, verifierInvocation } from '../evidence/runner.js';
@@ -528,26 +528,9 @@ export class Orchestrator {
       }
 
       if (node.repository !== null) {
-        const repoPath = repositoryPath(this.workspace, node.repository);
-        const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-        const created = createWorkerWorktree({
-          repoPath,
-          featureId: this.featureId,
-          nodeId,
-          baseBranch: repoDecl?.base_branch ?? 'main',
-          worktreeRoot: this.workspace.paths.worktreesDir,
-          repositoryName: node.repository,
-        });
+        const created = this.ensureWorktree(nodeId, claimId);
         worktree = created.worktree;
         branch = created.branch;
-        mutateState(this.paths.featureDir, (s) => {
-          const claim = s.nodes[nodeId]?.claim;
-          if (claim?.claim_id === claimId) {
-            claim.worktree = worktree;
-            claim.branch = branch;
-          }
-          return s;
-        });
       }
     } catch (err) {
       this.releaseForInfrastructure(nodeId, claimId, `claim setup failed: ${errorText(err)}`);
@@ -566,6 +549,70 @@ export class Orchestrator {
       expiresAt,
       ...(dispatchId !== undefined ? { dispatchId, resultFile: resultFile as string } : {}),
     };
+  }
+
+  /**
+   * Create (or re-attach) the node's worktree for the claim `claimId` and pin
+   * the commit its branch started from in the claim and the node runtime.
+   *
+   * A new branch starts at the repository's integration head when anything
+   * has been integrated (so a dependent sees the work its upstream nodes
+   * landed, without merging it itself), otherwise at the base branch. A
+   * branch that already exists keeps its commits and the base recorded when
+   * it was created.
+   */
+  private ensureWorktree(nodeId: string, claimId: string): { worktree: string; branch: string; baseSha: string | null } {
+    const node = this.node(nodeId);
+    if (node.repository === null) throw new Error(`${nodeId} has no repository.`);
+    const repoPath = repositoryPath(this.workspace, node.repository);
+    const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const integration = integrationBranchName(this.featureId);
+    const created = createWorkerWorktree({
+      repoPath,
+      featureId: this.featureId,
+      nodeId,
+      baseBranch: repoDecl?.base_branch ?? 'main',
+      worktreeRoot: this.workspace.paths.worktreesDir,
+      repositoryName: node.repository,
+      ...(branchExists(repoPath, integration) ? { startPoint: integration } : {}),
+    });
+    let baseSha: string | null = created.startSha;
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      if (!rt) return s;
+      if (created.startSha !== null) rt.branch_base_sha = created.startSha;
+      baseSha = rt.branch_base_sha ?? null;
+      const claim = rt.claim;
+      if (claim?.claim_id === claimId) {
+        claim.worktree = created.worktree;
+        claim.branch = created.branch;
+        if (baseSha !== null) claim.base_sha = baseSha;
+      }
+      return s;
+    });
+    return { worktree: created.worktree, branch: created.branch, baseSha };
+  }
+
+  /**
+   * The commit a node's fence is measured from: its pinned base, advanced
+   * to the newest integration commit this controller itself recorded (a
+   * node's integrated_sha in this repository) that the node's branch
+   * contains. A worker that merged the integration branch after it moved
+   * therefore owns only its own changes; a commit placed on the integration
+   * branch any other way stays in the node's diff. Returns null when the
+   * pinned base is not in the branch's history at all.
+   */
+  private fenceBase(repository: string, repoPath: string, pinned: string, head: string): string | null {
+    if (!isAncestor(repoPath, pinned, head)) return null;
+    const graph = this.graph();
+    let base = pinned;
+    for (const [id, rt] of Object.entries(this.state().nodes)) {
+      const sha = rt.integrated_sha;
+      if (!sha || graph.nodes.find((n) => n.id === id)?.repository !== repository) continue;
+      if (sha === base) continue;
+      if (isAncestor(repoPath, base, sha) && isAncestor(repoPath, sha, head)) base = sha;
+    }
+    return base;
   }
 
   /** How long a claim may stay unsettled before a host dispatch counts as abandoned. */
@@ -712,7 +759,19 @@ export class Orchestrator {
     runGit(verifyDir, ['config', 'core.autocrlf', 'false'], { allowFail: true });
 
     try {
-      const base = resolveRef(repoPath, baseBranch);
+      const runtime = this.state().nodes[nodeId];
+      const pinned = runtime?.claim?.base_sha ?? runtime?.branch_base_sha ?? null;
+      // A branch with no pinned base (created before bases were recorded) is
+      // measured against the base branch, as it always was.
+      const base = pinned === null ? resolveRef(repoPath, baseBranch) : this.fenceBase(node.repository, repoPath, pinned, sha);
+      if (base === null) {
+        return {
+          ok: false,
+          evidence,
+          sha,
+          detail: `OWNERSHIP_VIOLATION: BASE_NOT_ANCESTOR: ${branch} at ${sha.slice(0, 12)} no longer contains the commit ${String(pinned).slice(0, 12)} its worktree was created from`,
+        };
+      }
       const fence = verifyChangedPaths(verifyDir, base, {
         allowed: node.allowed_paths,
         forbidden: node.forbidden_paths ?? [],
@@ -1302,25 +1361,9 @@ export class Orchestrator {
     if (node.repository !== null && held.worktree === null) {
       // The dispatch was interrupted between claiming and creating the
       // worktree; finish that instead of pointing a worker at the control root.
-      const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-      const created = createWorkerWorktree({
-        repoPath: repositoryPath(this.workspace, node.repository),
-        featureId: this.featureId,
-        nodeId,
-        baseBranch: repoDecl?.base_branch ?? 'main',
-        worktreeRoot: this.workspace.paths.worktreesDir,
-        repositoryName: node.repository,
-      });
+      const created = this.ensureWorktree(nodeId, held.claim_id);
       held.worktree = created.worktree;
       held.branch = created.branch;
-      mutateState(this.paths.featureDir, (s) => {
-        const c = s.nodes[nodeId]?.claim;
-        if (c?.claim_id === held.claim_id) {
-          c.worktree = created.worktree;
-          c.branch = created.branch;
-        }
-        return s;
-      });
     }
     const ticket = this.buildTicket(
       nodeId,

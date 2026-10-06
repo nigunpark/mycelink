@@ -1182,13 +1182,19 @@ function branchGroup(args: ParsedArgs, io: CliIo): number {
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node?.repository) throw new Error(`Node "${nodeId}" has no repository.`);
     const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const repoPath = repositoryPath(workspace, node.repository);
+    // Like a claim, a new branch starts where the feature's integration is.
+    const integration = integrationBranchName(featureId);
     const created = createWorkerWorktree({
-      repoPath: repositoryPath(workspace, node.repository),
+      repoPath,
       featureId,
       nodeId,
       baseBranch: repoDecl?.base_branch ?? 'main',
       worktreeRoot: workspace.paths.worktreesDir,
       repositoryName: node.repository,
+      ...(runGit(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${integration}`], { allowFail: true }).exitCode === 0
+        ? { startPoint: integration }
+        : {}),
     });
     emit(io, args, created, () => `${created.branch} -> ${created.worktree}`);
     return 0;

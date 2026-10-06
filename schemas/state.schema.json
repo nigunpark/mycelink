@@ -131,6 +131,7 @@
             "usage_counted_for": { "type": "string" },
             "dispatched_at": { "type": "string" },
             "counted_fingerprints": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
+            "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
             "capture_pending": {
               "type": ["object", "null"],
               "required": ["file", "dispatch_id"],
@@ -160,6 +161,7 @@
         "usage": { "$ref": "#/$defs/usage" },
         "updated_at": { "type": "string" },
         "interruptions": { "type": "integer", "minimum": 0 },
+        "branch_base_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
         "last_settlement": {
           "type": ["object", "null"],
           "required": ["capability_sha256", "claim_id", "outcome", "state", "detail", "settled_at"],
