@@ -31,7 +31,9 @@
  *      same feature (node rework -> dispatch -> settle -> new candidate over
  *      every module -> deliver) and verifies as one complete feature; a
  *      second, unsuperseded feature is rejected, and an explicitly
- *      superseded, quiescent one is reported as history only;
+ *      superseded, quiescent one is reported as history only, and only
+ *      through a valid supersession chain (a self-reference or a cycle is
+ *      not history);
  *  12. the plugin's phase commands hand control back instead of stopping
  *      after the PRD or the plan, and /mycelink:run chains every phase.
  *
@@ -535,6 +537,51 @@ try {
           'superseded: an explicitly superseded, quiescent feature is history (warnings), and the run still verifies',
           sup.status === 0 && v.code === 0 && history.length > 0 && history.every((c) => c.severity === 'warning') && (v.json?.orchestration?.checks ?? []).some((c) => c.id === 'superseded-quiescent:LEDGER-1421' && c.ok),
           `supersede exit ${sup.status}; verifier exit ${v.code}`,
+        );
+
+        // History only through a valid supersession chain: a self-reference
+        // or a cycle among extra features never hides them as history.
+        const stateFile = (id) => join(flawed.control, 'features', id, 'STATE.json');
+        const editState = (id, edit) => {
+          const doc = JSON.parse(readFileSync(stateFile(id), 'utf8'));
+          edit(doc.data);
+          doc.revision += 1;
+          writeFileSync(stateFile(id), JSON.stringify(doc, null, 2) + '\n');
+        };
+        const original = Object.fromEntries(['LEDGER-1421'].map((id) => [id, readFileSync(stateFile(id), 'utf8')]));
+        planSecondFeature(flawed, 'LEDGER-1422');
+        editState('LEDGER-1422', (s) => {
+          s.feature_state = 'CANCELLED';
+          s.superseded_by = 'LEDGER-1422';
+        });
+        v = verifier(rws, ['--require-mycelink']);
+        record(
+          'superseded: a feature superseded by itself is not history',
+          v.code === 1 && Boolean(failedCheck(v, 'superseded-chain:LEDGER-1422')),
+          failedCheck(v, 'superseded-chain:LEDGER-1422')?.detail ?? `exit ${v.code}`,
+        );
+        editState('LEDGER-1422', (s) => {
+          s.superseded_by = 'LEDGER-1421';
+        });
+        editState('LEDGER-1421', (s) => {
+          s.superseded_by = 'LEDGER-1422';
+        });
+        v = verifier(rws, ['--require-mycelink']);
+        record(
+          'superseded: features superseding each other in a cycle are not history',
+          v.code === 1 && Boolean(failedCheck(v, 'superseded-chain:LEDGER-1421')) && Boolean(failedCheck(v, 'superseded-chain:LEDGER-1422')),
+          ['LEDGER-1421', 'LEDGER-1422'].map((id) => failedCheck(v, `superseded-chain:${id}`)?.detail ?? `${id}: no chain failure`).join('; '),
+        );
+        // A valid chain through history ends at the delivered feature.
+        writeFileSync(stateFile('LEDGER-1421'), original['LEDGER-1421']);
+        editState('LEDGER-1422', (s) => {
+          s.superseded_by = 'LEDGER-1421';
+        });
+        v = verifier(rws, ['--require-mycelink']);
+        record(
+          'superseded: a chain of supersessions ending at the delivered feature is history',
+          v.code === 0 && (v.json?.orchestration?.checks ?? []).some((c) => c.id === 'superseded-quiescent:LEDGER-1422' && c.ok),
+          [...(v.json?.completion?.checks ?? []), ...(v.json?.orchestration?.checks ?? [])].filter((c) => !c.ok && c.severity !== 'warning').map((c) => c.id).join(',') || `exit ${v.code}`,
         );
       }
     }

@@ -338,7 +338,14 @@ Before interpreting any result:
    - no unreleased lease (stricter than Mycelink, which ignores leases whose
      holder exited);
    - no live session;
-   - worker worktrees hold no uncommitted work.
+   - worker worktrees hold no uncommitted work;
+   - exactly one current (not superseded) feature, and it is the complete
+     delivery. A feature counts as superseded history (its checks become
+     warnings, and it must be at rest) only through a valid supersession
+     chain: every `superseded_by` hop names another feature of the same
+     control repository, no feature repeats, and the chain ends at a
+     feature that is neither superseded nor cancelled
+     (`superseded-chain:<id>`).
 
    A dirty control repo is a warning only. `in-run report` checks
    (`reporting`) confirm that the agent's own final acceptance run tested

@@ -333,6 +333,37 @@ function verifyOrchestration(workspace, bin, result) {
   const moduleByPath = Object.fromEntries(MODULES.map((m) => [pathKey(resolve(workspace, 'repos', m)), m]));
   /** Features not superseded: exactly one may exist, and it must be the complete delivery. */
   const current = [];
+  const keyOf = (root, id) => `${pathKey(root)}\u0000${id}`;
+  const states = new Map();
+  for (const { root, id } of features) {
+    try {
+      states.set(keyOf(root, id), readMycelinkDoc(join(root, 'features', id, 'STATE.json')));
+    } catch {
+      // Reported where the feature itself is checked.
+    }
+  }
+  /**
+   * Follow superseded_by from `id`: every hop must be another readable
+   * feature of the same control repository, never revisited, and the chain
+   * must end at a feature that is neither superseded nor cancelled.
+   */
+  const supersessionChain = (root, id) => {
+    const seen = [id];
+    for (let next = states.get(keyOf(root, id))?.superseded_by; typeof next === 'string'; ) {
+      if (seen.includes(next)) return { ok: false, detail: `cycle: ${[...seen, next].join(' -> ')}` };
+      const state = states.get(keyOf(root, next));
+      if (!features.some((x) => x.root === root && x.id === next) || state === undefined) {
+        return { ok: false, detail: `${[...seen, next].join(' -> ')}: ${next} is not a readable feature of this control repository` };
+      }
+      seen.push(next);
+      next = state.superseded_by;
+    }
+    const end = seen[seen.length - 1];
+    if (states.get(keyOf(root, end))?.feature_state === 'CANCELLED') {
+      return { ok: false, detail: `${seen.join(' -> ')}: the chain ends at ${end}, which is cancelled` };
+    }
+    return { ok: true, detail: seen.join(' -> ') };
+  };
 
   for (const { root, id } of features) {
     const tag = `${id}`;
@@ -347,12 +378,13 @@ function verifyOrchestration(workspace, bin, result) {
       continue;
     }
     // An explicitly superseded feature (`mycelink feature supersede`) whose
-    // replacement exists is history: its checks are reported as warnings and
-    // it must be fully at rest. Anything else is a current feature.
-    const supersededBy =
-      typeof state.superseded_by === 'string' && features.some((x) => x.root === root && x.id === state.superseded_by) ? state.superseded_by : null;
-    if (typeof state.superseded_by === 'string' && supersededBy === null) {
-      s.check(`superseded-target:${tag}`, false, `superseded_by names ${state.superseded_by}, which is not a feature of this control repository`);
+    // supersession chain is valid (existing features, no cycle, ending at a
+    // live feature) is history: its checks are reported as warnings and it
+    // must be fully at rest. Anything else is a current feature.
+    let supersededBy = null;
+    if (typeof state.superseded_by === 'string') {
+      const chain = supersessionChain(root, id);
+      if (s.check(`superseded-chain:${tag}`, chain.ok, chain.detail)) supersededBy = state.superseded_by;
     }
     const t = supersededBy ? new Section() : s;
     const nodes = Object.entries(state.nodes ?? {});
