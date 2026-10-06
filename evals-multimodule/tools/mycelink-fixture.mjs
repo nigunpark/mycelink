@@ -261,6 +261,7 @@ function fulfilTicket(ticket, control) {
     schema_version: 1,
     node_id: ticket.node_id,
     claim_id: ticket.claim_id,
+    ...(ticket.dispatch_id ? { dispatch_id: ticket.dispatch_id } : {}),
     outcome: 'SUBMITTED',
     commands,
     commit_sha: git(ticket.worktree, ['rev-parse', 'HEAD']).stdout,

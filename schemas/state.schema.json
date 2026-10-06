@@ -120,6 +120,20 @@
             "attempt": { "type": "integer", "minimum": 0 },
             "expires_at": { "type": "string" },
             "result_captured_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "dispatch_id": { "type": "string", "pattern": "^[0-9a-f-]{8,64}$" },
+            "result_file": { "type": "string", "pattern": "^result(-[0-9a-f-]{8,64})?\\.json$" },
+            "result_captured_dispatch_id": { "type": "string" },
+            "result_captured_file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
+            "usage_counted_for": { "type": "string" },
+            "capture_pending": {
+              "type": ["object", "null"],
+              "required": ["file", "dispatch_id"],
+              "additionalProperties": false,
+              "properties": {
+                "file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
+                "dispatch_id": { "type": "string" }
+              }
+            },
             "settling": {
               "type": ["object", "null"],
               "required": ["pid", "host", "started_at"],

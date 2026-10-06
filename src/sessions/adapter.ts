@@ -11,6 +11,8 @@ export interface NodeResult {
   schema_version: 1;
   node_id: string;
   claim_id: string;
+  /** The host dispatch generation the result answers (host-dispatched claims only). */
+  dispatch_id?: string;
   outcome: 'SUBMITTED' | 'RETRYABLE' | 'BLOCKED' | 'NEEDS_DECISION' | 'BUDGET_EXHAUSTED';
   commands: { command: string[]; exit_code: number; cwd?: string }[];
   commit_sha?: string | null;

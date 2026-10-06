@@ -78,6 +78,7 @@ controller collects it, checks it and removes it. If a tool you need is denied, 
   "schema_version": 1,
   "node_id": "...",
   "claim_id": "...",
+  "dispatch_id": "... (when your prompt gives a Dispatch: line)",
   "outcome": "SUBMITTED",
   "commands": [{ "command": ["npm", "test"], "exit_code": 0 }],
   "commit_sha": "...",
@@ -89,7 +90,9 @@ controller collects it, checks it and removes it. If a tool you need is denied, 
 ```
 
 `outcome` is one of `SUBMITTED`, `RETRYABLE`, `BLOCKED`, `NEEDS_DECISION`,
-`BUDGET_EXHAUSTED`. Submitting does not make the node done: a fresh verifier
+`BUDGET_EXHAUSTED`. When your prompt has a `Dispatch:` line, copy it into
+`dispatch_id` exactly: a result without the current dispatch id is refused.
+Submitting does not make the node done: a fresh verifier
 re-runs everything on a clean checkout of your branch and checks your diff
 against the fence.
 

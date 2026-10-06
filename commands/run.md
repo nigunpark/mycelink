@@ -38,7 +38,7 @@ Let `M` be the launcher: `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs"`.
       exists. If it does not, write the JSON node result the subagent
       returned in its final message to `ticket.result_slot` with the Write
       tool. If it returned none, write
-      `{"schema_version": 1, "node_id": <ticket.node_id>, "claim_id": <ticket.claim_id>, "outcome": "RETRYABLE", "commands": [], "evidence_paths": [], "failure_fingerprint": "WORKER_RESULT_MISSING"}`.
+      `{"schema_version": 1, "node_id": <ticket.node_id>, "claim_id": <ticket.claim_id>, "dispatch_id": <ticket.dispatch_id>, "outcome": "RETRYABLE", "commands": [], "evidence_paths": [], "failure_fingerprint": "WORKER_RESULT_MISSING"}`.
       Never write a result that claims more than the subagent reported.
    4. Run `ticket.settle_command` exactly (it is
       `M settle $0 <node-id> --capability <capability> --json`). Settle

@@ -204,8 +204,20 @@ export interface NodeClaim {
   attempt?: number;
   /** After this, an unsettled host dispatch counts as abandoned. */
   expires_at?: string;
-  /** SHA-256 of the controller copy a settle captured for this claim. */
+  /** SHA-256 of the controller copy a settle (or a resume) captured for this claim. */
   result_captured_sha256?: string;
+  /** File name, in the node's sessions directory, of that controller copy. */
+  result_captured_file?: string;
+  /** The dispatch generation the captured copy answers. */
+  result_captured_dispatch_id?: string;
+  /** Host dispatch generation: a resume issues a new one, revoking the old worker's result. */
+  dispatch_id?: string;
+  /** The current generation's result file name inside the worktree's result slot. */
+  result_file?: string;
+  /** The dispatch generation whose worker usage has been counted (exactly once). */
+  usage_counted_for?: string;
+  /** A capture that started: the controller copy it writes, so a settle that dies after writing it can finish. */
+  capture_pending?: { file: string; dispatch_id: string } | null;
   /** Set while a settle is verifying, so a second settle cannot run concurrently. */
   settling?: { pid: number; host: string; started_at: string } | null;
 }

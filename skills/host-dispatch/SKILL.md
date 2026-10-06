@@ -78,8 +78,11 @@ repeat at most 3 × (number of graph nodes) times:
 - **Lost a ticket** (interrupted turn, compaction, new session):
   `M session reconcile <feature> --json --authority <key>` lists `pending_dispatches`.
   `M dispatch <feature> --resume <node> --json --authority <key>` re-issues the ticket with a
-  rotated capability (the old one stops working). If `result_present` is
-  true, just run its `settle_command`.
+  rotated capability and a new dispatch id with its own result file. The old
+  capability stops working, and nothing the previous worker writes later is
+  read. A result it had already written is checked and taken into the
+  controller at the resume; then `result_present` is true and you just run
+  the new ticket's `settle_command`.
 - **Expired tickets** are handed back by reconcile as interruptions: the
   node returns to READY with its attempt refunded and no failure recorded.
   `--abandon-dispatches` does that at once (for `/mycelink:cancel`, or when

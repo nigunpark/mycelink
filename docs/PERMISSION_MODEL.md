@@ -76,7 +76,14 @@ session's permissions, and `mycelink settle` takes the result back.
   and revokes the old one. An operator who lost the key while a claim is
   live runs `mycelink controller open --takeover`, which requires an
   interactive terminal on stdin and stdout; an agent's Bash tool has none.
-- The result slot is `<worktree>/.mycelink-worker/result.json`. Settle moves
+- Each dispatch generation has a random dispatch id and its own result file,
+  `<worktree>/.mycelink-worker/result-<dispatch-id>.json`. A resume issues a
+  new generation; settle reads only the current generation's file and
+  accepts only a result naming its dispatch id, so a worker from before the
+  resume cannot affect the resumed attempt. A result the old generation had
+  already written is validated and captured into the controller (with its
+  capability redacted by hash) before the rotation, or discarded.
+- The result slot directory is `<worktree>/.mycelink-worker/`. Settle moves
   it into a controller-owned quarantine before reading it and applies the
   same link, hard-link, size, schema and identity checks as print mode; the
   capability is redacted from every kept copy.

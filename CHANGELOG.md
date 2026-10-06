@@ -30,6 +30,13 @@ under **Breaking**.
   printed once, only its hash is stored, and it cannot be opened while any
   claim is live; `--takeover` (interactive terminal only) recovers a lost
   key. The plugin commands open and pass it for you.
+- **A resumed dispatch revokes the previous worker's result authority.**
+  Every host dispatch generation has a dispatch id and its own result file
+  (`.mycelink-worker/result-<dispatch-id>.json`); results must carry
+  `dispatch_id`. `dispatch --resume` captures and validates a result the old
+  generation already wrote before rotating, and ignores anything it writes
+  afterwards. Previously a stale worker could write SUBMITTED, BLOCKED,
+  NEEDS_DECISION or RETRYABLE into the slot the resumed dispatch used.
 - Leaving BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED by any route
   (including INVALIDATED, PAUSED, EXCLUDED and re-running `feature init`)
   needs a decision recorded with `decision record`; the failure history is
@@ -48,6 +55,14 @@ under **Breaking**.
   skills that read `$MYCELINK_CONTEXT_PACK` or write `$MYCELINK_RESULT_PATH`
   must follow the bundled `module-worker` agent and `node-worker` skill
   instead; those variables are no longer set.
+
+### Fixed
+
+- Settle counts a worker's usage exactly once per dispatch generation: the
+  captured result's hash and the usage are recorded in one STATE.json
+  write, a capture announces its controller copy before taking it so a
+  settle that dies after writing it can finish, and a settle that dies after
+  concluding the attempt is answered from a provisional receipt.
 
 ### Changed
 

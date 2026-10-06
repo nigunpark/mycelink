@@ -7,7 +7,7 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
@@ -170,7 +170,8 @@ describe('an interrupted settle is recoverable', () => {
     const done = await cli(p, ['settle', FEATURE_ID, CORE, '--capability', t.capability, '--json']);
     const report = JSON.parse(done.out) as { outcome: string; detail: string };
     expect(`${report.outcome}: ${report.detail}`).toMatch(/^DONE/);
-    expect(existsSync(join(p.featureDir, 'sessions', CORE, 'result.attempt-1.json'))).toBe(true);
+    const copies = readdirSync(join(p.featureDir, 'sessions', CORE)).filter((f) => /^result\..*\.json$/.test(f));
+    expect(copies.length).toBe(1);
     expect(readFileSync(join(p.featureDir, 'STATE.json'), 'utf8')).not.toContain(t.capability);
   });
 });

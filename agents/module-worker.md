@@ -44,7 +44,8 @@ A RED must fail because the behaviour is missing. If your pack's
 — re-prove GREEN instead of inventing a new failing test.
 
 Commit your work on the worktree branch. Then write the node result to the
-`Result file:` path with your commands, exit codes, commit SHA, changed
+`Result file:` path, with `node_id`, `claim_id` and `dispatch_id` copied
+exactly from your prompt, and with your commands, exit codes, commit SHA, changed
 paths and evidence paths, and reply with only that JSON. If a tool you need
 is denied, write the result with `outcome: BLOCKED` and
 `failure_fingerprint: "PERMISSION_DENIED:<tool>"` rather than stopping

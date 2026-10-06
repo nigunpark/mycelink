@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type {
   ClaimMode,
   EvidenceKind,
@@ -55,6 +55,7 @@ import {
   WORKER_RESULT_FILE,
   buildHostWorkerPrompt,
   collectWorkerResult,
+  generationResultFile,
   loadPromptPack,
   prepareResultSlot,
   renderGateCommand,
@@ -113,7 +114,15 @@ export interface OrchestratorOptions {
    * ADAPTER_UNAVAILABLE instead of charging the node.
    */
   preflight?: () => PreflightResult;
+  /**
+   * Test seam: called at each settle boundary a crash can fall on. A throw
+   * here stands in for the process dying at that point.
+   */
+  settleFault?: (point: SettleFaultPoint) => void;
 }
+
+/** Where a settle can die with something already done that a retry must not redo. */
+export type SettleFaultPoint = 'result-captured' | 'result-attested' | 'attempt-concluded';
 
 export interface NodeRunReport {
   node_id: string;
@@ -215,6 +224,9 @@ export interface ClaimResult {
   attempt: number;
   mode: ClaimMode;
   expiresAt: string;
+  /** Host dispatches: this generation's id and result file. */
+  dispatchId?: string;
+  resultFile?: string;
 }
 
 /** How a worker attempt ended, whoever ran it. */
@@ -254,6 +266,8 @@ export interface DispatchTicket {
   feature_id: string;
   node_id: string;
   claim_id: string;
+  /** This dispatch generation; a resume issues a new one and the old worker's result stops counting. */
+  dispatch_id: string | null;
   attempt: number;
   /** Raw claim capability; settle and the gates need it. Only its hash is stored. */
   capability: string;
@@ -284,11 +298,11 @@ export interface DispatchResult {
   deferred: { node_id: string; reason: string }[];
 }
 
-function resultInSlot(cwd: string): boolean {
+function resultInSlot(cwd: string, resultFile: string = WORKER_RESULT_FILE): boolean {
   try {
     return (
       lstatSync(join(cwd, WORKER_RESULT_DIR)).isDirectory() &&
-      lstatSync(join(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE)).isFile()
+      lstatSync(join(cwd, WORKER_RESULT_DIR, resultFile)).isFile()
     );
   } catch {
     return false;
@@ -346,6 +360,7 @@ export class Orchestrator {
   private readonly workerEnv: Record<string, string>;
   private readonly recall: ((node: GraphNode) => MemoryRef[]) | undefined;
   private readonly preflight: (() => PreflightResult) | undefined;
+  private readonly settleFault: ((point: SettleFaultPoint) => void) | undefined;
   private preflightResult: PreflightResult | null = null;
 
   constructor(options: OrchestratorOptions) {
@@ -358,6 +373,7 @@ export class Orchestrator {
     this.workerEnv = options.workerEnv ?? {};
     this.recall = options.recall;
     this.preflight = options.preflight;
+    this.settleFault = options.settleFault;
   }
 
   /** The adapter preflight, run at most once per orchestrator. */
@@ -457,6 +473,8 @@ export class Orchestrator {
     const mode = options.mode ?? 'adapter';
     const capability = newCapability();
     const claimId = randomUUID();
+    const dispatchId = mode === 'host' ? randomUUID() : undefined;
+    const resultFile = dispatchId !== undefined ? generationResultFile(dispatchId) : undefined;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.claimTtlMs(node)).toISOString();
     let attempt = 0;
@@ -485,6 +503,7 @@ export class Orchestrator {
         attempt,
         expires_at: expiresAt,
         settling: null,
+        ...(dispatchId !== undefined ? { dispatch_id: dispatchId, result_file: resultFile as string } : {}),
       };
       return next;
     });
@@ -533,7 +552,16 @@ export class Orchestrator {
     }
 
     this.event('node.claimed', nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
-    return { claimId, capability: capability.raw, worktree, branch, attempt, mode, expiresAt };
+    return {
+      claimId,
+      capability: capability.raw,
+      worktree,
+      branch,
+      attempt,
+      mode,
+      expiresAt,
+      ...(dispatchId !== undefined ? { dispatchId, resultFile: resultFile as string } : {}),
+    };
   }
 
   /** How long a claim may stay unsettled before a host dispatch counts as abandoned. */
@@ -1027,17 +1055,29 @@ export class Orchestrator {
       const live = (rt as NodeRuntime).claim as NodeClaim;
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
       live.settling = { pid: process.pid, host: hostname(), started_at: new Date().toISOString() };
+      // A provisional receipt, in the same write: a settle that dies after
+      // concluding the attempt (the claim is gone) is still answered when the
+      // same capability settles again, instead of NOT_CLAIMED.
+      (rt as NodeRuntime).last_settlement = {
+        capability_sha256: live.capability_sha256 as string,
+        claim_id: live.claim_id,
+        outcome: 'PENDING',
+        state: (rt as NodeRuntime).state,
+        detail: 'settle started and did not record an outcome',
+        settled_at: new Date().toISOString(),
+      };
       claim = structuredClone(live);
       return s;
     });
 
     if (receipt !== null) {
       const r = receipt as SettlementReceipt;
+      const state = this.state().nodes[nodeId]?.state ?? (r.state as NodeState);
       return {
         node_id: nodeId,
-        outcome: r.outcome as NodeRunReport['outcome'],
+        outcome: r.outcome === 'PENDING' ? outcomeFromState(state) : (r.outcome as NodeRunReport['outcome']),
         session_id: null,
-        state: this.state().nodes[nodeId]?.state ?? r.state,
+        state,
         detail: r.detail,
         evidence: [],
         idempotent: true,
@@ -1197,23 +1237,43 @@ export class Orchestrator {
    */
   resumeDispatch(nodeId: string): DispatchResult {
     const node = this.node(nodeId);
+    const before = this.state().nodes[nodeId]?.claim ?? null;
+    if (before === null) throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim to resume.`);
+    if (before.mode !== 'host') {
+      throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${before.mode ?? 'legacy'} mode, not by a host dispatch.`);
+    }
+    if (before.settling && settlerAlive(before.settling)) throw new SettleInProgressError(nodeId, before.settling);
+
+    // Attest before rotating: a result the current generation already wrote
+    // is taken into the controller now, checked against that generation, or
+    // not at all. After the rotation nothing that generation writes counts.
+    const attested = before.result_captured_sha256 === undefined ? this.attestSlot(nodeId, before) : null;
+
     const capability = newCapability();
+    const dispatchId = randomUUID();
     let claim: NodeClaim | null = null;
     let attempt = 0;
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
       const live = rt?.claim ?? null;
-      if (!rt || live === null) throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim to resume.`);
-      if (live.mode !== 'host') {
-        throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${live.mode ?? 'legacy'} mode, not by a host dispatch.`);
+      if (!rt || live === null || live.claim_id !== before.claim_id || live.capability_sha256 !== before.capability_sha256) {
+        throw new Error(`DISPATCH_CHANGED: ${nodeId}'s claim changed while it was being resumed; reconcile and try again.`);
       }
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
-      live.settling = null;
-      live.capability_sha256 = capability.sha256;
-      live.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
-      attempt = live.attempt ?? rt.attempts;
-      claim = structuredClone(live);
-      return s;
+      let next = s;
+      if (attested !== null) {
+        next = this.recordCapture(next, nodeId, attested);
+      }
+      const held = (next.nodes[nodeId] as NodeRuntime).claim as NodeClaim;
+      held.settling = null;
+      held.capture_pending = null;
+      held.capability_sha256 = capability.sha256;
+      held.dispatch_id = dispatchId;
+      held.result_file = generationResultFile(dispatchId);
+      held.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
+      attempt = held.attempt ?? (next.nodes[nodeId] as NodeRuntime).attempts;
+      claim = structuredClone(held);
+      return next;
     });
     const held = claim as unknown as NodeClaim;
     if (node.repository !== null && held.worktree === null) {
@@ -1239,7 +1299,6 @@ export class Orchestrator {
         return s;
       });
     }
-    const cwd = held.worktree ?? this.controlRoot;
     const ticket = this.buildTicket(
       nodeId,
       {
@@ -1250,13 +1309,20 @@ export class Orchestrator {
         attempt,
         mode: 'host',
         expiresAt: held.expires_at as string,
+        dispatchId,
+        resultFile: held.result_file as string,
       },
-      { resumed: true, resultPresent: resultInSlot(cwd) },
+      { resumed: true, resultPresent: this.capturedResultFor(nodeId, held) !== null },
     );
-    this.event('dispatch.resumed', nodeId, { claim_id: held.claim_id, attempt });
+    this.event('dispatch.resumed', nodeId, {
+      claim_id: held.claim_id,
+      attempt,
+      dispatch_id: dispatchId,
+      attested: attested !== null,
+    });
     return {
       status: 'DISPATCHED',
-      detail: `re-issued ${nodeId} (attempt ${attempt}) with a new capability`,
+      detail: `re-issued ${nodeId} (attempt ${attempt}) with a new capability and dispatch id`,
       ticket,
       controller_reports: [],
       pending: this.pendingDispatches(),
@@ -1274,9 +1340,9 @@ export class Orchestrator {
     const packPath = this.writeContextPack(nodeId, claim.claimId);
     const pack = loadPromptPack(packPath, { featureId: this.featureId, nodeId, claimId: claim.claimId });
     const cwd = claim.worktree ?? this.controlRoot;
-    // A fresh dispatch starts from an empty slot; a resumed one keeps a
-    // result the worker may already have written.
-    const resultSlot = options.resumed && options.resultPresent ? join(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE) : prepareResultSlot(cwd);
+    // Every generation starts from its own empty result file. A result an
+    // earlier generation wrote was attested into the controller at the resume.
+    const resultSlot = prepareResultSlot(cwd, claim.resultFile ?? WORKER_RESULT_FILE);
     const gates = this.gateCommands(nodeId, claim.capability).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
     const launcher = mycelinkCliPath().replace(/\\/g, '/');
     const controlRoot = this.controlRoot.replace(/\\/g, '/');
@@ -1285,6 +1351,7 @@ export class Orchestrator {
       feature_id: this.featureId,
       node_id: nodeId,
       claim_id: claim.claimId,
+      dispatch_id: claim.dispatchId ?? null,
       attempt: claim.attempt,
       capability: claim.capability,
       expires_at: claim.expiresAt,
@@ -1315,7 +1382,13 @@ export class Orchestrator {
         max_turns: node.worker.max_turns,
         max_wall_clock_minutes: node.worker.max_wall_clock_minutes,
       },
-      prompt: buildHostWorkerPrompt({ pack, worktree: claim.worktree, resultSlot, gates }),
+      prompt: buildHostWorkerPrompt({
+        pack,
+        worktree: claim.worktree,
+        resultSlot,
+        gates,
+        ...(claim.dispatchId !== undefined ? { dispatchId: claim.dispatchId } : {}),
+      }),
       resumed: options.resumed,
       result_present: options.resultPresent ?? false,
     };
@@ -1337,44 +1410,64 @@ export class Orchestrator {
       const started = Date.parse(claim.claimed_at);
       const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
       const cwd = claim.worktree ?? this.controlRoot;
-      const sessionDir = join(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, '_'));
-      mkdirSync(sessionDir, { recursive: true });
-      const controllerCopy = join(sessionDir, `result.attempt-${attempt}.json`);
-      // The capability is redacted from everything kept of the result: a
-      // worker may well echo its gate lines back in `commands`.
-      const env = { ...process.env, [CAPABILITY_ENV]: capability ?? '' };
-      let collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
-      let recaptured = false;
-      if (collected.failure === 'RESULT_MISSING') {
-        // A settle of this same claim that was interrupted after capturing
-        // the result left the validated, redacted copy behind (and already
-        // counted its usage).
-        const captured = this.capturedResultFor(nodeId, claim);
-        if (captured !== null) {
-          collected = { result: captured, failure: null };
-          recaptured = true;
-        }
-      }
-      const result = collected.result;
-      if (result !== null && !recaptured) {
-        // Remember exactly what was captured, so a settle interrupted after
-        // this point can be completed from this copy and from nothing else.
-        const captured = createHash('sha256').update(readFileSync(controllerCopy)).digest('hex');
+      const generation = claim.dispatch_id ?? claim.claim_id;
+      const resultFile = claim.result_file ?? WORKER_RESULT_FILE;
+
+      let result: NodeResult | null = null;
+      let failure: string | null = null;
+      if (slotTouched(cwd, resultFile)) {
+        // The current generation's own result (or a slot tampered with,
+        // which the capture reports). The capability is redacted
+        // from everything kept: a worker may echo its gate lines back.
+        const env = { ...process.env, [CAPABILITY_ENV]: capability ?? '' };
+        const file = `result.${generation}.${randomBytes(16).toString('hex')}.json`;
+        // Record where the copy goes before taking it, so a settle that dies
+        // once the copy is written can finish from it.
         mutateState(this.paths.featureDir, (s) => {
           const c = s.nodes[nodeId]?.claim;
-          if (c?.claim_id === claim.claim_id) c.result_captured_sha256 = captured;
+          if (c?.claim_id === claim.claim_id) c.capture_pending = { file, dispatch_id: generation };
           return s;
         });
+        const collected = collectWorkerResult(
+          cwd,
+          { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...(claim.dispatch_id !== undefined ? { dispatchId: claim.dispatch_id } : {}) },
+          join(this.sessionDir(nodeId), file),
+          env,
+          { resultFile },
+        );
+        if (collected.result !== null) {
+          this.fault('result-captured');
+          const captured = { file, sha256: sha256OfFile(join(this.sessionDir(nodeId), file)), dispatchId: generation, usage: hostUsage(collected.result, started) };
+          mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
+          this.fault('result-attested');
+          result = collected.result;
+        } else {
+          failure = collected.failure;
+        }
+      } else {
+        // Nothing new in the slot: a copy captured before (by a resume's
+        // attestation, or by a settle of this claim that died) is the result.
+        result = this.capturedResultFor(nodeId, claim) ?? this.finishPendingCapture(nodeId, claim, started);
+        if (result === null) failure = 'RESULT_MISSING';
       }
-
+      // Whatever happened, the attempt's usage is counted once per generation.
       const usage = hostUsage(result, started);
-      if (!recaptured) mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
+      mutateState(this.paths.featureDir, (s) => {
+        const c = s.nodes[nodeId]?.claim;
+        if (c?.claim_id !== claim.claim_id) return s;
+        c.capture_pending = null;
+        if (c.usage_counted_for === generation || (result !== null && c.usage_counted_for === c.result_captured_dispatch_id)) return s;
+        const next = accumulateUsage(s, nodeId, usage);
+        ((next.nodes[nodeId] as NodeRuntime).claim as NodeClaim).usage_counted_for = generation;
+        return next;
+      });
+      const collected = { result, failure };
       const status: SessionStatus = result === null ? 'failed' : statusForOutcome(result.outcome);
       const failureReason =
         collected.failure ?? (status === 'failed' && result !== null ? `WORKER_${result.outcome}` : null);
       appendRun(this.paths.runs, {
         attempt_id: `${nodeId}#${attempt}`,
-        idempotency_key: `${nodeId}#${attempt}#${claim.claim_id}`,
+        idempotency_key: `${nodeId}#${attempt}#${claim.claim_id}#${generation}`,
         loop_id: `node-agent:${nodeId}`,
         parent_loop_id: `feature-orchestration:${this.featureId}`,
         node_id: nodeId,
@@ -1391,8 +1484,93 @@ export class Orchestrator {
         evidence_paths: result?.evidence_paths ?? [],
         transition: status,
       });
-      return this.concludeAttempt(nodeId, null, { status, result, failureReason }, []);
+      const report = this.concludeAttempt(nodeId, null, { status, result, failureReason }, []);
+      this.fault('attempt-concluded');
+      return report;
     });
+  }
+
+  private fault(point: SettleFaultPoint): void {
+    this.settleFault?.(point);
+  }
+
+  private sessionDir(nodeId: string): string {
+    const dir = join(this.paths.sessionsDir, safeNodeDir(nodeId));
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  /**
+   * Record a captured controller copy on the claim and count the worker's
+   * usage, in one STATE.json write: either both happened or neither did, so
+   * a settle that dies on either side of it never loses or double-counts.
+   */
+  private recordCapture(
+    s: FeatureState_,
+    nodeId: string,
+    captured: { file: string; sha256: string; dispatchId: string; usage: UsageTotals },
+    claimId?: string,
+  ): FeatureState_ {
+    const c = s.nodes[nodeId]?.claim;
+    if (!c || (claimId !== undefined && c.claim_id !== claimId)) return s;
+    c.result_captured_sha256 = captured.sha256;
+    c.result_captured_file = captured.file;
+    c.result_captured_dispatch_id = captured.dispatchId;
+    c.capture_pending = null;
+    if (c.usage_counted_for === captured.dispatchId) return s;
+    const next = accumulateUsage(s, nodeId, captured.usage);
+    ((next.nodes[nodeId] as NodeRuntime).claim as NodeClaim).usage_counted_for = captured.dispatchId;
+    return next;
+  }
+
+  /**
+   * At a resume: take the result the current generation left in its slot
+   * into a controller copy, validated against that generation and with its
+   * capability redacted by hash. Returns null (and drops the file) when
+   * there is none or it does not validate.
+   */
+  private attestSlot(
+    nodeId: string,
+    claim: NodeClaim,
+  ): { file: string; sha256: string; dispatchId: string; usage: UsageTotals } | null {
+    const cwd = claim.worktree ?? this.controlRoot;
+    const resultFile = claim.result_file ?? WORKER_RESULT_FILE;
+    if (!resultInSlot(cwd, resultFile)) return null;
+    const generation = claim.dispatch_id ?? claim.claim_id;
+    const file = `result.${generation}.${randomBytes(16).toString('hex')}.json`;
+    const collected = collectWorkerResult(
+      cwd,
+      { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...(claim.dispatch_id !== undefined ? { dispatchId: claim.dispatch_id } : {}) },
+      join(this.sessionDir(nodeId), file),
+      process.env,
+      { resultFile, ...(claim.capability_sha256 !== undefined ? { capabilitySha256: claim.capability_sha256 } : {}) },
+    );
+    if (collected.result === null) {
+      this.event('dispatch.attest_refused', nodeId, { claim_id: claim.claim_id, failure: collected.failure.slice(0, 300) });
+      return null;
+    }
+    return {
+      file,
+      sha256: sha256OfFile(join(this.sessionDir(nodeId), file)),
+      dispatchId: generation,
+      usage: hostUsage(collected.result, Date.parse(claim.claimed_at)),
+    };
+  }
+
+  /**
+   * A settle that died after writing its controller copy but before
+   * recording it: finish that capture from the copy it announced, after the
+   * same checks as any captured copy.
+   */
+  private finishPendingCapture(nodeId: string, claim: NodeClaim, started: number): NodeResult | null {
+    const pending = claim.capture_pending;
+    if (!pending) return null;
+    const file = join(this.sessionDir(nodeId), pending.file);
+    const parsed = readControllerCopy(file, null, nodeId, claim.claim_id, claim.dispatch_id);
+    if (parsed === null) return null;
+    const captured = { file: pending.file, sha256: sha256OfFile(file), dispatchId: pending.dispatch_id, usage: hostUsage(parsed, started) };
+    mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
+    return parsed;
   }
 
   /** RUNNING or CANDIDATE_READY becomes VERIFIED once every node is settled. */
@@ -1882,7 +2060,10 @@ export class Orchestrator {
       }
       if (claim.mode !== 'host') continue;
       const expired = Date.parse(claim.expires_at ?? claim.claimed_at) <= now;
-      const resultPresent = resultInSlot(claim.worktree ?? this.controlRoot) || this.capturedResultFor(nodeId, claim) !== null;
+      const resultPresent =
+        resultInSlot(claim.worktree ?? this.controlRoot, claim.result_file ?? WORKER_RESULT_FILE) ||
+        this.capturedResultFor(nodeId, claim) !== null ||
+        Boolean(claim.capture_pending);
       if (options.abandonDispatches === true || (expired && !resultPresent)) {
         this.interruptClaim(nodeId, claim.claim_id, `host dispatch abandoned (${expired ? 'claim expired' : 'abandoned by reconcile'})`);
         abandoned.push(nodeId);
@@ -1943,26 +2124,15 @@ export class Orchestrator {
   private capturedResultFor(nodeId: string, claim: NodeClaim): NodeResult | null {
     if (claim.result_captured_sha256 === undefined) return null;
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
-    const file = join(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, '_'), `result.attempt-${attempt}.json`);
-    let fd: number;
-    try {
-      fd = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
-    } catch {
-      return null;
-    }
-    try {
-      const st = fstatSync(fd);
-      if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync(file).isSymbolicLink()) return null;
-      const bytes = readFileSync(fd);
-      if (createHash('sha256').update(bytes).digest('hex') !== claim.result_captured_sha256) return null;
-      const parsed = JSON.parse(bytes.toString('utf8')) as NodeResult;
-      if (validateAgainstSchema('node-result', parsed).length > 0) return null;
-      return parsed.node_id === nodeId && parsed.claim_id === claim.claim_id ? parsed : null;
-    } catch {
-      return null;
-    } finally {
-      closeSync(fd);
-    }
+    const name = claim.result_captured_file ?? `result.attempt-${attempt}.json`;
+    const parsed = readControllerCopy(
+      join(this.paths.sessionsDir, safeNodeDir(nodeId), name),
+      claim.result_captured_sha256,
+      nodeId,
+      claim.claim_id,
+      claim.result_captured_dispatch_id === claim.claim_id ? undefined : claim.result_captured_dispatch_id,
+    );
+    return parsed;
   }
 
   /** Compact status summary suitable for a hook or a CLI line. */
@@ -2004,6 +2174,70 @@ export class Orchestrator {
   commitState(message: string): string | null {
     if (isWorktreeClean(this.controlRoot)) return null;
     return commitAll(this.controlRoot, message);
+  }
+}
+
+/**
+ * Whether the slot holds something for settle to take: this generation's
+ * result file, or a slot directory replaced by a link or a file (which the
+ * capture refuses as an escape rather than reading as missing).
+ */
+function slotTouched(cwd: string, resultFile: string): boolean {
+  try {
+    if (!lstatSync(join(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+  } catch {
+    return false;
+  }
+  try {
+    lstatSync(join(cwd, WORKER_RESULT_DIR, resultFile));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeNodeDir(nodeId: string): string {
+  return nodeId.replace(/[^\w.-]/g, '_');
+}
+
+/** The settle outcome a node's state implies, for a settle answered after it concluded. */
+function outcomeFromState(state: NodeState): NodeRunReport['outcome'] {
+  if (state === 'DONE' || state === 'BLOCKED' || state === 'NEEDS_DECISION' || state === 'BUDGET_EXHAUSTED') return state;
+  return 'RETRY';
+}
+
+/**
+ * Read a controller copy of a worker result: a regular, single-named file
+ * under the size ceiling, matching `sha256` when one was recorded,
+ * schema-valid and bound to this node, claim and (when given) dispatch.
+ */
+function readControllerCopy(
+  file: string,
+  sha256: string | null,
+  nodeId: string,
+  claimId: string,
+  dispatchId: string | undefined,
+): NodeResult | null {
+  let fd: number;
+  try {
+    fd = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync(file).isSymbolicLink()) return null;
+    const bytes = readFileSync(fd);
+    if (sha256 !== null && createHash('sha256').update(bytes).digest('hex') !== sha256) return null;
+    const parsed = JSON.parse(bytes.toString('utf8')) as NodeResult;
+    if (validateAgainstSchema('node-result', parsed).length > 0) return null;
+    if (parsed.node_id !== nodeId || parsed.claim_id !== claimId) return null;
+    if (dispatchId !== undefined && parsed.dispatch_id !== dispatchId) return null;
+    return parsed;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
   }
 }
 

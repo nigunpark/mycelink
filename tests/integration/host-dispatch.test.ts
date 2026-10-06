@@ -7,7 +7,7 @@
  * not depend on one.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
@@ -109,7 +109,9 @@ describe('host dispatch protocol', () => {
     });
     expect(t.capability).toMatch(/^[0-9a-f]{64}$/);
     expect(existsSync(t.worktree!)).toBe(true);
-    expect(t.result_slot).toBe(join(t.worktree!, '.mycelink-worker', 'result.json'));
+    // Each dispatch generation has its own result file, named by its dispatch id.
+    expect(t.dispatch_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(t.result_slot).toBe(join(t.worktree!, '.mycelink-worker', `result-${t.dispatch_id}.json`));
     expect(t.verification_commands).toEqual([{ id: 'targeted', command: ['node', 'tests/run.mjs'] }]);
     expect(t.gate_commands.map((g) => g.gate)).toEqual(['red', 'green', 'regression']);
     for (const g of t.gate_commands) expect(g.command).toContain(`--capability ${t.capability}`);
@@ -184,7 +186,9 @@ describe('host dispatch protocol', () => {
       p.control,
     );
     expect((await settle(p, CORE, t.capability)).code).toBe(0);
-    for (const file of ['STATE.json', 'events.jsonl', 'RUNS.jsonl', join('sessions', CORE, 'result.attempt-1.json')]) {
+    const copies = readdirSync(join(p.featureDir, 'sessions', CORE)).filter((f) => /^result\..*\.json$/.test(f));
+    expect(copies.length).toBe(1);
+    for (const file of ['STATE.json', 'events.jsonl', 'RUNS.jsonl', join('sessions', CORE, copies[0]!)]) {
       const full = join(p.featureDir, file);
       expect(`${file}:${existsSync(full)}`).toBe(`${file}:true`);
       expect(readFileSync(full, 'utf8')).not.toContain(t.capability);

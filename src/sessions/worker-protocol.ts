@@ -36,6 +36,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { NodeResult } from './adapter.js';
 import { packBytes, type ContextPack } from './context-pack.js';
 import { validateAgainstSchema } from '../schema/registry.js';
@@ -51,6 +52,51 @@ export const WORKER_RESULT_REL = `${WORKER_RESULT_DIR}/${WORKER_RESULT_FILE}`;
 /** Permission rule granting exactly the result file (verified on Claude Code 2.1.288). */
 export const WORKER_RESULT_GRANT = `Edit(./${WORKER_RESULT_REL})`;
 export const MAX_WORKER_RESULT_BYTES = 256 * 1024;
+/**
+ * A host dispatch generation writes its own result file, so a worker from
+ * an earlier generation of the same claim (a resumed dispatch) never writes
+ * where the current one does.
+ */
+const GENERATION_RESULT = /^result-[0-9a-f-]{8,64}\.json$/;
+
+/** The result file name for one host dispatch generation. */
+export function generationResultFile(dispatchId: string): string {
+  const name = `result-${dispatchId}.json`;
+  if (!GENERATION_RESULT.test(name)) throw new WorkerProtocolError('WORKER_PROTOCOL_INVALID', 'malformed dispatch id');
+  return name;
+}
+
+/** Whether a worktree-relative path is a worker result file the controller assigns. */
+export function isWorkerResultRel(rel: string): boolean {
+  if (rel === WORKER_RESULT_REL) return true;
+  const prefix = `${WORKER_RESULT_DIR}/`;
+  return rel.startsWith(prefix) && GENERATION_RESULT.test(rel.slice(prefix.length));
+}
+
+function assertResultFile(name: string): void {
+  if (name !== WORKER_RESULT_FILE && !GENERATION_RESULT.test(name)) {
+    throw new WorkerProtocolError('WORKER_PROTOCOL_INVALID', `not a result file name: ${name.slice(0, 80)}`);
+  }
+}
+
+/**
+ * Replace every 64-hex token whose SHA-256 is `sha256` with a marker. Used
+ * where only a capability's hash is known (a result attested at a resume,
+ * after the raw capability was handed out and forgotten).
+ */
+export function redactCapabilityByHash<T>(value: T, sha256: string): T {
+  const scrub = (text: string): string =>
+    text.replace(/[0-9a-f]{64}/g, (token) =>
+      createHash('sha256').update(token, 'utf8').digest('hex') === sha256 ? '[REDACTED:capability]' : token,
+    );
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return scrub(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v !== null && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  return walk(value) as T;
+}
 /** Ceiling on the pack read from disk, before its own byte budget is checked. */
 export const MAX_PROMPT_PACK_BYTES = 256 * 1024;
 
@@ -77,6 +123,8 @@ export interface WorkerIdentity {
   featureId: string;
   nodeId: string;
   claimId: string;
+  /** A host dispatch generation: the result must name exactly this one. */
+  dispatchId?: string;
 }
 
 /**
@@ -235,6 +283,8 @@ export interface HostWorkerPromptArgs {
   worktree: string | null;
   /** Absolute path of the result slot the host's subagent writes. */
   resultSlot: string;
+  /** This dispatch generation's id; the result must name it. */
+  dispatchId?: string;
   gates: { gate: WorkerGate; line: string }[];
 }
 
@@ -265,6 +315,7 @@ export function buildHostWorkerPrompt(args: HostWorkerPromptArgs): string {
     `Node: ${pack.node_id}`,
     `Feature: ${pack.feature_id}`,
     `Claim: ${pack.claim_id}`,
+    ...(args.dispatchId !== undefined ? [`Dispatch: ${args.dispatchId}`] : []),
     worktree === null
       ? 'Worktree: none (this node has no repository); work only where the pack allows.'
       : `Worktree: ${worktree}`,
@@ -286,7 +337,7 @@ export function buildHostWorkerPrompt(args: HostWorkerPromptArgs): string {
     '',
     `Result file: ${slash(args.resultSlot)}`,
     'Before you stop, for any reason, write one JSON node result to that exact path with the Write tool.',
-    'Fields: schema_version 1; node_id and claim_id exactly as above; outcome SUBMITTED, RETRYABLE, BLOCKED,',
+    `Fields: schema_version 1; node_id${args.dispatchId !== undefined ? ', claim_id and dispatch_id' : ' and claim_id'} exactly as above; outcome SUBMITTED, RETRYABLE, BLOCKED,`,
     'NEEDS_DECISION or BUDGET_EXHAUSTED; commands as [{"command": [...], "exit_code": n}]; commit_sha;',
     'changed_paths; evidence_paths; failure_fingerprint; decision_request ({"question", "options": [...]}',
     'for NEEDS_DECISION, otherwise null). Then reply with only that JSON.',
@@ -321,7 +372,8 @@ function removeLink(path: string): void {
  * Create the result slot inside `cwd`, git-ignored and empty, and return the
  * absolute result path. A slot that was replaced by a link is removed first.
  */
-export function prepareResultSlot(cwd: string): string {
+export function prepareResultSlot(cwd: string, resultFile: string = WORKER_RESULT_FILE): string {
+  assertResultFile(resultFile);
   const dir = join(cwd, WORKER_RESULT_DIR);
   if (existsSync(dir) || isLink(dir)) {
     const st = lstatSync(dir);
@@ -338,7 +390,7 @@ export function prepareResultSlot(cwd: string): string {
   const ignore = join(dir, '.gitignore');
   rmSync(ignore, { force: true, recursive: true });
   writeFileSync(ignore, '*\n', { encoding: 'utf8', flag: 'wx' });
-  const file = join(dir, WORKER_RESULT_FILE);
+  const file = join(dir, resultFile);
   // A stale result from a previous attempt must never be mistaken for this one's.
   rmSync(file, { force: true });
   return file;
@@ -376,12 +428,24 @@ export const RESULT_QUARANTINE_PREFIX = '.result-quarantine-';
  * redacted copy is written atomically to `controllerPath`, and the
  * quarantine is always removed, links unlinked rather than followed.
  */
+export interface CollectOptions {
+  /** The slot's result file name (a host dispatch generation's own file). */
+  resultFile?: string;
+  /** Redact the capability with this hash too, when its raw value is unknown. */
+  capabilitySha256?: string;
+  /** Called once the result has left the slot, before it is validated. */
+  onMoved?: () => void;
+}
+
 export function collectWorkerResult(
   cwd: string,
   expected: WorkerIdentity,
   controllerPath: string,
   env: Env = process.env,
+  options: CollectOptions = {},
 ): CollectedResult {
+  const resultFile = options.resultFile ?? WORKER_RESULT_FILE;
+  assertResultFile(resultFile);
   const fail = (failure: string): CollectedResult => ({ result: null, failure });
   const captureFailed = (what: string, err: unknown): CollectedResult =>
     fail(
@@ -404,12 +468,13 @@ export function collectWorkerResult(
       return fail('RESULT_PATH_ESCAPE: the result slot was replaced by a link');
     }
     try {
-      retrySync(() => renameSync(join(capturedDir, WORKER_RESULT_FILE), captured));
+      retrySync(() => renameSync(join(capturedDir, resultFile), captured));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fail('RESULT_MISSING');
       return captureFailed('the result', err);
     }
-    return readCapturedResult(captured, expected, controllerPath, env);
+    options.onMoved?.();
+    return readCapturedResult(captured, expected, controllerPath, env, options.capabilitySha256);
   } finally {
     removeQuarantine(quarantine);
   }
@@ -420,6 +485,7 @@ function readCapturedResult(
   expected: WorkerIdentity,
   controllerPath: string,
   env: Env,
+  capabilitySha256?: string,
 ): CollectedResult {
   const fail = (failure: string): CollectedResult => ({ result: null, failure });
   const notRegular = (): CollectedResult => fail('RESULT_PATH_ESCAPE: the result is not a regular file');
@@ -455,7 +521,11 @@ function readCapturedResult(
     if (parsed.node_id !== expected.nodeId || parsed.claim_id !== expected.claimId) {
       return fail('RESULT_IDENTITY_MISMATCH: the result names another node or claim');
     }
-    const result = redactValue(parsed, env);
+    if (expected.dispatchId !== undefined && parsed.dispatch_id !== expected.dispatchId) {
+      return fail('RESULT_STALE_DISPATCH: the result does not name the current dispatch (a superseded or foreign worker wrote it)');
+    }
+    const redacted = redactValue(parsed, env);
+    const result = capabilitySha256 === undefined ? redacted : redactCapabilityByHash(redacted, capabilitySha256);
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + '\n');
     return { result, failure: null };
   } finally {

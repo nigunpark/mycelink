@@ -18380,9 +18380,9 @@ function verifyCandidate(manifest, context) {
 
 // src/engine/orchestrator.ts
 import { existsSync as existsSync15, mkdirSync as mkdirSync11, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "node:fs";
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 import { join as join18, resolve as resolve12 } from "node:path";
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomBytes as randomBytes4, randomUUID as randomUUID2 } from "node:crypto";
 
 // src/engine/capability.ts
 import { createHash as createHash5, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
@@ -18468,6 +18468,7 @@ import {
   writeFileSync as writeFileSync3
 } from "node:fs";
 import { dirname as dirname5, join as join14 } from "node:path";
+import { createHash as createHash6 } from "node:crypto";
 
 // src/sessions/context-pack.ts
 var ContextPackTooLargeError = class extends Error {
@@ -18618,6 +18619,35 @@ var WORKER_RESULT_FILE = "result.json";
 var WORKER_RESULT_REL = `${WORKER_RESULT_DIR}/${WORKER_RESULT_FILE}`;
 var WORKER_RESULT_GRANT = `Edit(./${WORKER_RESULT_REL})`;
 var MAX_WORKER_RESULT_BYTES = 256 * 1024;
+var GENERATION_RESULT = /^result-[0-9a-f-]{8,64}\.json$/;
+function generationResultFile(dispatchId) {
+  const name = `result-${dispatchId}.json`;
+  if (!GENERATION_RESULT.test(name)) throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", "malformed dispatch id");
+  return name;
+}
+function isWorkerResultRel(rel) {
+  if (rel === WORKER_RESULT_REL) return true;
+  const prefix = `${WORKER_RESULT_DIR}/`;
+  return rel.startsWith(prefix) && GENERATION_RESULT.test(rel.slice(prefix.length));
+}
+function assertResultFile(name) {
+  if (name !== WORKER_RESULT_FILE && !GENERATION_RESULT.test(name)) {
+    throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", `not a result file name: ${name.slice(0, 80)}`);
+  }
+}
+function redactCapabilityByHash(value, sha256) {
+  const scrub = (text) => text.replace(
+    /[0-9a-f]{64}/g,
+    (token) => createHash6("sha256").update(token, "utf8").digest("hex") === sha256 ? "[REDACTED:capability]" : token
+  );
+  const walk = (v) => {
+    if (typeof v === "string") return scrub(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v !== null && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  return walk(value);
+}
 var MAX_PROMPT_PACK_BYTES = 256 * 1024;
 var PACK_OPEN = "<mycelink-context-pack>";
 var PACK_CLOSE = "</mycelink-context-pack>";
@@ -18754,6 +18784,7 @@ function buildHostWorkerPrompt(args) {
     `Node: ${pack.node_id}`,
     `Feature: ${pack.feature_id}`,
     `Claim: ${pack.claim_id}`,
+    ...args.dispatchId !== void 0 ? [`Dispatch: ${args.dispatchId}`] : [],
     worktree === null ? "Worktree: none (this node has no repository); work only where the pack allows." : `Worktree: ${worktree}`,
     "",
     "Your working directory is the host session's, not the worktree. Use absolute paths under the worktree",
@@ -18773,7 +18804,7 @@ function buildHostWorkerPrompt(args) {
     "",
     `Result file: ${slash(args.resultSlot)}`,
     "Before you stop, for any reason, write one JSON node result to that exact path with the Write tool.",
-    "Fields: schema_version 1; node_id and claim_id exactly as above; outcome SUBMITTED, RETRYABLE, BLOCKED,",
+    `Fields: schema_version 1; node_id${args.dispatchId !== void 0 ? ", claim_id and dispatch_id" : " and claim_id"} exactly as above; outcome SUBMITTED, RETRYABLE, BLOCKED,`,
     'NEEDS_DECISION or BUDGET_EXHAUSTED; commands as [{"command": [...], "exit_code": n}]; commit_sha;',
     'changed_paths; evidence_paths; failure_fingerprint; decision_request ({"question", "options": [...]}',
     "for NEEDS_DECISION, otherwise null). Then reply with only that JSON.",
@@ -18801,7 +18832,8 @@ function removeLink(path) {
     rmdirSync(path);
   }
 }
-function prepareResultSlot(cwd) {
+function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
+  assertResultFile(resultFile);
   const dir = join14(cwd, WORKER_RESULT_DIR);
   if (existsSync11(dir) || isLink(dir)) {
     const st = lstatSync4(dir);
@@ -18815,7 +18847,7 @@ function prepareResultSlot(cwd) {
   const ignore = join14(dir, ".gitignore");
   rmSync6(ignore, { force: true, recursive: true });
   writeFileSync3(ignore, "*\n", { encoding: "utf8", flag: "wx" });
-  const file = join14(dir, WORKER_RESULT_FILE);
+  const file = join14(dir, resultFile);
   rmSync6(file, { force: true });
   return file;
 }
@@ -18827,7 +18859,9 @@ function isLink(path) {
   }
 }
 var RESULT_QUARANTINE_PREFIX = ".result-quarantine-";
-function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
+function collectWorkerResult(cwd, expected, controllerPath, env = process.env, options = {}) {
+  const resultFile = options.resultFile ?? WORKER_RESULT_FILE;
+  assertResultFile(resultFile);
   const fail = (failure) => ({ result: null, failure });
   const captureFailed = (what, err) => fail(
     `RESULT_CAPTURE_FAILED: could not move ${what} into quarantine (${err.code ?? "error"})`
@@ -18848,17 +18882,18 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
     try {
-      retrySync(() => renameSync2(join14(capturedDir, WORKER_RESULT_FILE), captured));
+      retrySync(() => renameSync2(join14(capturedDir, resultFile), captured));
     } catch (err) {
       if (err.code === "ENOENT") return fail("RESULT_MISSING");
       return captureFailed("the result", err);
     }
-    return readCapturedResult(captured, expected, controllerPath, env);
+    options.onMoved?.();
+    return readCapturedResult(captured, expected, controllerPath, env, options.capabilitySha256);
   } finally {
     removeQuarantine(quarantine);
   }
 }
-function readCapturedResult(captured, expected, controllerPath, env) {
+function readCapturedResult(captured, expected, controllerPath, env, capabilitySha256) {
   const fail = (failure) => ({ result: null, failure });
   const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
   let fd;
@@ -18888,7 +18923,11 @@ function readCapturedResult(captured, expected, controllerPath, env) {
     if (parsed.node_id !== expected.nodeId || parsed.claim_id !== expected.claimId) {
       return fail("RESULT_IDENTITY_MISMATCH: the result names another node or claim");
     }
-    const result = redactValue(parsed, env);
+    if (expected.dispatchId !== void 0 && parsed.dispatch_id !== expected.dispatchId) {
+      return fail("RESULT_STALE_DISPATCH: the result does not name the current dispatch (a superseded or foreign worker wrote it)");
+    }
+    const redacted = redactValue(parsed, env);
+    const result = capabilitySha256 === void 0 ? redacted : redactCapabilityByHash(redacted, capabilitySha256);
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + "\n");
     return { result, failure: null };
   } finally {
@@ -19355,7 +19394,7 @@ function hookHealth(controlRoot) {
 // src/state/event-log.ts
 import { appendFileSync, closeSync as closeSync6, existsSync as existsSync14, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync6, readFileSync as readFileSync9, readdirSync as readdirSync5, renameSync as renameSync3, writeSync as writeSync4 } from "node:fs";
 import { basename as basename3, dirname as dirname6, join as join17 } from "node:path";
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 var EventTooLargeError = class extends Error {
   bytes;
   limit;
@@ -19419,7 +19458,7 @@ function repairTornTail(log) {
   return true;
 }
 function eventId(key, type) {
-  return createHash6("sha256").update(JSON.stringify([type, key])).digest("hex").slice(0, 24);
+  return createHash7("sha256").update(JSON.stringify([type, key])).digest("hex").slice(0, 24);
 }
 function findByKey(log, key) {
   for (const ev of parseJsonl(log)) {
@@ -19708,9 +19747,9 @@ var NotSchedulableError = class extends Error {
   }
 };
 var HOST_WORKER_AGENT = "mycelink:module-worker";
-function resultInSlot(cwd) {
+function resultInSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   try {
-    return lstatSync5(join18(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync5(join18(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE)).isFile();
+    return lstatSync5(join18(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync5(join18(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
   } catch {
     return false;
   }
@@ -19754,6 +19793,7 @@ var Orchestrator = class {
   workerEnv;
   recall;
   preflight;
+  settleFault;
   preflightResult = null;
   constructor(options) {
     this.controlRoot = resolve12(options.controlRoot);
@@ -19765,6 +19805,7 @@ var Orchestrator = class {
     this.workerEnv = options.workerEnv ?? {};
     this.recall = options.recall;
     this.preflight = options.preflight;
+    this.settleFault = options.settleFault;
   }
   /** The adapter preflight, run at most once per orchestrator. */
   adapterReady() {
@@ -19831,7 +19872,7 @@ var Orchestrator = class {
     const out = {};
     for (const rel of [...node.contract_inputs ?? [], ...node.contract_outputs ?? []]) {
       const full = join18(this.controlRoot, rel);
-      out[rel] = existsSync15(full) ? createHash7("sha256").update(readFileSync10(full)).digest("hex") : "";
+      out[rel] = existsSync15(full) ? createHash8("sha256").update(readFileSync10(full)).digest("hex") : "";
     }
     return out;
   }
@@ -19851,6 +19892,8 @@ var Orchestrator = class {
     const mode = options.mode ?? "adapter";
     const capability = newCapability();
     const claimId = randomUUID2();
+    const dispatchId = mode === "host" ? randomUUID2() : void 0;
+    const resultFile = dispatchId !== void 0 ? generationResultFile(dispatchId) : void 0;
     const now = /* @__PURE__ */ new Date();
     const expiresAt = new Date(now.getTime() + this.claimTtlMs(node)).toISOString();
     let attempt = 0;
@@ -19877,7 +19920,8 @@ var Orchestrator = class {
         mode,
         attempt,
         expires_at: expiresAt,
-        settling: null
+        settling: null,
+        ...dispatchId !== void 0 ? { dispatch_id: dispatchId, result_file: resultFile } : {}
       };
       return next;
     });
@@ -19923,7 +19967,16 @@ var Orchestrator = class {
       throw new ClaimSetupError(nodeId, err);
     }
     this.event("node.claimed", nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
-    return { claimId, capability: capability.raw, worktree, branch, attempt, mode, expiresAt };
+    return {
+      claimId,
+      capability: capability.raw,
+      worktree,
+      branch,
+      attempt,
+      mode,
+      expiresAt,
+      ...dispatchId !== void 0 ? { dispatchId, resultFile } : {}
+    };
   }
   /** How long a claim may stay unsettled before a host dispatch counts as abandoned. */
   claimTtlMs(node) {
@@ -20206,7 +20259,7 @@ var Orchestrator = class {
         parent_loop_id: `feature-orchestration:${this.featureId}`,
         node_id: nodeId,
         candidate_sha: null,
-        input_hash: createHash7("sha256").update(readFileSync10(packPath)).digest("hex").slice(0, 16),
+        input_hash: createHash8("sha256").update(readFileSync10(packPath)).digest("hex").slice(0, 16),
         started_at: new Date(started).toISOString(),
         finished_at: (/* @__PURE__ */ new Date()).toISOString(),
         model_turns: observation.turns,
@@ -20343,16 +20396,25 @@ var Orchestrator = class {
       const live = rt.claim;
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
       live.settling = { pid: process.pid, host: hostname3(), started_at: (/* @__PURE__ */ new Date()).toISOString() };
+      rt.last_settlement = {
+        capability_sha256: live.capability_sha256,
+        claim_id: live.claim_id,
+        outcome: "PENDING",
+        state: rt.state,
+        detail: "settle started and did not record an outcome",
+        settled_at: (/* @__PURE__ */ new Date()).toISOString()
+      };
       claim = structuredClone(live);
       return s;
     });
     if (receipt !== null) {
       const r = receipt;
+      const state = this.state().nodes[nodeId]?.state ?? r.state;
       return {
         node_id: nodeId,
-        outcome: r.outcome,
+        outcome: r.outcome === "PENDING" ? outcomeFromState(state) : r.outcome,
         session_id: null,
-        state: this.state().nodes[nodeId]?.state ?? r.state,
+        state,
         detail: r.detail,
         evidence: [],
         idempotent: true
@@ -20497,23 +20559,38 @@ var Orchestrator = class {
    */
   resumeDispatch(nodeId) {
     const node = this.node(nodeId);
+    const before = this.state().nodes[nodeId]?.claim ?? null;
+    if (before === null) throw new CapabilityError("NOT_CLAIMED", `${nodeId} has no claim to resume.`);
+    if (before.mode !== "host") {
+      throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${before.mode ?? "legacy"} mode, not by a host dispatch.`);
+    }
+    if (before.settling && settlerAlive(before.settling)) throw new SettleInProgressError(nodeId, before.settling);
+    const attested = before.result_captured_sha256 === void 0 ? this.attestSlot(nodeId, before) : null;
     const capability = newCapability();
+    const dispatchId = randomUUID2();
     let claim = null;
     let attempt = 0;
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
       const live = rt?.claim ?? null;
-      if (!rt || live === null) throw new CapabilityError("NOT_CLAIMED", `${nodeId} has no claim to resume.`);
-      if (live.mode !== "host") {
-        throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${live.mode ?? "legacy"} mode, not by a host dispatch.`);
+      if (!rt || live === null || live.claim_id !== before.claim_id || live.capability_sha256 !== before.capability_sha256) {
+        throw new Error(`DISPATCH_CHANGED: ${nodeId}'s claim changed while it was being resumed; reconcile and try again.`);
       }
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
-      live.settling = null;
-      live.capability_sha256 = capability.sha256;
-      live.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
-      attempt = live.attempt ?? rt.attempts;
-      claim = structuredClone(live);
-      return s;
+      let next = s;
+      if (attested !== null) {
+        next = this.recordCapture(next, nodeId, attested);
+      }
+      const held2 = next.nodes[nodeId].claim;
+      held2.settling = null;
+      held2.capture_pending = null;
+      held2.capability_sha256 = capability.sha256;
+      held2.dispatch_id = dispatchId;
+      held2.result_file = generationResultFile(dispatchId);
+      held2.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
+      attempt = held2.attempt ?? next.nodes[nodeId].attempts;
+      claim = structuredClone(held2);
+      return next;
     });
     const held = claim;
     if (node.repository !== null && held.worktree === null) {
@@ -20537,7 +20614,6 @@ var Orchestrator = class {
         return s;
       });
     }
-    const cwd = held.worktree ?? this.controlRoot;
     const ticket = this.buildTicket(
       nodeId,
       {
@@ -20547,14 +20623,21 @@ var Orchestrator = class {
         branch: held.branch,
         attempt,
         mode: "host",
-        expiresAt: held.expires_at
+        expiresAt: held.expires_at,
+        dispatchId,
+        resultFile: held.result_file
       },
-      { resumed: true, resultPresent: resultInSlot(cwd) }
+      { resumed: true, resultPresent: this.capturedResultFor(nodeId, held) !== null }
     );
-    this.event("dispatch.resumed", nodeId, { claim_id: held.claim_id, attempt });
+    this.event("dispatch.resumed", nodeId, {
+      claim_id: held.claim_id,
+      attempt,
+      dispatch_id: dispatchId,
+      attested: attested !== null
+    });
     return {
       status: "DISPATCHED",
-      detail: `re-issued ${nodeId} (attempt ${attempt}) with a new capability`,
+      detail: `re-issued ${nodeId} (attempt ${attempt}) with a new capability and dispatch id`,
       ticket,
       controller_reports: [],
       pending: this.pendingDispatches(),
@@ -20567,7 +20650,7 @@ var Orchestrator = class {
     const packPath = this.writeContextPack(nodeId, claim.claimId);
     const pack = loadPromptPack(packPath, { featureId: this.featureId, nodeId, claimId: claim.claimId });
     const cwd = claim.worktree ?? this.controlRoot;
-    const resultSlot = options.resumed && options.resultPresent ? join18(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE) : prepareResultSlot(cwd);
+    const resultSlot = prepareResultSlot(cwd, claim.resultFile ?? WORKER_RESULT_FILE);
     const gates = this.gateCommands(nodeId, claim.capability).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
     const launcher = mycelinkCliPath().replace(/\\/g, "/");
     const controlRoot = this.controlRoot.replace(/\\/g, "/");
@@ -20576,6 +20659,7 @@ var Orchestrator = class {
       feature_id: this.featureId,
       node_id: nodeId,
       claim_id: claim.claimId,
+      dispatch_id: claim.dispatchId ?? null,
       attempt: claim.attempt,
       capability: claim.capability,
       expires_at: claim.expiresAt,
@@ -20606,7 +20690,13 @@ var Orchestrator = class {
         max_turns: node.worker.max_turns,
         max_wall_clock_minutes: node.worker.max_wall_clock_minutes
       },
-      prompt: buildHostWorkerPrompt({ pack, worktree: claim.worktree, resultSlot, gates }),
+      prompt: buildHostWorkerPrompt({
+        pack,
+        worktree: claim.worktree,
+        resultSlot,
+        gates,
+        ...claim.dispatchId !== void 0 ? { dispatchId: claim.dispatchId } : {}
+      }),
       resumed: options.resumed,
       result_present: options.resultPresent ?? false
     };
@@ -20627,35 +20717,54 @@ var Orchestrator = class {
       const started = Date.parse(claim.claimed_at);
       const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
       const cwd = claim.worktree ?? this.controlRoot;
-      const sessionDir = join18(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"));
-      mkdirSync11(sessionDir, { recursive: true });
-      const controllerCopy = join18(sessionDir, `result.attempt-${attempt}.json`);
-      const env = { ...process.env, [CAPABILITY_ENV]: capability ?? "" };
-      let collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
-      let recaptured = false;
-      if (collected.failure === "RESULT_MISSING") {
-        const captured = this.capturedResultFor(nodeId, claim);
-        if (captured !== null) {
-          collected = { result: captured, failure: null };
-          recaptured = true;
-        }
-      }
-      const result = collected.result;
-      if (result !== null && !recaptured) {
-        const captured = createHash7("sha256").update(readFileSync10(controllerCopy)).digest("hex");
+      const generation = claim.dispatch_id ?? claim.claim_id;
+      const resultFile = claim.result_file ?? WORKER_RESULT_FILE;
+      let result = null;
+      let failure = null;
+      if (slotTouched(cwd, resultFile)) {
+        const env = { ...process.env, [CAPABILITY_ENV]: capability ?? "" };
+        const file = `result.${generation}.${randomBytes4(16).toString("hex")}.json`;
         mutateState(this.paths.featureDir, (s) => {
           const c = s.nodes[nodeId]?.claim;
-          if (c?.claim_id === claim.claim_id) c.result_captured_sha256 = captured;
+          if (c?.claim_id === claim.claim_id) c.capture_pending = { file, dispatch_id: generation };
           return s;
         });
+        const collected2 = collectWorkerResult(
+          cwd,
+          { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
+          join18(this.sessionDir(nodeId), file),
+          env,
+          { resultFile }
+        );
+        if (collected2.result !== null) {
+          this.fault("result-captured");
+          const captured = { file, sha256: sha256OfFile(join18(this.sessionDir(nodeId), file)), dispatchId: generation, usage: hostUsage(collected2.result, started) };
+          mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
+          this.fault("result-attested");
+          result = collected2.result;
+        } else {
+          failure = collected2.failure;
+        }
+      } else {
+        result = this.capturedResultFor(nodeId, claim) ?? this.finishPendingCapture(nodeId, claim, started);
+        if (result === null) failure = "RESULT_MISSING";
       }
       const usage = hostUsage(result, started);
-      if (!recaptured) mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
+      mutateState(this.paths.featureDir, (s) => {
+        const c = s.nodes[nodeId]?.claim;
+        if (c?.claim_id !== claim.claim_id) return s;
+        c.capture_pending = null;
+        if (c.usage_counted_for === generation || result !== null && c.usage_counted_for === c.result_captured_dispatch_id) return s;
+        const next = accumulateUsage(s, nodeId, usage);
+        next.nodes[nodeId].claim.usage_counted_for = generation;
+        return next;
+      });
+      const collected = { result, failure };
       const status = result === null ? "failed" : statusForOutcome(result.outcome);
       const failureReason = collected.failure ?? (status === "failed" && result !== null ? `WORKER_${result.outcome}` : null);
       appendRun(this.paths.runs, {
         attempt_id: `${nodeId}#${attempt}`,
-        idempotency_key: `${nodeId}#${attempt}#${claim.claim_id}`,
+        idempotency_key: `${nodeId}#${attempt}#${claim.claim_id}#${generation}`,
         loop_id: `node-agent:${nodeId}`,
         parent_loop_id: `feature-orchestration:${this.featureId}`,
         node_id: nodeId,
@@ -20672,8 +20781,80 @@ var Orchestrator = class {
         evidence_paths: result?.evidence_paths ?? [],
         transition: status
       });
-      return this.concludeAttempt(nodeId, null, { status, result, failureReason }, []);
+      const report = this.concludeAttempt(nodeId, null, { status, result, failureReason }, []);
+      this.fault("attempt-concluded");
+      return report;
     });
+  }
+  fault(point) {
+    this.settleFault?.(point);
+  }
+  sessionDir(nodeId) {
+    const dir = join18(this.paths.sessionsDir, safeNodeDir(nodeId));
+    mkdirSync11(dir, { recursive: true });
+    return dir;
+  }
+  /**
+   * Record a captured controller copy on the claim and count the worker's
+   * usage, in one STATE.json write: either both happened or neither did, so
+   * a settle that dies on either side of it never loses or double-counts.
+   */
+  recordCapture(s, nodeId, captured, claimId) {
+    const c = s.nodes[nodeId]?.claim;
+    if (!c || claimId !== void 0 && c.claim_id !== claimId) return s;
+    c.result_captured_sha256 = captured.sha256;
+    c.result_captured_file = captured.file;
+    c.result_captured_dispatch_id = captured.dispatchId;
+    c.capture_pending = null;
+    if (c.usage_counted_for === captured.dispatchId) return s;
+    const next = accumulateUsage(s, nodeId, captured.usage);
+    next.nodes[nodeId].claim.usage_counted_for = captured.dispatchId;
+    return next;
+  }
+  /**
+   * At a resume: take the result the current generation left in its slot
+   * into a controller copy, validated against that generation and with its
+   * capability redacted by hash. Returns null (and drops the file) when
+   * there is none or it does not validate.
+   */
+  attestSlot(nodeId, claim) {
+    const cwd = claim.worktree ?? this.controlRoot;
+    const resultFile = claim.result_file ?? WORKER_RESULT_FILE;
+    if (!resultInSlot(cwd, resultFile)) return null;
+    const generation = claim.dispatch_id ?? claim.claim_id;
+    const file = `result.${generation}.${randomBytes4(16).toString("hex")}.json`;
+    const collected = collectWorkerResult(
+      cwd,
+      { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
+      join18(this.sessionDir(nodeId), file),
+      process.env,
+      { resultFile, ...claim.capability_sha256 !== void 0 ? { capabilitySha256: claim.capability_sha256 } : {} }
+    );
+    if (collected.result === null) {
+      this.event("dispatch.attest_refused", nodeId, { claim_id: claim.claim_id, failure: collected.failure.slice(0, 300) });
+      return null;
+    }
+    return {
+      file,
+      sha256: sha256OfFile(join18(this.sessionDir(nodeId), file)),
+      dispatchId: generation,
+      usage: hostUsage(collected.result, Date.parse(claim.claimed_at))
+    };
+  }
+  /**
+   * A settle that died after writing its controller copy but before
+   * recording it: finish that capture from the copy it announced, after the
+   * same checks as any captured copy.
+   */
+  finishPendingCapture(nodeId, claim, started) {
+    const pending = claim.capture_pending;
+    if (!pending) return null;
+    const file = join18(this.sessionDir(nodeId), pending.file);
+    const parsed = readControllerCopy(file, null, nodeId, claim.claim_id, claim.dispatch_id);
+    if (parsed === null) return null;
+    const captured = { file: pending.file, sha256: sha256OfFile(file), dispatchId: pending.dispatch_id, usage: hostUsage(parsed, started) };
+    mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
+    return parsed;
   }
   /** RUNNING or CANDIDATE_READY becomes VERIFIED once every node is settled. */
   promoteSettledFeature() {
@@ -20928,7 +21109,7 @@ var Orchestrator = class {
   recordDecisionRequest(nodeId, result) {
     const request = result.decision_request;
     if (!request) return;
-    const id = `DEC-${createHash7("sha256").update(request.question).digest("hex").slice(0, 8)}`;
+    const id = `DEC-${createHash8("sha256").update(request.question).digest("hex").slice(0, 8)}`;
     const entry = `
 ## ${id} (${request.category ?? "uncategorised"})
 
@@ -21089,7 +21270,7 @@ var Orchestrator = class {
       }
       if (claim.mode !== "host") continue;
       const expired2 = Date.parse(claim.expires_at ?? claim.claimed_at) <= now;
-      const resultPresent = resultInSlot(claim.worktree ?? this.controlRoot) || this.capturedResultFor(nodeId, claim) !== null;
+      const resultPresent = resultInSlot(claim.worktree ?? this.controlRoot, claim.result_file ?? WORKER_RESULT_FILE) || this.capturedResultFor(nodeId, claim) !== null || Boolean(claim.capture_pending);
       if (options.abandonDispatches === true || expired2 && !resultPresent) {
         this.interruptClaim(nodeId, claim.claim_id, `host dispatch abandoned (${expired2 ? "claim expired" : "abandoned by reconcile"})`);
         abandoned.push(nodeId);
@@ -21147,26 +21328,15 @@ var Orchestrator = class {
   capturedResultFor(nodeId, claim) {
     if (claim.result_captured_sha256 === void 0) return null;
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
-    const file = join18(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"), `result.attempt-${attempt}.json`);
-    let fd;
-    try {
-      fd = openSync7(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
-    } catch {
-      return null;
-    }
-    try {
-      const st = fstatSync4(fd);
-      if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync5(file).isSymbolicLink()) return null;
-      const bytes = readFileSync10(fd);
-      if (createHash7("sha256").update(bytes).digest("hex") !== claim.result_captured_sha256) return null;
-      const parsed = JSON.parse(bytes.toString("utf8"));
-      if (validateAgainstSchema("node-result", parsed).length > 0) return null;
-      return parsed.node_id === nodeId && parsed.claim_id === claim.claim_id ? parsed : null;
-    } catch {
-      return null;
-    } finally {
-      closeSync7(fd);
-    }
+    const name = claim.result_captured_file ?? `result.attempt-${attempt}.json`;
+    const parsed = readControllerCopy(
+      join18(this.paths.sessionsDir, safeNodeDir(nodeId), name),
+      claim.result_captured_sha256,
+      nodeId,
+      claim.claim_id,
+      claim.result_captured_dispatch_id === claim.claim_id ? void 0 : claim.result_captured_dispatch_id
+    );
+    return parsed;
   }
   /** Compact status summary suitable for a hook or a CLI line. */
   statusSummary() {
@@ -21196,8 +21366,51 @@ var Orchestrator = class {
     return commitAll(this.controlRoot, message);
   }
 };
+function slotTouched(cwd, resultFile) {
+  try {
+    if (!lstatSync5(join18(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+  } catch {
+    return false;
+  }
+  try {
+    lstatSync5(join18(cwd, WORKER_RESULT_DIR, resultFile));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function safeNodeDir(nodeId) {
+  return nodeId.replace(/[^\w.-]/g, "_");
+}
+function outcomeFromState(state) {
+  if (state === "DONE" || state === "BLOCKED" || state === "NEEDS_DECISION" || state === "BUDGET_EXHAUSTED") return state;
+  return "RETRY";
+}
+function readControllerCopy(file, sha256, nodeId, claimId, dispatchId) {
+  let fd;
+  try {
+    fd = openSync7(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync4(fd);
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync5(file).isSymbolicLink()) return null;
+    const bytes = readFileSync10(fd);
+    if (sha256 !== null && createHash8("sha256").update(bytes).digest("hex") !== sha256) return null;
+    const parsed = JSON.parse(bytes.toString("utf8"));
+    if (validateAgainstSchema("node-result", parsed).length > 0) return null;
+    if (parsed.node_id !== nodeId || parsed.claim_id !== claimId) return null;
+    if (dispatchId !== void 0 && parsed.dispatch_id !== dispatchId) return null;
+    return parsed;
+  } catch {
+    return null;
+  } finally {
+    closeSync7(fd);
+  }
+}
 function sha256OfFile(file) {
-  return createHash7("sha256").update(readFileSync10(file)).digest("hex");
+  return createHash8("sha256").update(readFileSync10(file)).digest("hex");
 }
 function isProcessAlive(pid) {
   try {
@@ -21697,7 +21910,7 @@ function writeLoops(file, loops) {
 // src/hooks/entrypoint.ts
 import { existsSync as existsSync18, readFileSync as readFileSync12, readdirSync as readdirSync7 } from "node:fs";
 import { join as join19, relative as relative4, resolve as resolve14, sep as sep3 } from "node:path";
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 var MAX_BLOCK_BYTES = 1024;
 var MANAGED_PATTERNS = [
   "**/STATE.json",
@@ -21972,7 +22185,7 @@ function preToolUse(ctx, io, input) {
         `Blocked: "${rel}" resolves through a link to a location outside the worktree of ${active.id}.`
       );
     }
-    if (rel === WORKER_RESULT_REL) return 0;
+    if (isWorkerResultRel(rel)) return 0;
     const allowed = active.node.allowed_paths.some((g) => matchGlob(g, rel));
     const forbidden = (active.node.forbidden_paths ?? []).some((g) => matchGlob(g, rel));
     if (!allowed || forbidden) {
@@ -21997,7 +22210,7 @@ function preToolUse(ctx, io, input) {
 function postToolUse(ctx, io, input) {
   if (!ctx.paths || !ctx.state) return 0;
   const target = editTarget(input);
-  const key = createHash8("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
+  const key = createHash9("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
   try {
     appendEvent(ctx.paths.events, {
       idempotency_key: `posttool:${key}`,

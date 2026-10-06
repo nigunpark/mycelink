@@ -18,6 +18,7 @@ export interface DispatchTicket {
   feature_id: string;
   node_id: string;
   claim_id: string;
+  dispatch_id?: string | null;
   attempt: number;
   capability: string;
   agent: string;
@@ -103,6 +104,7 @@ export function fakeAgent(ticket: DispatchTicket, behaviour: AgentBehaviour, hos
     schema_version: 1,
     node_id: ticket.node_id,
     claim_id: ticket.claim_id,
+    ...(ticket.dispatch_id ? { dispatch_id: ticket.dispatch_id } : {}),
     outcome: behaviour.outcome ?? (failed ? 'RETRYABLE' : 'SUBMITTED'),
     commands: gates.map((g) => ({ command: [`gate:${g.gate}`], exit_code: g.exit })),
     commit_sha: ticket.worktree ? git(worktree, ['rev-parse', 'HEAD']) : null,
