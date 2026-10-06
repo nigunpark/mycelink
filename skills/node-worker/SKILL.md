@@ -51,6 +51,13 @@ claim commands yourself. Those need a controller key that only the host holds;
 you are never given it, and you must not look for it in the host's files,
 transcripts, processes or environment.
 
+Run one gate per Bash call, in order: red, then green, then regression only
+after green passed. Before the green gate, run the node's verification
+command yourself in the worktree until it passes: every gate run is
+recorded, and the same failure fingerprint in a later attempt blocks the
+node. A gate that answers `GATE_OUT_OF_ORDER` ran nothing; run the gate it
+names.
+
 When your prompt gives an absolute `Worktree:`, your working directory is not
 that worktree: use absolute paths under it for every edit, and run git as
 `git -C "<worktree>" ...`.

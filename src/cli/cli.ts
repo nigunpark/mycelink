@@ -22,7 +22,7 @@ import {
 } from '../workspace/workspace.js';
 import { validateGraph, validateRepositories } from '../graph/validate.js';
 import { DEFAULT_BUDGET, initialState, loadState, mutateState, saveState } from '../state/feature-state.js';
-import { applyNodeTransition, recordFailure } from '../state/transition.js';
+import { applyNodeTransition, isDeclaredEdge, recordFailure } from '../state/transition.js';
 import { IN_FLIGHT_STATES, computeReady, scheduleBatch } from '../scheduler/ready.js';
 import { acquireResource, leaseStatus, recoverLeases, releaseAllForNode, releaseResource } from '../resources/leases.js';
 import { runVerification, verifierInvocation, type VerificationInvocation } from '../evidence/runner.js';
@@ -1058,6 +1058,27 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   // Only the holder of the node's current claim may record its gates.
   const capability = presentedCapability(args);
   assertClaimCapability(nodeId, runtime, capability);
+
+  // A gate that could not move the node is refused before it runs anything:
+  // running the verifier anyway records evidence for nothing and, when it
+  // fails, counts a failure the gate order caused.
+  const gatePending = phase === 'red' ? 'RED_PENDING' : phase === 'green' ? 'GREEN_PENDING' : null;
+  const gateVerified =
+    phase === 'red' ? 'RED_VERIFIED' : phase === 'green' ? 'GREEN_VERIFIED' : 'REGRESSION_VERIFIED';
+  const via = gatePending ?? runtime.state;
+  if (!isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
+    const next =
+      runtime.state === 'RED_VERIFIED' || runtime.state === 'GREEN_PENDING'
+        ? 'green'
+        : runtime.state === 'GREEN_VERIFIED'
+          ? 'regression'
+          : runtime.state === 'CLAIMED' || runtime.state === 'RED_PENDING'
+            ? 'red'
+            : null;
+    throw new Error(
+      `GATE_OUT_OF_ORDER: ${nodeId} is ${runtime.state}; the ${phase} gate cannot run now${next ? ` (next: the ${next} gate)` : ''}. Nothing was run or recorded.`,
+    );
+  }
 
   const declared = node.verification_commands[0];
   // An explicit `-- <argv>` from the operator is always argv; a declared

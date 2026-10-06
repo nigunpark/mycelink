@@ -72,6 +72,8 @@ repeat at most 3 × (number of graph nodes) times:
 | `BLOCKED` | report the fingerprint and evidence; do not unblock it yourself |
 | `BUDGET_EXHAUSTED` / `NO_PROGRESS` | report usage or deferral reasons |
 | `INFRASTRUCTURE_FAILURE` | a claim could not be set up; nothing was charged — report it |
+| `PRECONDITION_FAILED` | the control repository has uncommitted files; commit your own scaffolding there and dispatch again, otherwise report them |
+| `CONTROLLER_FAILED` | a controller node (candidate build, E2E) ran and failed; report its detail |
 
 ## Recovery
 

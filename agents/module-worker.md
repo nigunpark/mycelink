@@ -39,6 +39,13 @@ evidence. Your prompt lists the exact gate commands (`- red: ...`,
 Bash tool. Each runs the node's declared verifier in your worktree and
 carries your claim's capability; do not copy that value anywhere else.
 
+Run one gate per Bash call, in order: red, then green, then regression
+only after green passed. Before the green gate, run the node's verification
+command yourself (the pack's `verification_commands`, in the worktree)
+until it passes: every gate run is recorded, and the same failure in a
+later attempt blocks the node. A gate that answers `GATE_OUT_OF_ORDER` ran
+nothing; run the gate it names.
+
 A RED must fail because the behaviour is missing. If your pack's
 `next_required_gate` is already `GREEN_VERIFIED`, a RED is already on record
 — re-prove GREEN instead of inventing a new failing test.

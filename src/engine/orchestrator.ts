@@ -81,7 +81,7 @@ import {
 } from '../git/worktree.js';
 import { createCandidate, loadCandidate } from '../git/candidate.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
-import { integrateNodeBranch } from '../git/integrate.js';
+import { DirtyWorktreeError, integrateNodeBranch } from '../git/integrate.js';
 import { commitAll, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
@@ -137,7 +137,9 @@ export interface NodeRunReport {
     | 'VERIFICATION_FAILED'
     | 'OWNERSHIP_VIOLATION'
     /** The worker could not be started; the claim was handed back unspent. */
-    | 'INFRASTRUCTURE_FAILURE';
+    | 'INFRASTRUCTURE_FAILURE'
+    /** A controller node's precondition (a clean control repository) does not hold; nothing was charged. */
+    | 'PRECONDITION_FAILED';
   session_id: string | null;
   state: NodeState;
   detail: string;
@@ -251,6 +253,8 @@ export type DispatchStatus =
   | 'CANCELLED'
   | 'NO_PROGRESS'
   | 'INFRASTRUCTURE_FAILURE'
+  | 'PRECONDITION_FAILED'
+  | 'CONTROLLER_FAILED'
   | 'MAX_STEPS';
 
 export interface PendingDispatch {
@@ -1178,7 +1182,15 @@ export class Orchestrator {
 
       const node = this.node(pick.node_id);
       if (node.node_type === 'candidate-build' || node.node_type === 'e2e-scenario') {
-        reports.push(await this.runNode(node.id));
+        const report = await this.runNode(node.id);
+        reports.push(report);
+        // A controller node that did not finish is not retried inline: an
+        // identical retry inside one call would only burn its budget before
+        // the host can see, let alone fix, what went wrong.
+        if (report.outcome === 'PRECONDITION_FAILED') return stop('PRECONDITION_FAILED', report.detail);
+        if (report.outcome !== 'DONE') {
+          return stop(report.state === 'BLOCKED' ? 'BLOCKED' : 'CONTROLLER_FAILED', `${node.id}: ${report.detail}`);
+        }
         continue;
       }
 
@@ -1593,8 +1605,9 @@ export class Orchestrator {
    */
   private runCandidateNode(nodeId: string): NodeRunReport {
     const evidence: EvidenceRecord[] = [];
+    let claimId: string | null = null;
     try {
-      this.claim(nodeId, { mode: 'controller' });
+      claimId = this.claim(nodeId, { mode: 'controller' }).claimId;
       const repoRefs = this.integrationRefs();
       if (repoRefs.length === 0) {
         return this.failAttempt(nodeId, null, 'NO_INTEGRATION_BRANCHES', evidence);
@@ -1644,6 +1657,14 @@ export class Orchestrator {
       this.releaseClaim(nodeId);
       return this.report(nodeId, 'DONE', null, manifest.candidate_id, evidence);
     } catch (err) {
+      if (err instanceof DirtyWorktreeError && claimId !== null) {
+        // Uncommitted files in the control repository or an integration
+        // worktree: a precondition the host can fix by committing them, not
+        // a failure of the build. Handed back unspent, nothing recorded.
+        const detail = `PRECONDITION_FAILED: ${err.message} Commit (or remove) those files, then dispatch again.`;
+        this.releaseForInfrastructure(nodeId, claimId, detail);
+        return this.report(nodeId, 'PRECONDITION_FAILED', null, detail, evidence);
+      }
       return this.failAttempt(
         nodeId,
         null,

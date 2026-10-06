@@ -16787,6 +16787,9 @@ function checkEvidenceGate(node, runtime, to) {
     }
   }
 }
+function isDeclaredEdge(from, to) {
+  return from === to || EDGES[from].includes(to);
+}
 function applyNodeTransition(graph, state, nodeId, to, options) {
   const node = requireNode(graph, nodeId);
   const next = structuredClone(state);
@@ -16854,10 +16857,16 @@ function recordFailure(graph, state, nodeId, fingerprint, options) {
   const next = structuredClone(state);
   const runtime = next.nodes[nodeId];
   if (!runtime) throw new TransitionError("UNKNOWN_NODE", nodeId, `No runtime state.`);
-  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
-  runtime.failure_counts[fingerprint] = count;
   runtime.last_failure_fingerprint = fingerprint;
   runtime.updated_at = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
+  const claim = runtime.claim;
+  if (claim) {
+    const counted = claim.counted_fingerprints ?? [];
+    if (counted.includes(fingerprint)) return next;
+    claim.counted_fingerprints = [...counted, fingerprint].slice(-50);
+  }
+  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
+  runtime.failure_counts[fingerprint] = count;
   const limit = options.maxSameFailure ?? node.worker.max_same_failure ?? next.budget.max_same_failure;
   if (count >= limit && runtime.state !== "BLOCKED") {
     return applyNodeTransition(graph, next, nodeId, "BLOCKED", {
@@ -18796,6 +18805,10 @@ function buildHostWorkerPrompt(args) {
     "* Never run mycelink dispatch, settle, finalize, candidate, deliver, integrate or claim: the host does that.",
     "  They need a controller key only the host holds. You are never given it; do not look for it.",
     "* Write a failing test first; the RED must fail for a missing behaviour, not a setup error.",
+    "* Gates are recorded, one Bash call each, in order: red, then green, then regression only after green passed.",
+    "  Before the green gate, run the node verification command yourself (see verification_commands in the pack)",
+    "  until it passes. A failing gate is recorded, and the same failure in another attempt blocks the node.",
+    "  If a gate answers GATE_OUT_OF_ORDER, run the gate it names instead.",
     "* Commit your work on the worktree branch before finishing: a fresh verifier checks out the branch, not your files.",
     "* If a tool you need is denied, do not work around it. Write the result with outcome BLOCKED and",
     '  failure_fingerprint "PERMISSION_DENIED:<tool>".',
@@ -20518,7 +20531,12 @@ var Orchestrator = class {
       }
       const node = this.node(pick.node_id);
       if (node.node_type === "candidate-build" || node.node_type === "e2e-scenario") {
-        reports.push(await this.runNode(node.id));
+        const report = await this.runNode(node.id);
+        reports.push(report);
+        if (report.outcome === "PRECONDITION_FAILED") return stop("PRECONDITION_FAILED", report.detail);
+        if (report.outcome !== "DONE") {
+          return stop(report.state === "BLOCKED" ? "BLOCKED" : "CONTROLLER_FAILED", `${node.id}: ${report.detail}`);
+        }
         continue;
       }
       let claim;
@@ -20886,8 +20904,9 @@ var Orchestrator = class {
    */
   runCandidateNode(nodeId) {
     const evidence = [];
+    let claimId = null;
     try {
-      this.claim(nodeId, { mode: "controller" });
+      claimId = this.claim(nodeId, { mode: "controller" }).claimId;
       const repoRefs = this.integrationRefs();
       if (repoRefs.length === 0) {
         return this.failAttempt(nodeId, null, "NO_INTEGRATION_BRANCHES", evidence);
@@ -20929,6 +20948,11 @@ var Orchestrator = class {
       this.releaseClaim(nodeId);
       return this.report(nodeId, "DONE", null, manifest.candidate_id, evidence);
     } catch (err) {
+      if (err instanceof DirtyWorktreeError && claimId !== null) {
+        const detail = `PRECONDITION_FAILED: ${err.message} Commit (or remove) those files, then dispatch again.`;
+        this.releaseForInfrastructure(nodeId, claimId, detail);
+        return this.report(nodeId, "PRECONDITION_FAILED", null, detail, evidence);
+      }
       return this.failAttempt(
         nodeId,
         null,
@@ -24565,6 +24589,15 @@ function tddGroup(args, io) {
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
   const capability = presentedCapability(args);
   assertClaimCapability(nodeId, runtime, capability);
+  const gatePending = phase === "red" ? "RED_PENDING" : phase === "green" ? "GREEN_PENDING" : null;
+  const gateVerified = phase === "red" ? "RED_VERIFIED" : phase === "green" ? "GREEN_VERIFIED" : "REGRESSION_VERIFIED";
+  const via = gatePending ?? runtime.state;
+  if (!isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
+    const next = runtime.state === "RED_VERIFIED" || runtime.state === "GREEN_PENDING" ? "green" : runtime.state === "GREEN_VERIFIED" ? "regression" : runtime.state === "CLAIMED" || runtime.state === "RED_PENDING" ? "red" : null;
+    throw new Error(
+      `GATE_OUT_OF_ORDER: ${nodeId} is ${runtime.state}; the ${phase} gate cannot run now${next ? ` (next: the ${next} gate)` : ""}. Nothing was run or recorded.`
+    );
+  }
   const declared = node.verification_commands[0];
   let invocation;
   if (args.passthrough.length > 0) invocation = { command: args.passthrough };

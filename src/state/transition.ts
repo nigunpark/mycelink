@@ -231,6 +231,11 @@ function checkEvidenceGate(
   }
 }
 
+/** Whether `from -> to` is a declared edge (no evidence or justification checks). */
+export function isDeclaredEdge(from: NodeState, to: NodeState): boolean {
+  return from === to || EDGES[from].includes(to);
+}
+
 /**
  * Apply a node transition to a cloned state. Pure: never touches disk.
  * Callers persist the result through `mutateState`.
@@ -357,10 +362,19 @@ export function recordFailure(
   const runtime = next.nodes[nodeId];
   if (!runtime) throw new TransitionError('UNKNOWN_NODE', nodeId, `No runtime state.`);
 
-  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
-  runtime.failure_counts[fingerprint] = count;
   runtime.last_failure_fingerprint = fingerprint;
   runtime.updated_at = options.now ?? new Date().toISOString();
+  // A fingerprint counts once per claim: a worker iterating on a failing
+  // gate inside one attempt is not looping. The same fingerprint in another
+  // attempt counts again, which is what stops a real loop.
+  const claim = runtime.claim;
+  if (claim) {
+    const counted = claim.counted_fingerprints ?? [];
+    if (counted.includes(fingerprint)) return next;
+    claim.counted_fingerprints = [...counted, fingerprint].slice(-50);
+  }
+  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
+  runtime.failure_counts[fingerprint] = count;
 
   const limit =
     options.maxSameFailure ?? node.worker.max_same_failure ?? next.budget.max_same_failure;

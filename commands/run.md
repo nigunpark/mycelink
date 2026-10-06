@@ -70,6 +70,15 @@ Stop reasons:
 - `NO_PROGRESS` — report what is deferred and why.
 - `INFRASTRUCTURE_FAILURE` — the controller could not set up a claim
   (worktree, git). Nothing was charged; report the detail.
+- `PRECONDITION_FAILED` — a controller node (the candidate build) needs a
+  clean control repository and found uncommitted files; nothing was
+  charged. If the files listed are Mycelink scaffolding or feature files
+  you created (`features/`, `repositories.yaml`, `.gitignore`, `CLAUDE.md`,
+  `.claude/settings.json`, `mycelink.config.json`), commit them in the
+  control repository (`git -C <control> add -A` then `git commit`) and
+  dispatch again; otherwise report them to the user.
+- `CONTROLLER_FAILED` — a controller node ran and failed. Report its
+  detail; do not edit controller files to make it pass.
 
 If the loop limit is reached, stop and report the last dispatch output.
 

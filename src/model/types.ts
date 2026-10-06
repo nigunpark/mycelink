@@ -216,6 +216,8 @@ export interface NodeClaim {
   result_file?: string;
   /** The dispatch generation whose worker usage has been counted (exactly once). */
   usage_counted_for?: string;
+  /** Failure fingerprints already counted for this claim (each counts once per claim). */
+  counted_fingerprints?: string[];
   /** A capture that started: the controller copy it writes, so a settle that dies after writing it can finish. */
   capture_pending?: { file: string; dispatch_id: string } | null;
   /** Set while a settle is verifying, so a second settle cannot run concurrently. */

@@ -125,6 +125,7 @@
             "result_captured_dispatch_id": { "type": "string" },
             "result_captured_file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
             "usage_counted_for": { "type": "string" },
+            "counted_fingerprints": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
             "capture_pending": {
               "type": ["object", "null"],
               "required": ["file", "dispatch_id"],

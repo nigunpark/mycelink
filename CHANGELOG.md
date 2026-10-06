@@ -58,6 +58,16 @@ under **Breaking**.
 
 ### Fixed
 
+- `dispatch` no longer retries a failing controller node inline until it is
+  BLOCKED. A candidate build that finds uncommitted files in the control
+  repository returns `PRECONDITION_FAILED` with nothing charged, and any
+  other controller failure stops dispatch with `CONTROLLER_FAILED` (seen in
+  the existing-informed real-model eval run).
+- `tdd` refuses a gate whose transition is illegal (`GATE_OUT_OF_ORDER`)
+  before running the verifier, and a failure fingerprint counts once per
+  claim, so a worker can iterate on a failing gate within one attempt (the
+  greenfield real-model eval run BLOCKED a node in its first attempt).
+  `/mycelink:init` and `/mycelink:plan` now commit the control-plane files.
 - Result capture works when worktrees live on another volume than the
   control repository: the slot is renamed into a quarantine beside the
   worktree instead of failing with EXDEV. It is still one atomic rename
