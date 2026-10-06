@@ -23,9 +23,11 @@ import type {
   FeatureState,
   FeatureState_,
   GraphNode,
+  NodeClaim,
   NodeRuntime,
   NodeState,
   PortfolioGraph,
+  SettlementReceipt,
 } from '../model/types.js';
 import { featurePaths, nodeEvidenceDir, type FeaturePaths } from '../workspace/paths.js';
 import { loadWorkspace, repositoryPath, type Workspace } from '../workspace/workspace.js';
@@ -38,7 +40,9 @@ import {
   TransitionError,
 } from '../state/transition.js';
 import { canSchedule, computeReady, scheduleBatch, type SchedulePlan } from '../scheduler/ready.js';
-import { CAPABILITY_ENV, newCapability } from './capability.js';
+import { CAPABILITY_ENV, assertClaimCapability, capabilityMatches, newCapability } from './capability.js';
+import { hostname } from 'node:os';
+import { isPidAlive } from '../state/process-lock.js';
 import {
   acquireResource,
   listLeases,
@@ -62,7 +66,7 @@ import { mycelinkCliPath } from '../workspace/hook-settings.js';
 import { runVerification, verifierInvocation } from '../evidence/runner.js';
 import { appendEvent } from '../state/event-log.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
-import type { NodeResult, SessionAdapter, SpawnRequest } from '../sessions/adapter.js';
+import type { NodeResult, SessionAdapter, SessionStatus, SpawnRequest } from '../sessions/adapter.js';
 import {
   findOrphanedSessions,
   recordObservation,
@@ -149,6 +153,34 @@ export interface ClaimResult {
   attempt: number;
   mode: ClaimMode;
   expiresAt: string;
+}
+
+/** How a worker attempt ended, whoever ran it. */
+export interface AttemptOutcome {
+  status: SessionStatus;
+  result: NodeResult | null;
+  failureReason: string | null;
+}
+
+export type SettleReport = NodeRunReport & { idempotent: boolean };
+
+/** A settle that started over this long ago is presumed dead even on another host. */
+const SETTLE_STALE_MS = 2 * 60 * 60 * 1000;
+
+export class SettleInProgressError extends Error {
+  readonly code = 'SETTLE_IN_PROGRESS';
+  constructor(nodeId: string, settling: { pid: number; host: string; started_at: string }) {
+    super(
+      `SETTLE_IN_PROGRESS: ${nodeId} is already being settled by pid ${settling.pid} on ${settling.host} since ${settling.started_at}.`,
+    );
+    this.name = 'SettleInProgressError';
+  }
+}
+
+function settlerAlive(settling: { pid: number; host: string; started_at: string }): boolean {
+  const started = Date.parse(settling.started_at);
+  if (Number.isNaN(started) || Date.now() - started > SETTLE_STALE_MS) return false;
+  return settling.host === hostname() ? isPidAlive(settling.pid) : true;
 }
 
 function errorText(err: unknown): string {
@@ -653,68 +685,12 @@ export class Orchestrator {
         transition: observation.status,
       });
 
-      const result = observation.result;
-
-      if (observation.status === 'needs-decision' && result?.decision_request) {
-        this.recordDecisionRequest(nodeId, result);
-        this.transition(nodeId, 'NEEDS_DECISION', {
-          reason: result.decision_request.question.slice(0, 300),
-        });
-        this.releaseClaim(nodeId);
-        return this.report(nodeId, 'NEEDS_DECISION', sessionId, result.decision_request.question, evidence);
-      }
-
-      if (observation.status === 'budget-exhausted') {
-        this.transition(nodeId, 'BUDGET_EXHAUSTED', {
-          reason: observation.failure_reason ?? 'worker budget exhausted',
-        });
-        this.releaseClaim(nodeId);
-        return this.report(nodeId, 'BUDGET_EXHAUSTED', sessionId, observation.failure_reason ?? '', evidence);
-      }
-
-      if (observation.status === 'blocked') {
-        this.transition(nodeId, 'BLOCKED', {
-          reason: result?.failure_fingerprint ?? observation.failure_reason ?? 'worker blocked',
-        });
-        this.releaseClaim(nodeId);
-        return this.report(nodeId, 'BLOCKED', sessionId, observation.failure_reason ?? 'blocked', evidence);
-      }
-
-      if (observation.status !== 'done' || result === null) {
-        return this.failAttempt(
-          nodeId,
-          sessionId,
-          result?.failure_fingerprint ?? observation.failure_reason ?? 'WORKER_FAILED',
-          evidence,
-        );
-      }
-
-      // The worker submitted. Independently verify before believing it.
-      const verification = this.freshVerify(nodeId);
-      for (const record of verification.evidence) {
-        evidence.push(record);
-        this.setEvidence(nodeId, record);
-      }
-
-      if (!verification.ok) {
-        const ownership = verification.detail.startsWith('OWNERSHIP_VIOLATION');
-        const outcome = ownership ? 'OWNERSHIP_VIOLATION' : 'VERIFICATION_FAILED';
-        const report = this.failAttempt(nodeId, sessionId, verification.detail, evidence);
-        return { ...report, outcome };
-      }
-
-      this.advanceVerifiedGates(nodeId);
-
-      const sha = this.integrate(nodeId);
-      if (sha !== null) {
-        this.transition(nodeId, 'INTEGRATED', { integratedSha: sha });
-      } else {
-        this.transition(nodeId, 'INTEGRATED');
-      }
-      this.transition(nodeId, 'DONE');
-      this.releaseClaim(nodeId, { removeWorktree: true });
-
-      return this.report(nodeId, 'DONE', sessionId, verification.detail, evidence);
+      return this.concludeAttempt(
+        nodeId,
+        sessionId,
+        { status: observation.status, result: observation.result, failureReason: observation.failure_reason },
+        evidence,
+      );
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       if (err instanceof ResourceBusyError || err instanceof NotSchedulableError) {
@@ -723,6 +699,194 @@ export class Orchestrator {
       }
       return this.failAttempt(nodeId, sessionId, detail, evidence);
     }
+  }
+
+  // ---- concluding an attempt ---------------------------------------------
+
+  /**
+   * Act on how a worker attempt ended. Shared by the adapter path (runNode)
+   * and the host-dispatch path (settle): a parking outcome parks the node, a
+   * failure is recorded under its fingerprint, and only a submission goes on
+   * to {@link finalizeVerified}. Nothing the worker says is believed beyond
+   * which of those roads to take.
+   */
+  concludeAttempt(
+    nodeId: string,
+    sessionId: string | null,
+    outcome: AttemptOutcome,
+    evidence: EvidenceRecord[] = [],
+  ): NodeRunReport {
+    const result = outcome.result;
+
+    if (outcome.status === 'needs-decision' && result?.decision_request) {
+      this.recordDecisionRequest(nodeId, result);
+      this.transition(nodeId, 'NEEDS_DECISION', {
+        reason: result.decision_request.question.slice(0, 300),
+      });
+      this.releaseClaim(nodeId);
+      return this.report(nodeId, 'NEEDS_DECISION', sessionId, result.decision_request.question, evidence);
+    }
+
+    if (outcome.status === 'budget-exhausted') {
+      this.transition(nodeId, 'BUDGET_EXHAUSTED', {
+        reason: outcome.failureReason ?? 'worker budget exhausted',
+      });
+      this.releaseClaim(nodeId);
+      return this.report(nodeId, 'BUDGET_EXHAUSTED', sessionId, outcome.failureReason ?? '', evidence);
+    }
+
+    if (outcome.status === 'blocked') {
+      this.transition(nodeId, 'BLOCKED', {
+        reason: result?.failure_fingerprint ?? outcome.failureReason ?? 'worker blocked',
+      });
+      this.releaseClaim(nodeId);
+      return this.report(nodeId, 'BLOCKED', sessionId, outcome.failureReason ?? 'blocked', evidence);
+    }
+
+    if (outcome.status !== 'done' || result === null) {
+      return this.failAttempt(
+        nodeId,
+        sessionId,
+        result?.failure_fingerprint ?? outcome.failureReason ?? 'WORKER_FAILED',
+        evidence,
+      );
+    }
+
+    return this.finalizeVerified(nodeId, sessionId, evidence);
+  }
+
+  /**
+   * The only road to DONE for a node with a worker: fresh verification on a
+   * clean checkout of the node branch (the worker's own files and claims
+   * count for nothing), gate advancement against the evidence actually
+   * recorded, integration into the repository's feature branch, DONE, and
+   * release of the claim, its leases and its worktree. Any refusal along the
+   * way is a recorded attempt failure, never a node left half-way.
+   */
+  finalizeVerified(nodeId: string, sessionId: string | null, evidence: EvidenceRecord[] = []): NodeRunReport {
+    const verification = this.freshVerify(nodeId);
+    for (const record of verification.evidence) {
+      evidence.push(record);
+      this.setEvidence(nodeId, record);
+    }
+
+    if (!verification.ok) {
+      const ownership = verification.detail.startsWith('OWNERSHIP_VIOLATION');
+      const outcome = ownership ? 'OWNERSHIP_VIOLATION' : 'VERIFICATION_FAILED';
+      const report = this.failAttempt(nodeId, sessionId, verification.detail, evidence);
+      return { ...report, outcome };
+    }
+
+    try {
+      this.advanceVerifiedGates(nodeId);
+      const sha = this.integrate(nodeId);
+      this.transition(nodeId, 'INTEGRATED', sha !== null ? { integratedSha: sha } : {});
+    } catch (err) {
+      return this.failAttempt(nodeId, sessionId, errorText(err), evidence);
+    }
+
+    // DONE drops the claim, so remember the worktree before it goes.
+    const worktree = this.state().nodes[nodeId]?.claim?.worktree ?? null;
+    this.transition(nodeId, 'DONE');
+    this.releaseClaim(nodeId);
+    this.removeWorktree(nodeId, worktree);
+    return this.report(nodeId, 'DONE', sessionId, verification.detail, evidence);
+  }
+
+  private removeWorktree(nodeId: string, worktree: string | null): void {
+    const node = this.node(nodeId);
+    if (worktree && node.repository) {
+      removeWorkerWorktree(repositoryPath(this.workspace, node.repository), worktree);
+    }
+  }
+
+  /**
+   * Run `work` as the single settlement of the node's current claim.
+   *
+   * The presented capability must be the current claim's. A settling marker
+   * is set in the same locked write, so a concurrent settle of the same claim
+   * refuses instead of verifying and integrating twice. The outcome is kept
+   * as a receipt: presenting the same capability again returns it rather
+   * than re-running anything.
+   */
+  settleGuard(
+    nodeId: string,
+    capability: string | undefined,
+    work: (claim: NodeClaim) => NodeRunReport,
+  ): SettleReport {
+    let receipt: SettlementReceipt | null = null;
+    let claim: NodeClaim | null = null;
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      const last = rt?.last_settlement ?? null;
+      const current = rt?.claim ?? null;
+      const isCurrent =
+        capability !== undefined && current?.capability_sha256 !== undefined && capabilityMatches(capability, current.capability_sha256);
+      if (!isCurrent && last !== null && capability !== undefined && capabilityMatches(capability, last.capability_sha256)) {
+        receipt = last;
+        return s;
+      }
+      assertClaimCapability(nodeId, rt, capability);
+      const live = (rt as NodeRuntime).claim as NodeClaim;
+      if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
+      live.settling = { pid: process.pid, host: hostname(), started_at: new Date().toISOString() };
+      claim = structuredClone(live);
+      return s;
+    });
+
+    if (receipt !== null) {
+      const r = receipt as SettlementReceipt;
+      return {
+        node_id: nodeId,
+        outcome: r.outcome as NodeRunReport['outcome'],
+        session_id: null,
+        state: this.state().nodes[nodeId]?.state ?? r.state,
+        detail: r.detail,
+        evidence: [],
+        idempotent: true,
+      };
+    }
+
+    const held = claim as unknown as NodeClaim;
+    let report: NodeRunReport;
+    try {
+      report = work(held);
+    } catch (err) {
+      this.clearSettling(nodeId, held.claim_id);
+      throw err;
+    }
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      if (!rt) return s;
+      rt.last_settlement = {
+        capability_sha256: held.capability_sha256 as string,
+        claim_id: held.claim_id,
+        outcome: report.outcome,
+        state: rt.state,
+        detail: report.detail.slice(0, 1000),
+        settled_at: new Date().toISOString(),
+      };
+      if (rt.claim?.claim_id === held.claim_id) rt.claim.settling = null;
+      return s;
+    });
+    this.event('node.settled', nodeId, { claim_id: held.claim_id, outcome: report.outcome, state: report.state });
+    return { ...report, idempotent: false };
+  }
+
+  private clearSettling(nodeId: string, claimId: string): void {
+    mutateState(this.paths.featureDir, (s) => {
+      const claim = s.nodes[nodeId]?.claim;
+      if (claim?.claim_id === claimId) claim.settling = null;
+      return s;
+    });
+  }
+
+  /**
+   * Finalize a node driven through the gates by hand (`node claim` + `tdd`):
+   * the same deterministic tail a settled worker submission takes.
+   */
+  finalize(nodeId: string, capability: string | undefined): SettleReport {
+    return this.settleGuard(nodeId, capability, () => this.finalizeVerified(nodeId, null, []));
   }
 
   /**

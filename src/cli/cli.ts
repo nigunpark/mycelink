@@ -76,7 +76,7 @@ const USAGE = `mycelink <group> <command> [options]
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
   graph compile|validate|ready|import|adapters  portfolio graph operations
-  node claim|begin|block|verify|release      node lifecycle
+  node claim|begin|block|verify|finalize|release|invalidate  node lifecycle
   context pack <feature> <node>              write a bounded worker context pack
   session spawn|status|stop|reconcile        worker sessions
   evidence record|validate                   evidence registration
@@ -700,7 +700,7 @@ function graphGroup(args: ParsedArgs, io: CliIo): number {
 
 function nodeGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'claim|begin|block|verify|release|invalidate');
+  const sub = requirePositional(args, 1, 'claim|begin|block|verify|finalize|release|invalidate');
   const featureId = requirePositional(args, 2, 'feature-id');
   const nodeId = requirePositional(args, 3, 'node-id');
   const orchestrator = orchestratorFor(controlRoot, featureId);
@@ -757,6 +757,15 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
         `INVALIDATED: ${invalidated.join(', ')}`,
       );
       return 0;
+    }
+    case 'finalize': {
+      // The deterministic tail for a node driven through the gates by hand:
+      // fresh verification, gate advancement, integration, DONE, release.
+      const report = orchestrator.finalize(nodeId, presentedCapability(args));
+      emit(io, args, report, () =>
+        `${report.node_id} -> ${report.outcome} (${report.state})${report.idempotent ? ' [already settled]' : ''} ${report.detail}`,
+      );
+      return report.outcome === 'DONE' ? 0 : 1;
     }
     case 'verify': {
       const result = orchestrator.freshVerify(nodeId);
