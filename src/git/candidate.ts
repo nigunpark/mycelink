@@ -7,7 +7,7 @@
  * bound SHA requires a new candidate id — never an edit in place.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 import { dirtyPaths, isWorktreeClean, resolveRef, runGit } from './git.js';
@@ -16,7 +16,7 @@ import { writeTextAtomic } from '../state/atomic-json.js';
 import { stableStringify } from '../graph/validate.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import type { Problem } from '../model/types.js';
-import { assertCandidateId } from '../security/names.js';
+import { assertCandidateId, assertFeatureId } from '../security/names.js';
 
 export interface CandidateRepoRef {
   name: string;
@@ -29,7 +29,15 @@ export interface CandidateManifest {
   candidate_id: string;
   feature_id: string;
   created_at: string;
+  /** Control HEAD when the candidate was cut. Informational once control_inputs is present. */
   control_commit: string;
+  /**
+   * Canonical content hashes of the control repository's semantic inputs
+   * (PRD, plan, graph, scenarios, loop contracts, repository manifest,
+   * config). What verification pins, instead of control HEAD: controller
+   * bookkeeping written after the cut cannot drift the candidate.
+   */
+  control_inputs?: { path: string; sha256: string }[];
   repositories: Record<string, { sha: string; branch: string; clean: boolean }>;
   artifacts?: { name: string; path: string; sha256: string }[];
   contracts: { path: string; sha256: string }[];
@@ -107,6 +115,78 @@ export function dirtyPathsOutside(repo: string, exemptDir: string): string[] {
     const norm = p.replace(/\\/g, '/');
     return norm !== rel && !norm.startsWith(rel + '/');
   });
+}
+
+/**
+ * Controller bookkeeping inside the control repository, by path relative to
+ * its root. Everything else the repository tracks (or would track) is a
+ * semantic input a candidate pins.
+ */
+const BOOKKEEPING: readonly RegExp[] = [
+  /^features\/[^/]+\/(STATE\.json|leases\.json|DECISIONS\.md|CHANGES\.md)$/,
+  /^features\/[^/]+\/(events|RUNS)(\.\d{5})?\.jsonl$/,
+  /^features\/[^/]+\/(evidence|sessions|context-packs|checkpoints|candidates|metrics|deliveries)\//,
+  /\.lock$/,
+  /(^|\/)\.gitkeep$/,
+  /^\.mycelink\//,
+  /(^|\/)\.mycelink-worker\//,
+];
+
+const STRUCTURED = /\.(ya?ml|json)$/;
+
+function canonicalHash(file: string): string {
+  const text = readFileSync(file, 'utf8');
+  // Structured inputs are hashed by meaning, so reformatting or reordering
+  // keys is not drift; a parse failure falls back to the exact text.
+  let value: unknown;
+  try {
+    value = file.endsWith('.json') ? JSON.parse(text) : YAML.parse(text);
+  } catch {
+    return textHash(file);
+  }
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+function textHash(file: string): string {
+  // Line endings are a checkout setting, not content.
+  const bytes = readFileSync(file);
+  return createHash('sha256').update(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1').digest('hex');
+}
+
+/**
+ * The control repository's semantic inputs, with canonical content hashes:
+ * every tracked or not-ignored file except controller bookkeeping (STATE,
+ * event and run logs, leases, evidence, sessions, context packs,
+ * checkpoints, candidates, deliveries, decision logs, locks, scratch). A
+ * candidate pins these instead of control HEAD, so committing bookkeeping
+ * cannot drift it, while any change to the PRD, plan, graph, scenarios,
+ * scripts, manifests or configuration still does.
+ */
+export function controlInputs(controlRepo: string, featureId: string): { path: string; sha256: string }[] {
+  assertFeatureId(featureId);
+  const control = resolve(controlRepo);
+  const listed = runGit(control, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    .stdout.split('\0')
+    .filter((p) => p !== '');
+  const out: { path: string; sha256: string }[] = [];
+  for (const rel of new Set(listed)) {
+    const path = rel.replace(/\\/g, '/');
+    if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
+    const full = join(control, ...path.split('/'));
+    // Deleted-but-tracked files and links are not content.
+    if (!isRegularFile(full)) continue;
+    out.push({ path, sha256: STRUCTURED.test(path) ? canonicalHash(full) : textHash(full) });
+  }
+  return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+function isRegularFile(p: string): boolean {
+  try {
+    const st = lstatSync(p);
+    return st.isFile() && !st.isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 /** Hash of the manifest content excluding the hash field itself. */
@@ -196,6 +276,7 @@ export function createCandidate(args: CreateCandidateArgs): CandidateManifest {
     feature_id: args.featureId,
     created_at: args.now ?? new Date().toISOString(),
     control_commit: resolveRef(control, 'HEAD'),
+    control_inputs: controlInputs(control, args.featureId),
     repositories,
     ...(artifacts.length > 0 ? { artifacts } : {}),
     contracts,
@@ -270,13 +351,43 @@ export function verifyCandidate(
   }
 
   const control = resolve(context.controlRepo);
-  const controlHead = resolveRef(control, 'HEAD');
-  if (controlHead !== manifest.control_commit) {
-    problems.push({
-      code: 'CONTROL_SHA_DRIFT',
-      path: '/control_commit',
-      detail: `Control repository is at ${controlHead}, candidate bound ${manifest.control_commit}.`,
-    });
+  if (manifest.control_inputs === undefined) {
+    // A candidate cut before content pinning can only be checked the old,
+    // strict way: control HEAD must not have moved at all.
+    const controlHead = resolveRef(control, 'HEAD');
+    if (controlHead !== manifest.control_commit) {
+      problems.push({
+        code: 'CONTROL_SHA_DRIFT',
+        path: '/control_commit',
+        detail: `Control repository is at ${controlHead}, candidate bound ${manifest.control_commit}.`,
+      });
+    }
+  } else {
+    const current = new Map(controlInputs(control, manifest.feature_id).map((i) => [i.path, i.sha256]));
+    for (const pinned of manifest.control_inputs) {
+      const now = current.get(pinned.path);
+      if (now === undefined) {
+        problems.push({
+          code: 'CONTROL_INPUT_MISSING',
+          path: '/control_inputs',
+          detail: `Control input "${pinned.path}" no longer exists.`,
+        });
+      } else if (now !== pinned.sha256) {
+        problems.push({
+          code: 'CONTROL_INPUT_DRIFT',
+          path: '/control_inputs',
+          detail: `Control input "${pinned.path}" changed since the candidate was cut (${now.slice(0, 12)} vs ${pinned.sha256.slice(0, 12)}).`,
+        });
+      }
+      current.delete(pinned.path);
+    }
+    for (const added of current.keys()) {
+      problems.push({
+        code: 'CONTROL_INPUT_ADDED',
+        path: '/control_inputs',
+        detail: `Control input "${added}" appeared after the candidate was cut.`,
+      });
+    }
   }
 
   const byName = new Map(context.repositories.map((r) => [r.name, r]));

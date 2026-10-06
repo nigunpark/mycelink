@@ -17836,7 +17836,7 @@ function safeHead(cwd) {
 // src/git/candidate.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash4 } from "node:crypto";
-import { existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync as readdirSync2 } from "node:fs";
+import { existsSync as existsSync10, lstatSync as lstatSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync as readdirSync2 } from "node:fs";
 import { basename as basename2, join as join13, relative as relative3, resolve as resolve10 } from "node:path";
 
 // src/git/integrate.ts
@@ -18109,6 +18109,52 @@ function dirtyPathsOutside(repo, exemptDir) {
     return norm !== rel && !norm.startsWith(rel + "/");
   });
 }
+var BOOKKEEPING = [
+  /^features\/[^/]+\/(STATE\.json|leases\.json|DECISIONS\.md|CHANGES\.md)$/,
+  /^features\/[^/]+\/(events|RUNS)(\.\d{5})?\.jsonl$/,
+  /^features\/[^/]+\/(evidence|sessions|context-packs|checkpoints|candidates|metrics|deliveries)\//,
+  /\.lock$/,
+  /(^|\/)\.gitkeep$/,
+  /^\.mycelink\//,
+  /(^|\/)\.mycelink-worker\//
+];
+var STRUCTURED = /\.(ya?ml|json)$/;
+function canonicalHash(file) {
+  const text = readFileSync6(file, "utf8");
+  let value;
+  try {
+    value = file.endsWith(".json") ? JSON.parse(text) : import_yaml2.default.parse(text);
+  } catch {
+    return textHash(file);
+  }
+  return createHash4("sha256").update(stableStringify(value)).digest("hex");
+}
+function textHash(file) {
+  const bytes = readFileSync6(file);
+  return createHash4("sha256").update(bytes.toString("latin1").replace(/\r\n/g, "\n"), "latin1").digest("hex");
+}
+function controlInputs(controlRepo, featureId) {
+  assertFeatureId(featureId);
+  const control = resolve10(controlRepo);
+  const listed = runGit(control, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]).stdout.split("\0").filter((p) => p !== "");
+  const out = [];
+  for (const rel of new Set(listed)) {
+    const path = rel.replace(/\\/g, "/");
+    if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
+    const full = join13(control, ...path.split("/"));
+    if (!isRegularFile(full)) continue;
+    out.push({ path, sha256: STRUCTURED.test(path) ? canonicalHash(full) : textHash(full) });
+  }
+  return out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+function isRegularFile(p) {
+  try {
+    const st = lstatSync3(p);
+    return st.isFile() && !st.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
 function computeManifestHash(manifest) {
   return createHash4("sha256").update(stableStringify(manifest)).digest("hex");
 }
@@ -18162,6 +18208,7 @@ function createCandidate(args) {
     feature_id: args.featureId,
     created_at: args.now ?? (/* @__PURE__ */ new Date()).toISOString(),
     control_commit: resolveRef(control, "HEAD"),
+    control_inputs: controlInputs(control, args.featureId),
     repositories,
     ...artifacts.length > 0 ? { artifacts } : {},
     contracts,
@@ -18207,13 +18254,41 @@ function verifyCandidate(manifest, context) {
     });
   }
   const control = resolve10(context.controlRepo);
-  const controlHead = resolveRef(control, "HEAD");
-  if (controlHead !== manifest.control_commit) {
-    problems.push({
-      code: "CONTROL_SHA_DRIFT",
-      path: "/control_commit",
-      detail: `Control repository is at ${controlHead}, candidate bound ${manifest.control_commit}.`
-    });
+  if (manifest.control_inputs === void 0) {
+    const controlHead = resolveRef(control, "HEAD");
+    if (controlHead !== manifest.control_commit) {
+      problems.push({
+        code: "CONTROL_SHA_DRIFT",
+        path: "/control_commit",
+        detail: `Control repository is at ${controlHead}, candidate bound ${manifest.control_commit}.`
+      });
+    }
+  } else {
+    const current = new Map(controlInputs(control, manifest.feature_id).map((i) => [i.path, i.sha256]));
+    for (const pinned of manifest.control_inputs) {
+      const now = current.get(pinned.path);
+      if (now === void 0) {
+        problems.push({
+          code: "CONTROL_INPUT_MISSING",
+          path: "/control_inputs",
+          detail: `Control input "${pinned.path}" no longer exists.`
+        });
+      } else if (now !== pinned.sha256) {
+        problems.push({
+          code: "CONTROL_INPUT_DRIFT",
+          path: "/control_inputs",
+          detail: `Control input "${pinned.path}" changed since the candidate was cut (${now.slice(0, 12)} vs ${pinned.sha256.slice(0, 12)}).`
+        });
+      }
+      current.delete(pinned.path);
+    }
+    for (const added of current.keys()) {
+      problems.push({
+        code: "CONTROL_INPUT_ADDED",
+        path: "/control_inputs",
+        detail: `Control input "${added}" appeared after the candidate was cut.`
+      });
+    }
   }
   const byName = new Map(context.repositories.map((r) => [r.name, r]));
   for (const [name, bound] of Object.entries(manifest.repositories)) {
@@ -18370,7 +18445,7 @@ import {
   constants as constants3,
   existsSync as existsSync11,
   fstatSync as fstatSync3,
-  lstatSync as lstatSync3,
+  lstatSync as lstatSync4,
   mkdirSync as mkdirSync8,
   mkdtempSync,
   openSync as openSync5,
@@ -18718,7 +18793,7 @@ function removeLink(path) {
 function prepareResultSlot(cwd) {
   const dir = join14(cwd, WORKER_RESULT_DIR);
   if (existsSync11(dir) || isLink(dir)) {
-    const st = lstatSync3(dir);
+    const st = lstatSync4(dir);
     if (st.isSymbolicLink()) removeLink(dir);
     else if (!st.isDirectory()) rmSync5(dir, { force: true });
   }
@@ -18735,7 +18810,7 @@ function prepareResultSlot(cwd) {
 }
 function isLink(path) {
   try {
-    return lstatSync3(path).isSymbolicLink();
+    return lstatSync4(path).isSymbolicLink();
   } catch {
     return false;
   }
@@ -18757,7 +18832,7 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env) {
       if (err.code === "ENOENT") return fail("RESULT_MISSING");
       return captureFailed("the result slot", err);
     }
-    const dirSt = lstatSync3(capturedDir);
+    const dirSt = lstatSync4(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
@@ -18783,7 +18858,7 @@ function readCapturedResult(captured, expected, controllerPath, env) {
   }
   try {
     const st = fstatSync3(fd, { bigint: true });
-    if (lstatSync3(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
+    if (lstatSync4(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
     }
@@ -18812,7 +18887,7 @@ function readCapturedResult(captured, expected, controllerPath, env) {
 function removeTree(path) {
   let st;
   try {
-    st = lstatSync3(path);
+    st = lstatSync4(path);
   } catch {
     return;
   }
@@ -18850,7 +18925,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { lstatSync as lstatSync4 } from "node:fs";
+import { lstatSync as lstatSync5 } from "node:fs";
 import { hostname as hostname3 } from "node:os";
 
 // src/e2e/runner.ts
@@ -19623,7 +19698,7 @@ var NotSchedulableError = class extends Error {
 var HOST_WORKER_AGENT = "mycelink:module-worker";
 function resultInSlot(cwd) {
   try {
-    return lstatSync4(join18(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync4(join18(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE)).isFile();
+    return lstatSync5(join18(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync5(join18(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE)).isFile();
   } catch {
     return false;
   }
