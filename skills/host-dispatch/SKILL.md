@@ -15,11 +15,31 @@ sandbox may not have.
 
 `M` below is `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs"`.
 
+## Controller authority
+
+Before the loop, run `M controller open --json` and keep its `authority`
+as `<key>`. Every controller command (dispatch, reconcile, decisions,
+deliver, ...) needs `--authority <key>`; settle and the gates need only the
+ticket's capability. The key exists so that a subagent, which runs as the
+same user with the same Bash tool, cannot act as the controller by simply
+leaving out its own capability. So:
+
+- never put the key in an Agent prompt, a file, a commit or an environment
+  variable, and never write it into a result;
+- it is shown once and only its hash is stored; opening again rotates it;
+- it cannot be opened while any claim is live (`CONTROLLER_BUSY`). If you
+  lost it while a ticket is outstanding, ask the user to run
+  `mycelink controller open --takeover` in their own terminal.
+
+The control repository must be committed (clean outside `features/<id>/`)
+before you dispatch: a candidate is cut only from a clean control
+repository.
+
 ## The loop
 
 ```text
 repeat at most 3 × (number of graph nodes) times:
-  d = M dispatch <feature> --json
+  d = M dispatch <feature> --json --authority <key>
   if d.status != DISPATCHED: stop and handle d.status
   Agent(subagent_type = d.ticket.agent, description = d.ticket.node_id, prompt = d.ticket.prompt)
   ensure a result exists at d.ticket.result_slot (write the subagent's JSON result there if it did not)
@@ -46,9 +66,9 @@ repeat at most 3 × (number of graph nodes) times:
 
 | status | what to do |
 |---|---|
-| `ALL_SETTLED` | `M feature verify`, `M candidate verify`, then `M deliver <feature> --json` |
-| `WAITING` | an unsettled ticket exists: `M session reconcile <feature> --json`, then `M dispatch <feature> --resume <node> --json` |
-| `NEEDS_DECISION` | ask the user; `M decision record`, then `M decision apply` |
+| `ALL_SETTLED` | `M feature verify`, `M candidate verify`, then `M deliver <feature> --json --authority <key>` |
+| `WAITING` | an unsettled ticket exists: `M session reconcile <feature> --json --authority <key>`, then `M dispatch <feature> --resume <node> --json --authority <key>` |
+| `NEEDS_DECISION` | ask the user; `M decision record ... --authority <key>`, then `M decision apply ... --authority <key>` |
 | `BLOCKED` | report the fingerprint and evidence; do not unblock it yourself |
 | `BUDGET_EXHAUSTED` / `NO_PROGRESS` | report usage or deferral reasons |
 | `INFRASTRUCTURE_FAILURE` | a claim could not be set up; nothing was charged — report it |
@@ -56,8 +76,8 @@ repeat at most 3 × (number of graph nodes) times:
 ## Recovery
 
 - **Lost a ticket** (interrupted turn, compaction, new session):
-  `M session reconcile <feature> --json` lists `pending_dispatches`.
-  `M dispatch <feature> --resume <node> --json` re-issues the ticket with a
+  `M session reconcile <feature> --json --authority <key>` lists `pending_dispatches`.
+  `M dispatch <feature> --resume <node> --json --authority <key>` re-issues the ticket with a
   rotated capability (the old one stops working). If `result_present` is
   true, just run its `settle_command`.
 - **Expired tickets** are handed back by reconcile as interruptions: the
@@ -71,7 +91,7 @@ repeat at most 3 × (number of graph nodes) times:
 
 ## Delivery
 
-`M deliver <feature> --json` fast-forwards every base branch to exactly the
+`M deliver <feature> --json --authority <key>` fast-forwards every base branch to exactly the
 candidate SHA after checking every repository first (fast-forward possible,
 checkout clean, candidate current and undrifted), writes the delivery
 manifest and runs final acceptance. It never pushes. It is safe to re-run.

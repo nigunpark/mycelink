@@ -17,6 +17,7 @@ import { main, type CliIo } from '../../src/cli/cli.js';
 import { loadState } from '../../src/state/feature-state.js';
 import { loadRegistry } from '../../src/sessions/registry.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -41,7 +42,7 @@ async function cli(p: Portfolio, argv: string[]): Promise<Run> {
   let out = '';
   let err = '';
   const io: CliIo = { out: (t) => (out += t + '\n'), err: (t) => (err += t + '\n') };
-  const code = await main([...argv, '--control-root', p.control], io);
+  const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
   return { code, out, err };
 }
 

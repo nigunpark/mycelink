@@ -27,6 +27,7 @@ import {
 } from '../../src/git/candidate.js';
 import { mutateState } from '../../src/state/feature-state.js';
 import { writeTextAtomic } from '../../src/state/atomic-json.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -54,7 +55,7 @@ function codes(p: Portfolio, manifest: CandidateManifest): string[] {
 
 async function cli(p: Portfolio, argv: string[]): Promise<number> {
   const io: CliIo = { out: () => {}, err: () => {} };
-  return main([...argv, '--control-root', p.control], io);
+  return main([...asController(argv, p.control), '--control-root', p.control], io);
 }
 
 describe('candidate pins control content, not control HEAD', () => {

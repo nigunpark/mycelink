@@ -47,7 +47,9 @@ Run them with the Bash tool exactly as written. Each runs the node's declared
 verifier in your worktree and carries your claim's capability; in print mode
 it is pre-approved only in that exact form. Do not copy the capability
 anywhere else, and never run settle, dispatch, finalize, candidate, deliver or
-claim commands yourself.
+claim commands yourself. Those need a controller key that only the host holds;
+you are never given it, and you must not look for it in the host's files,
+transcripts, processes or environment.
 
 When your prompt gives an absolute `Worktree:`, your working directory is not
 that worktree: use absolute paths under it for every edit, and run git as

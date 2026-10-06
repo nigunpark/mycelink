@@ -21,6 +21,7 @@ import { resolveRef } from '../../src/git/git.js';
 import { integrationBranchName } from '../../src/git/worktree.js';
 import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -31,7 +32,7 @@ async function cli(p: Portfolio, argv: string[]): Promise<{ code: number; out: s
   let out = '';
   let err = '';
   const io: CliIo = { out: (t) => (out += t + '\n'), err: (t) => (err += t + '\n') };
-  const code = await main([...argv, '--control-root', p.control], io);
+  const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
   return { code, out, err };
 }
 

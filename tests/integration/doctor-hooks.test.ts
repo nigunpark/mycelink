@@ -8,12 +8,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { main } from '../../src/cli/cli.js';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { controllerArgv } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
 async function run(argv: string[]) {
   const out: string[] = [];
-  const code = await main(argv, { out: (t) => out.push(t), err: () => undefined });
+  const code = await main(controllerArgv(argv), { out: (t) => out.push(t), err: () => undefined });
   return { code, out: out.join('\n') };
 }
 

@@ -28,7 +28,9 @@ Hard limits:
   contracts
 - never run `mycelink settle`, `dispatch`, `finalize`, `candidate`,
   `deliver`, `branch integrate` or `node claim` — the host and the
-  controller do that
+  controller do that. They need a controller key only the host holds; you
+  are never given it and must not look for it (host files, transcripts,
+  processes or environment)
 - no guessing a product decision — return `NEEDS_DECISION` with real options
 
 Work the gates through the controller so the real exit codes become

@@ -465,7 +465,7 @@ try {
       record('mycelink: worker usage is reported for cost accounting', (v.json?.evidence?.mycelink?.usage?.sessions ?? 0) >= 4, JSON.stringify(v.json?.evidence?.mycelink?.usage));
 
       const bin = join(TOOLS, '..', '..', 'bin', 'mycelink.mjs');
-      spawnSync(process.execPath, [bin, 'resource', 'acquire', FEATURE, 'full-runtime', '--node', 'stray', '--control-root', join(ows, 'platform')], { encoding: 'utf8' });
+      spawnSync(process.execPath, [bin, 'resource', 'acquire', FEATURE, 'full-runtime', '--node', 'stray', '--control-root', join(ows, 'platform'), '--authority', built.authority], { encoding: 'utf8' });
       v = verifier(ows, ['--require-mycelink']);
       // `mycelink feature verify` ignores a lease whose holder process has
       // exited (it is reclaimable); the verifier counts any unreleased lease.

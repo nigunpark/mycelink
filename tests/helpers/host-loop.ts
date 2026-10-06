@@ -10,6 +10,7 @@ import { expect } from 'vitest';
 import { main, type CliIo } from '../../src/cli/cli.js';
 import { FEATURE_ID, commitControl, createPortfolio, portfolioGraph, writePrd, type Portfolio } from './portfolio-fixture.js';
 import { fakeAgent, type AgentBehaviour, type DispatchTicket } from './host-agent.js';
+import { asController } from './authority.js';
 
 export const CORE = `${FEATURE_ID}.core.publish.impl`;
 export const API = `${FEATURE_ID}.api.consume.impl`;
@@ -28,7 +29,13 @@ export interface CliRun {
   err: string;
 }
 
+/** Run the CLI in-process as the controller: controller-only commands carry the controller key. */
 export async function cli(p: Portfolio, argv: string[]): Promise<CliRun> {
+  return cliRaw(p, asController(argv, p.control));
+}
+
+/** Run the CLI in-process exactly as given (a worker, or a test of the authority itself). */
+export async function cliRaw(p: Portfolio, argv: string[]): Promise<CliRun> {
   let out = '';
   let err = '';
   const io: CliIo = { out: (t) => (out += t + '\n'), err: (t) => (err += t + '\n') };

@@ -28,6 +28,7 @@ import { ClaudeCliAdapter } from '../../src/sessions/claude-cli-adapter.js';
 import type { SpawnRequest } from '../../src/sessions/adapter.js';
 import { main, type CliIo } from '../../src/cli/cli.js';
 import { loadState } from '../../src/state/feature-state.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -294,7 +295,7 @@ describe('worker transport through the orchestrator', () => {
   async function cli(argv: string[]): Promise<{ code: number; out: string }> {
     let out = '';
     const io: CliIo = { out: (t) => (out += t + '\n'), err: () => {} };
-    const code = await main([...argv, '--control-root', p.control], io);
+    const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
     return { code, out };
   }
 
@@ -369,7 +370,7 @@ describe('worker transport under a Windows 8.3 short-name alias', () => {
     const cli = async (argv: string[]): Promise<{ code: number; out: string }> => {
       let out = '';
       const io: CliIo = { out: (t) => (out += t + '\n'), err: () => {} };
-      const code = await main([...argv, '--control-root', p.control], io);
+      const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
       return { code, out };
     };
     writePrd(p);

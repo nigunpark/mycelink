@@ -21,6 +21,15 @@ under **Breaking**.
   it (`--capability` or `MYCELINK_CLAIM_TOKEN`); controller-only commands
   refuse anyone presenting one. `node claim` now goes through the scheduler
   and prints the capability once.
+- **Controller-only commands need positive controller authority.** Every
+  command in the controller-only table (including `dispatch`, `deliver`,
+  `session reconcile`, `decision record/apply`, `feature init`, `repo
+  register` and `init` of an existing control repository) now requires
+  `--authority <key>` from `mycelink controller open`. Omitting or unsetting
+  a worker capability no longer grants controller access. The key is
+  printed once, only its hash is stored, and it cannot be opened while any
+  claim is live; `--takeover` (interactive terminal only) recovers a lost
+  key. The plugin commands open and pass it for you.
 - Leaving BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED by any route
   (including INVALIDATED, PAUSED, EXCLUDED and re-running `feature init`)
   needs a decision recorded with `decision record`; the failure history is

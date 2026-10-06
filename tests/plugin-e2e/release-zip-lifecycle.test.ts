@@ -121,7 +121,14 @@ describeIfClaude('release ZIP lifecycle in an isolated profile', () => {
     // The documented post-update step: re-run init from the new copy so the
     // project hooks point at it, then doctor confirms.
     const launcher = join(entry.installPath, 'bin', 'mycelink.mjs');
-    const reinit = spawnSync(process.execPath, [launcher, 'init', control], { encoding: 'utf8', env: profile.env, windowsHide: true });
+    // Re-initialising an existing control repository is a controller operation.
+    const opened = spawnSync(process.execPath, [launcher, 'controller', 'open', '--control-root', control, '--json'], {
+      encoding: 'utf8',
+      env: profile.env,
+      windowsHide: true,
+    });
+    const key = (JSON.parse(opened.stdout) as { authority: string }).authority;
+    const reinit = spawnSync(process.execPath, [launcher, 'init', control, '--authority', key], { encoding: 'utf8', env: profile.env, windowsHide: true });
     expect(reinit.status, reinit.stderr).toBe(0);
     const doctor = spawnSync(process.execPath, [launcher, 'doctor', '--control-root', control, '--json'], {
       encoding: 'utf8',

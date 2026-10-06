@@ -276,6 +276,7 @@ export function buildHostWorkerPrompt(args: HostWorkerPromptArgs): string {
     "* Implement exactly this node, inside the worktree only, and only within the pack's allowed_paths.",
     '* Do not spawn subagents. Do not edit PRD, PLAN, PORTFOLIO-GRAPH, STATE, events, candidates or contracts.',
     '* Never run mycelink dispatch, settle, finalize, candidate, deliver, integrate or claim: the host does that.',
+    '  They need a controller key only the host holds. You are never given it; do not look for it.',
     '* Write a failing test first; the RED must fail for a missing behaviour, not a setup error.',
     '* Commit your work on the worktree branch before finishing: a fresh verifier checks out the branch, not your files.',
     '* If a tool you need is denied, do not work around it. Write the result with outcome BLOCKED and',

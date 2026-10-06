@@ -53,17 +53,44 @@ session's permissions, and `mycelink settle` takes the result back.
   the raw value is printed once in the ticket and appears in the gate
   commands the subagent runs. Gates, evidence, finalize and settle require
   the current claim's capability; a stale (rotated or abandoned) one fails
-  closed. Controller-only commands (claim, dispatch, integrate, candidate,
-  deliver, orchestrate, decision apply, feature init/cancel, checkpoint
-  restore, reconcile) refuse anyone presenting a capability.
+  closed.
+- Controller-only commands (every entry of the CLI's controller-only table:
+  init of an existing control repository, repo register/lock, graph
+  compile/import, feature init/cancel, node claim/block/invalidate/release/
+  verify, session spawn/reconcile/stop, evidence migrate, branch
+  create/integrate, candidate create, resource acquire/release/recover, e2e
+  run/cleanup, decision record/apply, checkpoint restore, orchestrate
+  once/run, dispatch, deliver) need **positive controller authority**:
+  `--authority <key>`. Not presenting a capability is not enough, because a
+  subagent can always leave out its own. Anyone presenting a capability is
+  refused as well, with or without a key.
+- The key is a random 256-bit value minted by `mycelink controller open`
+  and printed once to the caller; only its SHA-256 is stored, in
+  `.mycelink/controller-authority.json` (hook-protected). It never enters a
+  ticket, prompt, context pack, worktree, result or environment variable;
+  the plugin's commands tell the host to keep it in its own context and pass
+  it on the command line.
+- It cannot be minted while any claim in the control repository is live.
+  A worker exists only while its claim is live, so a running worker cannot
+  mint a key for itself. Opening again (with no claim live) rotates the key
+  and revokes the old one. An operator who lost the key while a claim is
+  live runs `mycelink controller open --takeover`, which requires an
+  interactive terminal on stdin and stdout; an agent's Bash tool has none.
 - The result slot is `<worktree>/.mycelink-worker/result.json`. Settle moves
   it into a controller-owned quarantine before reading it and applies the
   same link, hard-link, size, schema and identity checks as print mode; the
   capability is redacted from every kept copy.
-- Within one OS user, capabilities and roles stop confused or shortcut-taking
-  agents (the host claiming work by hand, a worker integrating its own
-  branch); they are not a boundary against hostile code running as that
-  user.
+- What this does and does not stop. Within one OS user, capabilities and
+  the controller key stop confused or shortcut-taking agents, including a
+  worker that omits or unsets its token to run a controller command, and
+  they make deliberate misuse require going outside the protocol. They are
+  not an OS boundary against hostile code running as that user: such code
+  can read the host's transcript or process list (where the key appears on
+  command lines), rewrite the stored hash, or edit controller files
+  directly when project hooks are not loaded. A host that settles while its
+  subagent is still running (a background Agent) leaves a window in which
+  no claim is live. Use OS-level isolation (a separate user, container or
+  VM for workers) where that matters.
 
 ## Worker sessions (standalone CLI adapter)
 

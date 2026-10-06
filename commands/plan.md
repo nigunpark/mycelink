@@ -27,7 +27,11 @@ Use the `portfolio-decomposition` and `graph-compilation` skills.
    budgets, nested delegation, escaping paths, contract inputs with no
    producer, consumers that do not depend on their producer, and acceptance
    criteria no node covers.
-6. Initialise: `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" feature init $0`
+6. Open the controller key:
+   `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json`; keep its
+   `authority` as `<key>` (never put it in a file or a subagent prompt).
+   Initialise: `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" feature init $0 --authority <key>`
+   Then commit `features/$0/` so the control repository is clean before a run.
 7. Validate the loop contracts:
    `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" loop validate $0`
 

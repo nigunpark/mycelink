@@ -16,6 +16,7 @@ import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
 import { FEATURE_ID, createPortfolio, portfolioGraph, writePrd, type Portfolio } from '../helpers/portfolio-fixture.js';
 import { main, type CliIo } from '../../src/cli/cli.js';
+import { controllerArgv, controllerKey } from '../helpers/authority.js';
 import { loadState } from '../../src/state/feature-state.js';
 
 afterAll(() => cleanupTmpRoots());
@@ -45,7 +46,7 @@ async function cli(p: Portfolio, argv: string[], env: Record<string, string> = {
       dd === -1
         ? [...argv, '--control-root', p.control]
         : [...argv.slice(0, dd), '--control-root', p.control, ...argv.slice(dd)];
-    const code = await main(withRoot, io);
+    const code = await main(controllerArgv(withRoot), io);
     return { code, out, err };
   } finally {
     for (const [k, v] of Object.entries(saved)) {
@@ -176,6 +177,8 @@ describe('claim authority', () => {
       FEATURE_ID,
       '--control-root',
       p.control,
+      '--authority',
+      controllerKey(p.control),
     ]);
     expect(r.code).not.toBe(0);
     expect(r.err).toMatch(/NOT_CLAIMED|CAPABILITY_INVALID/);

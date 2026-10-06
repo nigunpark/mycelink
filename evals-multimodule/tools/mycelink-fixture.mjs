@@ -275,9 +275,9 @@ function fulfilTicket(ticket, control) {
 }
 
 /** The bounded host loop /mycelink:run describes: dispatch -> Agent -> settle. */
-function hostLoop(control, env, log) {
+function hostLoop(control, key, env, log) {
   for (let i = 0; i < 20; i++) {
-    const d = JSON.parse(mycelink(['dispatch', FEATURE, '--control-root', control, '--json'], { env, allowFail: true }).stdout);
+    const d = JSON.parse(mycelink(['dispatch', FEATURE, '--control-root', control, '--authority', key, '--json'], { env, allowFail: true }).stdout);
     if (d.status !== 'DISPATCHED') return d;
     fulfilTicket(d.ticket, control);
     const s = mycelink(['settle', FEATURE, d.ticket.node_id, '--capability', d.ticket.capability, '--control-root', control, '--json'], { env, allowFail: true });
@@ -294,6 +294,8 @@ export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' }
   scaffold(ws, 'existing-cold', { runTests: false });
   const control = join(ws, 'platform');
   mycelink(['init', control]);
+  // Controller-only commands need the controller key; workers never get it.
+  const key = JSON.parse(mycelink(['controller', 'open', '--control-root', control, '--json']).stdout).authority;
   const configPath = join(control, 'mycelink.config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   // Host mode needs no worker executable at all; point the standalone adapter
@@ -304,7 +306,7 @@ export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' }
       : { claude_executable: join(ws, 'no-claude-here'), session_adapter: 'claude-background', claude_extra_args: [] };
   writeFileSync(configPath, JSON.stringify({ ...config, ...adapter }, null, 2) + '\n');
   for (const m of MODULES) {
-    mycelink(['repo', 'register', '--control-root', control, '--name', m, '--path', `../repos/${m}`, '--base-branch', 'main', '--', 'node', '--test']);
+    mycelink(['repo', 'register', '--control-root', control, '--authority', key, '--name', m, '--path', `../repos/${m}`, '--base-branch', 'main', '--', 'node', '--test']);
   }
   const featureDir = join(control, 'features', FEATURE);
   mkdirSync(featureDir, { recursive: true });
@@ -321,14 +323,14 @@ export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' }
   writeFileSync(scenarioFile, JSON.stringify(scenarios(control), null, 2));
   const env = { FAKE_CLAUDE_SCENARIO: scenarioFile };
   mycelink(['graph', 'validate', FEATURE, '--control-root', control, '--json'], { env });
-  mycelink(['feature', 'init', FEATURE, '--control-root', control, '--json'], { env });
+  mycelink(['feature', 'init', FEATURE, '--control-root', control, '--authority', key, '--json'], { env });
 
   let report;
   if (mode === 'host') {
-    report = hostLoop(control, env, log);
+    report = hostLoop(control, key, env, log);
     report.stop_reason = report.status;
   } else {
-    const run = mycelink(['orchestrate', 'run', FEATURE, '--control-root', control, '--json', '--max-cycles', '20'], { env, allowFail: true });
+    const run = mycelink(['orchestrate', 'run', FEATURE, '--control-root', control, '--authority', key, '--json', '--max-cycles', '20'], { env, allowFail: true });
     try {
       report = JSON.parse(run.stdout);
     } catch {
@@ -341,9 +343,9 @@ export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' }
   }
   // Delivery: the controller fast-forwards each module's main branch to the
   // candidate and records final acceptance.
-  const delivery = JSON.parse(mycelink(['deliver', FEATURE, '--control-root', control, '--json'], { env }).stdout);
+  const delivery = JSON.parse(mycelink(['deliver', FEATURE, '--control-root', control, '--authority', key, '--json'], { env }).stdout);
   log(`deliver: ${delivery.status}`);
-  return { control, report, delivery };
+  return { control, report, delivery, authority: key };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

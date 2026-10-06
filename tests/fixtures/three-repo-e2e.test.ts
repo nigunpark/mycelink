@@ -32,6 +32,7 @@ import { readEvents } from '../../src/state/event-log.js';
 import { planShards } from '../../src/e2e/scheduler.js';
 import { loadScenarios } from '../../src/e2e/runner.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -52,7 +53,7 @@ async function harness(p: Portfolio, argv: string[]): Promise<RunResult> {
       err += t + '\n';
     },
   };
-  const code = await main([...argv, '--control-root', p.control], io);
+  const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
   return { code, out, err };
 }
 

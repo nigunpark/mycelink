@@ -10,8 +10,9 @@
  * Worker-scoped mutations (gates, evidence, settle) must present the
  * capability of the current claim. Controller-only operations (claiming,
  * integrating, cutting candidates, delivering) refuse anyone who presents a
- * capability at all, flag or environment: a worker acting through its own
- * capability cannot widen its role.
+ * capability at all, flag or environment, and additionally need positive
+ * controller authority (engine/authority.ts): not presenting a capability is
+ * never enough, because a worker can always omit its own.
  *
  * Within one OS user this is a guard against confused or shortcut-taking
  * agents, not against hostile code running as that user.
@@ -66,7 +67,10 @@ export function presentedCapability(args: ParsedArgs): string | undefined {
   return env !== undefined && env !== '' ? env : undefined;
 }
 
-/** Refuse a controller-only operation to anyone holding a worker capability. */
+/**
+ * Refuse a controller-only operation to anyone holding a worker capability.
+ * This is the role half only; authority.ts adds the positive check.
+ */
 export function assertControllerRole(args: ParsedArgs, operation: string): void {
   const flag = args.flags['capability'];
   if ((typeof flag === 'string' && flag !== '') || flag === true || presentedCapability(args) !== undefined) {

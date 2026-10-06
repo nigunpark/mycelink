@@ -19,6 +19,7 @@ import { checkEvidenceOutput, resolveEvidenceOutput } from '../../src/evidence/p
 import { loadState, mutateState } from '../../src/state/feature-state.js';
 import { featurePaths, nodeEvidenceDir } from '../../src/workspace/paths.js';
 import type { EvidenceRecord } from '../../src/model/types.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -28,7 +29,7 @@ async function cli(control: string, argv: string[]): Promise<{ code: number; out
   let out = '';
   let err = '';
   const io: CliIo = { out: (t) => (out += t + '\n'), err: (t) => (err += t + '\n') };
-  const code = await main([...argv, '--control-root', control], io);
+  const code = await main([...asController(argv, control), '--control-root', control], io);
   return { code, out, err };
 }
 

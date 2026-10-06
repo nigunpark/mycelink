@@ -22,6 +22,7 @@ import { main } from '../../src/cli/cli.js';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { clone, VALID_GRAPH, VALID_REPOSITORIES } from '../helpers/graph-fixtures.js';
 import type { PortfolioGraph } from '../../src/model/types.js';
+import { controllerArgv } from '../helpers/authority.js';
 
 afterEach(() => cleanupTmpRoots());
 
@@ -67,7 +68,7 @@ function controlRoot(): string {
 async function cli(argv: string[]): Promise<{ code: number; out: string; err: string }> {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await main(argv, { out: (t) => out.push(t), err: (t) => err.push(t) });
+  const code = await main(controllerArgv(argv), { out: (t) => out.push(t), err: (t) => err.push(t) });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 

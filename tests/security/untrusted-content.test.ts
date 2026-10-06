@@ -27,6 +27,7 @@ import {
   type Portfolio,
 } from '../helpers/portfolio-fixture.js';
 import type { PortfolioGraph } from '../../src/model/types.js';
+import { controllerArgv } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -120,7 +121,7 @@ describe('hooks treat payload text as data', () => {
     writeFileSync(join(p.featureDir, 'PORTFOLIO-GRAPH.yaml'), YAML.stringify(g, { lineWidth: 0 }), 'utf8');
     mkdirSync(join(p.featureDir, 'e2e'), { recursive: true });
     commitControl(p, 'scaffold');
-    expect(await main(['feature', 'init', FEATURE_ID, '--control-root', p.control], io)).toBe(0);
+    expect(await main(controllerArgv(['feature', 'init', FEATURE_ID, '--control-root', p.control]), io)).toBe(0);
   });
 
   it('SessionStart never echoes graph title text into the model context', () => {
@@ -150,7 +151,7 @@ describe('hooks treat payload text as data', () => {
   });
 
   it('a write through a junction/symlink inside the worktree that points outside is blocked', async () => {
-    expect(await main(['node', 'claim', FEATURE_ID, node, '--control-root', p.control], io)).toBe(0);
+    expect(await main(controllerArgv(['node', 'claim', FEATURE_ID, node, '--control-root', p.control]), io)).toBe(0);
     const worktree = join(p.control, '.mycelink', 'worktrees', `core__${node.replace(/[^\w.-]/g, '_')}`);
     const outside = makeTmpDir('outside-');
     mkdirSync(join(worktree, 'tests'), { recursive: true });

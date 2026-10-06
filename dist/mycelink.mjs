@@ -15361,8 +15361,8 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync22, mkdirSync as mkdirSync15, readFileSync as readFileSync16, readdirSync as readdirSync9 } from "node:fs";
-import { dirname as dirname9, join as join23, resolve as resolve17 } from "node:path";
+import { existsSync as existsSync23, mkdirSync as mkdirSync15, readFileSync as readFileSync17, readdirSync as readdirSync10 } from "node:fs";
+import { dirname as dirname9, join as join24, resolve as resolve17 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -18763,6 +18763,7 @@ function buildHostWorkerPrompt(args) {
     "* Implement exactly this node, inside the worktree only, and only within the pack's allowed_paths.",
     "* Do not spawn subagents. Do not edit PRD, PLAN, PORTFOLIO-GRAPH, STATE, events, candidates or contracts.",
     "* Never run mycelink dispatch, settle, finalize, candidate, deliver, integrate or claim: the host does that.",
+    "  They need a controller key only the host holds. You are never given it; do not look for it.",
     "* Write a failing test first; the RED must fail for a missing behaviour, not a setup error.",
     "* Commit your work on the worktree branch before finishing: a fresh verifier checks out the branch, not your files.",
     "* If a tool you need is denied, do not work around it. Write the result with outcome BLOCKED and",
@@ -23257,9 +23258,116 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
   }
 }
 
+// src/engine/authority.ts
+import { existsSync as existsSync22, readdirSync as readdirSync9, readFileSync as readFileSync16 } from "node:fs";
+import { join as join23 } from "node:path";
+var AUTHORITY_FLAG = "authority";
+var AUTHORITY_FORMAT = /^[0-9a-f]{64}$/;
+var AuthorityError = class extends Error {
+  code;
+  constructor(code, detail) {
+    super(`${code}: ${detail}`);
+    this.name = "AuthorityError";
+    this.code = code;
+  }
+};
+function authorityFile(controlRoot) {
+  return join23(controlPaths(controlRoot).workDir, "controller-authority.json");
+}
+function readRecord(controlRoot) {
+  const file = authorityFile(controlRoot);
+  if (!existsSync22(file)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync16(file, "utf8"));
+    if (parsed.schema !== "mycelink-controller-authority/1" || typeof parsed.sha256 !== "string" || !AUTHORITY_FORMAT.test(parsed.sha256)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+function liveClaims(controlRoot) {
+  const dir = controlPaths(controlRoot).featuresDir;
+  if (!existsSync22(dir)) return [];
+  const out = [];
+  for (const feature of readdirSync9(dir).sort()) {
+    const file = join23(dir, feature, "STATE.json");
+    if (!existsSync22(file)) continue;
+    let nodes = {};
+    try {
+      const doc = JSON.parse(readFileSync16(file, "utf8"));
+      nodes = doc.data?.nodes ?? doc.nodes ?? {};
+    } catch {
+      out.push(`${feature}:(unreadable STATE.json)`);
+      continue;
+    }
+    for (const [id, rt] of Object.entries(nodes)) if (rt?.claim) out.push(`${feature}:${id}`);
+  }
+  return out;
+}
+function openControllerAuthority(controlRoot, options = {}) {
+  const paths = controlPaths(controlRoot);
+  if (!existsSync22(paths.config)) {
+    throw new Error(`NOT_A_CONTROL_REPOSITORY: ${controlRoot} has no mycelink.config.json; run mycelink init first.`);
+  }
+  const takeover = options.takeover === true;
+  if (takeover && options.interactive !== true) {
+    throw new AuthorityError(
+      "CONTROLLER_BUSY",
+      "--takeover needs an interactive terminal (a TTY on stdin and stdout); run it yourself, not through an agent tool."
+    );
+  }
+  return withLock(
+    join23(paths.workDir, "controller-authority.lock"),
+    () => {
+      const live = liveClaims(controlRoot);
+      if (live.length > 0 && !takeover) {
+        throw new AuthorityError(
+          "CONTROLLER_BUSY",
+          `claims are live (${live.slice(0, 5).join(", ")}${live.length > 5 ? ", ..." : ""}); controller authority cannot be minted while a worker may be running. Use the key you opened earlier, or, as the operator in an interactive terminal, mycelink controller open --takeover.`
+        );
+      }
+      const key = newCapability();
+      const record = {
+        schema: "mycelink-controller-authority/1",
+        sha256: key.sha256,
+        opened_at: (/* @__PURE__ */ new Date()).toISOString(),
+        takeover
+      };
+      writeTextAtomic(authorityFile(controlRoot), JSON.stringify(record, null, 2) + "\n");
+      return { authority: key.raw, opened_at: record.opened_at, takeover };
+    },
+    { timeoutMs: 5e3, pollMs: 50, purpose: "controller authority" }
+  );
+}
+function assertControllerAuthority(args, controlRoot, operation) {
+  const flag = args.flags["capability"];
+  if (typeof flag === "string" && flag !== "" || flag === true || presentedCapability(args) !== void 0) {
+    throw new RoleDeniedError(operation);
+  }
+  const presented = args.flags[AUTHORITY_FLAG];
+  if (typeof presented !== "string" || presented === "") {
+    throw new AuthorityError(
+      "CONTROLLER_AUTHORITY_REQUIRED",
+      `"${operation}" is a controller operation; pass --authority <key> from mycelink controller open. Workers never hold it.`
+    );
+  }
+  const record = readRecord(controlRoot);
+  if (record === null) {
+    throw new AuthorityError("CONTROLLER_AUTHORITY_REQUIRED", `no controller authority is open for ${controlRoot}; run mycelink controller open.`);
+  }
+  if (!capabilityMatches(presented, record.sha256)) {
+    throw new AuthorityError(
+      "CONTROLLER_AUTHORITY_INVALID",
+      `the authority presented for "${operation}" is not the current controller key (wrong, forged or rotated).`
+    );
+  }
+}
+
 // src/cli/cli.ts
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync16(join23(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync17(join24(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -23270,6 +23378,7 @@ var USAGE = `mycelink <group> <command> [options]
 
   version | --version                        print the installed version
   doctor                                     environment and workspace health
+  controller open [--takeover]               mint the controller key that controller-only commands need (--authority)
   init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
@@ -23293,7 +23402,7 @@ var USAGE = `mycelink <group> <command> [options]
   memory <...>                               LLM Wiki Brain adapter
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
 
-Global: --control-root <path> --json`;
+Global: --control-root <path> --json   Controller-only commands also need --authority <key>.`;
 var CONTROLLER_ONLY = {
   init: "*",
   dispatch: "*",
@@ -23319,7 +23428,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve17(env);
   let dir = resolve17(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync22(join23(dir, "mycelink.config.json"))) return dir;
+    if (existsSync23(join24(dir, "mycelink.config.json"))) return dir;
     const parent = dirname9(dir);
     if (parent === dir) break;
     dir = parent;
@@ -23356,6 +23465,41 @@ function orchestratorFor(controlRoot, featureId) {
     preflight: () => preflightAdapter(loadConfig(controlRoot))
   });
 }
+function requireController(args, operation) {
+  if (args.positional[0] === "init") {
+    const target = resolve17(args.positional[1] ?? ".");
+    if (!existsSync23(controlPaths(target).config)) {
+      assertControllerRole(args, operation);
+      return;
+    }
+    assertControllerAuthority(args, target, operation);
+    return;
+  }
+  assertControllerAuthority(args, resolveControlRoot(args), operation);
+}
+function controllerGroup(args, io) {
+  const sub = requirePositional(args, 1, "open");
+  if (sub !== "open") {
+    io.err(`Unknown controller command "${sub}".`);
+    return 2;
+  }
+  assertControllerRole(args, "controller open");
+  const opened = openControllerAuthority(resolveControlRoot(args), {
+    takeover: flagBool(args, "takeover"),
+    interactive: process.stdin.isTTY === true && process.stdout.isTTY === true
+  });
+  emit2(
+    io,
+    args,
+    opened,
+    () => [
+      `authority: ${opened.authority}`,
+      "Pass it as --authority to every controller command (dispatch, deliver, reconcile, decisions, ...).",
+      "It is shown once and never stored; never put it in a worker prompt, file or environment."
+    ].join("\n")
+  );
+  return 0;
+}
 function requirePositional(args, index, name) {
   const value = args.positional[index];
   if (value === void 0) throw new Error(`Missing required argument <${name}>`);
@@ -23375,10 +23519,12 @@ async function main(argv, io = defaultIo) {
   try {
     const sub = args.positional[1] ?? "";
     const only = CONTROLLER_ONLY[group];
-    if (only === "*" || only?.has(sub)) assertControllerRole(args, `${group}${only === "*" ? "" : ` ${sub}`}`);
+    if (only === "*" || only?.has(sub)) requireController(args, `${group}${only === "*" ? "" : ` ${sub}`}`);
     switch (group) {
       case "doctor":
         return doctor(args, io);
+      case "controller":
+        return controllerGroup(args, io);
       case "init":
         return cmdInit(args, io);
       case "repo":
@@ -23444,18 +23590,18 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync22(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync22(paths.config), paths.config);
+  push("control-root", existsSync23(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync23(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync22(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync16(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync23(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync17(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync22(paths.repositoriesManifest)) {
+  } else if (existsSync23(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
-    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync16(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
+    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync17(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
   }
   push("repositories.yaml", repoOk, repoDetail);
   if (repoOk) {
@@ -23474,11 +23620,11 @@ function doctor(args, io) {
     level: adapter.ok ? "ok" : "warn",
     detail: adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
-  if (existsSync22(paths.config)) {
+  if (existsSync23(paths.config)) {
     const hooks = hookHealth(controlRoot);
     push("hooks", hooks.ok, hooks.detail);
   }
-  const features = existsSync22(paths.featuresDir) ? readdirSync9(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync23(paths.featuresDir) ? readdirSync10(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -23492,14 +23638,14 @@ function doctor(args, io) {
 function cmdInit(args, io) {
   const target = resolve17(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync22(paths.repositoriesManifest)) {
+  if (!existsSync23(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync22(join23(target, "CLAUDE.md"))) {
-    writeTextAtomic(join23(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync23(join24(target, "CLAUDE.md"))) {
+    writeTextAtomic(join24(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -23547,7 +23693,7 @@ function repoGroup(args, io) {
     const path = flagString(args, "path");
     const baseBranch = flagString(args, "base-branch", "main");
     const testCommand = args.passthrough.length > 0 ? args.passthrough : ["npm", "test"];
-    const manifest = existsSync22(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync16(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync23(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync17(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     manifest.repositories = manifest.repositories.filter((r) => r["name"] !== name);
     manifest.repositories.push({
       name,
@@ -23635,9 +23781,9 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync16(resolve17(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync17(resolve17(graphPath), "utf8"));
     }
-    if (!existsSync22(paths.graph)) {
+    if (!existsSync23(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -23653,7 +23799,7 @@ function featureGroup(args, io) {
     const wip = args.flags["writer-concurrency"];
     if (typeof wip === "string") budget.max_writer_concurrency = Number(wip);
     saveState(paths.featureDir, initialState(graph, validation.graphHash, budget));
-    if (!existsSync22(paths.loops)) {
+    if (!existsSync23(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -23662,7 +23808,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync22(file)) writeTextAtomic(file, body);
+      if (!existsSync23(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -23755,12 +23901,12 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync16(resolve17(file), "utf8");
+      files[role] = readFileSync17(resolve17(file), "utf8");
     }
-    const repositories = existsSync22(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync23(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join23(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join24(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
     if (resolve17(out) === resolve17(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
@@ -23789,8 +23935,8 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync16(resolve17(source), "utf8"));
-    const repositories = existsSync22(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const parsed = import_yaml7.default.parse(readFileSync17(resolve17(source), "utf8"));
+    const repositories = existsSync23(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
@@ -24283,7 +24429,7 @@ function candidateGroup(args, io) {
     if (unfinished.length > 0) {
       throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(", ")}`);
     }
-    const contracts = existsSync22(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+    const contracts = existsSync23(workspace.paths.contractsDir) ? readdirSync10(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
     const manifest = createCandidate({
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
@@ -24413,7 +24559,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join23(paths.evidenceDir, "e2e"),
+      evidenceRoot: join24(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -24517,7 +24663,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync22(paths.decisions) ? readFileSync16(paths.decisions, "utf8") : "";
+    const body = existsSync23(paths.decisions) ? readFileSync17(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -24581,7 +24727,7 @@ function checkpointGroup(args, io) {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join23(paths.checkpointsDir, `${stamp}.json`);
+    const file = join24(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -24596,13 +24742,13 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync22(paths.checkpointsDir) ? readdirSync9(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync23(paths.checkpointsDir) ? readdirSync10(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync16(join23(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync17(join24(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -24622,8 +24768,8 @@ function checkpointGroup(args, io) {
       throw new Error("DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.");
     }
     assertDecisionUsable(paths.events, decisionId);
-    const file = join23(paths.checkpointsDir, name);
-    const checkpoint = JSON.parse(readFileSync16(file, "utf8"));
+    const file = join24(paths.checkpointsDir, name);
+    const checkpoint = JSON.parse(readFileSync17(file, "utf8"));
     const restored = structuredClone(checkpoint.state);
     for (const runtime of Object.values(restored.nodes)) {
       if (runtime.claim !== null && IN_FLIGHT_STATES.has(runtime.state)) runtime.state = "READY";

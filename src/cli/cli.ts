@@ -51,6 +51,7 @@ import { preflightAdapter } from '../sessions/preflight.js';
 import { featureVerifyProblems } from '../engine/feature-verify.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
+import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
 import { isInsideReal } from '../security/paths.js';
 import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
 
@@ -75,6 +76,7 @@ const USAGE = `mycelink <group> <command> [options]
 
   version | --version                        print the installed version
   doctor                                     environment and workspace health
+  controller open [--takeover]               mint the controller key that controller-only commands need (--authority)
   init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
@@ -98,15 +100,16 @@ const USAGE = `mycelink <group> <command> [options]
   memory <...>                               LLM Wiki Brain adapter
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
 
-Global: --control-root <path> --json`;
+Global: --control-root <path> --json   Controller-only commands also need --authority <key>.`;
 
 /**
  * Every subcommand that changes controller state, graphs, manifests,
- * decisions, leases or branches. None of them may be run by a worker
- * presenting a claim capability; worker-scoped commands (tdd, evidence
- * record, node begin/finalize, settle) are checked against the claim instead.
+ * decisions, leases or branches. Each needs positive controller authority
+ * (`--authority`, see engine/authority.ts) and refuses anyone presenting a
+ * claim capability; worker-scoped commands (tdd, evidence record, node
+ * begin/finalize, settle) are checked against the claim instead.
  */
-const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
+export const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
   init: '*',
   dispatch: '*',
   deliver: '*',
@@ -174,6 +177,46 @@ function orchestratorFor(controlRoot: string, featureId: string): Orchestrator {
   });
 }
 
+/**
+ * Gate a controller-only command on positive controller authority. `init`
+ * of a directory that is not yet a control repository is the one bootstrap:
+ * there is nothing to protect there yet, and no claim can exist.
+ */
+function requireController(args: ParsedArgs, operation: string): void {
+  if (args.positional[0] === 'init') {
+    const target = resolve(args.positional[1] ?? '.');
+    if (!existsSync(controlPaths(target).config)) {
+      assertControllerRole(args, operation);
+      return;
+    }
+    assertControllerAuthority(args, target, operation);
+    return;
+  }
+  assertControllerAuthority(args, resolveControlRoot(args), operation);
+}
+
+/** `mycelink controller open [--takeover]`: mint the controller key (see engine/authority.ts). */
+function controllerGroup(args: ParsedArgs, io: CliIo): number {
+  const sub = requirePositional(args, 1, 'open');
+  if (sub !== 'open') {
+    io.err(`Unknown controller command "${sub}".`);
+    return 2;
+  }
+  assertControllerRole(args, 'controller open');
+  const opened = openControllerAuthority(resolveControlRoot(args), {
+    takeover: flagBool(args, 'takeover'),
+    interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,
+  });
+  emit(io, args, opened, () =>
+    [
+      `authority: ${opened.authority}`,
+      'Pass it as --authority to every controller command (dispatch, deliver, reconcile, decisions, ...).',
+      'It is shown once and never stored; never put it in a worker prompt, file or environment.',
+    ].join('\n'),
+  );
+  return 0;
+}
+
 function requirePositional(args: ParsedArgs, index: number, name: string): string {
   const value = args.positional[index];
   if (value === undefined) throw new Error(`Missing required argument <${name}>`);
@@ -199,10 +242,12 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
   try {
     const sub = args.positional[1] ?? '';
     const only = CONTROLLER_ONLY[group];
-    if (only === '*' || only?.has(sub)) assertControllerRole(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
+    if (only === '*' || only?.has(sub)) requireController(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
     switch (group) {
       case 'doctor':
         return doctor(args, io);
+      case 'controller':
+        return controllerGroup(args, io);
       case 'init':
         return cmdInit(args, io);
       case 'repo':

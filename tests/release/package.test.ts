@@ -204,7 +204,8 @@ describe('install and run from the release ZIP alone', () => {
     const control = join(work, 'control');
     expect(cli(['init', control]).status).toBe(0);
     makeGitRepo(join(work, 'core'), { files: { 'package.json': '{}\n' } });
-    const reg = cli(['repo', 'register', '--control-root', control, '--name', 'core', '--path', '../core', '--base-branch', 'main', '--', 'node', '--test']);
+    const key = (JSON.parse(cli(['controller', 'open', '--control-root', control, '--json']).stdout) as { authority: string }).authority;
+    const reg = cli(['repo', 'register', '--control-root', control, '--authority', key, '--name', 'core', '--path', '../core', '--base-branch', 'main', '--', 'node', '--test']);
     expect(reg.status, reg.stderr).toBe(0);
 
     const graph = YAML.parse(readFileSync(join(plugin, 'templates', 'control-repo', 'features', 'FEATURE-TEMPLATE', 'PORTFOLIO-GRAPH.example.yaml'), 'utf8')) as Record<string, unknown>;

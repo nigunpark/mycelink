@@ -14,13 +14,14 @@ import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
 import { makeGitRepo, git } from '../helpers/git-fixture.js';
 import { main, type CliIo } from '../../src/cli/cli.js';
 import { createCandidate } from '../../src/git/candidate.js';
+import { controllerArgv } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
 async function run(argv: string[]): Promise<{ code: number; err: string }> {
   let err = '';
   const io: CliIo = { out: () => {}, err: (t) => (err += t + '\n') };
-  const code = await main(argv, io);
+  const code = await main(controllerArgv(argv), io);
   return { code, err };
 }
 
