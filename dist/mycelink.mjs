@@ -16817,6 +16817,10 @@ function applyNodeTransition(graph, state, nodeId, to, options) {
   runtime.state = to;
   runtime.updated_at = now;
   if (to === "CLAIMED") runtime.attempts += 1;
+  if (options.refundAttempt === true && to === "READY") {
+    runtime.attempts = Math.max(0, runtime.attempts - 1);
+    runtime.interruptions = (runtime.interruptions ?? 0) + 1;
+  }
   if (CLAIM_RELEASING.has(to)) runtime.claim = null;
   if (to === "BLOCKED" || to === "NEEDS_DECISION" || to === "BUDGET_EXHAUSTED") {
     runtime.blocked_reason = options.reason ?? to;
@@ -16901,7 +16905,13 @@ var OFFERABLE_STATES = /* @__PURE__ */ new Set([
 var IN_FLIGHT_STATES = /* @__PURE__ */ new Set([
   "CLAIMED",
   "RED_PENDING",
-  "GREEN_PENDING"
+  "RED_VERIFIED",
+  "GREEN_PENDING",
+  "GREEN_VERIFIED",
+  "REFACTOR_VERIFIED",
+  "REGRESSION_VERIFIED",
+  "REVIEW_VERIFIED",
+  "INTEGRATED"
 ]);
 function globPrefix(pattern) {
   const normalised = pattern.replace(/\\/g, "/");
@@ -16960,84 +16970,111 @@ function countInFlight(graph, state) {
   }
   return n;
 }
-function scheduleBatch(graph, state, options) {
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const ready = computeReady(graph, state);
+function conflictWith(graph, node, runtime, occupied, held, writerSlots, writerConcurrency) {
+  const id = node.id;
+  if (runtime.attempts >= node.worker.max_attempts) {
+    return {
+      node_id: id,
+      reason: "ATTEMPTS_EXHAUSTED",
+      detail: `attempts ${runtime.attempts} >= max_attempts ${node.worker.max_attempts}`
+    };
+  }
+  const pathConflict = occupied.find((other) => {
+    if (other.repository === null || node.repository === null) return false;
+    if (other.repository !== node.repository) return false;
+    return pathsOverlap(other.allowed_paths, node.allowed_paths);
+  });
+  if (pathConflict) {
+    return {
+      node_id: id,
+      reason: "PATH_OWNERSHIP_CONFLICT",
+      detail: `overlaps allowed_paths of ${pathConflict.id} in repository ${node.repository}`
+    };
+  }
+  const mine = new Set(node.contract_outputs ?? []);
+  const contractConflict = occupied.find((other) => (other.contract_outputs ?? []).some((c) => mine.has(c)));
+  if (contractConflict) {
+    return {
+      node_id: id,
+      reason: "CONTRACT_OWNERSHIP_CONFLICT",
+      detail: `writes a contract also produced by ${contractConflict.id}`
+    };
+  }
+  const blockingResource = node.required_resources.find((res) => {
+    const capacity = graph.resources[res]?.capacity ?? 0;
+    return (held[res] ?? 0) + 1 > capacity;
+  });
+  if (blockingResource !== void 0) {
+    return {
+      node_id: id,
+      reason: "RESOURCE_CAPACITY",
+      detail: `resource "${blockingResource}" is at capacity ${graph.resources[blockingResource]?.capacity ?? 0}`
+    };
+  }
+  if (writerSlots <= 0) {
+    return { node_id: id, reason: "WIP_LIMIT", detail: `writer concurrency limit ${writerConcurrency} reached` };
+  }
+  return null;
+}
+function inFlightNodes(graph, state) {
+  return graph.nodes.filter((n) => {
+    const runtime = state.nodes[n.id];
+    return runtime !== void 0 && IN_FLIGHT_STATES.has(runtime.state);
+  });
+}
+function heldUnits(graph, state, options) {
   const held = { ...inFlightResources(graph, state) };
   for (const [res, n] of Object.entries(options.heldResources ?? {})) {
     held[res] = (held[res] ?? 0) + n;
   }
+  return held;
+}
+function canSchedule(graph, state, nodeId, options) {
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  const runtime = state.nodes[nodeId];
+  if (!node || !runtime) return { ok: false, reason: "UNKNOWN_NODE", detail: `"${nodeId}" is not in the graph` };
+  if (!OFFERABLE_STATES.has(runtime.state)) {
+    return { ok: false, reason: "NOT_OFFERABLE", detail: `${nodeId} is ${runtime.state}` };
+  }
+  if (!dependenciesSatisfied(node, state)) {
+    const pending = node.depends_on.filter((d) => !SATISFIED_DEPENDENCY_STATES.has(state.nodes[d]?.state ?? "PLANNED"));
+    return {
+      ok: false,
+      reason: "DEPENDENCIES_NOT_DONE",
+      detail: pending.map((d) => `${d}=${state.nodes[d]?.state ?? "missing"}`).join(", ")
+    };
+  }
+  const conflict = conflictWith(
+    graph,
+    node,
+    runtime,
+    inFlightNodes(graph, state),
+    heldUnits(graph, state, options),
+    options.writerConcurrency - countInFlight(graph, state),
+    options.writerConcurrency
+  );
+  return conflict === null ? { ok: true } : { ok: false, reason: conflict.reason, detail: conflict.detail };
+}
+function scheduleBatch(graph, state, options) {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const held = heldUnits(graph, state, options);
+  const occupied = inFlightNodes(graph, state);
   let writerSlots = options.writerConcurrency - countInFlight(graph, state);
   const scheduled = [];
   const deferred = [];
-  for (const id of ready) {
+  for (const id of computeReady(graph, state)) {
     const node = byId.get(id);
     const runtime = state.nodes[id];
     if (!node || !runtime) continue;
-    if (runtime.attempts >= node.worker.max_attempts) {
-      deferred.push({
-        node_id: id,
-        reason: "ATTEMPTS_EXHAUSTED",
-        detail: `attempts ${runtime.attempts} >= max_attempts ${node.worker.max_attempts}`
-      });
-      continue;
-    }
-    const pathConflict = scheduled.find((s) => {
-      const other = byId.get(s.node_id);
-      if (!other) return false;
-      if (other.repository === null || node.repository === null) return false;
-      if (other.repository !== node.repository) return false;
-      return pathsOverlap(other.allowed_paths, node.allowed_paths);
-    });
-    if (pathConflict) {
-      deferred.push({
-        node_id: id,
-        reason: "PATH_OWNERSHIP_CONFLICT",
-        detail: `overlaps allowed_paths of ${pathConflict.node_id} in repository ${node.repository}`
-      });
-      continue;
-    }
-    const contractConflict = scheduled.find((s) => {
-      const other = byId.get(s.node_id);
-      if (!other) return false;
-      const mine = new Set(node.contract_outputs ?? []);
-      return (other.contract_outputs ?? []).some((c) => mine.has(c));
-    });
-    if (contractConflict) {
-      deferred.push({
-        node_id: id,
-        reason: "CONTRACT_OWNERSHIP_CONFLICT",
-        detail: `writes a contract also produced by ${contractConflict.node_id}`
-      });
-      continue;
-    }
-    const blockingResource = node.required_resources.find((res) => {
-      const capacity = graph.resources[res]?.capacity ?? 0;
-      return (held[res] ?? 0) + 1 > capacity;
-    });
-    if (blockingResource !== void 0) {
-      deferred.push({
-        node_id: id,
-        reason: "RESOURCE_CAPACITY",
-        detail: `resource "${blockingResource}" is at capacity ${graph.resources[blockingResource]?.capacity ?? 0}`
-      });
-      continue;
-    }
-    if (writerSlots <= 0) {
-      deferred.push({
-        node_id: id,
-        reason: "WIP_LIMIT",
-        detail: `writer concurrency limit ${options.writerConcurrency} reached`
-      });
+    const conflict = conflictWith(graph, node, runtime, occupied, held, writerSlots, options.writerConcurrency);
+    if (conflict !== null) {
+      deferred.push(conflict);
       continue;
     }
     for (const res of node.required_resources) held[res] = (held[res] ?? 0) + 1;
     writerSlots--;
-    scheduled.push({
-      node_id: id,
-      repository: node.repository,
-      resources: [...node.required_resources]
-    });
+    occupied.push(node);
+    scheduled.push({ node_id: id, repository: node.repository, resources: [...node.required_resources] });
   }
   return { scheduled, deferred };
 }
@@ -17082,6 +17119,7 @@ function save(featureDir, file, alsoKnown = []) {
 }
 function expired(lease, now) {
   if (Date.parse(lease.acquired_at) + lease.ttl_ms <= now) return true;
+  if (lease.claim_id !== void 0) return false;
   if (lease.host === hostname2() && !isPidAlive(lease.pid)) return true;
   return false;
 }
@@ -17130,7 +17168,8 @@ function acquireResource(featureDir, resource, options) {
         host: hostname2(),
         acquired_at: new Date(now).toISOString(),
         ttl_ms: options.ttlMs ?? DEFAULT_TTL_MS,
-        ...options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {}
+        ...options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {},
+        ...options.claimId ? { claim_id: options.claimId } : {}
       };
       save(featureDir, { ...file, leases: [...kept, lease] }, [resource]);
       return lease;
@@ -18256,9 +18295,74 @@ function verifyCandidate(manifest, context) {
 
 // src/engine/orchestrator.ts
 import { existsSync as existsSync14, mkdirSync as mkdirSync10, readFileSync as readFileSync10, readdirSync as readdirSync5 } from "node:fs";
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 import { join as join17, resolve as resolve12 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
+
+// src/engine/capability.ts
+import { createHash as createHash5, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+var CAPABILITY_ENV = "MYCELINK_CLAIM_CAPABILITY";
+var CAPABILITY_FORMAT = /^[0-9a-f]{64}$/;
+var CapabilityError = class extends Error {
+  code;
+  constructor(code, detail) {
+    super(`${code}: ${detail}`);
+    this.name = "CapabilityError";
+    this.code = code;
+  }
+};
+var RoleDeniedError = class extends Error {
+  constructor(operation) {
+    super(
+      `ROLE_DENIED: "${operation}" is a controller operation and cannot be run with a worker claim capability.`
+    );
+    this.name = "RoleDeniedError";
+  }
+};
+function newCapability() {
+  const raw = randomBytes3(32).toString("hex");
+  return { raw, sha256: capabilityHash(raw) };
+}
+function capabilityHash(raw) {
+  return createHash5("sha256").update(raw, "utf8").digest("hex");
+}
+function capabilityMatches(raw, sha256) {
+  if (!CAPABILITY_FORMAT.test(raw) || !CAPABILITY_FORMAT.test(sha256)) return false;
+  return timingSafeEqual(Buffer.from(capabilityHash(raw), "hex"), Buffer.from(sha256, "hex"));
+}
+function presentedCapability(args) {
+  const flag = args.flags["capability"];
+  if (typeof flag === "string" && flag !== "") return flag;
+  const env = process.env[CAPABILITY_ENV];
+  return env !== void 0 && env !== "" ? env : void 0;
+}
+function assertControllerRole(args, operation) {
+  const flag = args.flags["capability"];
+  if (typeof flag === "string" && flag !== "" || flag === true || presentedCapability(args) !== void 0) {
+    throw new RoleDeniedError(operation);
+  }
+}
+function assertClaimCapability(nodeId, runtime, raw) {
+  const claim = runtime?.claim ?? null;
+  if (claim === null) {
+    throw new CapabilityError("NOT_CLAIMED", `${nodeId} has no active claim; claim it through the controller first.`);
+  }
+  if (claim.capability_sha256 === void 0) {
+    throw new CapabilityError(
+      "CAPABILITY_REQUIRED",
+      `${nodeId}'s claim predates claim capabilities; reconcile and re-claim it.`
+    );
+  }
+  if (raw === void 0) {
+    throw new CapabilityError("CAPABILITY_REQUIRED", `${nodeId} is claimed; pass the claim's --capability.`);
+  }
+  if (!capabilityMatches(raw, claim.capability_sha256)) {
+    throw new CapabilityError(
+      "CAPABILITY_INVALID",
+      `the capability presented is not the one for ${nodeId}'s current claim (stale, rotated or for another node).`
+    );
+  }
+}
 
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
@@ -18819,7 +18923,7 @@ function hookHealth(controlRoot) {
 // src/state/event-log.ts
 import { appendFileSync, closeSync as closeSync5, existsSync as existsSync13, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync5, readFileSync as readFileSync9, readdirSync as readdirSync4, renameSync as renameSync2, writeSync as writeSync4 } from "node:fs";
 import { basename as basename3, dirname as dirname5, join as join16 } from "node:path";
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash6 } from "node:crypto";
 var EventTooLargeError = class extends Error {
   bytes;
   limit;
@@ -18883,7 +18987,7 @@ function repairTornTail(log) {
   return true;
 }
 function eventId(key, type) {
-  return createHash5("sha256").update(JSON.stringify([type, key])).digest("hex").slice(0, 24);
+  return createHash6("sha256").update(JSON.stringify([type, key])).digest("hex").slice(0, 24);
 }
 function findByKey(log, key) {
   for (const ev of parseJsonl(log)) {
@@ -19145,6 +19249,24 @@ function runSummary(runsFile, nodeId) {
 }
 
 // src/engine/orchestrator.ts
+var CLAIM_GRACE_MS = 15 * 60 * 1e3;
+var STOPPED_FEATURE_STATES = /* @__PURE__ */ new Set([
+  "BUDGET_EXHAUSTED",
+  "CANCELLED",
+  "PAUSED"
+]);
+var NotSchedulableError = class extends Error {
+  code = "NOT_SCHEDULABLE";
+  reason;
+  constructor(nodeId, reason, detail) {
+    super(`NOT_SCHEDULABLE: ${nodeId} cannot be claimed (${reason}): ${detail}`);
+    this.name = "NotSchedulableError";
+    this.reason = reason;
+  }
+};
+function errorText(err) {
+  return err instanceof Error ? err.message : String(err);
+}
 var Orchestrator = class {
   controlRoot;
   featureId;
@@ -19224,67 +19346,122 @@ var Orchestrator = class {
     const out = {};
     for (const rel of [...node.contract_inputs ?? [], ...node.contract_outputs ?? []]) {
       const full = join17(this.controlRoot, rel);
-      out[rel] = existsSync14(full) ? createHash6("sha256").update(readFileSync10(full)).digest("hex") : "";
+      out[rel] = existsSync14(full) ? createHash7("sha256").update(readFileSync10(full)).digest("hex") : "";
     }
     return out;
   }
   // ---- claim lifecycle --------------------------------------------------
   /**
-   * Claim a node: reserve its resources, create its isolated worktree, record
-   * the claim and write its bounded context pack.
+   * Claim a node atomically: re-check it against the scheduler under the
+   * state lock, move it to CLAIMED and record the claim with the hash of a
+   * fresh capability, all in one STATE.json write. Then reserve its
+   * resources and create its worktree. If that setup fails, the claim is
+   * released again without consuming the node's attempt budget.
+   *
+   * The raw capability is returned once and never stored.
    */
-  claim(nodeId) {
+  claim(nodeId, options = {}) {
     const graph = this.graph();
     const node = this.node(nodeId);
-    const before = this.state();
-    const runtime = before.nodes[nodeId];
-    if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
-    if (runtime.state === "PLANNED" || runtime.state === "INVALIDATED") {
-      this.transition(nodeId, "READY");
-    }
+    const mode = options.mode ?? "adapter";
+    const capability = newCapability();
     const claimId = randomUUID2();
-    for (const resource of node.required_resources) {
-      acquireResource(this.paths.featureDir, resource, {
-        nodeId,
+    const now = /* @__PURE__ */ new Date();
+    const expiresAt = new Date(now.getTime() + this.claimTtlMs(node)).toISOString();
+    let attempt = 0;
+    mutateState(this.paths.featureDir, (s) => {
+      if (STOPPED_FEATURE_STATES.has(s.feature_state)) {
+        throw new NotSchedulableError(nodeId, "FEATURE_STOPPED", `feature is ${s.feature_state}`);
+      }
+      const check = canSchedule(graph, s, nodeId, { writerConcurrency: s.budget.max_writer_concurrency });
+      if (!check.ok) throw new NotSchedulableError(nodeId, check.reason, check.detail);
+      let next = s;
+      if (next.nodes[nodeId]?.state !== "READY") {
+        next = applyNodeTransition(graph, next, nodeId, "READY", { actor: this.owner });
+      }
+      next = applyNodeTransition(graph, next, nodeId, "CLAIMED", { actor: this.owner });
+      const rt = next.nodes[nodeId];
+      attempt = rt.attempts;
+      rt.claim = {
+        claim_id: claimId,
         owner: this.owner,
-        capacities: graph.resources,
-        idempotencyKey: `${nodeId}:${resource}:${claimId}`
-      });
-    }
+        worktree: null,
+        branch: null,
+        claimed_at: now.toISOString(),
+        capability_sha256: capability.sha256,
+        mode,
+        attempt,
+        expires_at: expiresAt,
+        settling: null
+      };
+      return next;
+    });
     let worktree = null;
     let branch = null;
-    if (node.repository !== null) {
-      const repoPath = repositoryPath(this.workspace, node.repository);
-      const repoDecl = this.workspace.repositories.repositories.find(
-        (r) => r.name === node.repository
-      );
-      const created = createWorkerWorktree({
-        repoPath,
-        featureId: this.featureId,
-        nodeId,
-        baseBranch: repoDecl?.base_branch ?? "main",
-        worktreeRoot: this.workspace.paths.worktreesDir,
-        repositoryName: node.repository
-      });
-      worktree = created.worktree;
-      branch = created.branch;
+    try {
+      for (const resource of node.required_resources) {
+        acquireResource(this.paths.featureDir, resource, {
+          nodeId,
+          owner: this.owner,
+          capacities: graph.resources,
+          idempotencyKey: `${nodeId}:${resource}:${claimId}`,
+          // A host or manual claim outlives this process; its lease ends with
+          // the claim. An adapter or controller claim lives in this process.
+          ...mode === "host" || mode === "manual" ? { claimId, ttlMs: this.claimTtlMs(node) } : {}
+        });
+      }
+      if (node.repository !== null) {
+        const repoPath = repositoryPath(this.workspace, node.repository);
+        const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+        const created = createWorkerWorktree({
+          repoPath,
+          featureId: this.featureId,
+          nodeId,
+          baseBranch: repoDecl?.base_branch ?? "main",
+          worktreeRoot: this.workspace.paths.worktreesDir,
+          repositoryName: node.repository
+        });
+        worktree = created.worktree;
+        branch = created.branch;
+        mutateState(this.paths.featureDir, (s) => {
+          const claim = s.nodes[nodeId]?.claim;
+          if (claim?.claim_id === claimId) {
+            claim.worktree = worktree;
+            claim.branch = branch;
+          }
+          return s;
+        });
+      }
+    } catch (err) {
+      this.releaseForInfrastructure(nodeId, claimId, `claim setup failed: ${errorText(err)}`);
+      throw err;
     }
-    this.transition(nodeId, "CLAIMED");
+    this.event("node.claimed", nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
+    return { claimId, capability: capability.raw, worktree, branch, attempt, mode, expiresAt };
+  }
+  /** How long a claim may stay unsettled before a host dispatch counts as abandoned. */
+  claimTtlMs(node) {
+    return node.worker.max_wall_clock_minutes * 6e4 + CLAIM_GRACE_MS;
+  }
+  /**
+   * End a claim for an infrastructure reason: the node returns to READY with
+   * its attempt refunded and an interruption counted, no failure fingerprint
+   * is recorded, and its leases are released. The worktree and branch are
+   * kept, so committed work survives. Idempotent: only the named claim is
+   * released, and only once.
+   */
+  releaseForInfrastructure(nodeId, claimId, reason) {
+    const graph = this.graph();
+    let released = false;
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
-      if (rt) {
-        rt.claim = {
-          claim_id: claimId,
-          owner: this.owner,
-          worktree,
-          branch,
-          claimed_at: (/* @__PURE__ */ new Date()).toISOString()
-        };
-      }
-      return s;
+      if (!rt?.claim || rt.claim.claim_id !== claimId) return s;
+      released = true;
+      return applyNodeTransition(graph, s, nodeId, "READY", { actor: this.owner, reason, refundAttempt: true });
     });
-    this.event("node.claimed", nodeId, { claim_id: claimId, worktree, branch });
-    return { claimId, worktree, branch };
+    releaseAllForNode(this.paths.featureDir, nodeId);
+    if (released) this.event("node.interrupted", nodeId, { claim_id: claimId, reason: reason.slice(0, 500) });
+    return released;
   }
   /**
    * The `mycelink tdd` calls a worker must make, as exact argv.
@@ -19294,14 +19471,25 @@ var Orchestrator = class {
    * already declare. Paths use forward slashes so the line reads the same in
    * every shell a worker might use.
    */
-  gateCommands(nodeId) {
+  gateCommands(nodeId, capability) {
     const node = this.node(nodeId);
     if (node.verification_commands.length === 0) return [];
     const launcher = mycelinkCliPath().replace(/\\/g, "/");
     const controlRoot = this.controlRoot.replace(/\\/g, "/");
     return ["red", "green", "regression"].filter((gate) => node.required_evidence.includes(gate)).map((gate) => ({
       gate,
-      argv: ["node", launcher, "tdd", gate, this.featureId, nodeId, "--control-root", controlRoot]
+      argv: [
+        "node",
+        launcher,
+        "tdd",
+        gate,
+        this.featureId,
+        nodeId,
+        "--control-root",
+        controlRoot,
+        "--capability",
+        capability
+      ]
     }));
   }
   /** Write the node's context pack and return its path. */
@@ -19463,7 +19651,7 @@ var Orchestrator = class {
     if (node.node_type === "candidate-build") return this.runCandidateNode(nodeId);
     if (node.node_type === "e2e-scenario") return await this.runE2ENode(nodeId);
     try {
-      const { claimId, worktree, branch } = this.claim(nodeId);
+      const { claimId, capability, worktree, branch } = this.claim(nodeId, { mode: "adapter" });
       const packPath = this.writeContextPack(nodeId, claimId);
       const attempt = this.state().nodes[nodeId]?.attempts ?? 1;
       const sessionDir = join17(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"));
@@ -19485,10 +19673,11 @@ var Orchestrator = class {
           this.workspace.config.session_timeout_ms
         ),
         stallMs: Math.max(3e4, Math.floor(node.worker.max_wall_clock_minutes * 6e4 * 0.4)),
-        gateCommands: this.gateCommands(nodeId),
+        gateCommands: this.gateCommands(nodeId, capability),
         env: {
           MYCELINK_CONTROL_ROOT: this.controlRoot,
           MYCELINK_BRANCH: branch ?? "",
+          [CAPABILITY_ENV]: capability,
           ...this.workerEnv
         },
         replacesSessionId: previous?.session_id ?? null
@@ -19514,7 +19703,7 @@ var Orchestrator = class {
         parent_loop_id: `feature-orchestration:${this.featureId}`,
         node_id: nodeId,
         candidate_sha: null,
-        input_hash: createHash6("sha256").update(readFileSync10(packPath)).digest("hex").slice(0, 16),
+        input_hash: createHash7("sha256").update(readFileSync10(packPath)).digest("hex").slice(0, 16),
         started_at: new Date(started).toISOString(),
         finished_at: (/* @__PURE__ */ new Date()).toISOString(),
         model_turns: observation.turns,
@@ -19580,7 +19769,7 @@ var Orchestrator = class {
       return this.report(nodeId, "DONE", sessionId, verification.detail, evidence);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      if (err instanceof ResourceBusyError) {
+      if (err instanceof ResourceBusyError || err instanceof NotSchedulableError) {
         return this.report(nodeId, "RETRY", sessionId, detail, evidence);
       }
       return this.failAttempt(nodeId, sessionId, detail, evidence);
@@ -19595,7 +19784,7 @@ var Orchestrator = class {
   runCandidateNode(nodeId) {
     const evidence = [];
     try {
-      this.claim(nodeId);
+      this.claim(nodeId, { mode: "controller" });
       const repoRefs = this.integrationRefs();
       if (repoRefs.length === 0) {
         return this.failAttempt(nodeId, null, "NO_INTEGRATION_BRANCHES", evidence);
@@ -19706,7 +19895,7 @@ var Orchestrator = class {
     const evidence = [];
     const node = this.node(nodeId);
     try {
-      this.claim(nodeId);
+      this.claim(nodeId, { mode: "controller" });
       const state = this.state();
       const candidateId = state.current_candidate;
       if (candidateId === null) {
@@ -19832,7 +20021,7 @@ var Orchestrator = class {
   recordDecisionRequest(nodeId, result) {
     const request = result.decision_request;
     if (!request) return;
-    const id = `DEC-${createHash6("sha256").update(request.question).digest("hex").slice(0, 8)}`;
+    const id = `DEC-${createHash7("sha256").update(request.question).digest("hex").slice(0, 8)}`;
     const entry = `
 ## ${id} (${request.category ?? "uncategorised"})
 
@@ -20016,7 +20205,7 @@ var Orchestrator = class {
   }
 };
 function sha256OfFile(file) {
-  return createHash6("sha256").update(readFileSync10(file)).digest("hex");
+  return createHash7("sha256").update(readFileSync10(file)).digest("hex");
 }
 function isProcessAlive(pid) {
   try {
@@ -20802,7 +20991,7 @@ function writeLoops(file, loops) {
 // src/hooks/entrypoint.ts
 import { existsSync as existsSync18, readFileSync as readFileSync12, readdirSync as readdirSync7 } from "node:fs";
 import { join as join19, relative as relative4, resolve as resolve14, sep as sep3 } from "node:path";
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 var MAX_BLOCK_BYTES = 1024;
 var MANAGED_PATTERNS = [
   "**/STATE.json",
@@ -21100,7 +21289,7 @@ function preToolUse(ctx, io, input) {
 function postToolUse(ctx, io, input) {
   if (!ctx.paths || !ctx.state) return 0;
   const target = editTarget(input);
-  const key = createHash7("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
+  const key = createHash8("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
   try {
     appendEvent(ctx.paths.events, {
       idempotency_key: `posttool:${key}`,
@@ -22309,6 +22498,20 @@ function featureGroup(args, io) {
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
   if (sub === "init") {
+    assertControllerRole(args, "feature init");
+    const existing = loadState(paths.featureDir)?.data;
+    const progressed = existing !== void 0 && Object.values(existing.nodes).some(
+      (n) => n.state !== "PLANNED" || n.attempts > 0 || Object.keys(n.failure_counts).length > 0
+    );
+    if (progressed) {
+      const decisionId = args.flags["decision"];
+      if (typeof decisionId !== "string") {
+        throw new Error(
+          `STATE_EXISTS: ${featureId} already has progressed state; re-initialising would erase it. Pass --decision <recorded decision id> to start over deliberately.`
+        );
+      }
+      assertDecisionRecorded(paths.events, decisionId);
+    }
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
@@ -22426,6 +22629,7 @@ function featureGroup(args, io) {
     return problems.length === 0 ? 0 : 1;
   }
   if (sub === "cancel") {
+    assertControllerRole(args, "feature cancel");
     const graph = loadGraph(controlRoot, featureId);
     mutateState(paths.featureDir, (s) => {
       s.feature_state = "CANCELLED";
@@ -22568,13 +22772,15 @@ function nodeGroup(args, io) {
   const orchestrator = orchestratorFor(controlRoot, featureId);
   switch (sub) {
     case "claim": {
-      const claim = orchestrator.claim(nodeId);
+      assertControllerRole(args, "node claim");
+      const claim = orchestrator.claim(nodeId, { mode: "manual" });
       const pack = orchestrator.writeContextPack(nodeId, claim.claimId);
       emit2(
         io,
         args,
         { ...claim, context_pack: pack },
-        () => `Claimed ${nodeId} (${claim.claimId}) worktree=${claim.worktree ?? "-"} branch=${claim.branch ?? "-"}`
+        () => `Claimed ${nodeId} (${claim.claimId}) worktree=${claim.worktree ?? "-"} branch=${claim.branch ?? "-"}
+capability: ${claim.capability} (pass it as --capability to tdd and node finalize; it is not stored)`
       );
       return 0;
     }
@@ -22583,14 +22789,16 @@ function nodeGroup(args, io) {
       const paths = featurePaths(controlRoot, featureId);
       const node = graph.nodes.find((n) => n.id === nodeId);
       const target = node?.required_evidence.includes("red") ? "RED_PENDING" : "GREEN_PENDING";
-      mutateState(
-        paths.featureDir,
-        (s) => applyNodeTransition(graph, s, nodeId, target, { actor: "mycelink" })
-      );
+      const capability = presentedCapability(args);
+      mutateState(paths.featureDir, (s) => {
+        assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+        return applyNodeTransition(graph, s, nodeId, target, { actor: "mycelink" });
+      });
       emit2(io, args, { node_id: nodeId, state: target }, () => `${nodeId} -> ${target}`);
       return 0;
     }
     case "block": {
+      assertControllerRole(args, "node block");
       const graph = loadGraph(controlRoot, featureId);
       const paths = featurePaths(controlRoot, featureId);
       const reason = flagString(args, "reason", "blocked by operator");
@@ -22603,6 +22811,7 @@ function nodeGroup(args, io) {
       return 0;
     }
     case "invalidate": {
+      assertControllerRole(args, "node invalidate");
       const decisionId = typeof args.flags["decision"] === "string" ? args.flags["decision"] : void 0;
       if (decisionId !== void 0) assertDecisionRecorded(featurePaths(controlRoot, featureId).events, decisionId);
       const invalidated = orchestrator.invalidateWithDependents(
@@ -22629,6 +22838,7 @@ function nodeGroup(args, io) {
       return result.ok ? 0 : 1;
     }
     case "release": {
+      assertControllerRole(args, "node release");
       orchestrator.releaseClaim(nodeId, { removeWorktree: flagBool(args, "remove-worktree") });
       emit2(io, args, { node_id: nodeId, released: true }, () => `Released ${nodeId}`);
       return 0;
@@ -22670,6 +22880,7 @@ async function sessionGroup(args, io) {
     return 0;
   }
   if (sub === "spawn") {
+    assertControllerRole(args, "session spawn");
     const nodeId = requirePositional(args, 3, "node-id");
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const report = await orchestrator.runNode(nodeId);
@@ -22764,7 +22975,10 @@ function evidenceGroup(args, io) {
   }
   if (sub === "record") {
     const kind = flagString(args, "kind");
-    const cwd = flagString(args, "cwd", process.cwd());
+    const capability = presentedCapability(args);
+    const runtime = loadState(paths.featureDir)?.data.nodes[nodeId];
+    assertClaimCapability(nodeId, runtime, capability);
+    const cwd = claimedCwd(runtime?.claim?.worktree ?? null, args, controlRoot);
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     const record = runVerification({
@@ -22777,8 +22991,9 @@ function evidenceGroup(args, io) {
       pathBase: controlRoot
     });
     mutateState(paths.featureDir, (s) => {
-      const runtime = s.nodes[nodeId];
-      if (runtime) runtime.evidence[kind] = record;
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+      const rt = s.nodes[nodeId];
+      if (rt) rt.evidence[kind] = record;
       return s;
     });
     emit2(io, args, record, () => `${kind} exit=${record.exit_code} evidence=${record.output_path}`);
@@ -22799,12 +23014,14 @@ function tddGroup(args, io) {
   const doc = loadState(paths.featureDir);
   const runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
+  const capability = presentedCapability(args);
+  assertClaimCapability(nodeId, runtime, capability);
   const declared = node.verification_commands[0];
   let invocation;
   if (args.passthrough.length > 0) invocation = { command: args.passthrough };
   else if (declared !== void 0 && declared.command.length > 0) invocation = verifierInvocation(declared);
   else throw new Error("No command given and the node declares no verifier.");
-  const cwd = typeof args.flags["cwd"] === "string" ? resolve17(String(args.flags["cwd"])) : runtime.claim?.worktree ?? controlRoot;
+  const cwd = claimedCwd(runtime.claim?.worktree ?? null, args, controlRoot);
   const repoDecl = node.repository ? loadRepositories(controlRoot).repositories.find((r) => r.name === node.repository) : void 0;
   const kind = phase === "red" ? "red" : phase === "green" ? "green" : "regression";
   const record = runVerification({
@@ -22820,6 +23037,7 @@ function tddGroup(args, io) {
     pathBase: controlRoot
   });
   mutateState(paths.featureDir, (s) => {
+    assertClaimCapability(nodeId, s.nodes[nodeId], capability);
     const rt = s.nodes[nodeId];
     if (rt) rt.evidence[kind] = record;
     return s;
@@ -22828,6 +23046,7 @@ function tddGroup(args, io) {
   const verified = phase === "red" ? "RED_VERIFIED" : phase === "green" ? "GREEN_VERIFIED" : "REGRESSION_VERIFIED";
   try {
     mutateState(paths.featureDir, (s) => {
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
       let next = s;
       if (pending !== null && next.nodes[nodeId]?.state !== pending) {
         next = applyNodeTransition(graph, next, nodeId, pending, { actor: "mycelink" });
@@ -22854,6 +23073,15 @@ function tddGroup(args, io) {
   );
   return 0;
 }
+function claimedCwd(worktree, args, controlRoot) {
+  const base = worktree ?? controlRoot;
+  if (typeof args.flags["cwd"] !== "string") return base;
+  const requested = resolve17(String(args.flags["cwd"]));
+  if (!isInsideReal(base, requested)) {
+    throw new Error(`CWD_OUTSIDE_WORKTREE: ${requested} is outside the claim's working directory ${base}.`);
+  }
+  return requested;
+}
 function branchGroup(args, io) {
   const controlRoot = resolveControlRoot(args);
   const workspace = loadWorkspace(controlRoot);
@@ -22877,10 +23105,17 @@ function branchGroup(args, io) {
     return 0;
   }
   if (sub === "integrate") {
+    assertControllerRole(args, "branch integrate");
     const nodeId = requirePositional(args, 3, "node-id");
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node?.repository) throw new Error(`Node "${nodeId}" has no repository.`);
+    const state = loadState(featurePaths(controlRoot, featureId).featureDir)?.data.nodes[nodeId]?.state;
+    if (state !== "REVIEW_VERIFIED" && state !== "INTEGRATED" && state !== "DONE") {
+      throw new Error(
+        `NODE_NOT_VERIFIED: ${nodeId} is ${state ?? "unknown"}; only a node past fresh verification may be integrated. Settle or finalize it instead.`
+      );
+    }
     const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
     const result = integrateNodeBranch({
       repoPath: repositoryPath(workspace, node.repository),
@@ -22937,6 +23172,16 @@ function candidateGroup(args, io) {
     branch: integrationBranchName(featureId)
   }));
   if (sub === "create") {
+    assertControllerRole(args, "candidate create");
+    const graph = loadGraph(controlRoot, featureId);
+    const unfinished = Object.entries(loadState(paths.featureDir)?.data.nodes ?? {}).filter(([id, rt]) => {
+      const type = graph.nodes.find((n) => n.id === id)?.node_type;
+      if (type === "candidate-build" || type === "e2e-scenario") return false;
+      return rt.state !== "DONE" && rt.state !== "EXCLUDED";
+    }).map(([id, rt]) => `${id}=${rt.state}`);
+    if (unfinished.length > 0) {
+      throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(", ")}`);
+    }
     const contracts = existsSync20(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
     const manifest = createCandidate({
       controlRepo: controlRoot,
@@ -23191,6 +23436,7 @@ ${answer}
     return 0;
   }
   if (sub === "apply") {
+    assertControllerRole(args, "decision apply");
     const decisionId = requirePositional(args, 3, "decision-id");
     assertDecisionRecorded(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
@@ -23266,6 +23512,7 @@ function checkpointGroup(args, io) {
     return ok ? 0 : 1;
   }
   if (sub === "restore") {
+    assertControllerRole(args, "checkpoint restore");
     const name = requirePositional(args, 3, "checkpoint-file");
     assertPlainFileName(name);
     const file = join21(paths.checkpointsDir, name);
@@ -23295,6 +23542,7 @@ async function orchestrateGroup(args, io) {
     );
     return 0;
   }
+  assertControllerRole(args, `orchestrate ${sub}`);
   const paths = featurePaths(controlRoot, featureId);
   mutateState(paths.featureDir, (s) => {
     if (s.feature_state === "GRAPH_VALIDATED" || s.feature_state === "PLAN_APPROVED") {

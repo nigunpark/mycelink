@@ -47,6 +47,8 @@ import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
 import { assertDecisionRecorded } from '../state/decisions.js';
+import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
+import { isInsideReal } from '../security/paths.js';
 import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
 
 /** The installed package version, from the package.json that ships with it. */
@@ -416,6 +418,26 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   const paths = featurePaths(controlRoot, featureId);
 
   if (sub === 'init') {
+    assertControllerRole(args, 'feature init');
+    // Re-initialising rewrites STATE.json from scratch. Once any node has
+    // moved or failed, that would erase BLOCKED states and failure history,
+    // so it needs a recorded decision.
+    const existing = loadState(paths.featureDir)?.data;
+    const progressed =
+      existing !== undefined &&
+      Object.values(existing.nodes).some(
+        (n) => n.state !== 'PLANNED' || n.attempts > 0 || Object.keys(n.failure_counts).length > 0,
+      );
+    if (progressed) {
+      const decisionId = args.flags['decision'];
+      if (typeof decisionId !== 'string') {
+        throw new Error(
+          `STATE_EXISTS: ${featureId} already has progressed state; re-initialising would erase it. ` +
+            'Pass --decision <recorded decision id> to start over deliberately.',
+        );
+      }
+      assertDecisionRecorded(paths.events, decisionId);
+    }
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags['graph'];
     if (typeof graphPath === 'string') {
@@ -532,6 +554,7 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'cancel') {
+    assertControllerRole(args, 'feature cancel');
     const graph = loadGraph(controlRoot, featureId);
     mutateState(paths.featureDir, (s) => {
       s.feature_state = 'CANCELLED';
@@ -684,10 +707,13 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
 
   switch (sub) {
     case 'claim': {
-      const claim = orchestrator.claim(nodeId);
+      assertControllerRole(args, 'node claim');
+      // A manual claim goes through the same scheduler check as a dispatch.
+      const claim = orchestrator.claim(nodeId, { mode: 'manual' });
       const pack = orchestrator.writeContextPack(nodeId, claim.claimId);
       emit(io, args, { ...claim, context_pack: pack }, () =>
-        `Claimed ${nodeId} (${claim.claimId}) worktree=${claim.worktree ?? '-'} branch=${claim.branch ?? '-'}`,
+        `Claimed ${nodeId} (${claim.claimId}) worktree=${claim.worktree ?? '-'} branch=${claim.branch ?? '-'}\n` +
+        `capability: ${claim.capability} (pass it as --capability to tdd and node finalize; it is not stored)`,
       );
       return 0;
     }
@@ -696,13 +722,16 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       const paths = featurePaths(controlRoot, featureId);
       const node = graph.nodes.find((n) => n.id === nodeId);
       const target = node?.required_evidence.includes('red') ? 'RED_PENDING' : 'GREEN_PENDING';
-      mutateState(paths.featureDir, (s) =>
-        applyNodeTransition(graph, s, nodeId, target, { actor: 'mycelink' }),
-      );
+      const capability = presentedCapability(args);
+      mutateState(paths.featureDir, (s) => {
+        assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+        return applyNodeTransition(graph, s, nodeId, target, { actor: 'mycelink' });
+      });
       emit(io, args, { node_id: nodeId, state: target }, () => `${nodeId} -> ${target}`);
       return 0;
     }
     case 'block': {
+      assertControllerRole(args, 'node block');
       const graph = loadGraph(controlRoot, featureId);
       const paths = featurePaths(controlRoot, featureId);
       const reason = flagString(args, 'reason', 'blocked by operator');
@@ -714,6 +743,7 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       return 0;
     }
     case 'invalidate': {
+      assertControllerRole(args, 'node invalidate');
       // Cascades: a downstream node's evidence was produced against the old
       // upstream, so leaving it DONE would let a stale candidate look verified.
       const decisionId = typeof args.flags['decision'] === 'string' ? args.flags['decision'] : undefined;
@@ -736,6 +766,7 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       return result.ok ? 0 : 1;
     }
     case 'release': {
+      assertControllerRole(args, 'node release');
       orchestrator.releaseClaim(nodeId, { removeWorktree: flagBool(args, 'remove-worktree') });
       emit(io, args, { node_id: nodeId, released: true }, () => `Released ${nodeId}`);
       return 0;
@@ -786,6 +817,7 @@ async function sessionGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   }
 
   if (sub === 'spawn') {
+    assertControllerRole(args, 'session spawn');
     const nodeId = requirePositional(args, 3, 'node-id');
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const report = await orchestrator.runNode(nodeId);
@@ -884,7 +916,10 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
 
   if (sub === 'record') {
     const kind = flagString(args, 'kind') as EvidenceKind;
-    const cwd = flagString(args, 'cwd', process.cwd());
+    const capability = presentedCapability(args);
+    const runtime = loadState(paths.featureDir)?.data.nodes[nodeId];
+    assertClaimCapability(nodeId, runtime, capability);
+    const cwd = claimedCwd(runtime?.claim?.worktree ?? null, args, controlRoot);
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     const record = runVerification({
@@ -897,8 +932,10 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
       pathBase: controlRoot,
     });
     mutateState(paths.featureDir, (s) => {
-      const runtime = s.nodes[nodeId];
-      if (runtime) runtime.evidence[kind] = record;
+      // The claim may have been released or rotated while the command ran.
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+      const rt = s.nodes[nodeId];
+      if (rt) rt.evidence[kind] = record;
       return s;
     });
     emit(io, args, record, () => `${kind} exit=${record.exit_code} evidence=${record.output_path}`);
@@ -929,6 +966,9 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   const doc = loadState(paths.featureDir);
   const runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
+  // Only the holder of the node's current claim may record its gates.
+  const capability = presentedCapability(args);
+  assertClaimCapability(nodeId, runtime, capability);
 
   const declared = node.verification_commands[0];
   // An explicit `-- <argv>` from the operator is always argv; a declared
@@ -938,10 +978,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   else if (declared !== undefined && declared.command.length > 0) invocation = verifierInvocation(declared);
   else throw new Error('No command given and the node declares no verifier.');
 
-  const cwd =
-    typeof args.flags['cwd'] === 'string'
-      ? resolve(String(args.flags['cwd']))
-      : (runtime.claim?.worktree ?? controlRoot);
+  const cwd = claimedCwd(runtime.claim?.worktree ?? null, args, controlRoot);
 
   const repoDecl = node.repository
     ? loadRepositories(controlRoot).repositories.find((r) => r.name === node.repository)
@@ -962,6 +999,9 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   });
 
   mutateState(paths.featureDir, (s) => {
+    // Re-checked where the evidence lands: the claim may have been released
+    // or rotated while the command ran, and then this evidence is not its.
+    assertClaimCapability(nodeId, s.nodes[nodeId], capability);
     const rt = s.nodes[nodeId];
     if (rt) rt.evidence[kind] = record;
     return s;
@@ -973,6 +1013,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
 
   try {
     mutateState(paths.featureDir, (s) => {
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
       let next = s;
       if (pending !== null && next.nodes[nodeId]?.state !== pending) {
         next = applyNodeTransition(graph, next, nodeId, pending, { actor: 'mycelink' });
@@ -995,6 +1036,20 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
     `${nodeId} -> ${verified} (exit ${record.exit_code}, evidence ${record.output_path})`,
   );
   return 0;
+}
+
+/**
+ * Where a worker-scoped command runs: the claim's worktree, or a `--cwd`
+ * inside it. A gate run somewhere else would prove nothing about the claim.
+ */
+function claimedCwd(worktree: string | null, args: ParsedArgs, controlRoot: string): string {
+  const base = worktree ?? controlRoot;
+  if (typeof args.flags['cwd'] !== 'string') return base;
+  const requested = resolve(String(args.flags['cwd']));
+  if (!isInsideReal(base, requested)) {
+    throw new Error(`CWD_OUTSIDE_WORKTREE: ${requested} is outside the claim's working directory ${base}.`);
+  }
+  return requested;
 }
 
 // ---- branch / candidate ---------------------------------------------------
@@ -1024,10 +1079,19 @@ function branchGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'integrate') {
+    assertControllerRole(args, 'branch integrate');
     const nodeId = requirePositional(args, 3, 'node-id');
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node?.repository) throw new Error(`Node "${nodeId}" has no repository.`);
+    // Only freshly verified work may reach the integration branch.
+    const state = loadState(featurePaths(controlRoot, featureId).featureDir)?.data.nodes[nodeId]?.state;
+    if (state !== 'REVIEW_VERIFIED' && state !== 'INTEGRATED' && state !== 'DONE') {
+      throw new Error(
+        `NODE_NOT_VERIFIED: ${nodeId} is ${state ?? 'unknown'}; only a node past fresh verification may be integrated. ` +
+          'Settle or finalize it instead.',
+      );
+    }
     const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
     const result = integrateNodeBranch({
       repoPath: repositoryPath(workspace, node.repository),
@@ -1091,6 +1155,18 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
     }));
 
   if (sub === 'create') {
+    assertControllerRole(args, 'candidate create');
+    const graph = loadGraph(controlRoot, featureId);
+    const unfinished = Object.entries(loadState(paths.featureDir)?.data.nodes ?? {})
+      .filter(([id, rt]) => {
+        const type = graph.nodes.find((n) => n.id === id)?.node_type;
+        if (type === 'candidate-build' || type === 'e2e-scenario') return false;
+        return rt.state !== 'DONE' && rt.state !== 'EXCLUDED';
+      })
+      .map(([id, rt]) => `${id}=${rt.state}`);
+    if (unfinished.length > 0) {
+      throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(', ')}`);
+    }
     const contracts = existsSync(workspace.paths.contractsDir)
       ? readdirSync(workspace.paths.contractsDir)
           .filter((f) => !f.startsWith('.'))
@@ -1383,6 +1459,7 @@ function decisionGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'apply') {
+    assertControllerRole(args, 'decision apply');
     const decisionId = requirePositional(args, 3, 'decision-id');
     assertDecisionRecorded(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
@@ -1461,6 +1538,7 @@ function checkpointGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'restore') {
+    assertControllerRole(args, 'checkpoint restore');
     const name = requirePositional(args, 3, 'checkpoint-file');
     assertPlainFileName(name);
     const file = join(paths.checkpointsDir, name);
@@ -1493,6 +1571,7 @@ async function orchestrateGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     return 0;
   }
 
+  assertControllerRole(args, `orchestrate ${sub}`);
   const paths = featurePaths(controlRoot, featureId);
   mutateState(paths.featureDir, (s) => {
     if (s.feature_state === 'GRAPH_VALIDATED' || s.feature_state === 'PLAN_APPROVED') {

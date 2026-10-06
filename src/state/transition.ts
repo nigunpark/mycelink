@@ -123,6 +123,12 @@ export interface TransitionOptions {
   inputChanged?: boolean;
   /** Recorded on INTEGRATED. */
   integratedSha?: string;
+  /**
+   * The attempt ended for an infrastructure reason (no worker could start,
+   * the host was interrupted), not because of the task. Returning to READY
+   * gives the attempt back and counts an interruption instead.
+   */
+  refundAttempt?: boolean;
   now?: string;
 }
 
@@ -274,6 +280,10 @@ export function applyNodeTransition(
   runtime.updated_at = now;
 
   if (to === 'CLAIMED') runtime.attempts += 1;
+  if (options.refundAttempt === true && to === 'READY') {
+    runtime.attempts = Math.max(0, runtime.attempts - 1);
+    runtime.interruptions = (runtime.interruptions ?? 0) + 1;
+  }
   if (CLAIM_RELEASING.has(to)) runtime.claim = null;
 
   if (to === 'BLOCKED' || to === 'NEEDS_DECISION' || to === 'BUDGET_EXHAUSTED') {

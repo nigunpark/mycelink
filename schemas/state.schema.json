@@ -114,7 +114,21 @@
             "owner": { "type": "string" },
             "worktree": { "type": ["string", "null"] },
             "branch": { "type": ["string", "null"] },
-            "claimed_at": { "type": "string" }
+            "claimed_at": { "type": "string" },
+            "capability_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "mode": { "enum": ["adapter", "host", "manual", "controller"] },
+            "attempt": { "type": "integer", "minimum": 0 },
+            "expires_at": { "type": "string" },
+            "settling": {
+              "type": ["object", "null"],
+              "required": ["pid", "host", "started_at"],
+              "additionalProperties": false,
+              "properties": {
+                "pid": { "type": "integer" },
+                "host": { "type": "string" },
+                "started_at": { "type": "string" }
+              }
+            }
           }
         },
         "evidence": { "type": "object", "additionalProperties": true },
@@ -123,7 +137,21 @@
         "integrated_sha": { "type": ["string", "null"] },
         "blocked_reason": { "type": ["string", "null"] },
         "usage": { "$ref": "#/$defs/usage" },
-        "updated_at": { "type": "string" }
+        "updated_at": { "type": "string" },
+        "interruptions": { "type": "integer", "minimum": 0 },
+        "last_settlement": {
+          "type": ["object", "null"],
+          "required": ["capability_sha256", "claim_id", "outcome", "state", "detail", "settled_at"],
+          "additionalProperties": false,
+          "properties": {
+            "capability_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "claim_id": { "type": "string" },
+            "outcome": { "type": "string" },
+            "state": { "type": "string" },
+            "detail": { "type": "string" },
+            "settled_at": { "type": "string" }
+          }
+        }
       }
     }
   }

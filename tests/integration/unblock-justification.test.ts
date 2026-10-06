@@ -66,6 +66,23 @@ describe('unblocking requires a recorded decision', () => {
     expect(state.nodes[DEPENDENT]!.state).toBe('INVALIDATED');
   });
 
+  it('feature init cannot wipe a feature that has progressed (re-init laundering)', async () => {
+    const r = await cli(p, ['feature', 'init', FEATURE_ID]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/STATE_EXISTS/);
+    expect(loadState(p.featureDir)!.data.nodes[NODE]!.state).toBe('BLOCKED');
+
+    expect((await cli(p, ['decision', 'record', FEATURE_ID, 'DEC-reset', '--answer', 'start over'])).code).toBe(0);
+    expect((await cli(p, ['feature', 'init', FEATURE_ID, '--decision', 'DEC-reset'])).code).toBe(0);
+    expect(loadState(p.featureDir)!.data.nodes[NODE]!.state).toBe('PLANNED');
+  });
+
+  it('checkpoint restore is a controller operation', async () => {
+    expect((await cli(p, ['checkpoint', 'create', FEATURE_ID])).code).toBe(0);
+    const r = await cli(p, ['checkpoint', 'restore', FEATURE_ID, 'x.json', '--capability', 'a'.repeat(64)]);
+    expect(r.err).toMatch(/ROLE_DENIED/);
+  });
+
   it('decision apply refuses a decision that was never recorded', async () => {
     const r = await cli(p, ['decision', 'apply', FEATURE_ID, 'DEC-unrecorded']);
     expect(r.code).not.toBe(0);

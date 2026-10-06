@@ -17,10 +17,13 @@ import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
+  ClaimMode,
   EvidenceKind,
   EvidenceRecord,
+  FeatureState,
   FeatureState_,
   GraphNode,
+  NodeRuntime,
   NodeState,
   PortfolioGraph,
 } from '../model/types.js';
@@ -34,7 +37,8 @@ import {
   recordFailure,
   TransitionError,
 } from '../state/transition.js';
-import { computeReady, scheduleBatch, type SchedulePlan } from '../scheduler/ready.js';
+import { canSchedule, computeReady, scheduleBatch, type SchedulePlan } from '../scheduler/ready.js';
+import { CAPABILITY_ENV, newCapability } from './capability.js';
 import {
   acquireResource,
   listLeases,
@@ -115,6 +119,40 @@ export interface FeatureRunReport {
     | 'MAX_CYCLES';
   reports: NodeRunReport[];
   feature_state: string;
+}
+
+/** How long past its wall-clock budget an unsettled claim is still presumed alive. */
+const CLAIM_GRACE_MS = 15 * 60 * 1000;
+
+const STOPPED_FEATURE_STATES: ReadonlySet<FeatureState> = new Set<FeatureState>([
+  'BUDGET_EXHAUSTED',
+  'CANCELLED',
+  'PAUSED',
+]);
+
+export class NotSchedulableError extends Error {
+  readonly code = 'NOT_SCHEDULABLE';
+  readonly reason: string;
+  constructor(nodeId: string, reason: string, detail: string) {
+    super(`NOT_SCHEDULABLE: ${nodeId} cannot be claimed (${reason}): ${detail}`);
+    this.name = 'NotSchedulableError';
+    this.reason = reason;
+  }
+}
+
+export interface ClaimResult {
+  claimId: string;
+  /** Raw claim capability. Returned once; only its hash is stored. */
+  capability: string;
+  worktree: string | null;
+  branch: string | null;
+  attempt: number;
+  mode: ClaimMode;
+  expiresAt: string;
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export class Orchestrator {
@@ -215,67 +253,122 @@ export class Orchestrator {
   // ---- claim lifecycle --------------------------------------------------
 
   /**
-   * Claim a node: reserve its resources, create its isolated worktree, record
-   * the claim and write its bounded context pack.
+   * Claim a node atomically: re-check it against the scheduler under the
+   * state lock, move it to CLAIMED and record the claim with the hash of a
+   * fresh capability, all in one STATE.json write. Then reserve its
+   * resources and create its worktree. If that setup fails, the claim is
+   * released again without consuming the node's attempt budget.
+   *
+   * The raw capability is returned once and never stored.
    */
-  claim(nodeId: string): { claimId: string; worktree: string | null; branch: string | null } {
+  claim(nodeId: string, options: { mode?: ClaimMode } = {}): ClaimResult {
     const graph = this.graph();
     const node = this.node(nodeId);
-    const before = this.state();
-    const runtime = before.nodes[nodeId];
-    if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
-
-    if (runtime.state === 'PLANNED' || runtime.state === 'INVALIDATED') {
-      this.transition(nodeId, 'READY');
-    }
-
+    const mode = options.mode ?? 'adapter';
+    const capability = newCapability();
     const claimId = randomUUID();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + this.claimTtlMs(node)).toISOString();
+    let attempt = 0;
 
-    for (const resource of node.required_resources) {
-      acquireResource(this.paths.featureDir, resource, {
-        nodeId,
+    mutateState(this.paths.featureDir, (s) => {
+      if (STOPPED_FEATURE_STATES.has(s.feature_state)) {
+        throw new NotSchedulableError(nodeId, 'FEATURE_STOPPED', `feature is ${s.feature_state}`);
+      }
+      const check = canSchedule(graph, s, nodeId, { writerConcurrency: s.budget.max_writer_concurrency });
+      if (!check.ok) throw new NotSchedulableError(nodeId, check.reason, check.detail);
+      let next = s;
+      if (next.nodes[nodeId]?.state !== 'READY') {
+        next = applyNodeTransition(graph, next, nodeId, 'READY', { actor: this.owner });
+      }
+      next = applyNodeTransition(graph, next, nodeId, 'CLAIMED', { actor: this.owner });
+      const rt = next.nodes[nodeId] as NodeRuntime;
+      attempt = rt.attempts;
+      rt.claim = {
+        claim_id: claimId,
         owner: this.owner,
-        capacities: graph.resources,
-        idempotencyKey: `${nodeId}:${resource}:${claimId}`,
-      });
-    }
+        worktree: null,
+        branch: null,
+        claimed_at: now.toISOString(),
+        capability_sha256: capability.sha256,
+        mode,
+        attempt,
+        expires_at: expiresAt,
+        settling: null,
+      };
+      return next;
+    });
 
     let worktree: string | null = null;
     let branch: string | null = null;
-    if (node.repository !== null) {
-      const repoPath = repositoryPath(this.workspace, node.repository);
-      const repoDecl = this.workspace.repositories.repositories.find(
-        (r) => r.name === node.repository,
-      );
-      const created = createWorkerWorktree({
-        repoPath,
-        featureId: this.featureId,
-        nodeId,
-        baseBranch: repoDecl?.base_branch ?? 'main',
-        worktreeRoot: this.workspace.paths.worktreesDir,
-        repositoryName: node.repository,
-      });
-      worktree = created.worktree;
-      branch = created.branch;
+    try {
+      for (const resource of node.required_resources) {
+        acquireResource(this.paths.featureDir, resource, {
+          nodeId,
+          owner: this.owner,
+          capacities: graph.resources,
+          idempotencyKey: `${nodeId}:${resource}:${claimId}`,
+          // A host or manual claim outlives this process; its lease ends with
+          // the claim. An adapter or controller claim lives in this process.
+          ...(mode === 'host' || mode === 'manual' ? { claimId, ttlMs: this.claimTtlMs(node) } : {}),
+        });
+      }
+
+      if (node.repository !== null) {
+        const repoPath = repositoryPath(this.workspace, node.repository);
+        const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+        const created = createWorkerWorktree({
+          repoPath,
+          featureId: this.featureId,
+          nodeId,
+          baseBranch: repoDecl?.base_branch ?? 'main',
+          worktreeRoot: this.workspace.paths.worktreesDir,
+          repositoryName: node.repository,
+        });
+        worktree = created.worktree;
+        branch = created.branch;
+        mutateState(this.paths.featureDir, (s) => {
+          const claim = s.nodes[nodeId]?.claim;
+          if (claim?.claim_id === claimId) {
+            claim.worktree = worktree;
+            claim.branch = branch;
+          }
+          return s;
+        });
+      }
+    } catch (err) {
+      this.releaseForInfrastructure(nodeId, claimId, `claim setup failed: ${errorText(err)}`);
+      throw err;
     }
 
-    this.transition(nodeId, 'CLAIMED');
+    this.event('node.claimed', nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
+    return { claimId, capability: capability.raw, worktree, branch, attempt, mode, expiresAt };
+  }
+
+  /** How long a claim may stay unsettled before a host dispatch counts as abandoned. */
+  claimTtlMs(node: GraphNode): number {
+    return node.worker.max_wall_clock_minutes * 60_000 + CLAIM_GRACE_MS;
+  }
+
+  /**
+   * End a claim for an infrastructure reason: the node returns to READY with
+   * its attempt refunded and an interruption counted, no failure fingerprint
+   * is recorded, and its leases are released. The worktree and branch are
+   * kept, so committed work survives. Idempotent: only the named claim is
+   * released, and only once.
+   */
+  releaseForInfrastructure(nodeId: string, claimId: string, reason: string): boolean {
+    const graph = this.graph();
+    let released = false;
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
-      if (rt) {
-        rt.claim = {
-          claim_id: claimId,
-          owner: this.owner,
-          worktree,
-          branch,
-          claimed_at: new Date().toISOString(),
-        };
-      }
-      return s;
+      if (!rt?.claim || rt.claim.claim_id !== claimId) return s;
+      released = true;
+      return applyNodeTransition(graph, s, nodeId, 'READY', { actor: this.owner, reason, refundAttempt: true });
     });
-
-    this.event('node.claimed', nodeId, { claim_id: claimId, worktree, branch });
-    return { claimId, worktree, branch };
+    releaseAllForNode(this.paths.featureDir, nodeId);
+    if (released) this.event('node.interrupted', nodeId, { claim_id: claimId, reason: reason.slice(0, 500) });
+    return released;
   }
 
   /**
@@ -286,7 +379,7 @@ export class Orchestrator {
    * already declare. Paths use forward slashes so the line reads the same in
    * every shell a worker might use.
    */
-  gateCommands(nodeId: string): NonNullable<SpawnRequest['gateCommands']> {
+  gateCommands(nodeId: string, capability: string): NonNullable<SpawnRequest['gateCommands']> {
     const node = this.node(nodeId);
     if (node.verification_commands.length === 0) return [];
     const launcher = mycelinkCliPath().replace(/\\/g, '/');
@@ -295,7 +388,18 @@ export class Orchestrator {
       .filter((gate) => node.required_evidence.includes(gate))
       .map((gate) => ({
         gate,
-        argv: ['node', launcher, 'tdd', gate, this.featureId, nodeId, '--control-root', controlRoot],
+        argv: [
+          'node',
+          launcher,
+          'tdd',
+          gate,
+          this.featureId,
+          nodeId,
+          '--control-root',
+          controlRoot,
+          '--capability',
+          capability,
+        ],
       }));
   }
 
@@ -477,7 +581,7 @@ export class Orchestrator {
     if (node.node_type === 'e2e-scenario') return await this.runE2ENode(nodeId);
 
     try {
-      const { claimId, worktree, branch } = this.claim(nodeId);
+      const { claimId, capability, worktree, branch } = this.claim(nodeId, { mode: 'adapter' });
       const packPath = this.writeContextPack(nodeId, claimId);
       const attempt = this.state().nodes[nodeId]?.attempts ?? 1;
 
@@ -502,10 +606,11 @@ export class Orchestrator {
           this.workspace.config.session_timeout_ms,
         ),
         stallMs: Math.max(30_000, Math.floor(node.worker.max_wall_clock_minutes * 60_000 * 0.4)),
-        gateCommands: this.gateCommands(nodeId),
+        gateCommands: this.gateCommands(nodeId, capability),
         env: {
           MYCELINK_CONTROL_ROOT: this.controlRoot,
           MYCELINK_BRANCH: branch ?? '',
+          [CAPABILITY_ENV]: capability,
           ...this.workerEnv,
         },
         replacesSessionId: previous?.session_id ?? null,
@@ -612,7 +717,8 @@ export class Orchestrator {
       return this.report(nodeId, 'DONE', sessionId, verification.detail, evidence);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      if (err instanceof ResourceBusyError) {
+      if (err instanceof ResourceBusyError || err instanceof NotSchedulableError) {
+        // Nothing was claimed (or the claim was already released): no failure.
         return this.report(nodeId, 'RETRY', sessionId, detail, evidence);
       }
       return this.failAttempt(nodeId, sessionId, detail, evidence);
@@ -628,7 +734,7 @@ export class Orchestrator {
   private runCandidateNode(nodeId: string): NodeRunReport {
     const evidence: EvidenceRecord[] = [];
     try {
-      this.claim(nodeId);
+      this.claim(nodeId, { mode: 'controller' });
       const repoRefs = this.integrationRefs();
       if (repoRefs.length === 0) {
         return this.failAttempt(nodeId, null, 'NO_INTEGRATION_BRANCHES', evidence);
@@ -758,7 +864,7 @@ export class Orchestrator {
     const evidence: EvidenceRecord[] = [];
     const node = this.node(nodeId);
     try {
-      this.claim(nodeId);
+      this.claim(nodeId, { mode: 'controller' });
       const state = this.state();
       const candidateId = state.current_candidate;
       if (candidateId === null) {

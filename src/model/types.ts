@@ -175,13 +175,7 @@ export interface EvidenceRecord {
 export interface NodeRuntime {
   state: NodeState;
   attempts: number;
-  claim: {
-    claim_id: string;
-    owner: string;
-    worktree: string | null;
-    branch: string | null;
-    claimed_at: string;
-  } | null;
+  claim: NodeClaim | null;
   evidence: Partial<Record<EvidenceKind, EvidenceRecord>>;
   failure_counts: Record<string, number>;
   last_failure_fingerprint: string | null;
@@ -189,6 +183,38 @@ export interface NodeRuntime {
   blocked_reason: string | null;
   usage: UsageTotals;
   updated_at: string;
+  /** Attempts ended by infrastructure (adapter missing, host interrupted), not by the task. */
+  interruptions?: number;
+  /** Receipt of the last settled claim, so a repeated settle is answered, not re-run. */
+  last_settlement?: SettlementReceipt | null;
+}
+
+export type ClaimMode = 'adapter' | 'host' | 'manual' | 'controller';
+
+export interface NodeClaim {
+  claim_id: string;
+  owner: string;
+  worktree: string | null;
+  branch: string | null;
+  claimed_at: string;
+  /** SHA-256 of the claim capability. The raw capability is never stored. */
+  capability_sha256?: string;
+  /** Who executes the attempt: a spawned adapter session, the host's Agent tool, a person, or the controller. */
+  mode?: ClaimMode;
+  attempt?: number;
+  /** After this, an unsettled host dispatch counts as abandoned. */
+  expires_at?: string;
+  /** Set while a settle is verifying, so a second settle cannot run concurrently. */
+  settling?: { pid: number; host: string; started_at: string } | null;
+}
+
+export interface SettlementReceipt {
+  capability_sha256: string;
+  claim_id: string;
+  outcome: string;
+  state: NodeState;
+  detail: string;
+  settled_at: string;
 }
 
 export interface UsageTotals {
