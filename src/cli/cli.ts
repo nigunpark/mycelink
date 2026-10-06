@@ -80,7 +80,7 @@ const USAGE = `mycelink <group> <command> [options]
   controller open [--authority <current>|--takeover]  mint (first time) or rotate the controller key that controller-only commands need
   init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
-  feature init|verify|status|cancel          feature lifecycle
+  feature init|verify|status|cancel|supersede  feature lifecycle (supersede <old> --by <new> --reason <why>)
   graph compile|validate|ready|import|adapters  portfolio graph operations
   node claim|begin|block|verify|finalize|release|invalidate|rework  node lifecycle
   node rework <feature> <node> --reason <why> [--decision <id>]  reopen DONE work found wrong, inside the same feature
@@ -117,7 +117,7 @@ export const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
   deliver: '*',
   repo: new Set(['register', 'lock']),
   graph: new Set(['compile', 'import']),
-  feature: new Set(['init', 'cancel']),
+  feature: new Set(['init', 'cancel', 'supersede']),
   node: new Set(['claim', 'block', 'invalidate', 'rework', 'release', 'verify']),
   session: new Set(['spawn', 'reconcile', 'stop']),
   evidence: new Set(['migrate']),
@@ -520,7 +520,7 @@ function repoGroup(args: ParsedArgs, io: CliIo): number {
 
 function featureGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'init|verify|status|cancel');
+  const sub = requirePositional(args, 1, 'init|verify|status|cancel|supersede');
   const featureId = requirePositional(args, 2, 'feature-id');
   const paths = featurePaths(controlRoot, featureId);
 
@@ -636,6 +636,63 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
       releaseAllForNode(paths.featureDir, nodeId);
     }
     emit(io, args, { feature_id: featureId, cancelled: true }, () => `${featureId} cancelled; claims and leases released.`);
+    return 0;
+  }
+
+  if (sub === 'supersede') {
+    assertControllerRole(args, 'feature supersede');
+    // Prefer `node rework` inside the feature. When a feature really is
+    // replaced, the replacement is explicit and the old one must be at rest.
+    const by = args.flags['by'];
+    const reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'].trim() : '';
+    if (typeof by !== 'string' || by === featureId || loadState(featurePaths(controlRoot, by).featureDir) === null) {
+      throw new Error(`SUPERSEDING_FEATURE_MISSING: --by must name another initialised feature (got ${typeof by === 'string' ? by : 'nothing'}).`);
+    }
+    if (reason === '') throw new Error('SUPERSEDE_REASON_REQUIRED: say why the feature is replaced (--reason).');
+    // No cycle: the replacement must not itself be (transitively) replaced by this one.
+    const seen = new Set<string>([featureId]);
+    for (let next: string | null | undefined = by; typeof next === 'string'; ) {
+      if (seen.has(next)) throw new Error(`SUPERSEDE_CYCLE: ${by} is already superseded, directly or not, by ${featureId}.`);
+      seen.add(next);
+      next = loadState(featurePaths(controlRoot, next).featureDir)?.data.superseded_by;
+    }
+    const current = loadState(paths.featureDir)?.data;
+    if (!current) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+    if (current.superseded_by === by) {
+      emit(io, args, { feature_id: featureId, superseded_by: by, idempotent: true }, () => `${featureId} is already superseded by ${by}.`);
+      return 0;
+    }
+    if (typeof current.superseded_by === 'string') {
+      throw new Error(`ALREADY_SUPERSEDED: ${featureId} is superseded by ${current.superseded_by}.`);
+    }
+    const busy = [
+      ...Object.entries(current.nodes)
+        .filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state))
+        .map(([id, rt]) => `${id}=${rt.state}`),
+      ...Object.entries(leaseStatus(paths.featureDir))
+        .filter(([, st]) => st.held > 0)
+        .map(([resource]) => `lease ${resource}`),
+      ...liveSessions(paths.sessionsRegistry).map((x) => `session ${x.session_id}`),
+    ];
+    if (busy.length > 0) {
+      throw new Error(`FEATURE_NOT_QUIESCENT: ${featureId} still has work in flight (${busy.join(', ')}); settle, reconcile or cancel it first.`);
+    }
+    mutateState(paths.featureDir, (s) => {
+      if (s.feature_state !== 'COMPLETED') s.feature_state = 'CANCELLED';
+      s.blocked_reason = `superseded by ${by}: ${reason}`;
+      s.superseded_by = by;
+      s.superseded_reason = reason;
+      s.superseded_at = new Date().toISOString();
+      return s;
+    });
+    appendEvent(paths.events, {
+      idempotency_key: `feature.superseded:${featureId}:${by}`,
+      type: 'feature.superseded',
+      actor: 'mycelink',
+      feature_id: featureId,
+      data: { superseded_by: by, reason: reason.slice(0, 500) },
+    });
+    emit(io, args, { feature_id: featureId, superseded_by: by, idempotent: false }, () => `${featureId} is superseded by ${by}; it is history now.`);
     return 0;
   }
 

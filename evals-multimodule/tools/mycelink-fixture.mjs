@@ -219,8 +219,41 @@ function scenarios(control) {
   return { nodes };
 }
 
+/**
+ * A defect a worker can ship that its own node checks do not see: the CLI's
+ * `refunds list` prints nothing. The module suite and the node's targeted
+ * test pass; QA's acceptance suite (L2) does not.
+ */
+const DEFECTS = {
+  cli: (impl) => {
+    const file = 'src/commands/refunds.mjs';
+    const good = impl[file];
+    const bad = good.replace(/return \(await request\('GET', `\/orders\/\$\{orderIdArg\(positionals\)\}\/refunds`\)\)\.refunds;/, 'void positionals;\n    return [];');
+    if (bad === good) throw new Error('cli defect did not apply');
+    return { ...impl, [file]: bad };
+  },
+};
+
+/** The repair of that defect: the node's own test now pins `refunds list`, then the reference implementation. */
+function repairFor(module) {
+  if (module !== 'cli') throw new Error(`no repair scripted for ${module}`);
+  const [redFile, redBody] = RED_TESTS.cli;
+  const listTest = `
+test('refunds list returns the refunds the API reports', async () => {
+  const { refunds } = await import('../src/commands/refunds.mjs');
+  const listed = await refunds.list({ positionals: ['ord_1'], flags: {} }, async (method, path) => {
+    assert.equal(method, 'GET');
+    assert.equal(path, '/orders/ord_1/refunds');
+    return { refunds: [{ refund_id: 'rf_1' }] };
+  });
+  assert.deepEqual(listed, [{ refund_id: 'rf_1' }]);
+});
+`;
+  return { tests: { [redFile]: redBody + listTest }, impl: { 'src/commands/refunds.mjs': workFor('cli').impl['src/commands/refunds.mjs'] } };
+}
+
 /** What each module's worker writes: the RED test, then the reference implementation. */
-function workFor(module) {
+function workFor(module, defects = []) {
   const coreSrc = { ...filesOf(join(LIB, 'ledgerline', 'core', 'src')), ...filesOf(join(LIB, 'reference-solution', 'core', 'src')) };
   const corePkg = JSON.parse(readFileSync(join(LIB, 'reference-solution', 'core', 'package.json'), 'utf8'));
   const vendored = Object.fromEntries(Object.entries(coreSrc).map(([k, v]) => [`vendor/ledger-core/${k}`, v]));
@@ -228,6 +261,7 @@ function workFor(module) {
   const [redFile, redBody] = RED_TESTS[module];
   let impl = filesOf(join(LIB, 'reference-solution', module));
   if (CONSUMERS.includes(module)) impl = { ...impl, ...vendored, 'vendor/ledger-core.lock.json': JSON.stringify(lock, null, 2) + '\n' };
+  if (defects.includes(module)) impl = DEFECTS[module](impl);
   return { tests: { [redFile]: redBody }, impl };
 }
 
@@ -241,9 +275,9 @@ function writeAll(root, files) {
 }
 
 /** The module-worker subagent, deterministically: one ticket, real TDD, one result. */
-function fulfilTicket(ticket, control) {
+function fulfilTicket(ticket, control, work = workFor) {
   const module = ticket.repository;
-  const { tests, impl } = workFor(module);
+  const { tests, impl } = work(module);
   const gate = (name) => {
     const line = ticket.gate_commands.find((g) => g.gate === name)?.command;
     if (!line) throw new Error(`ticket for ${ticket.node_id} offers no ${name} gate`);
@@ -276,11 +310,11 @@ function fulfilTicket(ticket, control) {
 }
 
 /** The bounded host loop /mycelink:run describes: dispatch -> Agent -> settle. */
-function hostLoop(control, key, env, log) {
+function hostLoop(control, key, env, log, work = workFor) {
   for (let i = 0; i < 20; i++) {
     const d = JSON.parse(mycelink(['dispatch', FEATURE, '--control-root', control, '--authority', key, '--json'], { env, allowFail: true }).stdout);
     if (d.status !== 'DISPATCHED') return d;
-    fulfilTicket(d.ticket, control);
+    fulfilTicket(d.ticket, control, work);
     const s = mycelink(['settle', FEATURE, d.ticket.node_id, '--capability', d.ticket.capability, '--control-root', control, '--json'], { env, allowFail: true });
     const report = JSON.parse(s.stdout);
     log(`settle ${d.ticket.node_id}: ${report.outcome}`);
@@ -289,7 +323,7 @@ function hostLoop(control, key, env, log) {
   return { status: 'MAX_ITERATIONS' };
 }
 
-export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' } = {}) {
+export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host', defects = [] } = {}) {
   if (mode !== 'host' && mode !== 'adapter') throw new Error(`unknown mode ${mode}; expected host | adapter`);
   if (mode === 'adapter' && !existsSync(FAKE_CLAUDE)) throw new Error(`fake Claude executable missing: ${FAKE_CLAUDE}`);
   scaffold(ws, 'existing-cold', { runTests: false });
@@ -328,7 +362,7 @@ export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' }
 
   let report;
   if (mode === 'host') {
-    report = hostLoop(control, key, env, log);
+    report = hostLoop(control, key, env, log, (module) => workFor(module, defects));
     report.stop_reason = report.status;
   } else {
     const run = mycelink(['orchestrate', 'run', FEATURE, '--control-root', control, '--authority', key, '--json', '--max-cycles', '20'], { env, allowFail: true });
@@ -347,6 +381,38 @@ export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' }
   const delivery = JSON.parse(mycelink(['deliver', FEATURE, '--control-root', control, '--authority', key, '--json'], { env }).stdout);
   log(`deliver: ${delivery.status}`);
   return { control, report, delivery, authority: key };
+}
+
+/**
+ * Repair a delivered feature in place, as /mycelink:run documents: rework
+ * the node the failure is attributed to, dispatch and settle it again from
+ * the current integration state, let the candidate build cut a new
+ * candidate over every module, and deliver it. No new feature id.
+ */
+export function reworkAndRedeliver(built, { module, reason, log = () => {} }) {
+  const { control, authority: key } = built;
+  const node = nodeId(module);
+  const rework = JSON.parse(mycelink(['node', 'rework', FEATURE, node, '--reason', reason, '--control-root', control, '--authority', key, '--json']).stdout);
+  log(`rework ${node}: reopened ${rework.reopened.join(', ')}`);
+  const report = hostLoop(control, key, {}, log, (m) => (m === module ? repairFor(m) : workFor(m)));
+  if (report.status !== 'ALL_SETTLED') throw new Error(`rework run stopped with ${report.status}: ${report.detail ?? ''}`);
+  git(control, ['add', '--all']);
+  git(control, ['commit', '--quiet', '--allow-empty', '-m', `${FEATURE}: rework ${module}`], { time: Date.parse('2026-10-01T12:00:00Z') });
+  const delivery = JSON.parse(mycelink(['deliver', FEATURE, '--control-root', control, '--authority', key, '--json']).stdout);
+  log(`deliver: ${delivery.status}`);
+  return { rework, report, delivery };
+}
+
+/** Plan and initialise a second feature over the same modules (the follow-up-feature anti-pattern), committed. */
+export function planSecondFeature(built, id) {
+  const { control, authority: key } = built;
+  const dir = join(control, 'features', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'PRD.md'), `# ${id}\n\nA follow-up feature.\n`);
+  writeFileSync(join(dir, 'PORTFOLIO-GRAPH.yaml'), JSON.stringify(graph(), null, 2).replaceAll(FEATURE, id) + '\n');
+  mycelink(['feature', 'init', id, '--control-root', control, '--authority', key, '--json']);
+  git(control, ['add', '--all']);
+  git(control, ['commit', '--quiet', '-m', `${id}: planned`], { time: Date.parse('2026-10-01T13:00:00Z') });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

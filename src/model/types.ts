@@ -319,6 +319,13 @@ export interface FeatureState_ {
   accepted_deliveries?: Record<string, string>;
   /** Controller-authorized reworks within this feature, oldest first. */
   reworks?: ReworkRecord[];
+  /**
+   * The feature that replaced this one (`feature supersede`). A superseded
+   * feature is quiescent history: never the delivered feature.
+   */
+  superseded_by?: string | null;
+  superseded_reason?: string;
+  superseded_at?: string;
 }
 
 export interface Problem {

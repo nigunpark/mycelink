@@ -21,6 +21,10 @@ export function featureVerifyProblems(controlRoot: string, featureId: string): s
     return problems;
   }
   const state = doc.data;
+  if (typeof state.superseded_by === 'string') {
+    // History, not a delivery: whatever else holds, it is not complete.
+    problems.push(`SUPERSEDED: by ${state.superseded_by}${state.superseded_reason ? ` (${state.superseded_reason})` : ''}`);
+  }
   if (state.graph_hash !== validation.graphHash) {
     problems.push(
       `GRAPH_DRIFT: STATE.json was created for graph ${state.graph_hash.slice(0, 12)} but the graph now hashes to ${validation.graphHash.slice(0, 12)}`,

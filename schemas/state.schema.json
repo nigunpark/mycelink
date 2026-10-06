@@ -67,6 +67,9 @@
     "pending_decisions": { "type": "array", "items": { "type": "string" } },
     "candidates": { "type": "array", "items": { "type": "string" } },
     "current_candidate": { "type": ["string", "null"] },
+    "superseded_by": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
+    "superseded_reason": { "type": "string", "minLength": 1 },
+    "superseded_at": { "type": "string" },
     "reworks": {
       "type": "array",
       "items": {

@@ -45,6 +45,8 @@ const CASE_SCENARIO = {
   'existing-refunds-informed': 'existing-informed',
 };
 const LIVE_SESSION_STATUSES = new Set(['spawning', 'working', 'stalled']);
+/** Node states that hold a claim (Mycelink's IN_FLIGHT_STATES). */
+const IN_FLIGHT_STATES = new Set(['CLAIMED', 'RED_PENDING', 'RED_VERIFIED', 'GREEN_PENDING', 'GREEN_VERIFIED', 'REFACTOR_VERIFIED', 'REGRESSION_VERIFIED', 'REVIEW_VERIFIED', 'INTEGRATED']);
 
 // ------------------------------------------------------------ helpers ----
 
@@ -329,7 +331,8 @@ function verifyOrchestration(workspace, bin, result) {
 
   const deliveredHeads = Object.fromEntries(MODULES.map((m) => [m, result.evidence.modules?.[m]?.head ?? null]));
   const moduleByPath = Object.fromEntries(MODULES.map((m) => [pathKey(resolve(workspace, 'repos', m)), m]));
-  let anyComplete = false;
+  /** Features not superseded: exactly one may exist, and it must be the complete delivery. */
+  const current = [];
 
   for (const { root, id } of features) {
     const tag = `${id}`;
@@ -343,12 +346,21 @@ function verifyOrchestration(workspace, bin, result) {
       s.check(`state-readable:${tag}`, false, error.message);
       continue;
     }
+    // An explicitly superseded feature (`mycelink feature supersede`) whose
+    // replacement exists is history: its checks are reported as warnings and
+    // it must be fully at rest. Anything else is a current feature.
+    const supersededBy =
+      typeof state.superseded_by === 'string' && features.some((x) => x.root === root && x.id === state.superseded_by) ? state.superseded_by : null;
+    if (typeof state.superseded_by === 'string' && supersededBy === null) {
+      s.check(`superseded-target:${tag}`, false, `superseded_by names ${state.superseded_by}, which is not a feature of this control repository`);
+    }
+    const t = supersededBy ? new Section() : s;
     const nodes = Object.entries(state.nodes ?? {});
     f.feature_state = state.feature_state;
     f.node_states = Object.fromEntries(nodes.map(([n, r]) => [n, r.state]));
     f.current_candidate = state.current_candidate ?? null;
     const allDone = nodes.length > 0 && nodes.every(([, r]) => r.state === 'DONE' || r.state === 'EXCLUDED');
-    const okNodes = s.check(`nodes-done:${tag}`, allDone, `${nodes.length} node(s): ${nodes.map(([n, r]) => `${n}=${r.state}`).join(', ')}`);
+    const okNodes = t.check(`nodes-done:${tag}`, allDone, `${nodes.length} node(s): ${nodes.map(([n, r]) => `${n}=${r.state}`).join(', ')}`);
 
     // Evidence files referenced by STATE.json must exist.
     const missing = [];
@@ -361,11 +373,11 @@ function verifyOrchestration(workspace, bin, result) {
       if (r.state === 'DONE' && Object.keys(r.evidence ?? {}).length === 0) missing.push(`${n}:no-evidence`);
     }
     f.evidence_records = evidenceCount;
-    s.check(`evidence-files:${tag}`, missing.length === 0 && evidenceCount > 0, missing.length ? `missing: ${missing.join(', ')}` : `${evidenceCount} evidence record(s) with output on disk`);
+    t.check(`evidence-files:${tag}`, missing.length === 0 && evidenceCount > 0, missing.length ? `missing: ${missing.join(', ')}` : `${evidenceCount} evidence record(s) with output on disk`);
 
     const verify = mycelink(bin, ['feature', 'verify', id, '--control-root', root, '--json']);
     f.feature_verify = verify.json;
-    const okVerify = s.check(`feature-verify:${tag}`, verify.code === 0 && verify.json?.ok === true, verify.json ? `problems: ${JSON.stringify(verify.json.problems)}` : `exit ${verify.code}: ${verify.stderr.slice(0, 300)}`);
+    const okVerify = t.check(`feature-verify:${tag}`, verify.code === 0 && verify.json?.ok === true, verify.json ? `problems: ${JSON.stringify(verify.json.problems)}` : `exit ${verify.code}: ${verify.stderr.slice(0, 300)}`);
 
     // Leases: strict — any recorded lease is a leak, expired or not.
     let leases = [];
@@ -378,7 +390,7 @@ function verifyOrchestration(workspace, bin, result) {
     f.leases = leases;
     // Strict: an unreleased lease is a leak even when its holder has exited
     // (Mycelink's own `feature verify` treats dead-holder leases as reclaimable).
-    const okLeases = s.check(
+    const okLeases = t.check(
       `no-leaked-leases:${tag}`,
       leases.length === 0,
       leases.length
@@ -395,15 +407,15 @@ function verifyOrchestration(workspace, bin, result) {
     }
     const live = Object.values(sessions).filter((x) => LIVE_SESSION_STATUSES.has(x.status) || (x.pid && !x.finished_at && pidAlive(x.pid)));
     f.sessions = { total: Object.keys(sessions).length, live: live.map((x) => x.session_id ?? '?') };
-    const okSessions = s.check(`no-live-sessions:${tag}`, live.length === 0, `${f.sessions.total} session(s), ${live.length} live`);
+    const okSessions = t.check(`no-live-sessions:${tag}`, live.length === 0, `${f.sessions.total} session(s), ${live.length} live`);
 
     // Candidate: integrity, coverage of every module, and equality with what was delivered.
     let okCandidate = false;
-    if (s.check(`candidate-recorded:${tag}`, Boolean(state.current_candidate), `current candidate ${state.current_candidate ?? '(none)'}`)) {
+    if (t.check(`candidate-recorded:${tag}`, Boolean(state.current_candidate), `current candidate ${state.current_candidate ?? '(none)'}`)) {
       const file = join(featureDir, 'candidates', `${state.current_candidate}.yaml`);
       const cv = mycelink(bin, ['candidate', 'verify', id, state.current_candidate, '--control-root', root, '--json']);
       f.candidate_verify = cv.json;
-      const okCv = s.check(`candidate-verify:${tag}`, cv.code === 0 && cv.json?.ok === true, cv.json ? `problems: ${JSON.stringify(cv.json.problems ?? [])}` : `exit ${cv.code}: ${cv.stderr.slice(0, 300)}`);
+      const okCv = t.check(`candidate-verify:${tag}`, cv.code === 0 && cv.json?.ok === true, cv.json ? `problems: ${JSON.stringify(cv.json.problems ?? [])}` : `exit ${cv.code}: ${cv.stderr.slice(0, 300)}`);
       const audit = mycelink(bin, ['repo', 'audit', '--control-root', root, '--json']);
       const pathOf = Object.fromEntries((audit.json?.repositories ?? []).map((r) => [r.name, pathKey(r.path)]));
       const bound = existsSync(file) ? candidateRepositories(readFileSync(file, 'utf8')) : {};
@@ -414,20 +426,21 @@ function verifyOrchestration(workspace, bin, result) {
         if (mod) boundModules[mod] = { repo: repoName, sha: rec.sha };
       }
       const covered = MODULES.filter((m) => boundModules[m]);
-      const okCover = s.check(`candidate-binds-every-module:${tag}`, covered.length === MODULES.length, `candidate binds ${covered.join(', ') || 'nothing'} of ${MODULES.join(', ')}`);
+      const okCover = t.check(`candidate-binds-every-module:${tag}`, covered.length === MODULES.length, `candidate binds ${covered.join(', ') || 'nothing'} of ${MODULES.join(', ')}`);
       const matches = [];
       const mismatches = [];
       for (const m of covered) {
         const repo = join(workspace, 'repos', m);
         const sha = boundModules[m].sha;
-        const same = deliveredHeads[m] && /^[0-9a-f]{40}$/.test(sha ?? '') && treeOf(repo, sha) !== null && treeOf(repo, sha) === treeOf(repo, deliveredHeads[m]);
+        // Delivery fast-forwards each base to exactly the candidate commit.
+        const same = Boolean(deliveredHeads[m]) && /^[0-9a-f]{40}$/.test(sha ?? '') && treeOf(repo, sha) !== null && sha === deliveredHeads[m];
         (same ? matches : mismatches).push(`${m}:${String(sha).slice(0, 12)}${same ? '' : `≠${String(deliveredHeads[m]).slice(0, 12)}`}`);
       }
       f.candidate_matches_delivery = { matches, mismatches };
-      const okMatch = s.check(
+      const okMatch = t.check(
         `candidate-equals-delivery:${tag}`,
         covered.length > 0 && mismatches.length === 0,
-        mismatches.length ? `delivered trees differ from the candidate: ${mismatches.join(', ')}` : `delivered trees equal the candidate's bound SHAs (${matches.join(', ')})`,
+        mismatches.length ? `delivered heads differ from the candidate: ${mismatches.join(', ')}` : `delivered heads are the candidate's bound SHAs (${matches.join(', ')})`,
       );
       okCandidate = okCv && okCover && okMatch;
     }
@@ -435,7 +448,18 @@ function verifyOrchestration(workspace, bin, result) {
     const budget = mycelink(bin, ['loop', 'budget', id, '--control-root', root, '--json']);
     f.usage = budget.json?.usage ?? null;
     orch.usage = f.usage;
-    if (okNodes && okVerify && okLeases && okSessions && okCandidate) anyComplete = true;
+    const inFlight = nodes.filter(([, r]) => r.claim || IN_FLIGHT_STATES.has(r.state)).map(([n]) => n);
+    if (supersededBy) {
+      f.superseded_by = supersededBy;
+      for (const c of t.checks) s.checks.push({ ...c, id: `history:${c.id}`, severity: 'warning' });
+      s.check(
+        `superseded-quiescent:${tag}`,
+        okLeases && okSessions && inFlight.length === 0,
+        `superseded by ${supersededBy}; ${inFlight.length ? `in flight: ${inFlight.join(', ')}` : okLeases && okSessions ? 'at rest' : 'a lease or session is still held'}`,
+      );
+    } else {
+      current.push({ id, complete: okNodes && okVerify && okLeases && okSessions && okCandidate });
+    }
   }
 
   // Worker/integration worktrees must not hold uncommitted work.
@@ -453,7 +477,17 @@ function verifyOrchestration(workspace, bin, result) {
     const dirty = status.split('\n').filter((l) => l.trim() !== '');
     s.check(`control-repo-committed:${root}`, dirty.length === 0, dirty.length ? `${dirty.length} uncommitted path(s) in the control repository` : 'control repository clean', { severity: 'warning' });
   }
-  s.check('a-feature-is-complete', anyComplete, anyComplete ? 'at least one feature is fully verified with a delivered candidate' : 'no feature is fully verified');
+  s.check(
+    'exactly-one-current-feature',
+    current.length === 1,
+    `${current.length} current (not superseded) feature(s): ${current.map((c) => c.id).join(', ') || 'none'}`,
+  );
+  const complete = current.length === 1 && current[0].complete;
+  s.check(
+    'a-feature-is-complete',
+    complete,
+    complete ? `the current feature ${current[0].id} is fully verified with a delivered candidate` : `no single current feature is fully verified (${current.map((c) => `${c.id}:${c.complete ? 'complete' : 'incomplete'}`).join(', ') || 'none'})`,
+  );
   return { section: s, present: true };
 }
 

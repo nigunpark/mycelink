@@ -26,7 +26,14 @@
  *      and informed prompts are identical;
  *  10. git-safe classifies .git, commondir, config and info/attributes through
  *      a single open descriptor (no stat-then-read race) and fails closed on
- *      redirected, non-regular or missing git metadata.
+ *      redirected, non-regular or missing git metadata;
+ *  11. a defect found by QA's suite after delivery is repaired inside the
+ *      same feature (node rework -> dispatch -> settle -> new candidate over
+ *      every module -> deliver) and verifies as one complete feature; a
+ *      second, unsuperseded feature is rejected, and an explicitly
+ *      superseded, quiescent one is reported as history only;
+ *  12. the plugin's phase commands hand control back instead of stopping
+ *      after the PRD or the plan, and /mycelink:run chains every phase.
  *
  *   node evals-multimodule/tools/selftest.mjs [--write-baseline] [--keep] [--json <file>]
  *
@@ -480,6 +487,58 @@ try {
       record('mycelink: delivery that drifted from the candidate is rejected', v.code === 1 && v.json?.completion?.ok === true && Boolean(failedCheck(v, `candidate-equals-delivery:${FEATURE}`)));
     }
 
+    // ------- 11. repair inside the same feature, and superseded history ----
+    const { reworkAndRedeliver, planSecondFeature } = await import(pathToFileURL(join(TOOLS, 'mycelink-fixture.mjs')).href);
+    const rws = freshDir('mycelink-rework');
+    let flawed = null;
+    try {
+      flawed = buildOrchestratedWorkspace(rws, { mode: 'host', defects: ['cli'] });
+    } catch (error) {
+      record('rework: a delivery with a CLI defect its node checks miss is built', false, error.message.split('\n')[0]);
+    }
+    if (flawed) {
+      const qa = await runAcceptance({ workspace: rws, out: join(rws, 'acceptance-results') });
+      const failing = qa.acceptance?.cases.filter((c) => !c.ok).map((c) => c.name.split(' ')[0]) ?? [];
+      record('rework: the defect passes Mycelink acceptance but fails QA (L2 only)', flawed.delivery.status === 'ACCEPTED' && qa.verdict === 'FAIL' && failing.join() === 'L2', `deliver ${flawed.delivery.status}, QA failing: ${failing.join(',')}`);
+      let repaired = null;
+      try {
+        repaired = reworkAndRedeliver(flawed, { module: 'cli', reason: 'QA L2: `ledger refunds list` prints [] instead of the refunds' });
+      } catch (error) {
+        record('rework: the CLI node is reworked, settled and redelivered in the same feature', false, error.message.split('\n')[0]);
+      }
+      if (repaired) {
+        record(
+          'rework: the CLI node is reworked, settled and redelivered in the same feature',
+          repaired.rework.reopened.join() === `${FEATURE}.cli.refunds.impl,${FEATURE}.release.candidate.build` && repaired.delivery.status === 'ACCEPTED' && repaired.delivery.candidate_id === `${FEATURE}-C002`,
+          `reopened ${repaired.rework.reopened.join(',')}; ${repaired.delivery.candidate_id} ${repaired.delivery.status}`,
+        );
+        spawnSync(process.execPath, [join(rws, 'acceptance', 'run.mjs')], { cwd: rws, encoding: 'utf8', windowsHide: true });
+        let v = verifier(rws, ['--require-mycelink']);
+        const f = v.json?.evidence?.mycelink?.features ?? [];
+        record(
+          'rework: the verifier sees exactly one complete feature whose candidate binds every module at the delivered SHAs',
+          v.code === 0 && f.length === 1 && f[0].candidate_matches_delivery?.matches?.length === 4 && f[0].current_candidate === `${FEATURE}-C002`,
+          [...(v.json?.completion?.checks ?? []), ...(v.json?.orchestration?.checks ?? [])].filter((c) => !c.ok && c.severity !== 'warning').map((c) => c.id).join(',') || `exit ${v.code}`,
+        );
+
+        // The follow-up-feature anti-pattern: a second current feature fails.
+        planSecondFeature(flawed, 'LEDGER-1421');
+        v = verifier(rws, ['--require-mycelink']);
+        record('superseded: an extra feature that is not superseded is rejected', v.code === 1 && Boolean(failedCheck(v, 'exactly-one-current-feature')), failedCheck(v, 'exactly-one-current-feature')?.detail ?? `exit ${v.code}`);
+        const bin = join(TOOLS, '..', '..', 'bin', 'mycelink.mjs');
+        const sup = spawnSync(process.execPath, [bin, 'feature', 'supersede', 'LEDGER-1421', '--by', FEATURE, '--reason', 'folded back into the original feature', '--control-root', flawed.control, '--authority', flawed.authority, '--json'], { encoding: 'utf8' });
+        git(flawed.control, ['add', '--all']);
+        git(flawed.control, ['commit', '--quiet', '-m', 'LEDGER-1421 superseded'], { time: Date.parse('2026-10-01T14:00:00Z') });
+        v = verifier(rws, ['--require-mycelink']);
+        const history = (v.json?.orchestration?.checks ?? []).filter((c) => c.id.startsWith('history:') && c.id.endsWith(':LEDGER-1421'));
+        record(
+          'superseded: an explicitly superseded, quiescent feature is history (warnings), and the run still verifies',
+          sup.status === 0 && v.code === 0 && history.length > 0 && history.every((c) => c.severity === 'warning') && (v.json?.orchestration?.checks ?? []).some((c) => c.id === 'superseded-quiescent:LEDGER-1421' && c.ok),
+          `supersede exit ${sup.status}; verifier exit ${v.code}`,
+        );
+      }
+    }
+
     // The optional standalone CLI adapter (nested fake `claude -p` workers).
     const aws = freshDir('mycelink-adapter');
     try {
@@ -492,6 +551,21 @@ try {
     } catch (error) {
       record('mycelink: standalone-adapter orchestration settles and delivers', false, error.message.split('\n')[0]);
     }
+  }
+
+  // ------------------ 12. phase commands hand control back to the run ----
+  {
+    const plugin = join(TOOLS, '..', '..');
+    const read = (rel) => readFileSync(join(plugin, rel), 'utf8').replace(/\r\n/g, '\n');
+    const prose = (t) => t.replace(/\*\*/g, '').replace(/\s+/g, ' ');
+    const phases = ['commands/init.md', 'commands/prd.md', 'commands/plan.md'];
+    const stopsUnconditionally = phases.filter((f) => /^Stop when the PRD is written|^Do not plan or implement|Do not start implementing\.?$/m.test(read(f)));
+    const handsBack = phases.filter((f) => /## When this is one phase of a run/.test(read(f)) && /do not stop/i.test(prose(read(f))) && /continue (immediately )?with/i.test(prose(read(f))));
+    record('phase chaining: init, PRD and plan never stop an end-to-end run', stopsUnconditionally.length === 0 && handsBack.length === phases.length, `stop: ${stopsUnconditionally.join(',') || '-'}; hand back: ${handsBack.join(',')}`);
+    const run = read('commands/run.md');
+    const chain = [...run.matchAll(/^### Phase \d+ — ([a-z]+)/gm)].map((m) => m[1]).join(' -> ');
+    record('phase chaining: /mycelink:run chains init -> prd -> plan -> dispatch -> settle -> candidate -> deliver', chain === 'init -> prd -> plan -> dispatch -> settle -> candidate -> deliver' && /do not stop between phases/i.test(prose(run)), chain);
+    record('phase chaining: /mycelink:run repairs with node rework, never a new feature id', run.includes('node rework $0 <node-id> --reason') && /never create a new or follow-up feature/i.test(prose(run)));
   }
 
   // ---------------------------------------------- 7. lock mutant ----
