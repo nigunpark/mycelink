@@ -274,7 +274,7 @@ mycelink deliver            FEAT-101 --control-root ../control --authority $KEY 
 
 # 6. A check that fails after a node was DONE (acceptance on the delivered
 #    commits, say) is repaired in the same feature, not a new feature id:
-mycelink node rework FEAT-101 <node-id> --reason "<failing check>" --control-root ../control --authority $KEY
+mycelink node rework FEAT-101 <node-id> --reason "<failing check: input, expected, actual>" --control-root ../control --authority $KEY
 #    ... then dispatch/settle again; the new candidate binds every repository; deliver.
 ```
 

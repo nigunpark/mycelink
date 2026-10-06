@@ -141,6 +141,18 @@ export function inFlightResources(
   return held;
 }
 
+/**
+ * Attempts the node has used against its current allowance: since its
+ * current rework generation began, or in all when it is not in a rework.
+ * Each approved rework (bounded in number) gets worker.max_attempts of its
+ * own; the lifetime count is never reset by it. A base past the lifetime
+ * count (attempts reset by a recorded decision) counts from zero.
+ */
+export function generationAttempts(runtime: Pick<FeatureState_['nodes'][string], 'attempts' | 'rework_brief'>): number {
+  const base = runtime.rework_brief?.attempt_base ?? 0;
+  return base <= runtime.attempts ? runtime.attempts - base : runtime.attempts;
+}
+
 function countInFlight(graph: PortfolioGraph, state: FeatureState_): number {
   let n = 0;
   for (const node of graph.nodes) {
@@ -161,11 +173,15 @@ function conflictWith(
   writerConcurrency: number,
 ): DeferredNode | null {
   const id = node.id;
-  if (runtime.attempts >= node.worker.max_attempts) {
+  const used = generationAttempts(runtime);
+  if (used >= node.worker.max_attempts) {
     return {
       node_id: id,
       reason: 'ATTEMPTS_EXHAUSTED',
-      detail: `attempts ${runtime.attempts} >= max_attempts ${node.worker.max_attempts}`,
+      detail:
+        used === runtime.attempts
+          ? `attempts ${runtime.attempts} >= max_attempts ${node.worker.max_attempts}`
+          : `attempts ${used} in rework generation ${runtime.rework_brief?.generation} >= max_attempts ${node.worker.max_attempts} (lifetime ${runtime.attempts})`,
     };
   }
 

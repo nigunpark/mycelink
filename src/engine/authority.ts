@@ -160,6 +160,22 @@ export function openControllerAuthority(
 }
 
 /**
+ * Whether `text` contains the current controller key anywhere, including
+ * inside a longer run of hex digits. Text handed to a worker is checked with
+ * this, so controller authority is never relayed to one.
+ */
+export function holdsControllerKey(controlRoot: string, text: string): boolean {
+  const record = readRecord(controlRoot);
+  if (record === null) return false;
+  for (const run of text.toLowerCase().match(/[0-9a-f]{64,}/g) ?? []) {
+    for (let i = 0; i + 64 <= run.length; i++) {
+      if (capabilityMatches(run.slice(i, i + 64), record.sha256)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Require positive controller authority for `operation`.
  *
  * A presented worker capability (flag or environment) is refused first, so

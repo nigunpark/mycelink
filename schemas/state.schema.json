@@ -222,6 +222,32 @@
             }
           }
         },
+        "rework_brief": {
+          "type": ["object", "null"],
+          "required": ["generation", "limit", "at", "reason", "reason_sha256", "decision_id", "acceptance_criteria", "evidence", "replaced", "attempt_base"],
+          "additionalProperties": false,
+          "properties": {
+            "generation": { "type": "integer", "minimum": 1 },
+            "limit": { "type": "integer", "minimum": 1 },
+            "at": { "type": "string" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "reason_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "decision_id": { "type": ["string", "null"] },
+            "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+            "evidence": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 200 } },
+            "replaced": {
+              "type": "object",
+              "required": ["integrated_sha", "candidate_id", "archived_ref"],
+              "additionalProperties": false,
+              "properties": {
+                "integrated_sha": { "type": ["string", "null"] },
+                "candidate_id": { "type": ["string", "null"] },
+                "archived_ref": { "type": ["string", "null"] }
+              }
+            },
+            "attempt_base": { "type": "integer", "minimum": 0 }
+          }
+        },
         "last_settlement": {
           "type": ["object", "null"],
           "required": ["capability_sha256", "claim_id", "outcome", "state", "detail", "settled_at"],

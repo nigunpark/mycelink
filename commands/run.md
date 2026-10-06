@@ -105,23 +105,41 @@ cancel this one to start over.
 1. Attribute the failure to the producer node that owns the failing
    behaviour (use the `integration-failure-attribution` skill; name the
    failing test, file or contract).
-2. `M node rework $0 <node-id> --reason "<failing check, test and why this node owns it>" --json --authority <key>`
+2. `M node rework $0 <node-id> --reason "<failing check, the exact input and expected vs actual result, and why this node owns it>" [--acceptance <AC-id,...>] [--evidence <relative-path,...>] --json --authority <key>`
+   The reason is the worker's only description of the defect (its own
+   suite was green when the work was found wrong), so state the failing
+   check precisely: for example "POST refund with a 201-char reason returned
+   202 instead of 400 VALIDATION_FAILED (AC-4); validation lives in
+   src/orders.mjs". It must be at most 2000 bytes, without control
+   characters, and never contain your controller key (`REWORK_REASON_*`).
+   The controller stores it as the node's rework brief and hands it to the
+   node's next workers inside their context pack, as data.
    It reopens that node and everything downstream of it (candidate build
    and E2E included), keeps the node's attempts, failures and evidence as
    history, archives its old branch and makes the current candidate stale.
    If it names a parked node (`REWORK_PARKED`), ask the user, record the
    decision, and pass `--decision <id>`. Repeating the same rework changes
    nothing.
-3. Go back to Phase 4. The node is dispatched from the current integration
-   state, its worker writes a failing test for the reported defect first,
-   and settle fences only the repair. Then a new candidate binds every
-   repository and Phase 7 delivers it.
+3. Go back to Phase 4 **in this same feature**. The node is dispatched from
+   the current integration state with the rework brief in its ticket
+   (`rework`) and prompt; its worker writes a focused failing regression
+   test from the brief first, and settle fences only the repair. Then a new
+   candidate binds every repository and Phase 7 delivers it.
+
+Each approved rework is a generation with its own attempt allowance (the
+node's `max_attempts`); lifetime attempts and failure fingerprints carry on.
+A worker that reports `INVALID_RED_EVIDENCE` inside a rework is a recorded,
+retryable failure: keep dispatching. The same failure twice parks the node
+BLOCKED, and the number of reworks per node is bounded (`REWORK_LIMIT`).
 
 A rework is refused, with nothing changed, when work is still in flight
-(`REWORK_IN_FLIGHT`: settle or reconcile first), when the node's attempt or
-rework budget is spent (`REWORK_BUDGET_EXHAUSTED`, `REWORK_LIMIT`), or when a
-delivered base branch moved past the integration branch
-(`REWORK_BASE_MOVED`). Report those to the user; do not work around them.
+(`REWORK_IN_FLIGHT`: settle or reconcile first), when the node's rework
+limit is spent (`REWORK_LIMIT`), when its reason or references are unusable
+(`REWORK_REASON_TOO_LONG`, `REWORK_REASON_INVALID`, `REWORK_REASON_UNSAFE`,
+`REWORK_REFERENCE_INVALID`: fix the reason and retry), or when a delivered
+base branch moved past the integration branch (`REWORK_BASE_MOVED`). Report
+the others to the user; do not work around them, never bypass the
+controller, and never start a new feature instead.
 
 ## Stop reasons
 

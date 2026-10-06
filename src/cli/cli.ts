@@ -84,7 +84,8 @@ const USAGE = `mycelink <group> <command> [options]
   feature init|verify|status|cancel|supersede  feature lifecycle (supersede <old> --by <new> --reason <why>)
   graph compile|validate|ready|import|adapters  portfolio graph operations
   node claim|begin|block|verify|finalize|release|invalidate|rework  node lifecycle
-  node rework <feature> <node> --reason <why> [--decision <id>]  reopen DONE work found wrong, inside the same feature
+  node rework <feature> <node> --reason <why> [--acceptance <AC,..>] [--evidence <path,..>] [--decision <id>]
+                                 reopen DONE work found wrong, inside the same feature; the reason goes to its next worker
   context pack <feature> <node>              write a bounded worker context pack
   session spawn|status|stop|reconcile        worker sessions
   evidence record|validate                   evidence registration
@@ -923,9 +924,16 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       // Repair within the same feature: never a follow-up feature id.
       const reason = args.flags['reason'];
       const decision = args.flags['decision'];
+      // Comma-separated: the acceptance criteria and evidence the failure points at.
+      const list = (name: string): string[] => {
+        const v = args.flags[name];
+        return typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter((x) => x !== '') : [];
+      };
       const report = orchestrator.rework(nodeId, {
         reason: typeof reason === 'string' ? reason : '',
         ...(typeof decision === 'string' ? { decisionId: decision } : {}),
+        acceptance: list('acceptance'),
+        evidence: list('evidence'),
       });
       emit(io, args, { ...report, next: 'dispatch' }, () =>
         [

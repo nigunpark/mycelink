@@ -310,12 +310,15 @@ export function applyNodeTransition(
       runtime.attempts = 0;
       runtime.failure_counts = {};
       runtime.last_failure_fingerprint = null;
+      if (runtime.rework_brief) runtime.rework_brief.attempt_base = 0;
     }
   }
 
   if (to === 'INTEGRATED' && options.integratedSha) {
     runtime.integrated_sha = options.integratedSha;
   }
+  // The rework is repaired; a later reopening has a reason of its own.
+  if (to === 'DONE' && runtime.rework_brief) runtime.rework_brief = null;
   if (to === 'INVALIDATED') {
     // RED is a historical fact: a test once proved the behaviour was missing,
     // and an upstream change does not undo that. Everything downstream of it
@@ -328,7 +331,8 @@ export function applyNodeTransition(
     if (JUSTIFIED_EXITS.has(from) || options.rework === true) {
       // A parked node keeps the history that parked it, and a reworked node
       // the history of the work found wrong: attempts and fingerprints
-      // travel through INVALIDATED, so neither buys a fresh retry budget.
+      // travel through INVALIDATED. A rework's own attempts are counted from
+      // its brief's attempt_base (scheduler/ready.ts), never by resetting them.
       runtime.blocked_reason = null;
     } else {
       // Invalidating finished or in-flight work means its inputs changed, so
@@ -338,6 +342,7 @@ export function applyNodeTransition(
       runtime.attempts = 0;
       runtime.failure_counts = {};
       runtime.last_failure_fingerprint = null;
+      if (runtime.rework_brief) runtime.rework_brief.attempt_base = 0;
     }
   }
 

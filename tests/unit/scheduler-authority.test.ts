@@ -97,6 +97,33 @@ describe('canSchedule', () => {
     expect(canSchedule(g, t, 'A', opts(t))).toMatchObject({ ok: false, reason: 'ATTEMPTS_EXHAUSTED' });
   });
 
+  it('counts the attempt budget per approved rework generation, never resetting lifetime attempts', () => {
+    const g = graphOf([node('A')]);
+    const t = state(g, {});
+    const a = t.nodes['A']!;
+    a.attempts = 2;
+    a.rework_brief = {
+      generation: 1,
+      limit: 2,
+      at: 'now',
+      reason: 'QA failed',
+      reason_sha256: '0'.repeat(64),
+      decision_id: null,
+      acceptance_criteria: [],
+      evidence: [],
+      replaced: { integrated_sha: null, candidate_id: null, archived_ref: null },
+      attempt_base: 1,
+    };
+    // One of this generation's two attempts used.
+    expect(canSchedule(g, t, 'A', opts(t))).toMatchObject({ ok: true });
+    a.attempts = 3;
+    expect(canSchedule(g, t, 'A', opts(t))).toMatchObject({ ok: false, reason: 'ATTEMPTS_EXHAUSTED' });
+    // A base past the lifetime count (attempts reset by a decision) never mints extra attempts.
+    a.attempts = 2;
+    a.rework_brief.attempt_base = 5;
+    expect(canSchedule(g, t, 'A', opts(t))).toMatchObject({ ok: false, reason: 'ATTEMPTS_EXHAUSTED' });
+  });
+
   it('accepts a node that is out of batch order but conflict-free', () => {
     const g = graphOf([node('A'), node('B', { repository: 'api' }), node('C', { allowed_paths: ['docs/**'] })]);
     const s = state(g, {}, 2);

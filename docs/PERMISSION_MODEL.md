@@ -122,8 +122,13 @@ session's permissions, and `mycelink settle` takes the result back.
 - A candidate pins the global configuration and its own feature's files. A
   verifier, scenario or contract stored under another feature's directory is
   not pinned; keep shared files outside `features/`.
-- `node rework` is controller-only and never a way to buy budget: the
-  reopened node keeps its attempts and failure fingerprints, a parked node is
+- `node rework` is controller-only and never a way to launder history: the
+  reopened node keeps its lifetime attempts and failure fingerprints (each
+  approved rework gets its own bounded allowance of `max_attempts`, counted
+  from the attempts at the rework, and the same failure twice still parks
+  it), its reason reaches the next worker only as a bounded, redacted,
+  hash-bound brief inside the context pack's data delimiters (refused if it
+  holds the controller key or control characters), a parked node is
   never its target (that needs a recorded decision), a parked dependent is
   reopened only with a recorded decision that is consumed once, the number of
   reworks per node is bounded, and it is refused while anything is in

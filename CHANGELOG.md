@@ -125,8 +125,24 @@ under **Breaking**.
   candidate-build/E2E node are reopened, the current candidate stops being
   current, and its branch is archived so it is re-dispatched from the
   current integration state. Refused while work is in flight, when a parked
-  node would be reopened without a decision, past its budget or rework
-  limit, or when a delivered base moved past the integration branch.
+  node would be reopened without a decision, past its rework limit, or when
+  a delivered base moved past the integration branch.
+- A rework's reason now reaches the worker. `node rework` stores it (with
+  optional `--acceptance` and `--evidence` references) as the node's
+  `rework_brief`: at most 2000 bytes, no control characters, redacted of
+  credential shapes, refused if it holds the controller key, bound to the
+  rework record by its SHA-256 and re-checked before every dispatch
+  (`REWORK_BRIEF_INVALID`). Tickets carry it as `rework` and the context
+  pack inside its data delimiters, and the worker prompt and skills require
+  a focused failing regression test from it before any production change.
+  Found by a real-model run where QA's "201-char reason accepted" never
+  reached the worker, which saw its own green suite and parked the node.
+- Each approved rework is a generation with its own allowance of
+  `max_attempts` attempts, counted from the lifetime attempts at the rework;
+  lifetime attempts, fingerprints and history are kept. A worker's
+  `INVALID_RED_EVIDENCE` (BLOCKED or RETRYABLE) inside a rework is a recorded,
+  retryable failure under one fingerprint, so the same mistake twice parks
+  the node. `REWORK_BUDGET_EXHAUSTED` is gone; `REWORK_LIMIT` bounds reworks.
 - `mycelink feature supersede <old> --by <new> --reason <why>`: an explicit,
   audited `superseded_by` for a feature at rest; a superseded feature never
   verifies as complete. The replacement must be usable (not superseded, not

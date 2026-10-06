@@ -28,6 +28,7 @@ import type {
   NodeState,
   PendingIntegration,
   PortfolioGraph,
+  ReworkBrief,
   ReworkHistoryEntry,
   ReworkRecord,
   SettlementReceipt,
@@ -87,11 +88,12 @@ import { createCandidate, loadCandidate } from '../git/candidate.js';
 import { expectedIntegrationHead, IntegrationBranchMovedError, portfolioRefs, trustedIntegrationHead } from './portfolio.js';
 import { withLock } from '../state/process-lock.js';
 import { FeatureBusyError, withFeatureLock } from './feature-lock.js';
+import { admitReworkReason, reasonSha256, reworkAcceptance, ReworkBriefError, reworkEvidence, verifiedReworkBrief } from './rework-brief.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { applyIntegration, DirtyWorktreeError, planIntegration, type IntegrateResult } from '../git/integrate.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
-import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
+import { buildContextPack, type ContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
 import { runVerification, verifierInvocation } from '../evidence/runner.js';
 import { appendEvent } from '../state/event-log.js';
@@ -200,6 +202,18 @@ export type ReworkReport = ReworkRecord & {
   /** Archive refs the reopened nodes' old branches were kept under. */
   archived_refs: string[];
 };
+
+export interface ReworkOptions {
+  reason: string;
+  decisionId?: string;
+  /** Acceptance criteria the failure is attributed to (the reason's own mentions are added). */
+  acceptance?: string[];
+  /** Relative references to the failure's evidence. */
+  evidence?: string[];
+}
+
+/** The fingerprint of a worker that could not produce a valid RED. */
+const INVALID_RED_FINGERPRINT = 'INVALID_RED_EVIDENCE';
 
 /** A rework that would be unsafe or unjustified; nothing was changed. */
 export class ReworkRefusedError extends Error {
@@ -330,6 +344,8 @@ export interface DispatchTicket {
   settle_command: string;
   context_pack_path: string;
   budget: { model: string; max_turns: number; max_wall_clock_minutes: number };
+  /** The rework brief the worker was given in its pack, when the node is being reworked. */
+  rework?: NonNullable<ContextPack['rework']>;
   prompt: string;
   resumed: boolean;
   result_present: boolean;
@@ -534,6 +550,8 @@ export class Orchestrator {
       }
       const check = canSchedule(graph, s, nodeId, { writerConcurrency: s.budget.max_writer_concurrency });
       if (!check.ok) throw new NotSchedulableError(nodeId, check.reason, check.detail);
+      // A rework brief that no longer matches its rework is never handed out.
+      verifiedReworkBrief(s, nodeId);
       let next = s;
       if (next.nodes[nodeId]?.state !== 'READY') {
         next = applyNodeTransition(graph, next, nodeId, 'READY', { actor: this.owner });
@@ -1118,6 +1136,10 @@ export class Orchestrator {
         // The claim was released with its attempt refunded by claim() itself.
         return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, detail, evidence);
       }
+      if (err instanceof ReworkBriefError) {
+        // Refused before the claim: nothing was charged, and nothing runs on it.
+        return this.report(nodeId, 'PRECONDITION_FAILED', sessionId, detail, evidence);
+      }
       return this.failAttempt(nodeId, sessionId, detail, evidence);
     }
   }
@@ -1154,6 +1176,21 @@ export class Orchestrator {
       });
       this.releaseClaim(nodeId);
       return this.report(nodeId, 'BUDGET_EXHAUSTED', sessionId, outcome.failureReason ?? '', evidence);
+    }
+
+    // Inside an approved rework, a worker that could not write a RED made a
+    // mistake the brief tells it how to fix; it did not find a blocker. The
+    // attempt is a recorded failure under one stable fingerprint, so a retry
+    // stays inside the generation's allowance and the same mistake again
+    // parks the node (max_same_failure).
+    const fingerprint = result?.failure_fingerprint ?? outcome.failureReason ?? null;
+    if (
+      (outcome.status === 'blocked' || outcome.status === 'failed') &&
+      fingerprint !== null &&
+      fingerprint.startsWith(INVALID_RED_FINGERPRINT) &&
+      (this.state().nodes[nodeId]?.rework_brief ?? null) !== null
+    ) {
+      return this.failAttempt(nodeId, sessionId, INVALID_RED_FINGERPRINT, evidence);
     }
 
     if (outcome.status === 'blocked') {
@@ -1403,6 +1440,7 @@ export class Orchestrator {
       } catch (err) {
         // Lost a race to another dispatcher, or a lease is busy: look again.
         if (err instanceof NotSchedulableError || err instanceof ResourceBusyError) continue;
+        if (err instanceof ReworkBriefError) return stop('PRECONDITION_FAILED', err.message);
         // The claim was already released with its attempt refunded.
         return stop('INFRASTRUCTURE_FAILURE', errorText(err));
       }
@@ -1588,6 +1626,7 @@ export class Orchestrator {
         max_turns: node.worker.max_turns,
         max_wall_clock_minutes: node.worker.max_wall_clock_minutes,
       },
+      ...(pack.rework !== undefined ? { rework: pack.rework } : {}),
       prompt: buildHostWorkerPrompt({
         pack,
         worktree: claim.worktree,
@@ -1919,7 +1958,7 @@ export class Orchestrator {
    * integration state and fenced to its own new delta. Repeating the same
    * rework before the node is DONE again changes nothing.
    */
-  rework(nodeId: string, options: { reason: string; decisionId?: string }): ReworkReport {
+  rework(nodeId: string, options: ReworkOptions): ReworkReport {
     // Never concurrently with a delivery of this feature (or a supersede).
     const lockDir = join(this.paths.featureDir, 'deliveries');
     mkdirSync(lockDir, { recursive: true });
@@ -1930,13 +1969,25 @@ export class Orchestrator {
     });
   }
 
-  private reworkLocked(nodeId: string, options: { reason: string; decisionId?: string }): ReworkReport {
-    const reason = options.reason.trim();
+  private reworkLocked(nodeId: string, options: ReworkOptions): ReworkReport {
     const decisionId = options.decisionId ?? null;
-    if (reason === '') throw new ReworkRefusedError('REWORK_REASON_REQUIRED', `${nodeId}: say why the node's DONE work is wrong (--reason).`);
+    if (options.reason.trim() === '') throw new ReworkRefusedError('REWORK_REASON_REQUIRED', `${nodeId}: say why the node's DONE work is wrong (--reason).`);
     const graph = this.graph();
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node) throw new Error(`Node "${nodeId}" is not in the graph.`);
+    // The reason is handed to the node's next workers: bounded, redacted and
+    // never carrying authority, or the rework is refused before anything changes.
+    let reason: string;
+    let acceptance: string[];
+    let evidenceRefs: string[];
+    try {
+      reason = admitReworkReason(options.reason, this.controlRoot);
+      acceptance = reworkAcceptance(graph, reason, options.acceptance ?? []);
+      evidenceRefs = reworkEvidence(options.evidence ?? []);
+    } catch (err) {
+      if (err instanceof ReworkBriefError) throw new ReworkRefusedError(err.code, `${nodeId}: ${err.message.slice(err.code.length + 2)}`);
+      throw err;
+    }
     if (node.repository === null || CONTROLLER_NODE_TYPES.has(node.node_type)) {
       throw new ReworkRefusedError(
         'REWORK_NOT_A_PRODUCER',
@@ -1985,12 +2036,6 @@ export class Orchestrator {
       throw new ReworkRefusedError(
         'REWORK_LIMIT',
         `${nodeId} was already reworked ${reworked} time(s), the limit (max_same_failure ${state.budget.max_same_failure}); report it instead.`,
-      );
-    }
-    if (runtime.attempts >= node.worker.max_attempts) {
-      throw new ReworkRefusedError(
-        'REWORK_BUDGET_EXHAUSTED',
-        `${nodeId} has used ${runtime.attempts} of ${node.worker.max_attempts} attempts; a rework would have none left.`,
       );
     }
 
@@ -2043,6 +2088,20 @@ export class Orchestrator {
       ),
     };
 
+    // What the node's next workers are told, bound to this rework by the reason's hash.
+    const brief: ReworkBrief = {
+      generation: reworked + 1,
+      limit: state.budget.max_same_failure,
+      at,
+      reason,
+      reason_sha256: reasonSha256(reason),
+      decision_id: decisionId,
+      acceptance_criteria: acceptance,
+      evidence: evidenceRefs,
+      replaced: { integrated_sha: runtime.integrated_sha, candidate_id: state.current_candidate, archived_ref: entry.archived_ref },
+      attempt_base: runtime.attempts,
+    };
+
     const reopened: string[] = [];
     let candidate: string | null = null;
     mutateState(this.paths.featureDir, (s) => {
@@ -2059,6 +2118,7 @@ export class Orchestrator {
         if (root) {
           rt.rework_history = [...(rt.rework_history ?? []), entry];
           next = applyNodeTransition(graph, next, id, 'INVALIDATED', { actor: this.owner, reason: `rework: ${reason}`, rework: true });
+          (next.nodes[id] as NodeRuntime).rework_brief = brief;
         } else if (from === 'DONE') {
           next = applyNodeTransition(graph, next, id, 'INVALIDATED', { actor: this.owner, reason: `upstream ${nodeId} reworked: ${reason}`, inputChanged: true });
         } else if (from === 'BLOCKED' || from === 'NEEDS_DECISION' || from === 'BUDGET_EXHAUSTED') {
@@ -2090,6 +2150,11 @@ export class Orchestrator {
     if (decisionId !== null) markDecisionApplied(this.paths.events, this.featureId, decisionId, `node rework ${nodeId}`);
     this.event('node.reworked', nodeId, {
       reason: reason.slice(0, 500),
+      reason_sha256: brief.reason_sha256,
+      generation: brief.generation,
+      limit: brief.limit,
+      acceptance_criteria: acceptance,
+      evidence: evidenceRefs,
       decision_id: decisionId,
       reopened,
       invalidated_candidate: candidate,

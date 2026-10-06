@@ -16,6 +16,8 @@ import type {
 } from '../model/types.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { redactValue } from '../security/redact.js';
+import { generationAttempts } from '../scheduler/ready.js';
+import { verifiedReworkBrief } from '../engine/rework-brief.js';
 
 export interface MemoryRef {
   id: string;
@@ -47,7 +49,23 @@ export interface ContextPack {
   verification_commands: { id: string; command: string[]; cwd?: string }[];
   memory?: MemoryRef[];
   next_required_gate: string;
-  budget: { max_turns: number; max_wall_clock_minutes: number; max_attempts: number; attempt: number };
+  /**
+   * Present while the node is being reworked: why the controller reopened
+   * its DONE work. Data for the worker to reproduce the failure from; it
+   * never grants anything.
+   */
+  rework?: {
+    generation: number;
+    limit: number;
+    reason: string;
+    reason_sha256: string;
+    acceptance_criteria: string[];
+    evidence: string[];
+    replaced: { integrated_sha: string | null; candidate_id: string | null };
+    scope: { node_id: string; repository: string | null };
+  };
+  /** attempt and max_attempts are this rework generation's when the node is reworked; lifetime_attempts never resets. */
+  budget: { max_turns: number; max_wall_clock_minutes: number; max_attempts: number; attempt: number; lifetime_attempts?: number };
   byte_budget: number;
   rules: string[];
 }
@@ -179,6 +197,8 @@ export function buildContextPack(args: BuildContextPackArgs): ContextPack {
     })),
   ];
 
+  const brief = verifiedReworkBrief(args.state, args.nodeId);
+
   const latest: ContextPack['latest_evidence'] = [];
   for (const kind of ['red', 'green', 'refactor', 'regression', 'review', 'e2e'] as EvidenceKind[]) {
     const rec = runtime.evidence[kind];
@@ -220,11 +240,26 @@ export function buildContextPack(args: BuildContextPackArgs): ContextPack {
       ...(v.cwd ? { cwd: v.cwd } : {}),
     })),
     next_required_gate: nextRequiredGate(node, runtime.state, runtime.evidence),
+    ...(brief !== null
+      ? {
+          rework: {
+            generation: brief.generation,
+            limit: brief.limit,
+            reason: brief.reason,
+            reason_sha256: brief.reason_sha256,
+            acceptance_criteria: [...brief.acceptance_criteria],
+            evidence: [...brief.evidence],
+            replaced: { integrated_sha: brief.replaced.integrated_sha, candidate_id: brief.replaced.candidate_id },
+            scope: { node_id: node.id, repository: node.repository },
+          },
+        }
+      : {}),
     budget: {
       max_turns: node.worker.max_turns,
       max_wall_clock_minutes: node.worker.max_wall_clock_minutes,
       max_attempts: node.worker.max_attempts,
-      attempt: Math.max(1, runtime.attempts),
+      attempt: Math.max(1, generationAttempts(runtime)),
+      lifetime_attempts: runtime.attempts,
     },
     byte_budget: args.maxBytes,
     rules: [...WORKER_RULES],

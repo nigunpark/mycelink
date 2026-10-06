@@ -201,6 +201,35 @@ export interface NodeRuntime {
   fresh_branch_required?: boolean;
   /** Each controller-authorized rework of this node, oldest first: what it replaced and why. */
   rework_history?: ReworkHistoryEntry[];
+  /**
+   * The brief of the rework the node is in, handed to its next workers
+   * (see engine/rework-brief.ts). Cleared when the node is DONE again.
+   */
+  rework_brief?: ReworkBrief | null;
+}
+
+/**
+ * Why a controller-authorized rework reopened the node, for its workers.
+ * Each approved rework is a generation with its own attempt allowance
+ * (worker.max_attempts, counted from attempt_base); lifetime attempts and
+ * failure fingerprints carry on, and the number of generations is bounded.
+ */
+export interface ReworkBrief {
+  /** 1 for the node's first rework. */
+  generation: number;
+  /** How many reworks the node may have in all. */
+  limit: number;
+  at: string;
+  /** The controller's reason: bounded, redacted, free of control characters. */
+  reason: string;
+  reason_sha256: string;
+  decision_id: string | null;
+  acceptance_criteria: string[];
+  /** Relative references to the evidence of the failure. */
+  evidence: string[];
+  replaced: { integrated_sha: string | null; candidate_id: string | null; archived_ref: string | null };
+  /** Lifetime attempts when the generation began. */
+  attempt_base: number;
 }
 
 /** The DONE work a rework reopened, kept as history. */

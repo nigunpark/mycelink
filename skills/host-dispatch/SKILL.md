@@ -107,20 +107,33 @@ delivered commits) is repaired in the same feature, never under a new
 feature id:
 
 ```text
-M node rework <feature> <node-id> --reason "<failing check and why this node owns it>" --json --authority <key>
+M node rework <feature> <node-id> --reason "<failing check, exact input, expected vs actual, why this node owns it>" [--acceptance <AC-id,...>] [--evidence <relative-path,...>] --json --authority <key>
 ```
+
+The reason becomes the node's **rework brief**: bounded (2000 bytes), free
+of control characters, redacted of credential shapes, refused if it holds
+the controller key, bound to the rework record by its SHA-256 and re-checked
+before every dispatch (`REWORK_BRIEF_INVALID` otherwise). The node's next
+tickets carry it as `rework` and inside the context pack, between the data
+delimiters; the worker writes a focused failing regression test from it
+before changing production code. Make the reason precise enough to
+reproduce: the failing check, the exact input, expected and actual result.
 
 It reopens the attributed producer node and everything downstream (the
 candidate build and E2E included) in dependency order, keeps the node's
-attempts and failure fingerprints (no fresh budget) and its replaced work as
-history, archives its branch, and makes the current candidate stale. Then
-continue the loop: the node is dispatched from the current integration
-state, settle fences only the repair, and a new candidate binds every
-repository. It is refused, changing nothing, while work is in flight, when
-the node's budget or rework limit is spent, when a parked node would be
-reopened without `--decision <id>`, or when a delivered base has moved past
-the integration branch. A parked (BLOCKED) node is never reworked; it needs
-a recorded decision.
+attempts and failure fingerprints and its replaced work as history,
+archives its branch, and makes the current candidate stale. Each approved
+rework is a generation with its own allowance of `max_attempts` attempts,
+counted from the lifetime attempts at the rework (never reset); a worker's
+`INVALID_RED_EVIDENCE` inside a rework is a recorded, retryable failure, and
+the same failure twice parks the node. Then continue the loop in the same
+feature: the node is dispatched from the current integration state, settle
+fences only the repair, and a new candidate binds every repository. It is
+refused, changing nothing, while work is in flight, when the node's rework
+limit is spent, when the reason or references are unusable, when a parked
+node would be reopened without `--decision <id>`, or when a delivered base
+has moved past the integration branch. A parked (BLOCKED) node is never
+reworked; it needs a recorded decision.
 
 ## Delivery
 
