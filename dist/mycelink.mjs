@@ -18160,6 +18160,7 @@ function controlInputs(controlRepo, featureId) {
   for (const rel of new Set(listed)) {
     const path = rel.replace(/\\/g, "/");
     if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
+    if (path.startsWith("features/") && !path.startsWith(`features/${featureId}/`)) continue;
     const full = join13(control, ...path.split("/"));
     let st;
     try {
@@ -18308,6 +18309,15 @@ function verifyCandidate(manifest, context) {
         code: "CONTROL_INPUT_ADDED",
         path: "/control_inputs",
         detail: `Control input "${added}" appeared after the candidate was cut.`
+      });
+    }
+  }
+  for (const name of context.requiredRepositories ?? []) {
+    if (manifest.repositories[name] === void 0) {
+      problems.push({
+        code: "REPOSITORY_NOT_BOUND",
+        path: `/repositories/${name}`,
+        detail: `Candidate does not bind registered repository "${name}"; a candidate binds the whole portfolio. Cut a new candidate.`
       });
     }
   }
@@ -19003,6 +19013,21 @@ function zeroObservationUsage() {
 // src/engine/orchestrator.ts
 import { closeSync as closeSync7, constants as fsConstants, fstatSync as fstatSync4, lstatSync as lstatSync5, openSync as openSync7 } from "node:fs";
 import { hostname as hostname3 } from "node:os";
+
+// src/engine/portfolio.ts
+function portfolioRefs(workspace, featureId, options = {}) {
+  const branch = integrationBranchName(featureId);
+  return workspace.repositories.repositories.map((repo) => {
+    const path = repositoryPath(workspace, repo.name);
+    if (options.create === true && !branchExists(path, branch)) {
+      runGit(path, ["branch", branch, `refs/heads/${repo.base_branch}`]);
+    }
+    return { name: repo.name, path, branch };
+  });
+}
+function registeredRepositories(workspace) {
+  return workspace.repositories.repositories.map((r) => r.name);
+}
 
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
@@ -21056,14 +21081,9 @@ var Orchestrator = class {
     }
     return invalidated;
   }
+  /** Every registered repository on this feature's integration branch, created at its base where missing. */
   integrationRefs() {
-    const branch = integrationBranchName(this.featureId);
-    return this.workspace.repositories.repositories.filter((repo) => {
-      const path = repositoryPath(this.workspace, repo.name);
-      return runGit(path, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
-        allowFail: true
-      }).exitCode === 0;
-    }).map((repo) => ({ name: repo.name, path: repositoryPath(this.workspace, repo.name), branch }));
+    return portfolioRefs(this.workspace, this.featureId, { create: true });
   }
   /**
    * Run the E2E scenarios for the current candidate under a capacity-1
@@ -23454,7 +23474,11 @@ function deliverLocked(controlRoot, featureId, options) {
     path: repositoryPath(workspace, name),
     branch: candidate.repositories[name]?.branch
   }));
-  const drift = verifyCandidate(candidate, { controlRepo: controlRoot, repositories: refs });
+  const drift = verifyCandidate(candidate, {
+    controlRepo: controlRoot,
+    repositories: refs,
+    requiredRepositories: workspace.repositories.repositories.map((r) => r.name)
+  });
   if (!drift.ok) problems.push(`CANDIDATE_DRIFT: ${drift.problems.map((p) => `${p.code} ${p.detail}`).join("; ")}`);
   const plan = {};
   for (const name of names) {
@@ -24819,16 +24843,7 @@ function candidateGroup(args, io) {
   const sub = requirePositional(args, 1, "create|verify|list");
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
-  const repoRefs = workspace.repositories.repositories.filter((repo) => {
-    const branch = integrationBranchName(featureId);
-    return runGit(repositoryPath(workspace, repo.name), ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
-      allowFail: true
-    }).exitCode === 0;
-  }).map((repo) => ({
-    name: repo.name,
-    path: repositoryPath(workspace, repo.name),
-    branch: integrationBranchName(featureId)
-  }));
+  const repoRefs = portfolioRefs(workspace, featureId);
   if (sub === "create") {
     assertControllerRole(args, "candidate create");
     const graph = loadGraph(controlRoot, featureId);
@@ -24845,7 +24860,7 @@ function candidateGroup(args, io) {
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
       featureId,
-      repositories: repoRefs,
+      repositories: portfolioRefs(workspace, featureId, { create: true }),
       contracts
     });
     mutateState(paths.featureDir, (s) => {
@@ -24866,7 +24881,11 @@ function candidateGroup(args, io) {
     const id = args.positional[3] ?? loadState(paths.featureDir)?.data.current_candidate ?? "";
     if (id === "") throw new Error("No candidate id given and no current candidate recorded.");
     const manifest = loadCandidate(paths.featureDir, id);
-    const result = verifyCandidate(manifest, { controlRepo: controlRoot, repositories: repoRefs });
+    const result = verifyCandidate(manifest, {
+      controlRepo: controlRoot,
+      repositories: repoRefs,
+      requiredRepositories: registeredRepositories(workspace)
+    });
     emit2(
       io,
       args,

@@ -49,6 +49,7 @@ import { packageRoot } from '../util/paths.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
 import { preflightAdapter } from '../sessions/preflight.js';
 import { featureVerifyProblems } from '../engine/feature-verify.js';
+import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
@@ -1261,20 +1262,8 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
   const featureId = requirePositional(args, 2, 'feature-id');
   const paths = featurePaths(controlRoot, featureId);
 
-  const repoRefs = workspace.repositories.repositories
-    .filter((repo) => {
-      const branch = integrationBranchName(featureId);
-      return (
-        runGit(repositoryPath(workspace, repo.name), ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
-          allowFail: true,
-        }).exitCode === 0
-      );
-    })
-    .map((repo) => ({
-      name: repo.name,
-      path: repositoryPath(workspace, repo.name),
-      branch: integrationBranchName(featureId),
-    }));
+  // A candidate binds every registered repository (see engine/portfolio.ts).
+  const repoRefs = portfolioRefs(workspace, featureId);
 
   if (sub === 'create') {
     assertControllerRole(args, 'candidate create');
@@ -1298,7 +1287,7 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
       featureId,
-      repositories: repoRefs,
+      repositories: portfolioRefs(workspace, featureId, { create: true }),
       contracts,
     });
     mutateState(paths.featureDir, (s) => {
@@ -1320,7 +1309,11 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
       args.positional[3] ?? loadState(paths.featureDir)?.data.current_candidate ?? '';
     if (id === '') throw new Error('No candidate id given and no current candidate recorded.');
     const manifest = loadCandidate(paths.featureDir, id);
-    const result = verifyCandidate(manifest, { controlRepo: controlRoot, repositories: repoRefs });
+    const result = verifyCandidate(manifest, {
+      controlRepo: controlRoot,
+      repositories: repoRefs,
+      requiredRepositories: registeredRepositories(workspace),
+    });
     emit(io, args, result, () =>
       result.ok
         ? `${id} still matches every repository.`

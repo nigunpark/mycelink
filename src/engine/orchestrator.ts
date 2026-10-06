@@ -80,6 +80,7 @@ import {
   workerBranchName,
 } from '../git/worktree.js';
 import { createCandidate, loadCandidate } from '../git/candidate.js';
+import { portfolioRefs } from './portfolio.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { DirtyWorktreeError, integrateNodeBranch } from '../git/integrate.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
@@ -1790,18 +1791,9 @@ export class Orchestrator {
     return invalidated;
   }
 
+  /** Every registered repository on this feature's integration branch, created at its base where missing. */
   private integrationRefs(): { name: string; path: string; branch: string }[] {
-    const branch = integrationBranchName(this.featureId);
-    return this.workspace.repositories.repositories
-      .filter((repo) => {
-        const path = repositoryPath(this.workspace, repo.name);
-        return (
-          runGit(path, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
-            allowFail: true,
-          }).exitCode === 0
-        );
-      })
-      .map((repo) => ({ name: repo.name, path: repositoryPath(this.workspace, repo.name), branch }));
+    return portfolioRefs(this.workspace, this.featureId, { create: true });
   }
 
   /**

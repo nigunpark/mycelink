@@ -233,7 +233,11 @@ function deliverLocked(controlRoot: string, featureId: string, options: { candid
     path: repositoryPath(workspace, name),
     branch: candidate.repositories[name]?.branch as string,
   }));
-  const drift = verifyCandidate(candidate, { controlRepo: controlRoot, repositories: refs });
+  const drift = verifyCandidate(candidate, {
+    controlRepo: controlRoot,
+    repositories: refs,
+    requiredRepositories: workspace.repositories.repositories.map((r) => r.name),
+  });
   if (!drift.ok) problems.push(`CANDIDATE_DRIFT: ${drift.problems.map((p) => `${p.code} ${p.detail}`).join('; ')}`);
 
   const plan: Record<string, DeliveredRepository> = {};

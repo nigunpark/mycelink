@@ -156,13 +156,16 @@ function textHash(file: string): string {
 }
 
 /**
- * The control repository's semantic inputs, with canonical content hashes:
- * every tracked or not-ignored file except controller bookkeeping (STATE,
- * event and run logs, leases, evidence, sessions, context packs,
- * checkpoints, candidates, deliveries, decision logs, locks, scratch). A
- * candidate pins these instead of control HEAD, so committing bookkeeping
- * cannot drift it, while any change to the PRD, plan, graph, scenarios,
- * scripts, manifests or configuration still does.
+ * The control repository's semantic inputs for one feature, with canonical
+ * content hashes: every tracked or not-ignored file outside `features/`
+ * (global configuration, manifests, contracts, scripts) plus the target
+ * feature's own directory, except controller bookkeeping (STATE, event and
+ * run logs, leases, evidence, sessions, context packs, checkpoints,
+ * candidates, deliveries, decision logs, locks, scratch). A candidate pins
+ * these instead of control HEAD, so committing bookkeeping cannot drift it,
+ * and neither can another feature planned later, while any change to this
+ * feature's PRD, plan, graph or scenarios, or to the global configuration,
+ * still does.
  */
 export function controlInputs(controlRepo: string, featureId: string): { path: string; sha256: string }[] {
   assertFeatureId(featureId);
@@ -174,6 +177,7 @@ export function controlInputs(controlRepo: string, featureId: string): { path: s
   for (const rel of new Set(listed)) {
     const path = rel.replace(/\\/g, '/');
     if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
+    if (path.startsWith('features/') && !path.startsWith(`features/${featureId}/`)) continue;
     const full = join(control, ...path.split('/'));
     let st;
     try {
@@ -323,6 +327,11 @@ export function loadCandidate(featureDir: string, id: string): CandidateManifest
 export interface VerifyCandidateContext {
   controlRepo: string;
   repositories: CandidateRepoRef[];
+  /**
+   * Every repository the candidate must bind (the registered portfolio). A
+   * candidate that leaves one out cannot be delivered as the feature.
+   */
+  requiredRepositories?: string[];
 }
 
 export interface VerifyCandidateResult {
@@ -389,6 +398,16 @@ export function verifyCandidate(
         code: 'CONTROL_INPUT_ADDED',
         path: '/control_inputs',
         detail: `Control input "${added}" appeared after the candidate was cut.`,
+      });
+    }
+  }
+
+  for (const name of context.requiredRepositories ?? []) {
+    if (manifest.repositories[name] === undefined) {
+      problems.push({
+        code: 'REPOSITORY_NOT_BOUND',
+        path: `/repositories/${name}`,
+        detail: `Candidate does not bind registered repository "${name}"; a candidate binds the whole portfolio. Cut a new candidate.`,
       });
     }
   }
