@@ -257,6 +257,18 @@ These issues were found by CodeQL on the worker-transport pull request.
 - On Windows, batch shims and shell scripts run through the system
   `%SystemRoot%\System32\cmd.exe`. Before, they used `ComSpec`, which could
   come from a command's own environment.
+- A crashed integration was resumed whenever the integration branch
+  contained the verified node commit and its first parent was the recorded
+  head. A same-user process could forge that shape (a merge of the recorded
+  head and the verified commit carrying unverified content, moved onto
+  `feature/<id>` between fresh verification and integration) and have it
+  recorded as the trusted head; `branch integrate` likewise adopted such a
+  merge as already integrated. An integration now journals the exact commit
+  it produces (`pending_integrations` in STATE.json) before moving the
+  branch, under a per-repository lock, and a resume accepts only that
+  commit; anything else is `INTEGRATION_BRANCH_MOVED`. Merges are computed
+  with `git merge-tree` and the branch is fast-forwarded to the journaled
+  commit. `branch integrate` goes through the same path.
 
 ## [0.2.0-beta.1]
 

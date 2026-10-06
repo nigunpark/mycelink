@@ -18014,7 +18014,7 @@ function ensureIntegrationWorktree(args) {
   }
   return { path: target, branch };
 }
-function integrateNodeBranch(args) {
+function planIntegration(args) {
   const repo = resolve9(args.repoPath);
   if (!branchExists(repo, args.nodeBranch)) {
     throw new Error(`Node branch "${args.nodeBranch}" does not exist in ${repo}.`);
@@ -18029,48 +18029,45 @@ function integrateNodeBranch(args) {
       `NODE_BRANCH_MOVED: ${args.nodeBranch} is at ${nodeSha}, but fresh verification checked ${args.expectedSha}; the newer commit was never verified.`
     );
   }
-  const headSha = resolveRef(worktree, "HEAD");
-  if (isAncestor(worktree, nodeSha, headSha)) {
-    return { sha: headSha, branch, strategy: "already-integrated", integrationWorktree: worktree };
+  const from = resolveRef(worktree, "HEAD");
+  const plan = { branch, integrationWorktree: worktree, nodeSha, from };
+  if (isAncestor(worktree, nodeSha, from)) return { ...plan, to: from, strategy: "already-integrated" };
+  if (isAncestor(worktree, from, nodeSha)) return { ...plan, to: nodeSha, strategy: "fast-forward" };
+  const merge = runGit(worktree, ["merge-tree", "--write-tree", "--name-only", "--no-messages", from, nodeSha], {
+    allowFail: true
+  });
+  const lines = merge.stdout.split("\n").map((l) => l.trim());
+  if (merge.exitCode === 1) {
+    throw new IntegrationConflictError(args.nodeBranch, [...new Set(lines.slice(1).filter((l) => l !== ""))]);
   }
-  if (isAncestor(worktree, headSha, nodeSha)) {
-    runGit(worktree, ["merge", "--ff-only", nodeSha]);
-    return {
-      sha: resolveRef(worktree, "HEAD"),
-      branch,
-      strategy: "fast-forward",
-      integrationWorktree: worktree
-    };
+  if (merge.exitCode !== 0 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(lines[0] ?? "")) {
+    throw new Error(`Merging ${args.nodeBranch} failed: ${merge.stderr.trim() || `git merge-tree exited ${merge.exitCode}`}`);
   }
-  const merge = runGit(
-    worktree,
-    [
-      "-c",
-      "commit.gpgsign=false",
-      "merge",
-      "--no-ff",
-      "--no-edit",
-      "-m",
-      `integrate ${args.nodeBranch}`,
-      nodeSha
-    ],
-    { allowFail: true }
-  );
-  if (merge.exitCode !== 0) {
-    const conflicts = runGit(worktree, ["diff", "--name-only", "--diff-filter=U"], {
-      allowFail: true
-    }).stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-    runGit(worktree, ["merge", "--abort"], { allowFail: true });
-    runGit(worktree, ["reset", "--hard", headSha], { allowFail: true });
-    runGit(worktree, ["clean", "-fd"], { allowFail: true });
-    throw new IntegrationConflictError(args.nodeBranch, conflicts);
+  const to = runGit(worktree, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit-tree",
+    lines[0],
+    "-p",
+    from,
+    "-p",
+    nodeSha,
+    "-m",
+    `integrate ${args.nodeBranch}`
+  ]).stdout.trim();
+  return { ...plan, to, strategy: "merge" };
+}
+function applyIntegration(plan) {
+  if (plan.to === plan.from) return;
+  const head = resolveRef(plan.integrationWorktree, "HEAD");
+  if (head !== plan.from) {
+    throw new Error(`INTEGRATION_BRANCH_MOVED: ${plan.branch} is at ${head.slice(0, 12)}, but the integration was planned from ${plan.from.slice(0, 12)}.`);
   }
-  return {
-    sha: resolveRef(worktree, "HEAD"),
-    branch,
-    strategy: "merge",
-    integrationWorktree: worktree
-  };
+  runGit(plan.integrationWorktree, ["merge", "--ff-only", "--quiet", plan.to]);
+  const now = resolveRef(plan.integrationWorktree, "HEAD");
+  if (now !== plan.to) {
+    throw new Error(`INTEGRATION_BRANCH_MOVED: ${plan.branch} is at ${now.slice(0, 12)}, not the planned ${plan.to.slice(0, 12)}.`);
+  }
 }
 
 // src/git/candidate.ts
@@ -19856,6 +19853,12 @@ function runSummary(runsFile, nodeId) {
 }
 
 // src/engine/orchestrator.ts
+var InjectedFault = class extends Error {
+  constructor(cause) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "InjectedFault";
+  }
+};
 var CONTROLLER_NODE_TYPES = /* @__PURE__ */ new Set(["candidate-build", "e2e-scenario"]);
 var ReworkRefusedError = class extends Error {
   code;
@@ -20381,37 +20384,76 @@ var Orchestrator = class {
   }
   /** Merge a verified node branch into its repository integration branch. */
   integrate(nodeId, expectedSha) {
+    return this.integrateNode(nodeId, expectedSha)?.sha ?? null;
+  }
+  /**
+   * Integrate under the repository's integration lock. The exact commit the
+   * branch will move to is journaled in STATE.json before it moves; an
+   * integration that died after moving it resumes only when the branch is at
+   * exactly that journaled commit. The branch's shape (which commits it
+   * contains, its parents) is never evidence: anything else is
+   * INTEGRATION_BRANCH_MOVED.
+   */
+  integrateNode(nodeId, expectedSha) {
     const node = this.node(nodeId);
     if (node.repository === null) return null;
-    const repoPath = repositoryPath(this.workspace, node.repository);
-    const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const repository = node.repository;
+    const lockDir = join18(this.paths.featureDir, "integration");
+    mkdirSync11(lockDir, { recursive: true });
+    return withLock(join18(lockDir, `${repository}.lock`), () => this.integrateLocked(nodeId, repository, expectedSha), {
+      timeoutMs: 3e4,
+      pollMs: 50,
+      purpose: "integration"
+    });
+  }
+  integrateLocked(nodeId, repository, expectedSha) {
+    const repoPath = repositoryPath(this.workspace, repository);
+    const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === repository);
+    const branch = integrationBranchName(this.featureId);
+    const trust = { graph: this.graph(), state: this.state() };
     try {
-      trustedIntegrationHead(this.workspace, this.featureId, node.repository, { graph: this.graph(), state: this.state() });
+      trustedIntegrationHead(this.workspace, this.featureId, repository, trust);
     } catch (err) {
-      const head = resolveRef(repoPath, integrationBranchName(this.featureId));
-      const resumed = expectedSha !== void 0 && isAncestor(repoPath, expectedSha, head) && (head === expectedSha || runGit(repoPath, ["rev-parse", "--verify", "--quiet", `${head}^1`], { allowFail: true }).stdout.trim() === err.expected);
-      if (!resumed) throw err;
+      const pending = trust.state.pending_integrations?.[repository];
+      const resumable = err instanceof IntegrationBranchMovedError && pending !== void 0 && expectedSha !== void 0 && pending.node_id === nodeId && pending.verified_sha === expectedSha && pending.from === err.expected && resolveRef(repoPath, branch) === pending.to;
+      if (!resumable) throw err;
+      return this.recordIntegration(nodeId, repository, pending.to, pending.strategy, true);
     }
-    const result = integrateNodeBranch({
+    const plan = planIntegration({
       repoPath,
       featureId: this.featureId,
       nodeBranch: workerBranchName(this.featureId, nodeId),
       baseBranch: repoDecl?.base_branch ?? "main",
       integrationRoot: this.workspace.paths.integrationDir,
-      repositoryName: node.repository,
+      repositoryName: repository,
       ...expectedSha !== void 0 ? { expectedSha } : {}
     });
-    const repository = node.repository;
+    const expected = expectedIntegrationHead(this.workspace, repository, trust);
+    if (plan.from !== expected) throw new IntegrationBranchMovedError(repository, branch, plan.from, expected);
+    if (plan.strategy !== "already-integrated") {
+      const journal = { node_id: nodeId, verified_sha: plan.nodeSha, from: plan.from, to: plan.to, strategy: plan.strategy };
+      mutateState(this.paths.featureDir, (s) => {
+        s.pending_integrations = { ...s.pending_integrations ?? {}, [repository]: journal };
+        return s;
+      });
+      this.fault("integration-journaled");
+      applyIntegration(plan);
+      this.fault("integration-moved");
+    }
+    return this.recordIntegration(nodeId, repository, plan.to, plan.strategy, false);
+  }
+  recordIntegration(nodeId, repository, sha, strategy, resumed) {
     mutateState(this.paths.featureDir, (s) => {
-      s.integration_heads = { ...s.integration_heads ?? {}, [repository]: result.sha };
+      s.integration_heads = { ...s.integration_heads ?? {}, [repository]: sha };
+      if (s.pending_integrations?.[repository] !== void 0) {
+        const { [repository]: _done, ...rest } = s.pending_integrations;
+        if (Object.keys(rest).length > 0) s.pending_integrations = rest;
+        else delete s.pending_integrations;
+      }
       return s;
     });
-    this.event("node.integrated", nodeId, {
-      repository: node.repository,
-      sha: result.sha,
-      strategy: result.strategy
-    });
-    return result.sha;
+    this.event("node.integrated", nodeId, { repository, sha, strategy, ...resumed ? { resumed: true } : {} });
+    return { sha, branch: integrationBranchName(this.featureId), strategy };
   }
   // ---- one node attempt -------------------------------------------------
   async runNode(nodeId) {
@@ -20573,6 +20615,7 @@ var Orchestrator = class {
       const report = this.failAttempt(nodeId, sessionId, verification.detail, evidence);
       return { ...report, outcome };
     }
+    this.fault("fresh-verified");
     try {
       if (this.state().nodes[nodeId]?.state !== "INTEGRATED") {
         this.advanceVerifiedGates(nodeId);
@@ -20580,6 +20623,7 @@ var Orchestrator = class {
         this.transition(nodeId, "INTEGRATED", sha !== null ? { integratedSha: sha } : {});
       }
     } catch (err) {
+      if (err instanceof InjectedFault) throw err;
       return this.failAttempt(nodeId, sessionId, errorText(err), evidence);
     }
     const worktree = this.state().nodes[nodeId]?.claim?.worktree ?? null;
@@ -21002,7 +21046,11 @@ var Orchestrator = class {
     });
   }
   fault(point) {
-    this.settleFault?.(point);
+    try {
+      this.settleFault?.(point);
+    } catch (err) {
+      throw new InjectedFault(err);
+    }
   }
   sessionDir(nodeId) {
     const dir = join18(this.paths.sessionsDir, safeNodeDir(nodeId));
@@ -25222,19 +25270,8 @@ function branchGroup(args, io) {
         `NODE_NOT_VERIFIED: ${nodeId} is ${state ?? "unknown"}; only a node past fresh verification may be integrated. Settle or finalize it instead.`
       );
     }
-    const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
-    const result = integrateNodeBranch({
-      repoPath: repositoryPath(workspace, node.repository),
-      featureId,
-      nodeBranch: workerBranchName(featureId, nodeId),
-      baseBranch: repoDecl?.base_branch ?? "main",
-      integrationRoot: workspace.paths.integrationDir,
-      repositoryName: node.repository
-    });
-    mutateState(featurePaths(controlRoot, featureId).featureDir, (s) => {
-      s.integration_heads = { ...s.integration_heads ?? {}, [node.repository]: result.sha };
-      return s;
-    });
+    const result = orchestratorFor(controlRoot, featureId).integrateNode(nodeId);
+    if (result === null) throw new Error(`Node "${nodeId}" has no repository.`);
     emit2(io, args, result, () => `${result.strategy} -> ${result.sha}`);
     return 0;
   }

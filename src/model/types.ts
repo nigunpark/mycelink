@@ -301,6 +301,17 @@ export interface FeatureBudget {
   max_same_failure: number;
 }
 
+export interface PendingIntegration {
+  node_id: string;
+  /** The node commit fresh verification checked. */
+  verified_sha: string;
+  /** The recorded integration head the plan starts from. */
+  from: string;
+  /** The exact commit the integration branch is moved to. */
+  to: string;
+  strategy: 'fast-forward' | 'merge';
+}
+
 export interface FeatureState_ {
   schema_version: 1;
   feature_id: string;
@@ -325,6 +336,12 @@ export interface FeatureState_ {
    * at this head.
    */
   integration_heads?: Record<string, string>;
+  /**
+   * An integration the controller planned and is carrying out, by
+   * repository: written before the integration branch moves, cleared once
+   * its head is recorded. A resume accepts the branch at exactly `to`.
+   */
+  pending_integrations?: Record<string, PendingIntegration>;
   /**
    * The feature that replaced this one (`feature supersede`). A superseded
    * feature is quiescent history: never the delivered feature.

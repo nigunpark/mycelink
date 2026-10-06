@@ -26,6 +26,7 @@ import type {
   NodeClaim,
   NodeRuntime,
   NodeState,
+  PendingIntegration,
   PortfolioGraph,
   ReworkHistoryEntry,
   ReworkRecord,
@@ -83,10 +84,10 @@ import {
   worktreeDirName,
 } from '../git/worktree.js';
 import { createCandidate, loadCandidate } from '../git/candidate.js';
-import { portfolioRefs, trustedIntegrationHead } from './portfolio.js';
+import { expectedIntegrationHead, IntegrationBranchMovedError, portfolioRefs, trustedIntegrationHead } from './portfolio.js';
 import { withLock } from '../state/process-lock.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
-import { DirtyWorktreeError, integrateNodeBranch } from '../git/integrate.js';
+import { applyIntegration, DirtyWorktreeError, planIntegration, type IntegrateResult } from '../git/integrate.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
 import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
@@ -128,7 +129,21 @@ export interface OrchestratorOptions {
 }
 
 /** Where a settle can die with something already done that a retry must not redo. */
-export type SettleFaultPoint = 'result-captured' | 'result-attested' | 'attempt-concluded';
+export type SettleFaultPoint =
+  | 'result-captured'
+  | 'result-attested'
+  | 'attempt-concluded'
+  | 'fresh-verified'
+  | 'integration-journaled'
+  | 'integration-moved';
+
+/** A fault injected by a test at a settle boundary: a crash, never an attempt failure. */
+export class InjectedFault extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'InjectedFault';
+  }
+}
 
 export interface NodeRunReport {
   node_id: string;
@@ -890,44 +905,100 @@ export class Orchestrator {
 
   /** Merge a verified node branch into its repository integration branch. */
   integrate(nodeId: string, expectedSha?: string): string | null {
+    return this.integrateNode(nodeId, expectedSha)?.sha ?? null;
+  }
+
+  /**
+   * Integrate under the repository's integration lock. The exact commit the
+   * branch will move to is journaled in STATE.json before it moves; an
+   * integration that died after moving it resumes only when the branch is at
+   * exactly that journaled commit. The branch's shape (which commits it
+   * contains, its parents) is never evidence: anything else is
+   * INTEGRATION_BRANCH_MOVED.
+   */
+  integrateNode(nodeId: string, expectedSha?: string): { sha: string; branch: string; strategy: IntegrateResult['strategy'] } | null {
     const node = this.node(nodeId);
     if (node.repository === null) return null;
-    const repoPath = repositoryPath(this.workspace, node.repository);
-    const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const repository = node.repository;
+    const lockDir = join(this.paths.featureDir, 'integration');
+    mkdirSync(lockDir, { recursive: true });
+    return withLock(join(lockDir, `${repository}.lock`), () => this.integrateLocked(nodeId, repository, expectedSha), {
+      timeoutMs: 30_000,
+      pollMs: 50,
+      purpose: 'integration',
+    });
+  }
+
+  private integrateLocked(
+    nodeId: string,
+    repository: string,
+    expectedSha: string | undefined,
+  ): { sha: string; branch: string; strategy: IntegrateResult['strategy'] } {
+    const repoPath = repositoryPath(this.workspace, repository);
+    const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === repository);
+    const branch = integrationBranchName(this.featureId);
+    const trust = { graph: this.graph(), state: this.state() };
     try {
-      trustedIntegrationHead(this.workspace, this.featureId, node.repository, { graph: this.graph(), state: this.state() });
+      trustedIntegrationHead(this.workspace, this.featureId, repository, trust);
     } catch (err) {
-      // A finalize that died after merging this very commit left the branch
-      // one step past the recorded head; that resumes. Anything else refuses.
-      const head = resolveRef(repoPath, integrationBranchName(this.featureId));
-      const resumed =
+      // An integration that died after moving the branch: only the exact
+      // commit it journaled, from the head it started at, for this node's
+      // verified commit.
+      const pending = trust.state.pending_integrations?.[repository];
+      const resumable =
+        err instanceof IntegrationBranchMovedError &&
+        pending !== undefined &&
         expectedSha !== undefined &&
-        isAncestor(repoPath, expectedSha, head) &&
-        (head === expectedSha ||
-          runGit(repoPath, ['rev-parse', '--verify', '--quiet', `${head}^1`], { allowFail: true }).stdout.trim() ===
-            (err as { expected?: string }).expected);
-      if (!resumed) throw err;
+        pending.node_id === nodeId &&
+        pending.verified_sha === expectedSha &&
+        pending.from === err.expected &&
+        resolveRef(repoPath, branch) === pending.to;
+      if (!resumable) throw err;
+      return this.recordIntegration(nodeId, repository, pending.to, pending.strategy, true);
     }
-    const result = integrateNodeBranch({
+    const plan = planIntegration({
       repoPath,
       featureId: this.featureId,
       nodeBranch: workerBranchName(this.featureId, nodeId),
       baseBranch: repoDecl?.base_branch ?? 'main',
       integrationRoot: this.workspace.paths.integrationDir,
-      repositoryName: node.repository,
+      repositoryName: repository,
       ...(expectedSha !== undefined ? { expectedSha } : {}),
     });
-    const repository = node.repository;
+    // The plan starts where the controller left the branch, or nowhere.
+    const expected = expectedIntegrationHead(this.workspace, repository, trust);
+    if (plan.from !== expected) throw new IntegrationBranchMovedError(repository, branch, plan.from, expected);
+    if (plan.strategy !== 'already-integrated') {
+      const journal: PendingIntegration = { node_id: nodeId, verified_sha: plan.nodeSha, from: plan.from, to: plan.to, strategy: plan.strategy };
+      mutateState(this.paths.featureDir, (s) => {
+        s.pending_integrations = { ...(s.pending_integrations ?? {}), [repository]: journal };
+        return s;
+      });
+      this.fault('integration-journaled');
+      applyIntegration(plan);
+      this.fault('integration-moved');
+    }
+    return this.recordIntegration(nodeId, repository, plan.to, plan.strategy, false);
+  }
+
+  private recordIntegration(
+    nodeId: string,
+    repository: string,
+    sha: string,
+    strategy: IntegrateResult['strategy'],
+    resumed: boolean,
+  ): { sha: string; branch: string; strategy: IntegrateResult['strategy'] } {
     mutateState(this.paths.featureDir, (s) => {
-      s.integration_heads = { ...(s.integration_heads ?? {}), [repository]: result.sha };
+      s.integration_heads = { ...(s.integration_heads ?? {}), [repository]: sha };
+      if (s.pending_integrations?.[repository] !== undefined) {
+        const { [repository]: _done, ...rest } = s.pending_integrations;
+        if (Object.keys(rest).length > 0) s.pending_integrations = rest;
+        else delete s.pending_integrations;
+      }
       return s;
     });
-    this.event('node.integrated', nodeId, {
-      repository: node.repository,
-      sha: result.sha,
-      strategy: result.strategy,
-    });
-    return result.sha;
+    this.event('node.integrated', nodeId, { repository, sha, strategy, ...(resumed ? { resumed: true } : {}) });
+    return { sha, branch: integrationBranchName(this.featureId), strategy };
   }
 
   // ---- one node attempt -------------------------------------------------
@@ -1125,6 +1196,7 @@ export class Orchestrator {
       const report = this.failAttempt(nodeId, sessionId, verification.detail, evidence);
       return { ...report, outcome };
     }
+    this.fault('fresh-verified');
 
     try {
       // A finalize interrupted after integration resumes at DONE: the merge
@@ -1135,6 +1207,7 @@ export class Orchestrator {
         this.transition(nodeId, 'INTEGRATED', sha !== null ? { integratedSha: sha } : {});
       }
     } catch (err) {
+      if (err instanceof InjectedFault) throw err;
       return this.failAttempt(nodeId, sessionId, errorText(err), evidence);
     }
 
@@ -1623,7 +1696,11 @@ export class Orchestrator {
   }
 
   private fault(point: SettleFaultPoint): void {
-    this.settleFault?.(point);
+    try {
+      this.settleFault?.(point);
+    } catch (err) {
+      throw new InjectedFault(err);
+    }
   }
 
   private sessionDir(nodeId: string): string {

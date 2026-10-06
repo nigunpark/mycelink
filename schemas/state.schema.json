@@ -71,6 +71,21 @@
       "type": "object",
       "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
     },
+    "pending_integrations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["node_id", "verified_sha", "from", "to", "strategy"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": { "type": "string", "minLength": 1 },
+          "verified_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "from": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "to": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "strategy": { "enum": ["fast-forward", "merge"] }
+        }
+      }
+    },
     "superseded_by": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
     "superseded_reason": { "type": "string", "minLength": 1 },
     "superseded_at": { "type": "string" },

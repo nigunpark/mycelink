@@ -27,7 +27,6 @@ import { IN_FLIGHT_STATES, computeReady, scheduleBatch } from '../scheduler/read
 import { acquireResource, leaseStatus, recoverLeases, releaseAllForNode, releaseResource } from '../resources/leases.js';
 import { runVerification, verifierInvocation, type VerificationInvocation } from '../evidence/runner.js';
 import { createCandidate, listCandidates, loadCandidate, verifyCandidate } from '../git/candidate.js';
-import { integrateNodeBranch } from '../git/integrate.js';
 import { createWorkerWorktree, workerBranchName, integrationBranchName } from '../git/worktree.js';
 import { isGitRepository, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { Orchestrator } from '../engine/orchestrator.js';
@@ -1296,19 +1295,10 @@ function branchGroup(args: ParsedArgs, io: CliIo): number {
           'Settle or finalize it instead.',
       );
     }
-    const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
-    const result = integrateNodeBranch({
-      repoPath: repositoryPath(workspace, node.repository),
-      featureId,
-      nodeBranch: workerBranchName(featureId, nodeId),
-      baseBranch: repoDecl?.base_branch ?? 'main',
-      integrationRoot: workspace.paths.integrationDir,
-      repositoryName: node.repository,
-    });
-    mutateState(featurePaths(controlRoot, featureId).featureDir, (s) => {
-      s.integration_heads = { ...(s.integration_heads ?? {}), [node.repository as string]: result.sha };
-      return s;
-    });
+    // The same road as a settle: only from the head the controller recorded,
+    // journaled before the branch moves.
+    const result = orchestratorFor(controlRoot, featureId).integrateNode(nodeId);
+    if (result === null) throw new Error(`Node "${nodeId}" has no repository.`);
     emit(io, args, result, () => `${result.strategy} -> ${result.sha}`);
     return 0;
   }

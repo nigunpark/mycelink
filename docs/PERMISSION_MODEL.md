@@ -111,8 +111,14 @@ session's permissions, and `mycelink settle` takes the result back.
   integrated there): a new worker branch, an integration and a candidate
   all refuse a `feature/<id>` branch moved any other way, including a
   pre-existing one in a repository no node touches
-  (`INTEGRATION_BRANCH_MOVED`). Same-user code that rewrites STATE.json is
-  outside this, as above.
+  (`INTEGRATION_BRANCH_MOVED`). An integration journals the exact commit it
+  will move the branch to (`pending_integrations`) before moving it, under
+  a per-repository lock; an integration that died after the move resumes
+  only when the branch is at exactly that journaled commit. Which commits
+  the branch contains, or what its first parent is, is never evidence: a
+  merge that contains the verified commit plus anything else is refused.
+  `branch integrate` takes the same road. Same-user code that rewrites
+  STATE.json is outside this, as above.
 - A candidate pins the global configuration and its own feature's files. A
   verifier, scenario or contract stored under another feature's directory is
   not pinned; keep shared files outside `features/`.
