@@ -269,6 +269,11 @@ These issues were found by CodeQL on the worker-transport pull request.
   commit; anything else is `INTEGRATION_BRANCH_MOVED`. Merges are computed
   with `git merge-tree` and the branch is fast-forwarded to the journaled
   commit. `branch integrate` goes through the same path.
+- A candidate was cut and made current outside the feature's delivery
+  lock, so it could become current in the middle of a delivery or right
+  after a rework reopened the work it binds. The candidate node and
+  `candidate create` now check, bind and record it under that lock;
+  a busy lock hands the candidate node back unspent (`FEATURE_BUSY`).
 
 ## [0.2.0-beta.1]
 

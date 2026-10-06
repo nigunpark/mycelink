@@ -129,6 +129,10 @@ session's permissions, and `mycelink settle` takes the result back.
   reworks per node is bounded, and it is refused while anything is in
   flight or when a delivered base branch moved past the integration branch.
   `feature supersede` likewise requires the old feature to be at rest.
+  Delivery, rework, supersede and every candidate cut (the candidate node
+  and `candidate create`) hold the feature's delivery lock, so the current
+  candidate never changes under a running delivery or across a rework
+  (`FEATURE_BUSY` when another holds it).
 - What this does and does not stop. Within one OS user, capabilities and
   the controller key stop confused or shortcut-taking agents, including a
   worker that omits or unsets its token to run a controller command, and

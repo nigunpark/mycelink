@@ -15361,8 +15361,8 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync23, mkdirSync as mkdirSync15, readFileSync as readFileSync17, readdirSync as readdirSync10 } from "node:fs";
-import { dirname as dirname9, join as join24, resolve as resolve18 } from "node:path";
+import { existsSync as existsSync23, mkdirSync as mkdirSync16, readFileSync as readFileSync17, readdirSync as readdirSync10 } from "node:fs";
+import { dirname as dirname9, join as join25, resolve as resolve18 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -18396,10 +18396,37 @@ function verifyCandidate(manifest, context) {
   return { ok: problems.length === 0, problems };
 }
 
+// src/engine/feature-lock.ts
+import { mkdirSync as mkdirSync8 } from "node:fs";
+import { join as join14 } from "node:path";
+var FeatureBusyError = class extends Error {
+  code = "FEATURE_BUSY";
+  constructor(purpose, cause) {
+    super(`FEATURE_BUSY: ${purpose} waits for a delivery, rework, supersede or candidate cut of this feature already running (${cause.message}); try again once it has finished.`);
+    this.name = "FeatureBusyError";
+  }
+};
+function withFeatureLock(featureDir, purpose, fn, timeoutMs = 2e3) {
+  const dir = join14(featureDir, "deliveries");
+  mkdirSync8(dir, { recursive: true });
+  let handle;
+  try {
+    handle = acquireLock(join14(dir, "deliver.lock"), { timeoutMs, pollMs: 50, purpose });
+  } catch (err) {
+    if (err instanceof LockTimeoutError) throw new FeatureBusyError(purpose, err);
+    throw err;
+  }
+  try {
+    return fn();
+  } finally {
+    handle.release();
+  }
+}
+
 // src/engine/orchestrator.ts
-import { existsSync as existsSync15, mkdirSync as mkdirSync11, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "node:fs";
+import { existsSync as existsSync15, mkdirSync as mkdirSync12, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "node:fs";
 import { createHash as createHash8 } from "node:crypto";
-import { join as join18, resolve as resolve13 } from "node:path";
+import { join as join19, resolve as resolve13 } from "node:path";
 import { randomBytes as randomBytes4, randomUUID as randomUUID2 } from "node:crypto";
 
 // src/engine/capability.ts
@@ -18474,7 +18501,7 @@ import {
   existsSync as existsSync11,
   fstatSync as fstatSync3,
   lstatSync as lstatSync4,
-  mkdirSync as mkdirSync8,
+  mkdirSync as mkdirSync9,
   mkdtempSync,
   openSync as openSync5,
   readdirSync as readdirSync3,
@@ -18485,7 +18512,7 @@ import {
   unlinkSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
-import { dirname as dirname5, join as join14, resolve as resolve11 } from "node:path";
+import { dirname as dirname5, join as join15, resolve as resolve11 } from "node:path";
 import { createHash as createHash6 } from "node:crypto";
 
 // src/sessions/context-pack.ts
@@ -18856,20 +18883,20 @@ function removeLink(path) {
 }
 function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   assertResultFile(resultFile);
-  const dir = join14(cwd, WORKER_RESULT_DIR);
+  const dir = join15(cwd, WORKER_RESULT_DIR);
   if (existsSync11(dir) || isLink(dir)) {
     const st = lstatSync4(dir);
     if (st.isSymbolicLink()) removeLink(dir);
     else if (!st.isDirectory()) rmSync6(dir, { force: true });
   }
-  mkdirSync8(dir, { recursive: true });
+  mkdirSync9(dir, { recursive: true });
   if (!isInsideReal(cwd, dir)) {
     throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", "result slot resolves outside the worktree");
   }
-  const ignore = join14(dir, ".gitignore");
+  const ignore = join15(dir, ".gitignore");
   rmSync6(ignore, { force: true, recursive: true });
   writeFileSync3(ignore, "*\n", { encoding: "utf8", flag: "wx" });
-  const file = join14(dir, resultFile);
+  const file = join15(dir, resultFile);
   rmSync6(file, { force: true });
   return file;
 }
@@ -18888,16 +18915,16 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
   const captureFailed = (what, err) => fail(
     `RESULT_CAPTURE_FAILED: could not move ${what} into quarantine (${err.code ?? "error"})`
   );
-  mkdirSync8(dirname5(controllerPath), { recursive: true });
+  mkdirSync9(dirname5(controllerPath), { recursive: true });
   const bases = [dirname5(controllerPath)];
   const fallback = options.fallbackQuarantineDir === void 0 ? dirname5(resolve11(cwd)) : options.fallbackQuarantineDir;
   if (fallback !== null && resolve11(fallback) !== resolve11(dirname5(controllerPath))) bases.push(fallback);
   let quarantine = null;
   let lastError = null;
   for (const base of bases) {
-    const candidate = mkdtempSync(join14(base, RESULT_QUARANTINE_PREFIX));
+    const candidate = mkdtempSync(join15(base, RESULT_QUARANTINE_PREFIX));
     try {
-      retrySync(() => renameSync2(join14(cwd, WORKER_RESULT_DIR), join14(candidate, "slot")));
+      retrySync(() => renameSync2(join15(cwd, WORKER_RESULT_DIR), join15(candidate, "slot")));
       quarantine = candidate;
       break;
     } catch (err) {
@@ -18908,15 +18935,15 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
     }
   }
   if (quarantine === null) return captureFailed("the result slot", lastError);
-  const capturedDir = join14(quarantine, "slot");
-  const captured = join14(quarantine, WORKER_RESULT_FILE);
+  const capturedDir = join15(quarantine, "slot");
+  const captured = join15(quarantine, WORKER_RESULT_FILE);
   try {
     const dirSt = lstatSync4(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
     try {
-      retrySync(() => renameSync2(join14(capturedDir, resultFile), captured));
+      retrySync(() => renameSync2(join15(capturedDir, resultFile), captured));
     } catch (err) {
       if (err.code === "ENOENT") return fail("RESULT_MISSING");
       return captureFailed("the result", err);
@@ -18976,7 +19003,7 @@ function removeTree(path) {
   }
   if (st.isSymbolicLink()) return retrySync(() => removeLink(path));
   if (!st.isDirectory()) return retrySync(() => unlinkSync(path));
-  for (const name of readdirSync3(path)) removeTree(join14(path, name));
+  for (const name of readdirSync3(path)) removeTree(join15(path, name));
   retrySync(() => rmdirSync(path));
 }
 function removeQuarantine(quarantine) {
@@ -19069,8 +19096,8 @@ function registeredRepositories(workspace) {
 
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-import { existsSync as existsSync12, mkdirSync as mkdirSync9, readFileSync as readFileSync7, readdirSync as readdirSync4 } from "node:fs";
-import { join as join15, resolve as resolve12 } from "node:path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync10, readFileSync as readFileSync7, readdirSync as readdirSync4 } from "node:fs";
+import { join as join16, resolve as resolve12 } from "node:path";
 
 // src/e2e/scheduler.ts
 function conflictReason(a, b) {
@@ -19242,7 +19269,7 @@ function loadScenarios(scenariosDir) {
   const out = [];
   for (const file of readdirSync4(dir).sort()) {
     if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue;
-    const parsed = import_yaml3.default.parse(readFileSync7(join15(dir, file), "utf8"));
+    const parsed = import_yaml3.default.parse(readFileSync7(join16(dir, file), "utf8"));
     const problems = validateAgainstSchema("e2e-scenario", parsed);
     if (problems.length > 0) {
       throw new Error(
@@ -19261,9 +19288,9 @@ function isolationEnv(candidateId, scenario, root) {
     E2E_CANDIDATE_ID: candidateId,
     E2E_DATA_NAMESPACE: scenario.isolation.data_namespace === "unique" ? ns : "shared",
     E2E_ACCOUNT: scenario.isolation.account === "unique" ? `user_${ns}` : scenario.isolation.account,
-    E2E_BROWSER_PROFILE_DIR: scenario.isolation.browser_profile === "unique" ? join15(root, "profiles", slug) : join15(root, "profiles", "shared"),
-    E2E_TRACE_DIR: join15(root, "traces", slug),
-    E2E_SCREENSHOT_DIR: join15(root, "screenshots", slug)
+    E2E_BROWSER_PROFILE_DIR: scenario.isolation.browser_profile === "unique" ? join16(root, "profiles", slug) : join16(root, "profiles", "shared"),
+    E2E_TRACE_DIR: join16(root, "traces", slug),
+    E2E_SCREENSHOT_DIR: join16(root, "screenshots", slug)
   });
 }
 async function runE2E(args) {
@@ -19271,7 +19298,7 @@ async function runE2E(args) {
   const plan = planShards(selected, args.resources);
   const owner = args.owner ?? "e2e-runner";
   const evidenceRoot = resolve12(args.evidenceRoot, args.candidate.candidate_id);
-  mkdirSync9(evidenceRoot, { recursive: true });
+  mkdirSync10(evidenceRoot, { recursive: true });
   const leases = [];
   const results = [];
   let preflightFailure = null;
@@ -19343,11 +19370,11 @@ async function runE2E(args) {
 async function runScenario(scenario, shardIndex, args, evidenceRoot) {
   const env = isolationEnv(args.candidate.candidate_id, scenario, evidenceRoot);
   for (const dir of [env["E2E_BROWSER_PROFILE_DIR"], env["E2E_TRACE_DIR"], env["E2E_SCREENSHOT_DIR"]]) {
-    if (dir) mkdirSync9(dir, { recursive: true });
+    if (dir) mkdirSync10(dir, { recursive: true });
   }
   const evidence = [];
-  const scenarioEvidenceDir = join15(evidenceRoot, scenario.id.replace(/[^A-Za-z0-9._-]/g, "_"));
-  mkdirSync9(scenarioEvidenceDir, { recursive: true });
+  const scenarioEvidenceDir = join16(evidenceRoot, scenario.id.replace(/[^A-Za-z0-9._-]/g, "_"));
+  mkdirSync10(scenarioEvidenceDir, { recursive: true });
   const run = (label, command) => runVerification({
     kind: "e2e",
     nodeId: scenario.id,
@@ -19399,7 +19426,7 @@ async function runScenario(scenario, shardIndex, args, evidenceRoot) {
 
 // src/state/event-log.ts
 import { appendFileSync, closeSync as closeSync6, existsSync as existsSync13, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync6, readFileSync as readFileSync8, readdirSync as readdirSync5, renameSync as renameSync3, writeSync as writeSync4 } from "node:fs";
-import { basename as basename3, dirname as dirname6, join as join16 } from "node:path";
+import { basename as basename3, dirname as dirname6, join as join17 } from "node:path";
 import { createHash as createHash7 } from "node:crypto";
 var EventTooLargeError = class extends Error {
   bytes;
@@ -19439,7 +19466,7 @@ function listRotatedSegments(log) {
   const dir = dirname6(log);
   const base = basename3(log).replace(/\.jsonl$/, "");
   if (!existsSync13(dir)) return [];
-  return readdirSync5(dir).filter((f) => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{5}\\.jsonl$`).test(f)).sort().map((f) => join16(dir, f));
+  return readdirSync5(dir).filter((f) => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{5}\\.jsonl$`).test(f)).sort().map((f) => join17(dir, f));
 }
 function nextSegmentPath(log) {
   const existing = listRotatedSegments(log);
@@ -19596,9 +19623,9 @@ function assertDecisionRecorded(eventsLog, decisionId) {
 
 // src/workspace/hook-settings.ts
 import { existsSync as existsSync14, readFileSync as readFileSync9 } from "node:fs";
-import { join as join17 } from "node:path";
+import { join as join18 } from "node:path";
 function mycelinkCliPath() {
-  return join17(packageRoot(), "bin", "mycelink.mjs");
+  return join18(packageRoot(), "bin", "mycelink.mjs");
 }
 function cmd(event, launcher) {
   return `node "${launcher.replace(/\\/g, "/")}" hook ${event}`;
@@ -19640,7 +19667,7 @@ function buildHookSettings(launcher = mycelinkCliPath()) {
   };
 }
 function installHooks(controlRoot, launcher = mycelinkCliPath()) {
-  const file = join17(controlRoot, ".claude", "settings.json");
+  const file = join18(controlRoot, ".claude", "settings.json");
   const existing = existsSync14(file) ? JSON.parse(readFileSync9(file, "utf8")) : {};
   const ours = buildHookSettings(launcher);
   const merged = { ...existing.hooks ?? {} };
@@ -19655,7 +19682,7 @@ function isOurHook(command) {
   return /mycelink\.mjs" hook [a-z-]+$/.test(command);
 }
 function hookHealth(controlRoot) {
-  const file = join17(controlRoot, ".claude", "settings.json");
+  const file = join18(controlRoot, ".claude", "settings.json");
   let settings = {};
   try {
     settings = existsSync14(file) ? JSON.parse(readFileSync9(file, "utf8")) : {};
@@ -19679,7 +19706,7 @@ function hookHealth(controlRoot) {
 
 // src/sessions/registry.ts
 import { dirname as dirname7 } from "node:path";
-import { mkdirSync as mkdirSync10 } from "node:fs";
+import { mkdirSync as mkdirSync11 } from "node:fs";
 function lockPath2(registryFile) {
   return registryFile + ".lock";
 }
@@ -19692,7 +19719,7 @@ function save2(file, data) {
   if (problems.length > 0) {
     throw new Error("Session registry invalid: " + problems.map((p) => p.detail).join("; "));
   }
-  mkdirSync10(dirname7(file), { recursive: true });
+  mkdirSync11(dirname7(file), { recursive: true });
   writeDocAtomic(file, data);
 }
 function recordSpawn(file, handle, info) {
@@ -19897,7 +19924,7 @@ var NotSchedulableError = class extends Error {
 var HOST_WORKER_AGENT = "mycelink:module-worker";
 function resultInSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   try {
-    return lstatSync5(join18(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync5(join18(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
+    return lstatSync5(join19(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync5(join19(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
   } catch {
     return false;
   }
@@ -20019,7 +20046,7 @@ var Orchestrator = class {
   contractHashes(node) {
     const out = {};
     for (const rel of [...node.contract_inputs ?? [], ...node.contract_outputs ?? []]) {
-      const full = join18(this.controlRoot, rel);
+      const full = join19(this.controlRoot, rel);
       out[rel] = existsSync15(full) ? createHash8("sha256").update(readFileSync10(full)).digest("hex") : "";
     }
     return out;
@@ -20255,8 +20282,8 @@ var Orchestrator = class {
       maxBytes: this.workspace.config.context_pack_max_bytes,
       ...this.recall ? { memory: this.recall(node) } : {}
     });
-    mkdirSync11(this.paths.contextPacksDir, { recursive: true });
-    const file = join18(this.paths.contextPacksDir, `${nodeId}.json`);
+    mkdirSync12(this.paths.contextPacksDir, { recursive: true });
+    const file = join19(this.paths.contextPacksDir, `${nodeId}.json`);
     writeTextAtomic(file, JSON.stringify(pack, null, 2) + "\n");
     return file;
   }
@@ -20294,9 +20321,9 @@ var Orchestrator = class {
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
     const baseBranch = repoDecl?.base_branch ?? "main";
     const branch = workerBranchName(this.featureId, nodeId);
-    const verifyRoot = join18(this.workspace.paths.workDir, "verify");
-    mkdirSync11(verifyRoot, { recursive: true });
-    const verifyDir = join18(
+    const verifyRoot = join19(this.workspace.paths.workDir, "verify");
+    mkdirSync12(verifyRoot, { recursive: true });
+    const verifyDir = join19(
       verifyRoot,
       `${node.repository}__${nodeId.replace(/[^\w.-]/g, "_")}__${randomUUID2().slice(0, 8)}`
     );
@@ -20335,7 +20362,7 @@ var Orchestrator = class {
           nodeId,
           repository: node.repository,
           ...verifierInvocation(verifier),
-          cwd: verifier.cwd ? join18(verifyDir, verifier.cwd) : verifyDir,
+          cwd: verifier.cwd ? join19(verifyDir, verifier.cwd) : verifyDir,
           evidenceDir,
           label: `${labelPrefix}-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
@@ -20398,9 +20425,9 @@ var Orchestrator = class {
     const node = this.node(nodeId);
     if (node.repository === null) return null;
     const repository = node.repository;
-    const lockDir = join18(this.paths.featureDir, "integration");
-    mkdirSync11(lockDir, { recursive: true });
-    return withLock(join18(lockDir, `${repository}.lock`), () => this.integrateLocked(nodeId, repository, expectedSha), {
+    const lockDir = join19(this.paths.featureDir, "integration");
+    mkdirSync12(lockDir, { recursive: true });
+    return withLock(join19(lockDir, `${repository}.lock`), () => this.integrateLocked(nodeId, repository, expectedSha), {
       timeoutMs: 3e4,
       pollMs: 50,
       purpose: "integration"
@@ -20471,8 +20498,8 @@ var Orchestrator = class {
       const { claimId, capability, worktree, branch } = this.claim(nodeId, { mode: "adapter" });
       const packPath = this.writeContextPack(nodeId, claimId);
       const attempt = this.state().nodes[nodeId]?.attempts ?? 1;
-      const sessionDir = join18(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"));
-      mkdirSync11(sessionDir, { recursive: true });
+      const sessionDir = join19(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"));
+      mkdirSync12(sessionDir, { recursive: true });
       const previous = liveSessions(this.paths.sessionsRegistry).find((s) => s.node_id === nodeId);
       const request = {
         featureId: this.featureId,
@@ -20481,8 +20508,8 @@ var Orchestrator = class {
         attempt,
         contextPackPath: packPath,
         cwd: worktree ?? this.controlRoot,
-        resultPath: join18(sessionDir, `result.attempt-${attempt}.json`),
-        logPath: join18(sessionDir, `session.attempt-${attempt}.log`),
+        resultPath: join19(sessionDir, `result.attempt-${attempt}.json`),
+        logPath: join19(sessionDir, `session.attempt-${attempt}.log`),
         model: node.worker.model,
         maxTurns: node.worker.max_turns,
         maxWallClockMs: Math.min(
@@ -20991,13 +21018,13 @@ var Orchestrator = class {
         const collected2 = collectWorkerResult(
           cwd,
           { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
-          join18(this.sessionDir(nodeId), file),
+          join19(this.sessionDir(nodeId), file),
           env,
           { resultFile, ...claim.worktree === null ? { fallbackQuarantineDir: null } : {} }
         );
         if (collected2.result !== null) {
           this.fault("result-captured");
-          const captured = { file, sha256: sha256OfFile(join18(this.sessionDir(nodeId), file)), dispatchId: generation, usage: hostUsage(collected2.result, started) };
+          const captured = { file, sha256: sha256OfFile(join19(this.sessionDir(nodeId), file)), dispatchId: generation, usage: hostUsage(collected2.result, started) };
           mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
           this.fault("result-attested");
           result = collected2.result;
@@ -21053,8 +21080,8 @@ var Orchestrator = class {
     }
   }
   sessionDir(nodeId) {
-    const dir = join18(this.paths.sessionsDir, safeNodeDir(nodeId));
-    mkdirSync11(dir, { recursive: true });
+    const dir = join19(this.paths.sessionsDir, safeNodeDir(nodeId));
+    mkdirSync12(dir, { recursive: true });
     return dir;
   }
   /**
@@ -21089,7 +21116,7 @@ var Orchestrator = class {
     const collected = collectWorkerResult(
       cwd,
       { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
-      join18(this.sessionDir(nodeId), file),
+      join19(this.sessionDir(nodeId), file),
       process.env,
       {
         resultFile,
@@ -21103,7 +21130,7 @@ var Orchestrator = class {
     }
     return {
       file,
-      sha256: sha256OfFile(join18(this.sessionDir(nodeId), file)),
+      sha256: sha256OfFile(join19(this.sessionDir(nodeId), file)),
       dispatchId: generation,
       usage: hostUsage(collected.result, Date.parse(claim.dispatched_at ?? claim.claimed_at))
     };
@@ -21123,7 +21150,7 @@ var Orchestrator = class {
   pendingCapture(nodeId, claim, started) {
     const pending = claim.capture_pending;
     if (!pending || pending.dispatch_id !== (claim.dispatch_id ?? claim.claim_id)) return null;
-    const file = join18(this.sessionDir(nodeId), pending.file);
+    const file = join19(this.sessionDir(nodeId), pending.file);
     const parsed = readControllerCopy(file, null, nodeId, claim.claim_id, claim.dispatch_id);
     if (parsed === null) return null;
     return {
@@ -21149,18 +21176,28 @@ var Orchestrator = class {
     let claimId = null;
     try {
       claimId = this.claim(nodeId, { mode: "controller" }).claimId;
-      const repoRefs = this.integrationRefs();
-      if (repoRefs.length === 0) {
+      const contracts = existsSync15(this.workspace.paths.contractsDir) ? readdirSync6(this.workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+      const manifest = withFeatureLock(this.paths.featureDir, "candidate build", () => {
+        const repoRefs = this.integrationRefs();
+        if (repoRefs.length === 0) return null;
+        const cut = createCandidate({
+          controlRepo: this.controlRoot,
+          featureDir: this.paths.featureDir,
+          featureId: this.featureId,
+          repositories: repoRefs,
+          contracts
+        });
+        mutateState(this.paths.featureDir, (s) => {
+          if (!s.candidates.includes(cut.candidate_id)) s.candidates.push(cut.candidate_id);
+          s.current_candidate = cut.candidate_id;
+          if (s.feature_state === "RUNNING") s.feature_state = "CANDIDATE_READY";
+          return s;
+        });
+        return cut;
+      });
+      if (manifest === null) {
         return this.failAttempt(nodeId, null, "NO_INTEGRATION_BRANCHES", evidence);
       }
-      const contracts = existsSync15(this.workspace.paths.contractsDir) ? readdirSync6(this.workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
-      const manifest = createCandidate({
-        controlRepo: this.controlRoot,
-        featureDir: this.paths.featureDir,
-        featureId: this.featureId,
-        repositories: repoRefs,
-        contracts
-      });
       const record = {
         kind: "candidate",
         node_id: nodeId,
@@ -21172,24 +21209,23 @@ var Orchestrator = class {
         repository: null,
         commit_sha: manifest.control_commit,
         output_path: `features/${this.featureId}/candidates/${manifest.candidate_id}.yaml`,
-        output_sha256: sha256OfFile(join18(this.paths.candidatesDir, `${manifest.candidate_id}.yaml`)),
+        output_sha256: sha256OfFile(join19(this.paths.candidatesDir, `${manifest.candidate_id}.yaml`)),
         failure_fingerprint: null,
         candidate_id: manifest.candidate_id
       };
       evidence.push(record);
       this.setEvidence(nodeId, record);
-      mutateState(this.paths.featureDir, (s) => {
-        if (!s.candidates.includes(manifest.candidate_id)) s.candidates.push(manifest.candidate_id);
-        s.current_candidate = manifest.candidate_id;
-        if (s.feature_state === "RUNNING") s.feature_state = "CANDIDATE_READY";
-        return s;
-      });
       this.advanceVerifiedGates(nodeId);
       this.transition(nodeId, "INTEGRATED");
       this.transition(nodeId, "DONE");
       this.releaseClaim(nodeId);
       return this.report(nodeId, "DONE", null, manifest.candidate_id, evidence);
     } catch (err) {
+      if (err instanceof FeatureBusyError && claimId !== null) {
+        const detail = `PRECONDITION_FAILED: ${err.message}`;
+        this.releaseForInfrastructure(nodeId, claimId, detail);
+        return this.report(nodeId, "PRECONDITION_FAILED", null, detail, evidence);
+      }
       if (err instanceof DirtyWorktreeError && claimId !== null) {
         const detail = `PRECONDITION_FAILED: ${err.message} Commit (or remove) those files, then dispatch again.`;
         this.releaseForInfrastructure(nodeId, claimId, detail);
@@ -21225,9 +21261,9 @@ var Orchestrator = class {
    * rework before the node is DONE again changes nothing.
    */
   rework(nodeId, options) {
-    const lockDir = join18(this.paths.featureDir, "deliveries");
-    mkdirSync11(lockDir, { recursive: true });
-    return withLock(join18(lockDir, "deliver.lock"), () => this.reworkLocked(nodeId, options), {
+    const lockDir = join19(this.paths.featureDir, "deliveries");
+    mkdirSync12(lockDir, { recursive: true });
+    return withLock(join19(lockDir, "deliver.lock"), () => this.reworkLocked(nodeId, options), {
       timeoutMs: 2e3,
       pollMs: 50,
       purpose: "feature rework"
@@ -21424,7 +21460,7 @@ var Orchestrator = class {
   /** Whether any delivery of this feature moved (or tried to move) its base branches. */
   featureDelivered(state) {
     if (Object.keys(state.accepted_deliveries ?? {}).length > 0) return true;
-    const dir = join18(this.paths.featureDir, "deliveries");
+    const dir = join19(this.paths.featureDir, "deliveries");
     return existsSync15(dir) && readdirSync6(dir).some((f) => f.endsWith(".json"));
   }
   /** Repositories whose base branch is no longer an ancestor of this feature's integration branch. */
@@ -21471,7 +21507,7 @@ var Orchestrator = class {
     const head = resolveRef(repoPath, branch);
     const ref = this.archiveRefName(nodeId, head);
     runGit(repoPath, ["update-ref", ref, head]);
-    const expected = resolve13(join18(this.workspace.paths.worktreesDir, worktreeDirName(node.repository, nodeId)));
+    const expected = resolve13(join19(this.workspace.paths.worktreesDir, worktreeDirName(node.repository, nodeId)));
     for (const w of listWorktrees(repoPath)) {
       if (w.branch === branch || resolve13(w.path) === expected) removeWorkerWorktree(repoPath, w.path);
     }
@@ -21564,7 +21600,7 @@ var Orchestrator = class {
       };
       const result = await runE2E({
         featureDir: this.paths.featureDir,
-        evidenceRoot: join18(this.paths.evidenceDir, "e2e"),
+        evidenceRoot: join19(this.paths.evidenceDir, "e2e"),
         graph,
         candidate,
         scenarios,
@@ -21881,7 +21917,7 @@ var Orchestrator = class {
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
     const name = claim.result_captured_file ?? `result.attempt-${attempt}.json`;
     const parsed = readControllerCopy(
-      join18(this.paths.sessionsDir, safeNodeDir(nodeId), name),
+      join19(this.paths.sessionsDir, safeNodeDir(nodeId), name),
       claim.result_captured_sha256,
       nodeId,
       claim.claim_id,
@@ -21919,12 +21955,12 @@ var Orchestrator = class {
 };
 function slotTouched(cwd, resultFile) {
   try {
-    if (!lstatSync5(join18(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+    if (!lstatSync5(join19(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
   } catch {
     return false;
   }
   try {
-    lstatSync5(join18(cwd, WORKER_RESULT_DIR, resultFile));
+    lstatSync5(join19(cwd, WORKER_RESULT_DIR, resultFile));
     return true;
   } catch {
     return false;
@@ -21974,7 +22010,7 @@ function isProcessAlive(pid) {
 
 // src/sessions/claude-cli-adapter.ts
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync as existsSync16, mkdirSync as mkdirSync12, rmSync as rmSync7 } from "node:fs";
+import { createWriteStream, existsSync as existsSync16, mkdirSync as mkdirSync13, rmSync as rmSync7 } from "node:fs";
 import { dirname as dirname8, resolve as resolve14 } from "node:path";
 import { randomUUID as randomUUID3 } from "node:crypto";
 var PermissionPolicyError = class extends Error {
@@ -22036,8 +22072,8 @@ var ClaudeCliAdapter = class {
   }
   spawn(request) {
     const sessionId = randomUUID3();
-    mkdirSync12(dirname8(resolve14(request.logPath)), { recursive: true });
-    mkdirSync12(dirname8(resolve14(request.resultPath)), { recursive: true });
+    mkdirSync13(dirname8(resolve14(request.logPath)), { recursive: true });
+    mkdirSync13(dirname8(resolve14(request.resultPath)), { recursive: true });
     if (existsSync16(request.resultPath)) rmSync7(request.resultPath, { force: true });
     const handle = {
       session_id: sessionId,
@@ -22460,7 +22496,7 @@ function writeLoops(file, loops) {
 
 // src/hooks/entrypoint.ts
 import { existsSync as existsSync18, readFileSync as readFileSync12, readdirSync as readdirSync7 } from "node:fs";
-import { join as join19, relative as relative4, resolve as resolve15, sep as sep3 } from "node:path";
+import { join as join20, relative as relative4, resolve as resolve15, sep as sep3 } from "node:path";
 import { createHash as createHash9 } from "node:crypto";
 var MAX_BLOCK_BYTES = 1024;
 var MANAGED_PATTERNS = [
@@ -22514,11 +22550,11 @@ function activeFeature(controlRoot, explicit) {
   const dir = controlPaths(controlRoot).featuresDir;
   if (!existsSync18(dir)) return null;
   const candidates = readdirSync7(dir).filter(
-    (f) => isSafeFeatureId(f) && existsSync18(join19(dir, f, "STATE.json"))
+    (f) => isSafeFeatureId(f) && existsSync18(join20(dir, f, "STATE.json"))
   );
   if (candidates.length === 1) return candidates[0];
   for (const id of candidates.sort()) {
-    const state = loadState(join19(dir, id))?.data;
+    const state = loadState(join20(dir, id))?.data;
     if (state && ["RUNNING", "E2E_RUNNING", "CANDIDATE_READY"].includes(state.feature_state)) {
       return id;
     }
@@ -22880,8 +22916,8 @@ import { resolve as resolve17 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync19, mkdirSync as mkdirSync13, readFileSync as readFileSync13, readdirSync as readdirSync8, statSync as statSync4 } from "node:fs";
-import { join as join20, relative as relative5, resolve as resolve16 } from "node:path";
+import { existsSync as existsSync19, mkdirSync as mkdirSync14, readFileSync as readFileSync13, readdirSync as readdirSync8, statSync as statSync4 } from "node:fs";
+import { join as join21, relative as relative5, resolve as resolve16 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
   procedure: "procedures",
@@ -22889,9 +22925,9 @@ var DIR_FOR = {
   decision: "decisions",
   concept: "concepts",
   pitfall: "pitfalls",
-  "code-module": join20("code", "modules"),
-  "code-contract": join20("code", "contracts"),
-  "code-flow": join20("code", "flows")
+  "code-module": join21("code", "modules"),
+  "code-contract": join21("code", "contracts"),
+  "code-flow": join21("code", "flows")
 };
 var STATUS_WEIGHT = {
   verified: 100,
@@ -22914,18 +22950,18 @@ function brainRoot(controlRoot, override) {
 function initBrain(root) {
   for (const dir of [
     root,
-    ...Object.values(DIR_FOR).map((d) => join20(root, d)),
-    join20(root, "queries"),
-    join20(root, "review"),
-    join20(root, "archive"),
-    join20(root, "manifests"),
-    join20(root, "evidence")
+    ...Object.values(DIR_FOR).map((d) => join21(root, d)),
+    join21(root, "queries"),
+    join21(root, "review"),
+    join21(root, "archive"),
+    join21(root, "manifests"),
+    join21(root, "evidence")
   ]) {
-    mkdirSync13(dir, { recursive: true });
+    mkdirSync14(dir, { recursive: true });
   }
-  const schema = join20(root, "SCHEMA.md");
+  const schema = join21(root, "SCHEMA.md");
   if (!existsSync19(schema)) writeTextAtomic(schema, SCHEMA_MD);
-  const index = join20(root, "index.md");
+  const index = join21(root, "index.md");
   if (!existsSync19(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
   return root;
 }
@@ -22971,7 +23007,7 @@ ${body.trimEnd()}
 `;
 }
 function pagePath(root, frontmatter) {
-  return join20(root, DIR_FOR[frontmatter.type], `${frontmatter.id}.md`);
+  return join21(root, DIR_FOR[frontmatter.type], `${frontmatter.id}.md`);
 }
 function writePage(root, frontmatter, body) {
   const problems = validateAgainstSchema("memory-page", frontmatter);
@@ -22999,7 +23035,7 @@ function writePage(root, frontmatter, body) {
   }
   if (problems.length > 0) return { path: "", problems };
   const file = pagePath(root, frontmatter);
-  mkdirSync13(join20(root, DIR_FOR[frontmatter.type]), { recursive: true });
+  mkdirSync14(join21(root, DIR_FOR[frontmatter.type]), { recursive: true });
   writeTextAtomic(file, renderPage(frontmatter, body));
   return { path: file, problems: [] };
 }
@@ -23020,7 +23056,7 @@ function listPages(root) {
   const out = [];
   const walk = (dir) => {
     for (const entry of readdirSync8(dir).sort()) {
-      const full = join20(dir, entry);
+      const full = join21(dir, entry);
       if (statSync4(full).isDirectory()) {
         if (entry === "archive") continue;
         walk(full);
@@ -23168,9 +23204,9 @@ function consolidate(root) {
 function adoptCodewiki(controlRoot, brain) {
   const codewiki = resolve16(controlRoot, ".codewiki");
   if (!existsSync19(codewiki)) return { adopted: false, path: codewiki };
-  mkdirSync13(join20(brain, "code"), { recursive: true });
+  mkdirSync14(join21(brain, "code"), { recursive: true });
   writeTextAtomic(
-    join20(brain, "code", "SUBVAULT.md"),
+    join21(brain, "code", "SUBVAULT.md"),
     [
       "# Adopted code-memory sub-vault",
       "",
@@ -23639,7 +23675,7 @@ registerAdapter(eccAdapter);
 // src/sessions/preflight.ts
 import { accessSync, constants as constants4, existsSync as existsSync20, statSync as statSync5 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter as delimiter2, isAbsolute as isAbsolute3, join as join21 } from "node:path";
+import { delimiter as delimiter2, isAbsolute as isAbsolute3, join as join22 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
 var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
@@ -23656,7 +23692,7 @@ function resolveExecutable(exe, env = process.env) {
   if (process.platform === "win32") return resolveWindowsExecutable(exe, env);
   if (isAbsolute3(exe) || exe.includes("/")) return isRunnableFile(exe) ? exe : null;
   for (const dir of (env["PATH"] ?? "").split(delimiter2).filter(Boolean)) {
-    const candidate = join21(dir, exe);
+    const candidate = join22(dir, exe);
     if (isRunnableFile(candidate)) return candidate;
   }
   return null;
@@ -23760,9 +23796,9 @@ function featureVerifyProblems(controlRoot, featureId) {
 }
 
 // src/engine/deliver.ts
-import { existsSync as existsSync21, mkdirSync as mkdirSync14, readFileSync as readFileSync15 } from "node:fs";
+import { existsSync as existsSync21, mkdirSync as mkdirSync15, readFileSync as readFileSync15 } from "node:fs";
 import { createHash as createHash10 } from "node:crypto";
-import { join as join22 } from "node:path";
+import { join as join23 } from "node:path";
 var DeliveryRefusedError = class extends Error {
   problems;
   constructor(problems) {
@@ -23779,7 +23815,7 @@ var DeliveryFailedError = class extends Error {
 };
 function manifestFile(featureDir, candidateId) {
   assertCandidateId(candidateId);
-  return join22(featureDir, "deliveries", `${candidateId}.json`);
+  return join23(featureDir, "deliveries", `${candidateId}.json`);
 }
 function readManifest(file) {
   if (!existsSync21(file)) return null;
@@ -23821,13 +23857,13 @@ function untrustedManifest(controlRoot, featureId, candidateId, targets, raw) {
   return null;
 }
 function save3(file, manifest) {
-  mkdirSync14(join22(file, ".."), { recursive: true });
+  mkdirSync15(join23(file, ".."), { recursive: true });
   writeTextAtomic(file, JSON.stringify(manifest, null, 2) + "\n");
 }
 function deliverFeature(controlRoot, featureId, options = {}) {
-  const lockDir = join22(featurePaths(controlRoot, featureId).featureDir, "deliveries");
-  mkdirSync14(lockDir, { recursive: true });
-  return withLock(join22(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
+  const lockDir = join23(featurePaths(controlRoot, featureId).featureDir, "deliveries");
+  mkdirSync15(lockDir, { recursive: true });
+  return withLock(join23(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
     timeoutMs: 2e3,
     pollMs: 50,
     purpose: "feature delivery"
@@ -23992,7 +24028,7 @@ function deliverLocked(controlRoot, featureId, options) {
     feature_id: featureId,
     data: { candidate_id: candidateId, repositories: Object.fromEntries(names.map((n) => [n, plan[n]?.after ?? null])) }
   });
-  const evidenceDir = join22(paths.evidenceDir, "delivery", candidateId);
+  const evidenceDir = join23(paths.evidenceDir, "delivery", candidateId);
   manifest.acceptance = names.map((name) => acceptance(controlRoot, workspace, name, plan[name], candidateId, evidenceDir));
   const passed = manifest.acceptance.every((a) => a.failure_fingerprint === null);
   manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
@@ -24031,10 +24067,10 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
   const decl = workspace.repositories.repositories.find((r) => r.name === name);
   const repo = repositoryPath(workspace, name);
   const command = decl?.commands.test ?? [];
-  const dir = join22(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
+  const dir = join23(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
   runGit(repo, ["worktree", "remove", "--force", dir], { allowFail: true });
   runGit(repo, ["worktree", "prune"], { allowFail: true });
-  mkdirSync14(join22(workspace.paths.workDir, "acceptance"), { recursive: true });
+  mkdirSync15(join23(workspace.paths.workDir, "acceptance"), { recursive: true });
   runGit(repo, ["worktree", "add", "--detach", dir, step.base_branch]);
   try {
     const sha = resolveRef(dir, "HEAD");
@@ -24068,7 +24104,7 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
 
 // src/engine/authority.ts
 import { existsSync as existsSync22, readdirSync as readdirSync9, readFileSync as readFileSync16 } from "node:fs";
-import { join as join23 } from "node:path";
+import { join as join24 } from "node:path";
 var AUTHORITY_FLAG = "authority";
 var AUTHORITY_FORMAT = /^[0-9a-f]{64}$/;
 var AuthorityError = class extends Error {
@@ -24080,7 +24116,7 @@ var AuthorityError = class extends Error {
   }
 };
 function authorityFile(controlRoot) {
-  return join23(controlPaths(controlRoot).workDir, "controller-authority.json");
+  return join24(controlPaths(controlRoot).workDir, "controller-authority.json");
 }
 function readRecord(controlRoot) {
   const file = authorityFile(controlRoot);
@@ -24100,7 +24136,7 @@ function liveClaims(controlRoot) {
   if (!existsSync22(dir)) return [];
   const out = [];
   for (const feature of readdirSync9(dir).sort()) {
-    const file = join23(dir, feature, "STATE.json");
+    const file = join24(dir, feature, "STATE.json");
     if (!existsSync22(file)) continue;
     let nodes = {};
     try {
@@ -24127,7 +24163,7 @@ function openControllerAuthority(controlRoot, options = {}) {
     );
   }
   return withLock(
-    join23(paths.workDir, "controller-authority.lock"),
+    join24(paths.workDir, "controller-authority.lock"),
     () => {
       if (!takeover && existsSync22(authorityFile(controlRoot))) {
         const record2 = readRecord(controlRoot);
@@ -24187,7 +24223,7 @@ function assertControllerAuthority(args, controlRoot, operation) {
 
 // src/cli/cli.ts
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync17(join24(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync17(join25(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -24249,7 +24285,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve18(env);
   let dir = resolve18(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync23(join24(dir, "mycelink.config.json"))) return dir;
+    if (existsSync23(join25(dir, "mycelink.config.json"))) return dir;
     const parent = dirname9(dir);
     if (parent === dir) break;
     dir = parent;
@@ -24467,8 +24503,8 @@ function cmdInit(args, io) {
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync23(join24(target, "CLAUDE.md"))) {
-    writeTextAtomic(join24(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync23(join25(target, "CLAUDE.md"))) {
+    writeTextAtomic(join25(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -24724,8 +24760,8 @@ function featureGroup(args, io) {
     if (busy.length > 0) {
       throw new Error(`FEATURE_NOT_QUIESCENT: ${featureId} still has work in flight (${busy.join(", ")}); settle, reconcile or cancel it first.`);
     }
-    mkdirSync15(join24(paths.featureDir, "deliveries"), { recursive: true });
-    withLock(join24(paths.featureDir, "deliveries", "deliver.lock"), () => mutateState(paths.featureDir, (s) => {
+    mkdirSync16(join25(paths.featureDir, "deliveries"), { recursive: true });
+    withLock(join25(paths.featureDir, "deliveries", "deliver.lock"), () => mutateState(paths.featureDir, (s) => {
       const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
       if (started) throw new Error(`FEATURE_NOT_QUIESCENT: ${started[0]} started meanwhile.`);
       if (s.feature_state !== "COMPLETED") s.feature_state = "CANCELLED";
@@ -24781,12 +24817,12 @@ function graphGroup(args, io) {
     const repositories = existsSync23(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve18(args.flags["out"]) : join24(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    const out = typeof args.flags["out"] === "string" ? resolve18(args.flags["out"]) : join25(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
     if (resolve18(out) === resolve18(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
-    mkdirSync15(dirname9(out), { recursive: true });
+    mkdirSync16(dirname9(out), { recursive: true });
     const header = `# DRAFT generated by the "${adapter.name}" adapter (${adapter.verification}).
 # Requires human review. Not approved. Rename to PORTFOLIO-GRAPH.yaml only after review,
 # then run: mycelink graph validate ${featureId}
@@ -24818,7 +24854,7 @@ function graphGroup(args, io) {
       return 1;
     }
     const paths = featurePaths(controlRoot, featureId);
-    mkdirSync15(paths.featureDir, { recursive: true });
+    mkdirSync16(paths.featureDir, { recursive: true });
     writeTextAtomic(paths.graph, import_yaml7.default.stringify(parsed, { lineWidth: 0 }));
     emit2(
       io,
@@ -25311,32 +25347,40 @@ function candidateGroup(args, io) {
   const repoRefs = portfolioRefs(workspace, featureId);
   if (sub === "create") {
     assertControllerRole(args, "candidate create");
-    const graph = loadGraph(controlRoot, featureId);
-    const state = loadState(paths.featureDir)?.data;
-    if (!state) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
-    const unfinished = Object.entries(state.nodes).filter(([id, rt]) => {
-      const type = graph.nodes.find((n) => n.id === id)?.node_type;
-      if (type === "candidate-build" || type === "e2e-scenario") return false;
-      return rt.state !== "DONE" && rt.state !== "EXCLUDED";
-    }).map(([id, rt]) => `${id}=${rt.state}`);
-    if (unfinished.length > 0) {
-      throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(", ")}`);
-    }
-    const contracts = existsSync23(workspace.paths.contractsDir) ? readdirSync10(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
-    const manifest = createCandidate({
-      controlRepo: controlRoot,
-      featureDir: paths.featureDir,
-      featureId,
-      // Only integration branches exactly where the controller left them.
-      repositories: portfolioRefs(workspace, featureId, { create: true, trust: { graph, state } }),
-      contracts
-    });
-    mutateState(paths.featureDir, (s) => {
-      s.candidates.push(manifest.candidate_id);
-      s.current_candidate = manifest.candidate_id;
-      if (s.feature_state === "RUNNING") s.feature_state = "CANDIDATE_READY";
-      return s;
-    });
+    const manifest = withFeatureLock(
+      paths.featureDir,
+      "candidate create",
+      () => {
+        const graph = loadGraph(controlRoot, featureId);
+        const state = loadState(paths.featureDir)?.data;
+        if (!state) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+        const unfinished = Object.entries(state.nodes).filter(([id, rt]) => {
+          const type = graph.nodes.find((n) => n.id === id)?.node_type;
+          if (type === "candidate-build" || type === "e2e-scenario") return false;
+          return rt.state !== "DONE" && rt.state !== "EXCLUDED";
+        }).map(([id, rt]) => `${id}=${rt.state}`);
+        if (unfinished.length > 0) {
+          throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(", ")}`);
+        }
+        const contracts = existsSync23(workspace.paths.contractsDir) ? readdirSync10(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+        const cut = createCandidate({
+          controlRepo: controlRoot,
+          featureDir: paths.featureDir,
+          featureId,
+          // Only integration branches exactly where the controller left them.
+          repositories: portfolioRefs(workspace, featureId, { create: true, trust: { graph, state } }),
+          contracts
+        });
+        mutateState(paths.featureDir, (s) => {
+          if (!s.candidates.includes(cut.candidate_id)) s.candidates.push(cut.candidate_id);
+          s.current_candidate = cut.candidate_id;
+          if (s.feature_state === "RUNNING") s.feature_state = "CANDIDATE_READY";
+          return s;
+        });
+        return cut;
+      },
+      5e3
+    );
     emit2(
       io,
       args,
@@ -25457,7 +25501,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join24(paths.evidenceDir, "e2e"),
+      evidenceRoot: join25(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -25620,12 +25664,12 @@ function checkpointGroup(args, io) {
   const sub = requirePositional(args, 1, "create|validate|restore");
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
-  mkdirSync15(paths.checkpointsDir, { recursive: true });
+  mkdirSync16(paths.checkpointsDir, { recursive: true });
   if (sub === "create") {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join24(paths.checkpointsDir, `${stamp}.json`);
+    const file = join25(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -25646,7 +25690,7 @@ function checkpointGroup(args, io) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync17(join24(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync17(join25(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -25666,7 +25710,7 @@ function checkpointGroup(args, io) {
       throw new Error("DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.");
     }
     assertDecisionUsable(paths.events, decisionId);
-    const file = join24(paths.checkpointsDir, name);
+    const file = join25(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync17(file, "utf8"));
     const restored = structuredClone(checkpoint.state);
     for (const runtime of Object.values(restored.nodes)) {

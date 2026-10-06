@@ -27,6 +27,7 @@ import { IN_FLIGHT_STATES, computeReady, scheduleBatch } from '../scheduler/read
 import { acquireResource, leaseStatus, recoverLeases, releaseAllForNode, releaseResource } from '../resources/leases.js';
 import { runVerification, verifierInvocation, type VerificationInvocation } from '../evidence/runner.js';
 import { createCandidate, listCandidates, loadCandidate, verifyCandidate } from '../git/candidate.js';
+import { withFeatureLock } from '../engine/feature-lock.js';
 import { createWorkerWorktree, workerBranchName, integrationBranchName } from '../git/worktree.js';
 import { isGitRepository, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { Orchestrator } from '../engine/orchestrator.js';
@@ -1342,38 +1343,49 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
 
   if (sub === 'create') {
     assertControllerRole(args, 'candidate create');
-    const graph = loadGraph(controlRoot, featureId);
-    const state = loadState(paths.featureDir)?.data;
-    if (!state) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
-    const unfinished = Object.entries(state.nodes)
-      .filter(([id, rt]) => {
-        const type = graph.nodes.find((n) => n.id === id)?.node_type;
-        if (type === 'candidate-build' || type === 'e2e-scenario') return false;
-        return rt.state !== 'DONE' && rt.state !== 'EXCLUDED';
-      })
-      .map(([id, rt]) => `${id}=${rt.state}`);
-    if (unfinished.length > 0) {
-      throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(', ')}`);
-    }
-    const contracts = existsSync(workspace.paths.contractsDir)
-      ? readdirSync(workspace.paths.contractsDir)
-          .filter((f) => !f.startsWith('.'))
-          .map((f) => `contracts/${f}`)
-      : [];
-    const manifest = createCandidate({
-      controlRepo: controlRoot,
-      featureDir: paths.featureDir,
-      featureId,
-      // Only integration branches exactly where the controller left them.
-      repositories: portfolioRefs(workspace, featureId, { create: true, trust: { graph, state } }),
-      contracts,
-    });
-    mutateState(paths.featureDir, (s) => {
-      s.candidates.push(manifest.candidate_id);
-      s.current_candidate = manifest.candidate_id;
-      if (s.feature_state === 'RUNNING') s.feature_state = 'CANDIDATE_READY';
-      return s;
-    });
+    // Checked, bound and made current under the feature's delivery lock:
+    // never in the middle of a delivery, a rework or a supersede, and the
+    // work it binds is judged once the lock is held.
+    const manifest = withFeatureLock(
+      paths.featureDir,
+      'candidate create',
+      () => {
+        const graph = loadGraph(controlRoot, featureId);
+        const state = loadState(paths.featureDir)?.data;
+        if (!state) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+        const unfinished = Object.entries(state.nodes)
+          .filter(([id, rt]) => {
+            const type = graph.nodes.find((n) => n.id === id)?.node_type;
+            if (type === 'candidate-build' || type === 'e2e-scenario') return false;
+            return rt.state !== 'DONE' && rt.state !== 'EXCLUDED';
+          })
+          .map(([id, rt]) => `${id}=${rt.state}`);
+        if (unfinished.length > 0) {
+          throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(', ')}`);
+        }
+        const contracts = existsSync(workspace.paths.contractsDir)
+          ? readdirSync(workspace.paths.contractsDir)
+              .filter((f) => !f.startsWith('.'))
+              .map((f) => `contracts/${f}`)
+          : [];
+        const cut = createCandidate({
+          controlRepo: controlRoot,
+          featureDir: paths.featureDir,
+          featureId,
+          // Only integration branches exactly where the controller left them.
+          repositories: portfolioRefs(workspace, featureId, { create: true, trust: { graph, state } }),
+          contracts,
+        });
+        mutateState(paths.featureDir, (s) => {
+          if (!s.candidates.includes(cut.candidate_id)) s.candidates.push(cut.candidate_id);
+          s.current_candidate = cut.candidate_id;
+          if (s.feature_state === 'RUNNING') s.feature_state = 'CANDIDATE_READY';
+          return s;
+        });
+        return cut;
+      },
+      5_000,
+    );
     emit(io, args, manifest, () =>
       `${manifest.candidate_id}: ${Object.entries(manifest.repositories)
         .map(([n, r]) => `${n}@${r.sha.slice(0, 12)}`)

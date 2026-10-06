@@ -86,6 +86,7 @@ import {
 import { createCandidate, loadCandidate } from '../git/candidate.js';
 import { expectedIntegrationHead, IntegrationBranchMovedError, portfolioRefs, trustedIntegrationHead } from './portfolio.js';
 import { withLock } from '../state/process-lock.js';
+import { FeatureBusyError, withFeatureLock } from './feature-lock.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { applyIntegration, DirtyWorktreeError, planIntegration, type IntegrateResult } from '../git/integrate.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
@@ -1818,23 +1819,35 @@ export class Orchestrator {
     let claimId: string | null = null;
     try {
       claimId = this.claim(nodeId, { mode: 'controller' }).claimId;
-      const repoRefs = this.integrationRefs();
-      if (repoRefs.length === 0) {
-        return this.failAttempt(nodeId, null, 'NO_INTEGRATION_BRANCHES', evidence);
-      }
       const contracts = existsSync(this.workspace.paths.contractsDir)
         ? readdirSync(this.workspace.paths.contractsDir)
             .filter((f) => !f.startsWith('.'))
             .map((f) => `contracts/${f}`)
         : [];
 
-      const manifest = createCandidate({
-        controlRepo: this.controlRoot,
-        featureDir: this.paths.featureDir,
-        featureId: this.featureId,
-        repositories: repoRefs,
-        contracts,
+      // Bound and made current under the feature's delivery lock: never in
+      // the middle of a delivery, a rework or a supersede.
+      const manifest = withFeatureLock(this.paths.featureDir, 'candidate build', () => {
+        const repoRefs = this.integrationRefs();
+        if (repoRefs.length === 0) return null;
+        const cut = createCandidate({
+          controlRepo: this.controlRoot,
+          featureDir: this.paths.featureDir,
+          featureId: this.featureId,
+          repositories: repoRefs,
+          contracts,
+        });
+        mutateState(this.paths.featureDir, (s) => {
+          if (!s.candidates.includes(cut.candidate_id)) s.candidates.push(cut.candidate_id);
+          s.current_candidate = cut.candidate_id;
+          if (s.feature_state === 'RUNNING') s.feature_state = 'CANDIDATE_READY';
+          return s;
+        });
+        return cut;
       });
+      if (manifest === null) {
+        return this.failAttempt(nodeId, null, 'NO_INTEGRATION_BRANCHES', evidence);
+      }
 
       const record: EvidenceRecord = {
         kind: 'candidate',
@@ -1854,19 +1867,19 @@ export class Orchestrator {
       evidence.push(record);
       this.setEvidence(nodeId, record);
 
-      mutateState(this.paths.featureDir, (s) => {
-        if (!s.candidates.includes(manifest.candidate_id)) s.candidates.push(manifest.candidate_id);
-        s.current_candidate = manifest.candidate_id;
-        if (s.feature_state === 'RUNNING') s.feature_state = 'CANDIDATE_READY';
-        return s;
-      });
-
       this.advanceVerifiedGates(nodeId);
       this.transition(nodeId, 'INTEGRATED');
       this.transition(nodeId, 'DONE');
       this.releaseClaim(nodeId);
       return this.report(nodeId, 'DONE', null, manifest.candidate_id, evidence);
     } catch (err) {
+      if (err instanceof FeatureBusyError && claimId !== null) {
+        // Another delivery, rework or candidate cut is running: handed back
+        // unspent, nothing recorded.
+        const detail = `PRECONDITION_FAILED: ${err.message}`;
+        this.releaseForInfrastructure(nodeId, claimId, detail);
+        return this.report(nodeId, 'PRECONDITION_FAILED', null, detail, evidence);
+      }
       if (err instanceof DirtyWorktreeError && claimId !== null) {
         // Uncommitted files in the control repository or an integration
         // worktree: a precondition the host can fix by committing them, not
