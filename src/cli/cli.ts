@@ -46,6 +46,7 @@ import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
 import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
+import { assertDecisionRecorded } from '../state/decisions.js';
 import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
 
 /** The installed package version, from the package.json that ships with it. */
@@ -715,9 +716,12 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
     case 'invalidate': {
       // Cascades: a downstream node's evidence was produced against the old
       // upstream, so leaving it DONE would let a stale candidate look verified.
+      const decisionId = typeof args.flags['decision'] === 'string' ? args.flags['decision'] : undefined;
+      if (decisionId !== undefined) assertDecisionRecorded(featurePaths(controlRoot, featureId).events, decisionId);
       const invalidated = orchestrator.invalidateWithDependents(
         nodeId,
         flagString(args, 'reason', 'invalidated'),
+        decisionId !== undefined ? { decisionId } : {},
       );
       emit(io, args, { node_id: nodeId, invalidated }, () =>
         `INVALIDATED: ${invalidated.join(', ')}`,
@@ -1380,6 +1384,7 @@ function decisionGroup(args: ParsedArgs, io: CliIo): number {
 
   if (sub === 'apply') {
     const decisionId = requirePositional(args, 3, 'decision-id');
+    assertDecisionRecorded(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
     const unblocked: string[] = [];
     mutateState(paths.featureDir, (s) => {

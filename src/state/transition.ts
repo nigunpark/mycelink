@@ -254,7 +254,10 @@ export function applyNodeTransition(
     );
   }
 
-  if (JUSTIFIED_EXITS.has(from) && to === 'READY') {
+  // Every way out of a parked state needs the same justification: READY
+  // directly, or INVALIDATED / PAUSED / EXCLUDED, each of which leads back to
+  // READY. Moving between parked states (BLOCKED <-> NEEDS_DECISION) does not.
+  if (JUSTIFIED_EXITS.has(from) && !JUSTIFIED_EXITS.has(to)) {
     if (!options.decisionId && options.inputChanged !== true) {
       throw new TransitionError(
         'UNBLOCK_REQUIRES_JUSTIFICATION',
@@ -299,12 +302,20 @@ export function applyNodeTransition(
     const red = runtime.evidence.red;
     runtime.evidence = red ? { red } : {};
     runtime.integrated_sha = null;
-    // Invalidation means the inputs changed, so this is a different problem.
-    // Carrying the old attempt count and fingerprints forward would exhaust
-    // the budget before the new problem had a single attempt.
-    runtime.attempts = 0;
-    runtime.failure_counts = {};
-    runtime.last_failure_fingerprint = null;
+    if (JUSTIFIED_EXITS.has(from)) {
+      // A parked node keeps the history that parked it: its attempts and
+      // fingerprints travel through INVALIDATED, so the identical failure
+      // re-blocks at once rather than buying a fresh retry budget.
+      runtime.blocked_reason = null;
+    } else {
+      // Invalidating finished or in-flight work means its inputs changed, so
+      // this is a different problem. Carrying the old attempt count and
+      // fingerprints forward would exhaust the budget before the new problem
+      // had a single attempt.
+      runtime.attempts = 0;
+      runtime.failure_counts = {};
+      runtime.last_failure_fingerprint = null;
+    }
   }
 
   return next;

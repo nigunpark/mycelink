@@ -693,7 +693,7 @@ export class Orchestrator {
    * A downstream node's evidence was produced against the old upstream, so
    * leaving it DONE would let a stale candidate look verified.
    */
-  invalidateWithDependents(nodeId: string, reason: string): string[] {
+  invalidateWithDependents(nodeId: string, reason: string, justification: { decisionId?: string } = {}): string[] {
     const graph = this.graph();
     const dependents = new Map<string, string[]>();
     for (const node of graph.nodes) {
@@ -715,13 +715,19 @@ export class Orchestrator {
 
     const invalidated: string[] = [];
     for (const id of order) {
+      const root = id === nodeId;
       try {
         this.transition(id, 'INVALIDATED', {
-          reason: id === nodeId ? reason : `upstream ${nodeId} was invalidated: ${reason}`,
+          reason: root ? reason : `upstream ${nodeId} was invalidated: ${reason}`,
+          // The root needs the caller's recorded decision to leave a parked
+          // state; a dependent's input genuinely changed because of the root.
+          ...(root ? (justification.decisionId ? { decisionId: justification.decisionId } : {}) : { inputChanged: true }),
         });
         invalidated.push(id);
-      } catch {
-        // Already in a state from which INVALIDATED is not reachable.
+      } catch (err) {
+        // A parked root without a justification is the caller's error, never
+        // something to skip silently. Dependents already past reach are left.
+        if (root && err instanceof TransitionError && err.code === 'UNBLOCK_REQUIRES_JUSTIFICATION') throw err;
       }
     }
     if (invalidated.length > 0) {

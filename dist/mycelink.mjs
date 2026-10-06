@@ -16803,7 +16803,7 @@ function applyNodeTransition(graph, state, nodeId, to, options) {
       `${from} -> ${to} is not a declared edge.`
     );
   }
-  if (JUSTIFIED_EXITS.has(from) && to === "READY") {
+  if (JUSTIFIED_EXITS.has(from) && !JUSTIFIED_EXITS.has(to)) {
     if (!options.decisionId && options.inputChanged !== true) {
       throw new TransitionError(
         "UNBLOCK_REQUIRES_JUSTIFICATION",
@@ -16835,9 +16835,13 @@ function applyNodeTransition(graph, state, nodeId, to, options) {
     const red = runtime.evidence.red;
     runtime.evidence = red ? { red } : {};
     runtime.integrated_sha = null;
-    runtime.attempts = 0;
-    runtime.failure_counts = {};
-    runtime.last_failure_fingerprint = null;
+    if (JUSTIFIED_EXITS.has(from)) {
+      runtime.blocked_reason = null;
+    } else {
+      runtime.attempts = 0;
+      runtime.failure_counts = {};
+      runtime.last_failure_fingerprint = null;
+    }
   }
   return next;
 }
@@ -19647,7 +19651,7 @@ var Orchestrator = class {
    * A downstream node's evidence was produced against the old upstream, so
    * leaving it DONE would let a stale candidate look verified.
    */
-  invalidateWithDependents(nodeId, reason) {
+  invalidateWithDependents(nodeId, reason, justification = {}) {
     const graph = this.graph();
     const dependents = /* @__PURE__ */ new Map();
     for (const node of graph.nodes) {
@@ -19667,12 +19671,17 @@ var Orchestrator = class {
     }
     const invalidated = [];
     for (const id of order) {
+      const root = id === nodeId;
       try {
         this.transition(id, "INVALIDATED", {
-          reason: id === nodeId ? reason : `upstream ${nodeId} was invalidated: ${reason}`
+          reason: root ? reason : `upstream ${nodeId} was invalidated: ${reason}`,
+          // The root needs the caller's recorded decision to leave a parked
+          // state; a dependent's input genuinely changed because of the root.
+          ...root ? justification.decisionId ? { decisionId: justification.decisionId } : {} : { inputChanged: true }
         });
         invalidated.push(id);
-      } catch {
+      } catch (err) {
+        if (root && err instanceof TransitionError && err.code === "UNBLOCK_REQUIRES_JUSTIFICATION") throw err;
       }
     }
     if (invalidated.length > 0) {
@@ -21966,6 +21975,24 @@ function listAdapters() {
 }
 registerAdapter(eccAdapter);
 
+// src/state/decisions.ts
+var DecisionNotRecordedError = class extends Error {
+  constructor(decisionId) {
+    super(
+      `DECISION_NOT_RECORDED: decision "${decisionId}" has no recorded answer; record it with "mycelink decision record <feature> <decision-id> --answer ..." first.`
+    );
+    this.name = "DecisionNotRecordedError";
+  }
+};
+function isDecisionRecorded(eventsLog, decisionId) {
+  return readEvents(eventsLog, { includeRotated: true, type: "decision.recorded" }).some(
+    (e) => e.data?.decision_id === decisionId
+  );
+}
+function assertDecisionRecorded(eventsLog, decisionId) {
+  if (!isDecisionRecorded(eventsLog, decisionId)) throw new DecisionNotRecordedError(decisionId);
+}
+
 // src/cli/cli.ts
 function packageVersion() {
   const pkg = JSON.parse(readFileSync15(join21(packageRoot(), "package.json"), "utf8"));
@@ -22576,9 +22603,12 @@ function nodeGroup(args, io) {
       return 0;
     }
     case "invalidate": {
+      const decisionId = typeof args.flags["decision"] === "string" ? args.flags["decision"] : void 0;
+      if (decisionId !== void 0) assertDecisionRecorded(featurePaths(controlRoot, featureId).events, decisionId);
       const invalidated = orchestrator.invalidateWithDependents(
         nodeId,
-        flagString(args, "reason", "invalidated")
+        flagString(args, "reason", "invalidated"),
+        decisionId !== void 0 ? { decisionId } : {}
       );
       emit2(
         io,
@@ -23162,6 +23192,7 @@ ${answer}
   }
   if (sub === "apply") {
     const decisionId = requirePositional(args, 3, "decision-id");
+    assertDecisionRecorded(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
     const unblocked = [];
     mutateState(paths.featureDir, (s) => {
