@@ -199,3 +199,29 @@ describe('an ACCEPTED manifest is verified before it is trusted', () => {
     expect(r.out!.acceptance.find((a) => a.repository === 'api')!.exit_code).not.toBe(0);
   });
 });
+
+describe('a relabelled failed delivery is not trusted', () => {
+  it('an ACCEPTANCE_FAILED manifest edited to ACCEPTED runs acceptance again', async () => {
+    const p = await hostPortfolio();
+    expect((await hostLoop(p)).status).toBe('ALL_SETTLED');
+    const moved = join(p.root, 'order-status.v3.json');
+    writeFileSync(moved, JSON.stringify({ name: 'order-status', version: 3 }));
+    process.env['CONTRACT_PATH'] = moved;
+    try {
+      expect((await deliver(p)).out?.status).toBe('ACCEPTANCE_FAILED');
+    } finally {
+      delete process.env['CONTRACT_PATH'];
+    }
+    // Relabel it: the failing output file is real and still hashes correctly.
+    const m = JSON.parse(readFileSync(manifestPath(p), 'utf8')) as Record<string, unknown>;
+    m['status'] = 'ACCEPTED';
+    m['accepted_at'] = new Date().toISOString();
+    for (const a of m['acceptance'] as { exit_code: number; failure_fingerprint: string | null }[]) {
+      a.exit_code = 0;
+      a.failure_fingerprint = null;
+    }
+    writeFileSync(manifestPath(p), JSON.stringify(m, null, 2));
+    const r = await deliver(p);
+    expect(r.out).toMatchObject({ idempotent: false, status: 'ACCEPTED', ok: true });
+  });
+});

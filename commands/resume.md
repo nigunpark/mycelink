@@ -11,11 +11,11 @@ Feature: `$0`
 Do not rely on anything you remember. Rebuild from the canonical files. Let
 `M` be `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs"`.
 
-0. `M controller open --json` and keep `authority` as `<key>` (never in a file
-   or a subagent prompt). If it reports `CONTROLLER_BUSY`, a claim is still
-   live: use the key you opened earlier in this conversation if you have it;
-   otherwise ask the user to run `mycelink controller open --takeover` in
-   their own terminal and give you the key.
+0. You need the controller key (`<key>`). Use the one you hold from earlier
+   in this conversation. A new session does not have it: ask the user to run
+   `mycelink controller open --takeover` in their own terminal and give you
+   the key; never search for it, and never put it in a file or a subagent
+   prompt.
 1. `M session reconcile $0 --json --authority <key>`
    Reclaims dead leases, clears settles whose process died, hands expired
    host dispatches back as interruptions (no failure is recorded), and lists

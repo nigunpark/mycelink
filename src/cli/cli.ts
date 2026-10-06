@@ -76,7 +76,7 @@ const USAGE = `mycelink <group> <command> [options]
 
   version | --version                        print the installed version
   doctor                                     environment and workspace health
-  controller open [--takeover]               mint the controller key that controller-only commands need (--authority)
+  controller open [--authority <current>|--takeover]  mint (first time) or rotate the controller key that controller-only commands need
   init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
@@ -203,9 +203,11 @@ function controllerGroup(args: ParsedArgs, io: CliIo): number {
     return 2;
   }
   assertControllerRole(args, 'controller open');
+  const current = args.flags['authority'];
   const opened = openControllerAuthority(resolveControlRoot(args), {
     takeover: flagBool(args, 'takeover'),
     interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    ...(typeof current === 'string' ? { current } : current === true ? { current: '' } : {}),
   });
   emit(io, args, opened, () =>
     [
@@ -1066,9 +1068,11 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   const gateVerified =
     phase === 'red' ? 'RED_VERIFIED' : phase === 'green' ? 'GREEN_VERIFIED' : 'REGRESSION_VERIFIED';
   const via = gatePending ?? runtime.state;
-  if (!isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
-    const next =
-      runtime.state === 'RED_VERIFIED' || runtime.state === 'GREEN_PENDING'
+  const redMissing = phase === 'green' && node.required_evidence.includes('red') && runtime.evidence['red'] === undefined;
+  if (redMissing || !isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
+    const next = redMissing
+      ? 'red'
+      : runtime.state === 'RED_VERIFIED' || runtime.state === 'GREEN_PENDING'
         ? 'green'
         : runtime.state === 'GREEN_VERIFIED'
           ? 'regression'

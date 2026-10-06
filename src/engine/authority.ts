@@ -9,12 +9,14 @@
  * always omit its own token.
  *
  * The key never enters a ticket, worker prompt, context pack, worktree or
- * environment. It can be minted only while no claim is live in any feature
- * of the control repository, and a worker exists only while its claim is
- * live, so no worker can mint one for itself. Minting rotates: the previous
- * key stops working. An operator who lost the key while a claim is live
- * takes over from an interactive terminal (`--takeover`), which a Bash tool
- * call does not have.
+ * environment. The first key of a control repository is minted before any
+ * work can be dispatched (dispatch itself needs it), so before any worker
+ * exists. After that a new key is minted only by presenting the current one
+ * (rotation, and only while no claim is live) or by an operator taking over
+ * from an interactive terminal (`--takeover`), which a Bash tool call does
+ * not have. "No claim is live" alone is not enough: a worker holds its own
+ * claim capability and can end its own claim (settle it, or fail a gate
+ * into BLOCKED) while it keeps running.
  *
  * Within one OS user this is the strongest protocol a host can mediate, not
  * an OS boundary: a hostile process running as the same user can read the
@@ -31,7 +33,11 @@ import { withLock } from '../state/process-lock.js';
 export const AUTHORITY_FLAG = 'authority';
 const AUTHORITY_FORMAT = /^[0-9a-f]{64}$/;
 
-export type AuthorityCode = 'CONTROLLER_AUTHORITY_REQUIRED' | 'CONTROLLER_AUTHORITY_INVALID' | 'CONTROLLER_BUSY';
+export type AuthorityCode =
+  | 'CONTROLLER_AUTHORITY_REQUIRED'
+  | 'CONTROLLER_AUTHORITY_INVALID'
+  | 'CONTROLLER_AUTHORITY_EXISTS'
+  | 'CONTROLLER_BUSY';
 
 export class AuthorityError extends Error {
   readonly code: AuthorityCode;
@@ -98,12 +104,13 @@ export interface OpenedAuthority {
 /**
  * Mint and store a new controller key, revoking the previous one.
  *
- * Refused while any claim is live, unless an operator takes over from an
- * interactive terminal.
+ * The first key needs nothing (no work can have been dispatched without
+ * one). Any later key needs the current one (`current`) and no live claim,
+ * or an operator taking over from an interactive terminal.
  */
 export function openControllerAuthority(
   controlRoot: string,
-  options: { takeover?: boolean; interactive?: boolean } = {},
+  options: { takeover?: boolean; interactive?: boolean; current?: string } = {},
 ): OpenedAuthority {
   const paths = controlPaths(controlRoot);
   if (!existsSync(paths.config)) {
@@ -119,6 +126,18 @@ export function openControllerAuthority(
   return withLock(
     join(paths.workDir, 'controller-authority.lock'),
     () => {
+      if (!takeover && existsSync(authorityFile(controlRoot))) {
+        const record = readRecord(controlRoot);
+        if (options.current === undefined || options.current === '') {
+          throw new AuthorityError(
+            'CONTROLLER_AUTHORITY_EXISTS',
+            'a controller key is already open for this control repository. Use it, or rotate it with controller open --authority <current key>. If it is lost, the operator runs mycelink controller open --takeover in an interactive terminal.',
+          );
+        }
+        if (record === null || !capabilityMatches(options.current, record.sha256)) {
+          throw new AuthorityError('CONTROLLER_AUTHORITY_INVALID', 'the key presented to rotate is not the current controller key.');
+        }
+      }
       const live = liveClaims(controlRoot);
       if (live.length > 0 && !takeover) {
         throw new AuthorityError(

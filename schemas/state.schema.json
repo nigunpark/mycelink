@@ -37,6 +37,10 @@
       ]
     },
     "graph_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "accepted_deliveries": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
     "created_at": { "type": "string" },
     "updated_at": { "type": "string" },
     "nodes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/nodeRuntime" } },
@@ -125,6 +129,7 @@
             "result_captured_dispatch_id": { "type": "string" },
             "result_captured_file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
             "usage_counted_for": { "type": "string" },
+            "dispatched_at": { "type": "string" },
             "counted_fingerprints": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
             "capture_pending": {
               "type": ["object", "null"],

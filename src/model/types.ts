@@ -210,6 +210,8 @@ export interface NodeClaim {
   result_captured_file?: string;
   /** The dispatch generation the captured copy answers. */
   result_captured_dispatch_id?: string;
+  /** When the current dispatch generation was issued (a resume resets it). */
+  dispatched_at?: string;
   /** Host dispatch generation: a resume issues a new one, revoking the old worker's result. */
   dispatch_id?: string;
   /** The current generation's result file name inside the worktree's result slot. */
@@ -263,6 +265,8 @@ export interface FeatureState_ {
   pending_decisions: string[];
   candidates: string[];
   current_candidate: string | null;
+  /** SHA-256 of each ACCEPTED delivery manifest, by candidate id, recorded when acceptance passed. */
+  accepted_deliveries?: Record<string, string>;
 }
 
 export interface Problem {

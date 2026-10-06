@@ -1051,7 +1051,11 @@ export class Orchestrator {
       const current = rt?.claim ?? null;
       const isCurrent =
         capability !== undefined && current?.capability_sha256 !== undefined && capabilityMatches(capability, current.capability_sha256);
-      if (!isCurrent && last !== null && capability !== undefined && capabilityMatches(capability, last.capability_sha256)) {
+      // A provisional receipt only answers once its claim is gone (the settle
+      // concluded and then died); while the claim lives on, a rotated-away
+      // capability is simply invalid.
+      const pendingLive = last?.outcome === 'PENDING' && current?.claim_id === last.claim_id;
+      if (!isCurrent && !pendingLive && last !== null && capability !== undefined && capabilityMatches(capability, last.capability_sha256)) {
         receipt = last;
         return s;
       }
@@ -1259,7 +1263,13 @@ export class Orchestrator {
     // Attest before rotating: a result the current generation already wrote
     // is taken into the controller now, checked against that generation, or
     // not at all. After the rotation nothing that generation writes counts.
-    const attested = before.result_captured_sha256 === undefined ? this.attestSlot(nodeId, before) : null;
+    // A settle of this generation that died after writing its copy counts as
+    // captured before the rotation too.
+    const attested =
+      before.result_captured_sha256 === undefined
+        ? (this.pendingCapture(nodeId, before, Date.parse(before.dispatched_at ?? before.claimed_at))?.captured ??
+          this.attestSlot(nodeId, before))
+        : null;
 
     const capability = newCapability();
     const dispatchId = randomUUID();
@@ -1283,6 +1293,7 @@ export class Orchestrator {
       held.dispatch_id = dispatchId;
       held.result_file = generationResultFile(dispatchId);
       held.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
+      held.dispatched_at = new Date().toISOString();
       attempt = held.attempt ?? (next.nodes[nodeId] as NodeRuntime).attempts;
       claim = structuredClone(held);
       return next;
@@ -1419,7 +1430,7 @@ export class Orchestrator {
       if (claim.mode !== 'host') {
         throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${claim.mode ?? 'legacy'} mode; use node finalize for a manual claim.`);
       }
-      const started = Date.parse(claim.claimed_at);
+      const started = Date.parse(claim.dispatched_at ?? claim.claimed_at);
       const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
       const cwd = claim.worktree ?? this.controlRoot;
       const generation = claim.dispatch_id ?? claim.claim_id;
@@ -1569,7 +1580,7 @@ export class Orchestrator {
       file,
       sha256: sha256OfFile(join(this.sessionDir(nodeId), file)),
       dispatchId: generation,
-      usage: hostUsage(collected.result, Date.parse(claim.claimed_at)),
+      usage: hostUsage(collected.result, Date.parse(claim.dispatched_at ?? claim.claimed_at)),
     };
   }
 
@@ -1579,14 +1590,27 @@ export class Orchestrator {
    * same checks as any captured copy.
    */
   private finishPendingCapture(nodeId: string, claim: NodeClaim, started: number): NodeResult | null {
+    const pending = this.pendingCapture(nodeId, claim, started);
+    if (pending === null) return null;
+    mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, pending.captured, claim.claim_id));
+    return pending.result;
+  }
+
+  /** The controller copy a capture of this claim's current generation announced and wrote, checked. */
+  private pendingCapture(
+    nodeId: string,
+    claim: NodeClaim,
+    started: number,
+  ): { result: NodeResult; captured: { file: string; sha256: string; dispatchId: string; usage: UsageTotals } } | null {
     const pending = claim.capture_pending;
-    if (!pending) return null;
+    if (!pending || pending.dispatch_id !== (claim.dispatch_id ?? claim.claim_id)) return null;
     const file = join(this.sessionDir(nodeId), pending.file);
     const parsed = readControllerCopy(file, null, nodeId, claim.claim_id, claim.dispatch_id);
     if (parsed === null) return null;
-    const captured = { file: pending.file, sha256: sha256OfFile(file), dispatchId: pending.dispatch_id, usage: hostUsage(parsed, started) };
-    mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
-    return parsed;
+    return {
+      result: parsed,
+      captured: { file: pending.file, sha256: sha256OfFile(file), dispatchId: pending.dispatch_id, usage: hostUsage(parsed, started) },
+    };
   }
 
   /** RUNNING or CANDIDATE_READY becomes VERIFIED once every node is settled. */

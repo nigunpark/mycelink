@@ -12,8 +12,11 @@ Let `M` be `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs"`.
 
 1. `M feature verify $0` — must exit 0.
 2. `M candidate verify $0` — must exit 0.
-3. Use the controller key this conversation opened, or `M controller open --json`
-   (keep `authority` as `<key>`; never write it to a file or a subagent prompt).
+3. Use the controller key you already hold in this conversation (`<key>`).
+   Only if this control repository has never had one, run
+   `M controller open --json`. If you do not hold an existing key, ask the
+   user to run `mycelink controller open --takeover` in their own terminal.
+   Never write the key to a file or a subagent prompt.
 4. `M deliver $0 --json --authority <key>`
 
 `deliver` checks everything before it moves anything: the feature verifies,

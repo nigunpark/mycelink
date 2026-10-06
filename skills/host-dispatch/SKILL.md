@@ -17,8 +17,9 @@ sandbox may not have.
 
 ## Controller authority
 
-Before the loop, run `M controller open --json` and keep its `authority`
-as `<key>`. Every controller command (dispatch, reconcile, decisions,
+Before the loop you need the controller key (`<key>`): the one you hold
+from earlier in this conversation, or, only if this control repository has
+never had one, `M controller open --json` (keep its `authority`). Every controller command (dispatch, reconcile, decisions,
 deliver, ...) needs `--authority <key>`; settle and the gates need only the
 ticket's capability. The key exists so that a subagent, which runs as the
 same user with the same Bash tool, cannot act as the controller by simply
@@ -26,10 +27,14 @@ leaving out its own capability. So:
 
 - never put the key in an Agent prompt, a file, a commit or an environment
   variable, and never write it into a result;
-- it is shown once and only its hash is stored; opening again rotates it;
-- it cannot be opened while any claim is live (`CONTROLLER_BUSY`). If you
-  lost it while a ticket is outstanding, ask the user to run
-  `mycelink controller open --takeover` in their own terminal.
+- it is shown once and only its hash is stored. Once a key exists, a new one
+  is minted only by its holder (`controller open --authority <key>`, rotation,
+  with no claim live) or by the operator at a terminal
+  (`controller open --takeover`). A subagent can end its own claim, so "no
+  claim is live" never proves that no worker is running;
+- if you do not hold the key (`CONTROLLER_AUTHORITY_EXISTS`), ask the user
+  to run `mycelink controller open --takeover` in their own terminal; never
+  search for it.
 
 The control repository must be committed (clean outside `features/<id>/`)
 before you dispatch: a candidate is cut only from a clean control

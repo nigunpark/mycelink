@@ -9,9 +9,11 @@ allowed-tools: Bash, Read, Edit, AskUserQuestion
 Feature: `$0`
 Decision: `$1`
 
-Recording and applying need `--authority <key>`: the key this conversation
-opened, or a new one from
-`node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json`.
+Recording and applying need `--authority <key>`: the controller key you
+already hold in this conversation. Only if this control repository has never
+had one, run `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json`. If you do not hold an existing
+key, ask the user to run `mycelink controller open --takeover` in their own
+terminal and give it to you.
 
 1. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" decision list $0`
 2. Read `features/$0/DECISIONS.md` for the exact question and options.

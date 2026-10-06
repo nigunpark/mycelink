@@ -8,11 +8,12 @@ allowed-tools: Bash, Read
 
 Feature: `$0`
 
-Controller commands need `--authority <key>`: use the key this conversation
-opened with `mycelink controller open`, or open one now
-(`node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json`). If that
-reports `CONTROLLER_BUSY` and you hold no key, ask the user to run
-`mycelink controller open --takeover` in their own terminal.
+Controller commands need `--authority <key>`: the controller key you
+already hold in this conversation. Only if this control repository has never
+had one, run `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json` and keep `authority`. If that
+answers `CONTROLLER_AUTHORITY_EXISTS` and you do not hold the key, ask the
+user to run `mycelink controller open --takeover` in their own terminal and
+give it to you; never search for it.
 
 1. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" checkpoint create $0`
 2. `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" feature cancel $0 --reason "$1" --authority <key>`

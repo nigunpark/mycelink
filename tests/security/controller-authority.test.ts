@@ -19,6 +19,7 @@ import { FEATURE_ID, type Portfolio } from '../helpers/portfolio-fixture.js';
 import { CORE, WORK, hostPortfolio } from '../helpers/host-loop.js';
 import { fakeAgent, type DispatchTicket } from '../helpers/host-agent.js';
 import { CONTROLLER_ONLY, main, type CliIo } from '../../src/cli/cli.js';
+import { controllerKey } from '../helpers/authority.js';
 import { resolveRef } from '../../src/git/git.js';
 
 afterAll(() => cleanupTmpRoots());
@@ -51,8 +52,9 @@ async function raw(p: Portfolio, argv: string[], env: Record<string, string | un
   }
 }
 
+/** The host's key: rotated from the one the fixture's setup opened, as a host holding it would. */
 async function open(p: Portfolio): Promise<string> {
-  const r = await raw(p, ['controller', 'open', '--json']);
+  const r = await raw(p, ['controller', 'open', '--json', '--authority', controllerKey(p.control)]);
   expect(r.err).toBe('');
   expect(r.code).toBe(0);
   const out = JSON.parse(r.out) as { authority: string };
@@ -146,10 +148,13 @@ describe('controller authority', () => {
     expect(both.err).toMatch(/ROLE_DENIED/);
   });
 
-  it('cannot be minted while any claim is live, so a running worker cannot mint one', async () => {
+  it('cannot be minted by anyone without the current key, nor rotated while a claim is live', async () => {
     const r = await raw(p, ['controller', 'open', '--json'], { MYCELINK_CLAIM_TOKEN: undefined });
     expect(r.code).not.toBe(0);
-    expect(r.err).toMatch(/CONTROLLER_BUSY/);
+    expect(r.err).toMatch(/CONTROLLER_AUTHORITY_EXISTS/);
+    // Even the key's holder cannot rotate it while a claim is live.
+    const rotate = await raw(p, ['controller', 'open', '--json', '--authority', authority], { MYCELINK_CLAIM_TOKEN: undefined });
+    expect(rotate.err).toMatch(/CONTROLLER_BUSY/);
     const takeover = await raw(p, ['controller', 'open', '--takeover', '--json']);
     expect(takeover.code).not.toBe(0);
     expect(takeover.err).toMatch(/TTY/);
@@ -191,10 +196,29 @@ describe('controller authority', () => {
     expect(JSON.parse(delivered.out)).toMatchObject({ ok: true, status: 'ACCEPTED' });
   });
 
-  it('rotates: a new open (no live claim) revokes the previous key', async () => {
+  it('a worker that settles its own claim still cannot mint a key afterwards', async () => {
+    fakeAgent(ticket, WORK[CORE]!, p.control);
+    // The worker holds its capability, so it can end its own claim...
+    expect((await raw(p, ['settle', FEATURE_ID, CORE, '--capability', ticket.capability])).code).toBe(0);
+    // ...and now no claim is live anywhere. Minting still needs the current key.
+    const omitted = await raw(p, ['controller', 'open', '--json'], { MYCELINK_CLAIM_TOKEN: undefined });
+    expect(omitted.code).not.toBe(0);
+    expect(omitted.err).toMatch(/CONTROLLER_AUTHORITY_EXISTS/);
+    const presented = await raw(p, ['controller', 'open', '--json'], { MYCELINK_CLAIM_TOKEN: ticket.capability });
+    expect(presented.err).toMatch(/ROLE_DENIED/);
+    const forged = await raw(p, ['controller', 'open', '--json', '--authority', ticket.capability], { MYCELINK_CLAIM_TOKEN: undefined });
+    expect(forged.err).toMatch(/CONTROLLER_AUTHORITY_INVALID/);
+    expect((await raw(p, ['controller', 'open', '--takeover', '--json'])).err).toMatch(/TTY/);
+    // The host's key is untouched.
+    expect((await raw(p, ['session', 'reconcile', FEATURE_ID, '--authority', authority])).code).toBe(0);
+  });
+
+  it('rotates: the holder of the current key opens a new one (no live claim) and the old one stops working', async () => {
     fakeAgent(ticket, WORK[CORE]!, p.control);
     expect((await raw(p, ['settle', FEATURE_ID, CORE, '--capability', ticket.capability])).code).toBe(0);
-    const next = await open(p);
+    const r = await raw(p, ['controller', 'open', '--json', '--authority', authority]);
+    expect(r.err).toBe('');
+    const next = (JSON.parse(r.out) as { authority: string }).authority;
     expect(next).not.toBe(authority);
     const old = await raw(p, ['session', 'reconcile', FEATURE_ID, '--authority', authority]);
     expect(old.err).toMatch(/CONTROLLER_AUTHORITY_INVALID/);

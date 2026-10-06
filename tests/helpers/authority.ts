@@ -29,7 +29,9 @@ export function controllerKey(controlRoot: string): string {
   const root = resolve(controlRoot);
   const known = keys.get(root);
   if (known !== undefined && current(root, known)) return known;
-  const opened = openControllerAuthority(root).authority;
+  // A test that rotated the key itself left this helper without it: take over
+  // in-process, as an operator at a terminal would (the CLI never can).
+  const opened = openControllerAuthority(root, known === undefined && !existsSync(authorityFile(root)) ? {} : { takeover: true, interactive: true }).authority;
   keys.set(root, opened);
   return opened;
 }

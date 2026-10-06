@@ -20412,7 +20412,8 @@ var Orchestrator = class {
       const last = rt?.last_settlement ?? null;
       const current = rt?.claim ?? null;
       const isCurrent = capability !== void 0 && current?.capability_sha256 !== void 0 && capabilityMatches(capability, current.capability_sha256);
-      if (!isCurrent && last !== null && capability !== void 0 && capabilityMatches(capability, last.capability_sha256)) {
+      const pendingLive = last?.outcome === "PENDING" && current?.claim_id === last.claim_id;
+      if (!isCurrent && !pendingLive && last !== null && capability !== void 0 && capabilityMatches(capability, last.capability_sha256)) {
         receipt = last;
         return s;
       }
@@ -20594,7 +20595,7 @@ var Orchestrator = class {
       throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${before.mode ?? "legacy"} mode, not by a host dispatch.`);
     }
     if (before.settling && settlerAlive(before.settling)) throw new SettleInProgressError(nodeId, before.settling);
-    const attested = before.result_captured_sha256 === void 0 ? this.attestSlot(nodeId, before) : null;
+    const attested = before.result_captured_sha256 === void 0 ? this.pendingCapture(nodeId, before, Date.parse(before.dispatched_at ?? before.claimed_at))?.captured ?? this.attestSlot(nodeId, before) : null;
     const capability = newCapability();
     const dispatchId = randomUUID2();
     let claim = null;
@@ -20617,6 +20618,7 @@ var Orchestrator = class {
       held2.dispatch_id = dispatchId;
       held2.result_file = generationResultFile(dispatchId);
       held2.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
+      held2.dispatched_at = (/* @__PURE__ */ new Date()).toISOString();
       attempt = held2.attempt ?? next.nodes[nodeId].attempts;
       claim = structuredClone(held2);
       return next;
@@ -20743,7 +20745,7 @@ var Orchestrator = class {
       if (claim.mode !== "host") {
         throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${claim.mode ?? "legacy"} mode; use node finalize for a manual claim.`);
       }
-      const started = Date.parse(claim.claimed_at);
+      const started = Date.parse(claim.dispatched_at ?? claim.claimed_at);
       const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
       const cwd = claim.worktree ?? this.controlRoot;
       const generation = claim.dispatch_id ?? claim.claim_id;
@@ -20871,7 +20873,7 @@ var Orchestrator = class {
       file,
       sha256: sha256OfFile(join18(this.sessionDir(nodeId), file)),
       dispatchId: generation,
-      usage: hostUsage(collected.result, Date.parse(claim.claimed_at))
+      usage: hostUsage(collected.result, Date.parse(claim.dispatched_at ?? claim.claimed_at))
     };
   }
   /**
@@ -20880,14 +20882,22 @@ var Orchestrator = class {
    * same checks as any captured copy.
    */
   finishPendingCapture(nodeId, claim, started) {
+    const pending = this.pendingCapture(nodeId, claim, started);
+    if (pending === null) return null;
+    mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, pending.captured, claim.claim_id));
+    return pending.result;
+  }
+  /** The controller copy a capture of this claim's current generation announced and wrote, checked. */
+  pendingCapture(nodeId, claim, started) {
     const pending = claim.capture_pending;
-    if (!pending) return null;
+    if (!pending || pending.dispatch_id !== (claim.dispatch_id ?? claim.claim_id)) return null;
     const file = join18(this.sessionDir(nodeId), pending.file);
     const parsed = readControllerCopy(file, null, nodeId, claim.claim_id, claim.dispatch_id);
     if (parsed === null) return null;
-    const captured = { file: pending.file, sha256: sha256OfFile(file), dispatchId: pending.dispatch_id, usage: hostUsage(parsed, started) };
-    mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
-    return parsed;
+    return {
+      result: parsed,
+      captured: { file: pending.file, sha256: sha256OfFile(file), dispatchId: pending.dispatch_id, usage: hostUsage(parsed, started) }
+    };
   }
   /** RUNNING or CANDIDATE_READY becomes VERIFIED once every node is settled. */
   promoteSettledFeature() {
@@ -23290,6 +23300,7 @@ function featureVerifyProblems(controlRoot, featureId) {
 
 // src/engine/deliver.ts
 import { existsSync as existsSync21, mkdirSync as mkdirSync14, readFileSync as readFileSync15 } from "node:fs";
+import { createHash as createHash10 } from "node:crypto";
 import { join as join22 } from "node:path";
 var DeliveryRefusedError = class extends Error {
   problems;
@@ -23381,7 +23392,9 @@ function deliverLocked(controlRoot, featureId, options) {
     const decl = workspace.repositories.repositories.find((r) => r.name === n);
     return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
   })) {
-    const why = untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
+    const recorded = state.accepted_deliveries?.[candidateId];
+    const bytes = createHash10("sha256").update(readFileSync15(file)).digest("hex");
+    const why = recorded !== bytes ? "manifest does not match the accepted delivery recorded in STATE.json" : untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
     if (why === null) return { ...existing, ok: true, idempotent: true };
     appendEvent(paths.events, {
       idempotency_key: `delivery.manifest_untrusted:${candidateId}:${Date.now()}`,
@@ -23520,12 +23533,15 @@ function deliverLocked(controlRoot, featureId, options) {
   manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
   manifest.accepted_at = passed ? (/* @__PURE__ */ new Date()).toISOString() : null;
   save3(file, manifest);
-  if (passed) {
-    mutateState(paths.featureDir, (s) => {
-      s.feature_state = "COMPLETED";
-      return s;
-    });
-  }
+  const manifestSha = createHash10("sha256").update(readFileSync15(file)).digest("hex");
+  mutateState(paths.featureDir, (s) => {
+    const accepted = { ...s.accepted_deliveries ?? {} };
+    if (passed) accepted[candidateId] = manifestSha;
+    else delete accepted[candidateId];
+    s.accepted_deliveries = accepted;
+    if (passed) s.feature_state = "COMPLETED";
+    return s;
+  });
   return { ...manifest, ok: passed, idempotent: false };
 }
 function restoreBase(repo, step) {
@@ -23648,6 +23664,18 @@ function openControllerAuthority(controlRoot, options = {}) {
   return withLock(
     join23(paths.workDir, "controller-authority.lock"),
     () => {
+      if (!takeover && existsSync22(authorityFile(controlRoot))) {
+        const record2 = readRecord(controlRoot);
+        if (options.current === void 0 || options.current === "") {
+          throw new AuthorityError(
+            "CONTROLLER_AUTHORITY_EXISTS",
+            "a controller key is already open for this control repository. Use it, or rotate it with controller open --authority <current key>. If it is lost, the operator runs mycelink controller open --takeover in an interactive terminal."
+          );
+        }
+        if (record2 === null || !capabilityMatches(options.current, record2.sha256)) {
+          throw new AuthorityError("CONTROLLER_AUTHORITY_INVALID", "the key presented to rotate is not the current controller key.");
+        }
+      }
       const live = liveClaims(controlRoot);
       if (live.length > 0 && !takeover) {
         throw new AuthorityError(
@@ -23705,7 +23733,7 @@ var USAGE = `mycelink <group> <command> [options]
 
   version | --version                        print the installed version
   doctor                                     environment and workspace health
-  controller open [--takeover]               mint the controller key that controller-only commands need (--authority)
+  controller open [--authority <current>|--takeover]  mint (first time) or rotate the controller key that controller-only commands need
   init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
@@ -23811,9 +23839,11 @@ function controllerGroup(args, io) {
     return 2;
   }
   assertControllerRole(args, "controller open");
+  const current = args.flags["authority"];
   const opened = openControllerAuthority(resolveControlRoot(args), {
     takeover: flagBool(args, "takeover"),
-    interactive: process.stdin.isTTY === true && process.stdout.isTTY === true
+    interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    ...typeof current === "string" ? { current } : current === true ? { current: "" } : {}
   });
   emit2(
     io,
@@ -24592,8 +24622,9 @@ function tddGroup(args, io) {
   const gatePending = phase === "red" ? "RED_PENDING" : phase === "green" ? "GREEN_PENDING" : null;
   const gateVerified = phase === "red" ? "RED_VERIFIED" : phase === "green" ? "GREEN_VERIFIED" : "REGRESSION_VERIFIED";
   const via = gatePending ?? runtime.state;
-  if (!isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
-    const next = runtime.state === "RED_VERIFIED" || runtime.state === "GREEN_PENDING" ? "green" : runtime.state === "GREEN_VERIFIED" ? "regression" : runtime.state === "CLAIMED" || runtime.state === "RED_PENDING" ? "red" : null;
+  const redMissing = phase === "green" && node.required_evidence.includes("red") && runtime.evidence["red"] === void 0;
+  if (redMissing || !isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
+    const next = redMissing ? "red" : runtime.state === "RED_VERIFIED" || runtime.state === "GREEN_PENDING" ? "green" : runtime.state === "GREEN_VERIFIED" ? "regression" : runtime.state === "CLAIMED" || runtime.state === "RED_PENDING" ? "red" : null;
     throw new Error(
       `GATE_OUT_OF_ORDER: ${nodeId} is ${runtime.state}; the ${phase} gate cannot run now${next ? ` (next: the ${next} gate)` : ""}. Nothing was run or recorded.`
     );

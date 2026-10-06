@@ -70,12 +70,16 @@ session's permissions, and `mycelink settle` takes the result back.
   ticket, prompt, context pack, worktree, result or environment variable;
   the plugin's commands tell the host to keep it in its own context and pass
   it on the command line.
-- It cannot be minted while any claim in the control repository is live.
-  A worker exists only while its claim is live, so a running worker cannot
-  mint a key for itself. Opening again (with no claim live) rotates the key
-  and revokes the old one. An operator who lost the key while a claim is
-  live runs `mycelink controller open --takeover`, which requires an
-  interactive terminal on stdin and stdout; an agent's Bash tool has none.
+- The first key of a control repository can be minted by anyone, but only
+  before one exists, which is before anything can be dispatched (dispatch
+  needs it), so before any worker exists. After that a key is minted only
+  by presenting the current one (rotation, refused while any claim is live)
+  or by `mycelink controller open --takeover`, which requires an interactive
+  terminal on stdin and stdout; an agent's Bash tool has none. "No claim is
+  live" alone is never treated as proof that no worker runs: a worker holds
+  its own claim capability and can end its claim (settle it, or fail a gate
+  into BLOCKED) while it keeps running. A new host session that lost the
+  key asks the operator for a takeover.
 - Each dispatch generation has a random dispatch id and its own result file,
   `<worktree>/.mycelink-worker/result-<dispatch-id>.json`. A resume issues a
   new generation; settle reads only the current generation's file and
@@ -100,9 +104,9 @@ session's permissions, and `mycelink settle` takes the result back.
   not an OS boundary against hostile code running as that user: such code
   can read the host's transcript or process list (where the key appears on
   command lines), rewrite the stored hash, or edit controller files
-  directly when project hooks are not loaded. A host that settles while its
-  subagent is still running (a background Agent) leaves a window in which
-  no claim is live. Use OS-level isolation (a separate user, container or
+  directly when project hooks are not loaded. A dispatch id is stored in
+  STATE.json, so a deliberately misbehaving earlier-generation worker could
+  read it and write the current generation's result file. Use OS-level isolation (a separate user, container or
   VM for workers) where that matters.
 
 ## Worker sessions (standalone CLI adapter)

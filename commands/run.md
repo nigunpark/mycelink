@@ -15,15 +15,17 @@ process.
 
 Let `M` be the launcher: `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs"`.
 
-0. `M controller open --json` and keep its `authority` value; below it is
-   `<key>`. Every controller command needs `--authority <key>`; `settle` and
-   the gates do not (they use the ticket's capability). The key is yours
-   alone: never put the key in the Agent prompt, a file or an environment
-   variable, and never pass it to the subagent. If it reports
-   `CONTROLLER_BUSY`, a claim from an earlier run is still live: use the key
-   you opened earlier in this conversation if you have it; otherwise ask the
-   user to run `mycelink controller open --takeover` in their own terminal
-   and give you the key.
+0. You need the controller key; below it is `<key>`. Use the one you hold
+   from earlier in this conversation (`/mycelink:init` opens it). Only if
+   this control repository has never had one, run `M controller open --json`
+   and keep its `authority`. If that answers `CONTROLLER_AUTHORITY_EXISTS`
+   and you do not hold the key, stop and ask the user to run
+   `mycelink controller open --takeover` in their own terminal and give you
+   the key; never search for it. Every controller command needs
+   `--authority <key>`; `settle` and the gates do not (they use the
+   ticket's capability). The key is yours alone: never put the key in the
+   Agent prompt, a file or an environment variable, and never pass it to the
+   subagent.
 1. `M loop validate $0`
 2. `M orchestrate ready $0` — show the user which nodes are schedulable and
    why the rest are deferred.

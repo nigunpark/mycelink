@@ -146,6 +146,43 @@ describe('resumed dispatch generations', () => {
   });
 });
 
+describe('resume edge cases', () => {
+  it('a settle that died, then a resume: the old capability gets CAPABILITY_INVALID, not a receipt', async () => {
+    const p = await hostPortfolio();
+    const t1 = (await dispatch(p)).ticket!;
+    const { Orchestrator } = await import('../../src/engine/orchestrator.js');
+    fakeAgent(t1, WORK[CORE]!, p.control);
+    const crashing = new Orchestrator({
+      controlRoot: p.control,
+      featureId: FEATURE_ID,
+      adapter: {} as never,
+      settleFault: (point) => {
+        if (point === 'result-captured') throw new Error('CRASH');
+      },
+    });
+    expect(() => crashing.settle(CORE, t1.capability)).toThrow(/CRASH/);
+    const t2 = (await dispatch(p, ['--resume', CORE])).ticket!;
+    const stale = await settleOut(p, t1);
+    expect(stale.err).toMatch(/CAPABILITY_INVALID/);
+    expect((await settleOut(p, t2)).report).toMatchObject({ outcome: 'DONE' });
+  });
+
+  it('counts each generation from its own dispatch, not from the original claim', async () => {
+    const p = await hostPortfolio();
+    await dispatch(p);
+    // The first generation was dispatched an hour ago and lost.
+    const { mutateState } = await import('../../src/state/feature-state.js');
+    mutateState(p.featureDir, (s) => {
+      s.nodes[CORE]!.claim!.claimed_at = new Date(Date.now() - 3_600_000).toISOString();
+      return s;
+    });
+    const t2 = (await dispatch(p, ['--resume', CORE])).ticket!;
+    fakeAgent(t2, WORK[CORE]!, p.control);
+    expect((await settleOut(p, t2)).report).toMatchObject({ outcome: 'DONE' });
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.wall_clock_ms).toBeLessThan(600_000);
+  });
+});
+
 describe('result file names', () => {
   it('the hook exempts exactly the controller-assigned result files', async () => {
     const { isWorkerResultRel, generationResultFile } = await import('../../src/sessions/worker-protocol.js');

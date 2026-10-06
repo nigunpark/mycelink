@@ -27,9 +27,10 @@ under **Breaking**.
   register` and `init` of an existing control repository) now requires
   `--authority <key>` from `mycelink controller open`. Omitting or unsetting
   a worker capability no longer grants controller access. The key is
-  printed once, only its hash is stored, and it cannot be opened while any
-  claim is live; `--takeover` (interactive terminal only) recovers a lost
-  key. The plugin commands open and pass it for you.
+  printed once and only its hash is stored. Once a key exists, a new one is
+  minted only by presenting it (rotation, with no claim live) or by
+  `--takeover` from an interactive terminal, so a worker that ends its own
+  claim still cannot mint one. The plugin commands open and pass it for you.
 - **A resumed dispatch revokes the previous worker's result authority.**
   Every host dispatch generation has a dispatch id and its own result file
   (`.mycelink-worker/result-<dispatch-id>.json`); results must carry
@@ -79,9 +80,10 @@ under **Breaking**.
   committed on in the meantime is never reset; the manifest records
   `PARTIAL_DELIVERY` and names it. Before, a checked-out base was put back
   with `reset --keep`, discarding such a commit.
-- A repeated `deliver` trusts an ACCEPTED manifest only after re-checking its
-  shape, its binding to the candidate and every acceptance output's hash;
-  otherwise acceptance runs again.
+- A repeated `deliver` trusts an ACCEPTED manifest only if it is byte-for-byte
+  the one whose passing acceptance was recorded in STATE.json, and its shape,
+  binding to the candidate and every acceptance output's hash still check
+  out; otherwise acceptance runs again.
 - Settle counts a worker's usage exactly once per dispatch generation: the
   captured result's hash and the usage are recorded in one STATE.json
   write, a capture announces its controller copy before taking it so a

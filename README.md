@@ -275,10 +275,12 @@ workers itself; `mycelink doctor` reports whether that executable can start.
 Neither `dispatch` nor `deliver` ever pushes.
 
 `settle` and the gate commands take the claim's `--capability`, never the
-controller key. A key can only be opened while no claim is live (so a
-running worker cannot open one for itself) and opening again rotates it; if
-you lose it while a claim is live, run `mycelink controller open --takeover`
-yourself in an interactive terminal. See
+controller key. The first key of a control repository is opened before any
+work is dispatched. After that, a new key comes only from its holder
+(`controller open --authority $KEY`, which rotates it while no claim is
+live) or from you at an interactive terminal (`controller open --takeover`),
+so a worker can never mint one. A new Claude session that needs the key
+asks you to run the takeover and hand it over. See
 [docs/PERMISSION_MODEL.md](docs/PERMISSION_MODEL.md).
 
 `--control-root` can be omitted when you run from inside the control
@@ -354,7 +356,7 @@ verification commands (argv) and a worker budget.
 claude plugin marketplace update mycelink-marketplace
 claude plugin update mycelink@mycelink-marketplace
 # then, for every control repository, refresh the hook paths:
-node <new-install-path>/bin/mycelink.mjs controller open --control-root <control-repo>   # prints the key
+node <new-install-path>/bin/mycelink.mjs controller open --takeover --control-root <control-repo>   # in your terminal; prints a new key
 node <new-install-path>/bin/mycelink.mjs init <control-repo> --authority <key>
 node <new-install-path>/bin/mycelink.mjs doctor --control-root <control-repo>
 ```
@@ -402,7 +404,7 @@ entries from its `.claude/settings.json` by hand.
 | Symptom | Fix |
 |---|---|
 | `Mycelink runtime bundle is missing` | you are in a source checkout without `dist/`; run `npm ci && npm run build`, or install a release |
-| `doctor`: `hooks point at a missing launcher` | the plugin moved after an update; re-run `mycelink init <control-repo> --authority <key>` (after `mycelink controller open`) |
+| `doctor`: `hooks point at a missing launcher` | the plugin moved after an update; re-run `mycelink init <control-repo> --authority <key>` (the key from `mycelink controller open --takeover` in your terminal) |
 | `Unsafe feature id` / `Unsafe branch name` | ids are `UPPERCASE-123`; branch names must be valid Git refs and must not start with `-` |
 | `SHELL_NOT_ALLOWED` | the verifier asks for a shell; use argv, or set `allow_shell_commands: true` knowingly |
 | `BATCH_METACHARACTER` (Windows) | call the real executable instead of a `.cmd` shim, or drop the metacharacter |

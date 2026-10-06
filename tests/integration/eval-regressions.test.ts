@@ -86,6 +86,18 @@ describe('tdd gates', () => {
     expect(evidenceFiles(p)).toBe(files);
   });
 
+  it('refuses green before red without running the verifier', async () => {
+    const p = await hostPortfolio();
+    const cap = await claim(p);
+    const files = evidenceFiles(p);
+    const r = await cli(p, ['tdd', 'green', FEATURE_ID, CORE, '--capability', cap]);
+    expect(r.err).toMatch(/GATE_OUT_OF_ORDER.*red/);
+    const rt = loadState(p.featureDir)!.data.nodes[CORE]!;
+    expect(rt.failure_counts).toEqual({});
+    expect(rt.evidence['green']).toBeUndefined();
+    expect(evidenceFiles(p)).toBe(files);
+  });
+
   it('counts a repeated identical gate failure once per claim, so one attempt can iterate', async () => {
     const p = await hostPortfolio();
     const cap = await claim(p);

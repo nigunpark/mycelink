@@ -27,9 +27,12 @@ Use the `portfolio-decomposition` and `graph-compilation` skills.
    budgets, nested delegation, escaping paths, contract inputs with no
    producer, consumers that do not depend on their producer, and acceptance
    criteria no node covers.
-6. Open the controller key:
-   `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json`; keep its
-   `authority` as `<key>` (never put it in a file or a subagent prompt).
+6. Use the controller key you already hold (`<key>`, from `/mycelink:init`).
+   Only if this control repository has never had one, run
+   `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" controller open --json` and keep its `authority`. If it answers
+   `CONTROLLER_AUTHORITY_EXISTS` and you do not hold the key, ask the user to
+   run `mycelink controller open --takeover` in their own terminal. Never put
+   the key in a file or a subagent prompt.
    Initialise: `node "${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs" feature init $0 --authority <key>`
    Then commit `features/$0/` so the control repository is clean before a run.
 7. Validate the loop contracts:

@@ -22,6 +22,7 @@
  * delivery resumes, treating bases already at the candidate as done.
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { featurePaths } from '../workspace/paths.js';
 import { loadWorkspace, repositoryPath } from '../workspace/workspace.js';
@@ -201,7 +202,15 @@ function deliverLocked(controlRoot: string, featureId: string, options: { candid
       return decl !== undefined && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
     })
   ) {
-    const why = untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
+    // The manifest must be byte-for-byte the one whose acceptance this
+    // controller saw pass (its hash is in STATE.json), and must still check
+    // out on its own: a relabelled failed delivery is neither.
+    const recorded = state.accepted_deliveries?.[candidateId];
+    const bytes = createHash('sha256').update(readFileSync(file)).digest('hex');
+    const why =
+      recorded !== bytes
+        ? 'manifest does not match the accepted delivery recorded in STATE.json'
+        : untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
     if (why === null) return { ...(existing as DeliveryManifest), ok: true, idempotent: true };
     // Never trusted on its word: re-verify by running acceptance again.
     appendEvent(paths.events, {
@@ -355,12 +364,15 @@ function deliverLocked(controlRoot: string, featureId: string, options: { candid
   manifest.status = passed ? 'ACCEPTED' : 'ACCEPTANCE_FAILED';
   manifest.accepted_at = passed ? new Date().toISOString() : null;
   save(file, manifest);
-  if (passed) {
-    mutateState(paths.featureDir, (s) => {
-      s.feature_state = 'COMPLETED';
-      return s;
-    });
-  }
+  const manifestSha = createHash('sha256').update(readFileSync(file)).digest('hex');
+  mutateState(paths.featureDir, (s) => {
+    const accepted = { ...(s.accepted_deliveries ?? {}) };
+    if (passed) accepted[candidateId] = manifestSha;
+    else delete accepted[candidateId];
+    s.accepted_deliveries = accepted;
+    if (passed) s.feature_state = 'COMPLETED';
+    return s;
+  });
   return { ...manifest, ok: passed, idempotent: false };
 }
 
