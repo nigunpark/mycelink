@@ -19670,6 +19670,7 @@ function runSummary(runsFile, nodeId) {
 }
 
 // src/engine/orchestrator.ts
+var MAX_INTERRUPTIONS = 3;
 var CLAIM_GRACE_MS = 15 * 60 * 1e3;
 var STOPPED_FEATURE_STATES = /* @__PURE__ */ new Set([
   "BUDGET_EXHAUSTED",
@@ -19931,6 +19932,9 @@ var Orchestrator = class {
       const rt = s.nodes[nodeId];
       if (!rt?.claim || rt.claim.claim_id !== claimId) return s;
       released = true;
+      if (rt.state === "INTEGRATED") {
+        return applyNodeTransition(graph, s, nodeId, "BLOCKED", { actor: this.owner, reason: `${reason} after integration` });
+      }
       return applyNodeTransition(graph, s, nodeId, "READY", { actor: this.owner, reason, refundAttempt: true });
     });
     releaseAllForNode(this.paths.featureDir, nodeId);
@@ -20277,9 +20281,11 @@ var Orchestrator = class {
       return { ...report, outcome };
     }
     try {
-      this.advanceVerifiedGates(nodeId);
-      const sha = this.integrate(nodeId);
-      this.transition(nodeId, "INTEGRATED", sha !== null ? { integratedSha: sha } : {});
+      if (this.state().nodes[nodeId]?.state !== "INTEGRATED") {
+        this.advanceVerifiedGates(nodeId);
+        const sha = this.integrate(nodeId);
+        this.transition(nodeId, "INTEGRATED", sha !== null ? { integratedSha: sha } : {});
+      }
     } catch (err) {
       return this.failAttempt(nodeId, sessionId, errorText(err), evidence);
     }
@@ -20493,6 +20499,27 @@ var Orchestrator = class {
       return s;
     });
     const held = claim;
+    if (node.repository !== null && held.worktree === null) {
+      const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+      const created = createWorkerWorktree({
+        repoPath: repositoryPath(this.workspace, node.repository),
+        featureId: this.featureId,
+        nodeId,
+        baseBranch: repoDecl?.base_branch ?? "main",
+        worktreeRoot: this.workspace.paths.worktreesDir,
+        repositoryName: node.repository
+      });
+      held.worktree = created.worktree;
+      held.branch = created.branch;
+      mutateState(this.paths.featureDir, (s) => {
+        const c = s.nodes[nodeId]?.claim;
+        if (c?.claim_id === held.claim_id) {
+          c.worktree = created.worktree;
+          c.branch = created.branch;
+        }
+        return s;
+      });
+    }
     const cwd = held.worktree ?? this.controlRoot;
     const ticket = this.buildTicket(
       nodeId,
@@ -20587,10 +20614,18 @@ var Orchestrator = class {
       mkdirSync11(sessionDir, { recursive: true });
       const controllerCopy = join18(sessionDir, `result.attempt-${attempt}.json`);
       const env = { ...process.env, [CAPABILITY_ENV]: capability ?? "" };
-      const collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
+      let collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
+      let recaptured = false;
+      if (collected.failure === "RESULT_MISSING") {
+        const captured = this.capturedResultFor(nodeId, claim);
+        if (captured !== null) {
+          collected = { result: captured, failure: null };
+          recaptured = true;
+        }
+      }
       const result = collected.result;
       const usage = hostUsage(result, started);
-      mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
+      if (!recaptured) mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
       const status = result === null ? "failed" : statusForOutcome(result.outcome);
       const failureReason = collected.failure ?? (status === "failed" && result !== null ? `WORKER_${result.outcome}` : null);
       appendRun(this.paths.runs, {
@@ -20991,7 +21026,7 @@ var Orchestrator = class {
    * Recover from a crashed controller or worker: reclaim dead leases, close
    * orphaned sessions and return their nodes to a safe state.
    */
-  reconcile() {
+  reconcile(options = {}) {
     const recovered = recoverLeases(this.paths.featureDir);
     const orphaned = [];
     const released = [];
@@ -21009,22 +21044,88 @@ var Orchestrator = class {
       orphaned.push(session.session_id);
       markTerminal(this.paths.sessionsRegistry, session.session_id, "failed");
       const runtime = this.state().nodes[session.node_id];
-      if (runtime && ["CLAIMED", "RED_PENDING", "GREEN_PENDING"].includes(runtime.state)) {
-        try {
-          this.transition(session.node_id, "BLOCKED", {
-            reason: `Worker session ${session.session_id} disappeared; claim reclaimed.`
-          });
-        } catch {
-        }
-        this.releaseClaim(session.node_id);
+      if (runtime?.claim?.claim_id === session.claim_id && IN_FLIGHT_STATES.has(runtime.state)) {
+        this.interruptClaim(session.node_id, session.claim_id, `worker session ${session.session_id} disappeared`);
         released.push(session.node_id);
+      }
+    }
+    const pending = [];
+    const abandoned = [];
+    const interrupted = [];
+    const now = Date.now();
+    for (const [nodeId, runtime] of Object.entries(this.state().nodes)) {
+      const claim = runtime.claim;
+      if (claim === null) continue;
+      if (claim.settling && !settlerAlive(claim.settling)) {
+        this.clearSettling(nodeId, claim.claim_id);
+        interrupted.push(nodeId);
+      } else if (claim.settling) {
+        continue;
+      }
+      if (claim.mode !== "host") continue;
+      const expired2 = Date.parse(claim.expires_at ?? claim.claimed_at) <= now;
+      const resultPresent = resultInSlot(claim.worktree ?? this.controlRoot) || this.capturedResultFor(nodeId, claim) !== null;
+      if (options.abandonDispatches === true || expired2 && !resultPresent) {
+        this.interruptClaim(nodeId, claim.claim_id, `host dispatch abandoned (${expired2 ? "claim expired" : "abandoned by reconcile"})`);
+        abandoned.push(nodeId);
+      } else {
+        pending.push({ node_id: nodeId, claim_id: claim.claim_id, result_present: resultPresent, expired: expired2 });
       }
     }
     this.event("feature.reconciled", null, {
       recovered_leases: recovered.length,
-      orphaned_sessions: orphaned.length
+      orphaned_sessions: orphaned.length,
+      abandoned_dispatches: abandoned,
+      interrupted_settles: interrupted,
+      pending_dispatches: pending.map((x) => x.node_id)
     });
-    return { recoveredLeases: recovered.length, orphanedSessions: orphaned, releasedNodes: released };
+    return {
+      recoveredLeases: recovered.length,
+      orphanedSessions: orphaned,
+      releasedNodes: released,
+      pending_dispatches: pending,
+      abandoned_dispatches: abandoned,
+      interrupted_settles: interrupted
+    };
+  }
+  /**
+   * Hand back a claim whose holder vanished, as an interruption. Past
+   * MAX_INTERRUPTIONS the node is parked BLOCKED instead (leaving needs a
+   * recorded decision), so recovery cannot loop forever. Failure counts are
+   * never touched: nothing is known about the task.
+   */
+  interruptClaim(nodeId, claimId, reason) {
+    const count = (this.state().nodes[nodeId]?.interruptions ?? 0) + 1;
+    if (count <= MAX_INTERRUPTIONS) {
+      this.releaseForInfrastructure(nodeId, claimId, reason);
+      return;
+    }
+    const graph = this.graph();
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      if (!rt?.claim || rt.claim.claim_id !== claimId) return s;
+      rt.interruptions = count;
+      return applyNodeTransition(graph, s, nodeId, "BLOCKED", {
+        actor: this.owner,
+        reason: `${reason}; interrupted ${count} times`
+      });
+    });
+    releaseAllForNode(this.paths.featureDir, nodeId);
+    this.event("node.interrupted", nodeId, { claim_id: claimId, reason: reason.slice(0, 300), parked: true });
+  }
+  /** Controller copy of a result already captured for this claim by an interrupted settle. */
+  capturedResultFor(nodeId, claim) {
+    const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
+    const file = join18(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"), `result.attempt-${attempt}.json`);
+    try {
+      const st = lstatSync5(file);
+      if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_WORKER_RESULT_BYTES) return null;
+      const parsed = JSON.parse(readFileSync10(file, "utf8"));
+      if (validateAgainstSchema("node-result", parsed).length > 0) return null;
+      return parsed.node_id === nodeId && parsed.claim_id === claim.claim_id ? parsed : null;
+    } catch {
+      return null;
+    }
   }
   /** Compact status summary suitable for a hook or a CLI line. */
   statusSummary() {
@@ -23772,17 +23873,25 @@ async function sessionGroup(args, io) {
     return report.outcome === "DONE" ? 0 : 1;
   }
   if (sub === "reconcile") {
+    assertControllerRole(args, "session reconcile");
     const orchestrator = orchestratorFor(controlRoot, featureId);
-    const result = orchestrator.reconcile();
+    const result = orchestrator.reconcile({ abandonDispatches: flagBool(args, "abandon-dispatches") });
     emit2(
       io,
       args,
       result,
-      () => `recovered leases: ${result.recoveredLeases}; orphaned sessions: ${result.orphanedSessions.length}; released nodes: ${result.releasedNodes.join(", ") || "(none)"}`
+      () => [
+        `recovered leases: ${result.recoveredLeases}; orphaned sessions: ${result.orphanedSessions.length}; released nodes: ${result.releasedNodes.join(", ") || "(none)"}`,
+        `abandoned dispatches: ${result.abandoned_dispatches.join(", ") || "(none)"}; interrupted settles: ${result.interrupted_settles.join(", ") || "(none)"}`,
+        ...result.pending_dispatches.map(
+          (d) => `pending dispatch ${d.node_id}${d.result_present ? " (result written: resume, then settle)" : ""}${d.expired ? " (expired)" : ""}: mycelink dispatch ${featureId} --resume ${d.node_id} --json`
+        )
+      ].join("\n")
     );
     return 0;
   }
   if (sub === "stop") {
+    assertControllerRole(args, "session stop");
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const result = orchestrator.reconcile();
     emit2(io, args, result, () => `Stopped; ${result.orphanedSessions.length} sessions closed.`);

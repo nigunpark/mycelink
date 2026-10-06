@@ -40,7 +40,8 @@ import {
   recordFailure,
   TransitionError,
 } from '../state/transition.js';
-import { canSchedule, computeReady, scheduleBatch, type SchedulePlan } from '../scheduler/ready.js';
+import { IN_FLIGHT_STATES, canSchedule, computeReady, scheduleBatch, type SchedulePlan } from '../scheduler/ready.js';
+import { validateAgainstSchema } from '../schema/registry.js';
 import {
   CAPABILITY_ENV,
   CapabilityError,
@@ -49,6 +50,7 @@ import {
   newCapability,
 } from './capability.js';
 import {
+  MAX_WORKER_RESULT_BYTES,
   WORKER_RESULT_DIR,
   WORKER_RESULT_FILE,
   buildHostWorkerPrompt,
@@ -154,6 +156,21 @@ export interface FeatureRunReport {
   feature_state: string;
   /** The adapter preflight, when one ran. */
   adapter?: PreflightResult;
+}
+
+/** Interruptions a node may absorb before reconcile parks it instead of retrying. */
+const MAX_INTERRUPTIONS = 3;
+
+export interface ReconcileReport {
+  recoveredLeases: number;
+  orphanedSessions: string[];
+  releasedNodes: string[];
+  /** Unsettled host dispatches still within their claim (resume with dispatch --resume). */
+  pending_dispatches: { node_id: string; claim_id: string; result_present: boolean; expired: boolean }[];
+  /** Host dispatches handed back as interruptions (no failure recorded). */
+  abandoned_dispatches: string[];
+  /** Settles whose process died; their marker was cleared. */
+  interrupted_settles: string[];
 }
 
 /** How long past its wall-clock budget an unsettled claim is still presumed alive. */
@@ -538,6 +555,10 @@ export class Orchestrator {
       const rt = s.nodes[nodeId];
       if (!rt?.claim || rt.claim.claim_id !== claimId) return s;
       released = true;
+      if (rt.state === 'INTEGRATED') {
+        // Already merged: it cannot simply be retried, so a person decides.
+        return applyNodeTransition(graph, s, nodeId, 'BLOCKED', { actor: this.owner, reason: `${reason} after integration` });
+      }
       return applyNodeTransition(graph, s, nodeId, 'READY', { actor: this.owner, reason, refundAttempt: true });
     });
     releaseAllForNode(this.paths.featureDir, nodeId);
@@ -937,9 +958,13 @@ export class Orchestrator {
     }
 
     try {
-      this.advanceVerifiedGates(nodeId);
-      const sha = this.integrate(nodeId);
-      this.transition(nodeId, 'INTEGRATED', sha !== null ? { integratedSha: sha } : {});
+      // A finalize interrupted after integration resumes at DONE: the merge
+      // already happened (and integrating again would be a no-op anyway).
+      if (this.state().nodes[nodeId]?.state !== 'INTEGRATED') {
+        this.advanceVerifiedGates(nodeId);
+        const sha = this.integrate(nodeId);
+        this.transition(nodeId, 'INTEGRATED', sha !== null ? { integratedSha: sha } : {});
+      }
     } catch (err) {
       return this.failAttempt(nodeId, sessionId, errorText(err), evidence);
     }
@@ -1178,6 +1203,29 @@ export class Orchestrator {
       return s;
     });
     const held = claim as unknown as NodeClaim;
+    if (node.repository !== null && held.worktree === null) {
+      // The dispatch was interrupted between claiming and creating the
+      // worktree; finish that instead of pointing a worker at the control root.
+      const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
+      const created = createWorkerWorktree({
+        repoPath: repositoryPath(this.workspace, node.repository),
+        featureId: this.featureId,
+        nodeId,
+        baseBranch: repoDecl?.base_branch ?? 'main',
+        worktreeRoot: this.workspace.paths.worktreesDir,
+        repositoryName: node.repository,
+      });
+      held.worktree = created.worktree;
+      held.branch = created.branch;
+      mutateState(this.paths.featureDir, (s) => {
+        const c = s.nodes[nodeId]?.claim;
+        if (c?.claim_id === held.claim_id) {
+          c.worktree = created.worktree;
+          c.branch = created.branch;
+        }
+        return s;
+      });
+    }
     const cwd = held.worktree ?? this.controlRoot;
     const ticket = this.buildTicket(
       nodeId,
@@ -1282,11 +1330,22 @@ export class Orchestrator {
       // The capability is redacted from everything kept of the result: a
       // worker may well echo its gate lines back in `commands`.
       const env = { ...process.env, [CAPABILITY_ENV]: capability ?? '' };
-      const collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
+      let collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
+      let recaptured = false;
+      if (collected.failure === 'RESULT_MISSING') {
+        // A settle of this same claim that was interrupted after capturing
+        // the result left the validated, redacted copy behind (and already
+        // counted its usage).
+        const captured = this.capturedResultFor(nodeId, claim);
+        if (captured !== null) {
+          collected = { result: captured, failure: null };
+          recaptured = true;
+        }
+      }
       const result = collected.result;
 
       const usage = hostUsage(result, started);
-      mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
+      if (!recaptured) mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
       const status: SessionStatus = result === null ? 'failed' : statusForOutcome(result.outcome);
       const failureReason =
         collected.failure ?? (status === 'failed' && result !== null ? `WORKER_${result.outcome}` : null);
@@ -1753,7 +1812,7 @@ export class Orchestrator {
    * Recover from a crashed controller or worker: reclaim dead leases, close
    * orphaned sessions and return their nodes to a safe state.
    */
-  reconcile(): { recoveredLeases: number; orphanedSessions: string[]; releasedNodes: string[] } {
+  reconcile(options: { abandonDispatches?: boolean } = {}): ReconcileReport {
     const recovered = recoverLeases(this.paths.featureDir);
     const orphaned: string[] = [];
     const released: string[] = [];
@@ -1771,26 +1830,100 @@ export class Orchestrator {
       if (!gone.has(session.session_id)) continue;
       orphaned.push(session.session_id);
       markTerminal(this.paths.sessionsRegistry, session.session_id, 'failed');
-
+      // The worker's process is gone (a killed controller, a reboot). That
+      // says nothing about the task, so the claim is handed back as an
+      // interruption rather than BLOCKing the node.
       const runtime = this.state().nodes[session.node_id];
-      if (runtime && ['CLAIMED', 'RED_PENDING', 'GREEN_PENDING'].includes(runtime.state)) {
-        try {
-          this.transition(session.node_id, 'BLOCKED', {
-            reason: `Worker session ${session.session_id} disappeared; claim reclaimed.`,
-          });
-        } catch {
-          // Node already moved on.
-        }
-        this.releaseClaim(session.node_id);
+      if (runtime?.claim?.claim_id === session.claim_id && IN_FLIGHT_STATES.has(runtime.state)) {
+        this.interruptClaim(session.node_id, session.claim_id, `worker session ${session.session_id} disappeared`);
         released.push(session.node_id);
+      }
+    }
+
+    // Host dispatches and settles. Their holders have no PID the controller
+    // can watch: a dispatch is abandoned once its claim expires (or when the
+    // caller says the previous host is gone); a settle marker whose process
+    // died is cleared so the same capability can settle again.
+    const pending: ReconcileReport['pending_dispatches'] = [];
+    const abandoned: string[] = [];
+    const interrupted: string[] = [];
+    const now = Date.now();
+    for (const [nodeId, runtime] of Object.entries(this.state().nodes)) {
+      const claim = runtime.claim;
+      if (claim === null) continue;
+      if (claim.settling && !settlerAlive(claim.settling)) {
+        this.clearSettling(nodeId, claim.claim_id);
+        interrupted.push(nodeId);
+      } else if (claim.settling) {
+        continue; // A settle is running right now; leave it alone.
+      }
+      if (claim.mode !== 'host') continue;
+      const expired = Date.parse(claim.expires_at ?? claim.claimed_at) <= now;
+      const resultPresent = resultInSlot(claim.worktree ?? this.controlRoot) || this.capturedResultFor(nodeId, claim) !== null;
+      if (options.abandonDispatches === true || (expired && !resultPresent)) {
+        this.interruptClaim(nodeId, claim.claim_id, `host dispatch abandoned (${expired ? 'claim expired' : 'abandoned by reconcile'})`);
+        abandoned.push(nodeId);
+      } else {
+        pending.push({ node_id: nodeId, claim_id: claim.claim_id, result_present: resultPresent, expired });
       }
     }
 
     this.event('feature.reconciled', null, {
       recovered_leases: recovered.length,
       orphaned_sessions: orphaned.length,
+      abandoned_dispatches: abandoned,
+      interrupted_settles: interrupted,
+      pending_dispatches: pending.map((x) => x.node_id),
     });
-    return { recoveredLeases: recovered.length, orphanedSessions: orphaned, releasedNodes: released };
+    return {
+      recoveredLeases: recovered.length,
+      orphanedSessions: orphaned,
+      releasedNodes: released,
+      pending_dispatches: pending,
+      abandoned_dispatches: abandoned,
+      interrupted_settles: interrupted,
+    };
+  }
+
+  /**
+   * Hand back a claim whose holder vanished, as an interruption. Past
+   * MAX_INTERRUPTIONS the node is parked BLOCKED instead (leaving needs a
+   * recorded decision), so recovery cannot loop forever. Failure counts are
+   * never touched: nothing is known about the task.
+   */
+  private interruptClaim(nodeId: string, claimId: string, reason: string): void {
+    const count = (this.state().nodes[nodeId]?.interruptions ?? 0) + 1;
+    if (count <= MAX_INTERRUPTIONS) {
+      this.releaseForInfrastructure(nodeId, claimId, reason);
+      return;
+    }
+    const graph = this.graph();
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      if (!rt?.claim || rt.claim.claim_id !== claimId) return s;
+      rt.interruptions = count;
+      return applyNodeTransition(graph, s, nodeId, 'BLOCKED', {
+        actor: this.owner,
+        reason: `${reason}; interrupted ${count} times`,
+      });
+    });
+    releaseAllForNode(this.paths.featureDir, nodeId);
+    this.event('node.interrupted', nodeId, { claim_id: claimId, reason: reason.slice(0, 300), parked: true });
+  }
+
+  /** Controller copy of a result already captured for this claim by an interrupted settle. */
+  private capturedResultFor(nodeId: string, claim: NodeClaim): NodeResult | null {
+    const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
+    const file = join(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, '_'), `result.attempt-${attempt}.json`);
+    try {
+      const st = lstatSync(file);
+      if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_WORKER_RESULT_BYTES) return null;
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as NodeResult;
+      if (validateAgainstSchema('node-result', parsed).length > 0) return null;
+      return parsed.node_id === nodeId && parsed.claim_id === claim.claim_id ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Compact status summary suitable for a hook or a CLI line. */

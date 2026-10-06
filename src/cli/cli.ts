@@ -821,15 +821,24 @@ async function sessionGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   }
 
   if (sub === 'reconcile') {
+    assertControllerRole(args, 'session reconcile');
     const orchestrator = orchestratorFor(controlRoot, featureId);
-    const result = orchestrator.reconcile();
+    const result = orchestrator.reconcile({ abandonDispatches: flagBool(args, 'abandon-dispatches') });
     emit(io, args, result, () =>
-      `recovered leases: ${result.recoveredLeases}; orphaned sessions: ${result.orphanedSessions.length}; released nodes: ${result.releasedNodes.join(', ') || '(none)'}`,
+      [
+        `recovered leases: ${result.recoveredLeases}; orphaned sessions: ${result.orphanedSessions.length}; released nodes: ${result.releasedNodes.join(', ') || '(none)'}`,
+        `abandoned dispatches: ${result.abandoned_dispatches.join(', ') || '(none)'}; interrupted settles: ${result.interrupted_settles.join(', ') || '(none)'}`,
+        ...result.pending_dispatches.map(
+          (d) =>
+            `pending dispatch ${d.node_id}${d.result_present ? ' (result written: resume, then settle)' : ''}${d.expired ? ' (expired)' : ''}: mycelink dispatch ${featureId} --resume ${d.node_id} --json`,
+        ),
+      ].join('\n'),
     );
     return 0;
   }
 
   if (sub === 'stop') {
+    assertControllerRole(args, 'session stop');
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const result = orchestrator.reconcile();
     emit(io, args, result, () => `Stopped; ${result.orphanedSessions.length} sessions closed.`);

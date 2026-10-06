@@ -20,6 +20,7 @@ import { listLeases } from '../../src/resources/leases.js';
 import { resolveRef } from '../../src/git/git.js';
 import { integrationBranchName } from '../../src/git/worktree.js';
 import { hostname } from 'node:os';
+import { createHash } from 'node:crypto';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -117,6 +118,24 @@ describe('node finalize', () => {
     expect(again.code).toBe(0);
     expect(JSON.parse(again.out)).toMatchObject({ outcome: 'DONE', idempotent: true });
     expect(resolveRef(p.core, integrationBranchName(FEATURE_ID))).toBe(sha);
+  });
+
+  it('completes a finalize that was interrupted after integration but before DONE', async () => {
+    const c = await driveToRegression(p);
+    expect((await cli(p, ['node', 'finalize', FEATURE_ID, CORE, '--capability', c.capability])).code).toBe(0);
+    const done = loadState(p.featureDir)!.data.nodes[CORE]!;
+    // Rewind to the crash point: integrated, claim still held, no receipt.
+    mutateState(p.featureDir, (s) => {
+      const rt = s.nodes[CORE]!;
+      rt.state = 'INTEGRATED';
+      rt.last_settlement = null;
+      rt.claim = { claim_id: 'c-crash', owner: 'mycelink', worktree: null, branch: null, claimed_at: new Date().toISOString(), capability_sha256: createHash('sha256').update(c.capability).digest('hex'), mode: 'manual', attempt: 1, settling: null };
+      return s;
+    });
+    const r = await cli(p, ['node', 'finalize', FEATURE_ID, CORE, '--capability', c.capability, '--json']);
+    expect(r.err).toBe('');
+    expect(JSON.parse(r.out)).toMatchObject({ outcome: 'DONE', state: 'DONE' });
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.integrated_sha).toBe(done.integrated_sha);
   });
 
   it('refuses to run while another settle of the same claim is in progress', async () => {
