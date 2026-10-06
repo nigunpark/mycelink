@@ -100,6 +100,31 @@ const USAGE = `mycelink <group> <command> [options]
 
 Global: --control-root <path> --json`;
 
+/**
+ * Every subcommand that changes controller state, graphs, manifests,
+ * decisions, leases or branches. None of them may be run by a worker
+ * presenting a claim capability; worker-scoped commands (tdd, evidence
+ * record, node begin/finalize, settle) are checked against the claim instead.
+ */
+const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
+  init: '*',
+  dispatch: '*',
+  deliver: '*',
+  repo: new Set(['register', 'lock']),
+  graph: new Set(['compile', 'import']),
+  feature: new Set(['init', 'cancel']),
+  node: new Set(['claim', 'block', 'invalidate', 'release']),
+  session: new Set(['spawn', 'reconcile', 'stop']),
+  evidence: new Set(['migrate']),
+  branch: new Set(['create', 'integrate']),
+  candidate: new Set(['create']),
+  resource: new Set(['acquire', 'release', 'recover']),
+  e2e: new Set(['run', 'cleanup']),
+  decision: new Set(['record', 'apply']),
+  checkpoint: new Set(['restore']),
+  orchestrate: new Set(['once', 'run']),
+};
+
 /** Find the control repository: flag, env, or nearest ancestor with mycelink.config.json. */
 export function resolveControlRoot(args: ParsedArgs, cwd = process.cwd()): string {
   const flag = args.flags['control-root'];
@@ -172,6 +197,9 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
   }
 
   try {
+    const sub = args.positional[1] ?? '';
+    const only = CONTROLLER_ONLY[group];
+    if (only === '*' || only?.has(sub)) assertControllerRole(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
     switch (group) {
       case 'doctor':
         return doctor(args, io);

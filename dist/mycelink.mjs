@@ -23216,6 +23216,24 @@ var USAGE = `mycelink <group> <command> [options]
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
 
 Global: --control-root <path> --json`;
+var CONTROLLER_ONLY = {
+  init: "*",
+  dispatch: "*",
+  deliver: "*",
+  repo: /* @__PURE__ */ new Set(["register", "lock"]),
+  graph: /* @__PURE__ */ new Set(["compile", "import"]),
+  feature: /* @__PURE__ */ new Set(["init", "cancel"]),
+  node: /* @__PURE__ */ new Set(["claim", "block", "invalidate", "release"]),
+  session: /* @__PURE__ */ new Set(["spawn", "reconcile", "stop"]),
+  evidence: /* @__PURE__ */ new Set(["migrate"]),
+  branch: /* @__PURE__ */ new Set(["create", "integrate"]),
+  candidate: /* @__PURE__ */ new Set(["create"]),
+  resource: /* @__PURE__ */ new Set(["acquire", "release", "recover"]),
+  e2e: /* @__PURE__ */ new Set(["run", "cleanup"]),
+  decision: /* @__PURE__ */ new Set(["record", "apply"]),
+  checkpoint: /* @__PURE__ */ new Set(["restore"]),
+  orchestrate: /* @__PURE__ */ new Set(["once", "run"])
+};
 function resolveControlRoot(args, cwd = process.cwd()) {
   const flag = args.flags["control-root"];
   if (typeof flag === "string") return resolve17(flag);
@@ -23277,6 +23295,9 @@ async function main(argv, io = defaultIo) {
     return group === void 0 ? 1 : 0;
   }
   try {
+    const sub = args.positional[1] ?? "";
+    const only = CONTROLLER_ONLY[group];
+    if (only === "*" || only?.has(sub)) assertControllerRole(args, `${group}${only === "*" ? "" : ` ${sub}`}`);
     switch (group) {
       case "doctor":
         return doctor(args, io);

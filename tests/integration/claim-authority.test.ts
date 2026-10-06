@@ -199,6 +199,27 @@ describe('claim authority', () => {
     }
   });
 
+  it('every other mutating controller command refuses a worker capability too', async () => {
+    const c = await claim(p, CORE);
+    for (const argv of [
+      ['decision', 'record', FEATURE_ID, 'DEC-x', '--answer', 'yes'],
+      ['resource', 'acquire', FEATURE_ID, 'full-runtime', '--node', 'x'],
+      ['resource', 'release', FEATURE_ID, `node:${CORE}`],
+      ['resource', 'recover', FEATURE_ID],
+      ['e2e', 'run', FEATURE_ID],
+      ['e2e', 'cleanup', FEATURE_ID],
+      ['repo', 'register', '--name', 'x', '--path', '../x'],
+      ['repo', 'lock', FEATURE_ID],
+      ['graph', 'compile', FEATURE_ID, '--from', 'x.yaml'],
+      ['branch', 'create', FEATURE_ID, EXTRA],
+      ['session', 'reconcile', FEATURE_ID],
+      ['evidence', 'migrate', FEATURE_ID],
+    ]) {
+      const r = await cli(p, [...argv, '--capability', c.capability]);
+      expect(`${argv.slice(0, 2).join(' ')}: ${r.err.split('\n')[0]}`).toMatch(/: ROLE_DENIED/);
+    }
+  });
+
   it('controller primitives refuse to integrate or cut a candidate from unverified work', async () => {
     await claim(p, CORE);
     const integrate = await cli(p, ['branch', 'integrate', FEATURE_ID, CORE]);
