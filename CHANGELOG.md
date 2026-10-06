@@ -58,6 +58,12 @@ under **Breaking**.
 
 ### Fixed
 
+- Result capture works when worktrees live on another volume than the
+  control repository: the slot is renamed into a quarantine beside the
+  worktree instead of failing with EXDEV. It is still one atomic rename
+  with the same link, hard-link, size, schema and identity checks; nothing
+  is copied, and capture still fails closed when no same-volume rename
+  exists.
 - Delivery rollback is a compare-and-swap: a base is restored only while it
   is still exactly at the candidate this delivery installed. A base someone
   committed on in the meantime is never reset; the manifest records

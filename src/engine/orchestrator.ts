@@ -1433,7 +1433,7 @@ export class Orchestrator {
           { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...(claim.dispatch_id !== undefined ? { dispatchId: claim.dispatch_id } : {}) },
           join(this.sessionDir(nodeId), file),
           env,
-          { resultFile },
+          { resultFile, ...(claim.worktree === null ? { fallbackQuarantineDir: null } : {}) },
         );
         if (collected.result !== null) {
           this.fault('result-captured');
@@ -1543,7 +1543,11 @@ export class Orchestrator {
       { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...(claim.dispatch_id !== undefined ? { dispatchId: claim.dispatch_id } : {}) },
       join(this.sessionDir(nodeId), file),
       process.env,
-      { resultFile, ...(claim.capability_sha256 !== undefined ? { capabilitySha256: claim.capability_sha256 } : {}) },
+      {
+        resultFile,
+        ...(claim.capability_sha256 !== undefined ? { capabilitySha256: claim.capability_sha256 } : {}),
+        ...(claim.worktree === null ? { fallbackQuarantineDir: null } : {}),
+      },
     );
     if (collected.result === null) {
       this.event('dispatch.attest_refused', nodeId, { claim_id: claim.claim_id, failure: collected.failure.slice(0, 300) });

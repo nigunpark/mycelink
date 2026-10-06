@@ -86,7 +86,13 @@ session's permissions, and `mycelink settle` takes the result back.
 - The result slot directory is `<worktree>/.mycelink-worker/`. Settle moves
   it into a controller-owned quarantine before reading it and applies the
   same link, hard-link, size, schema and identity checks as print mode; the
-  capability is redacted from every kept copy.
+  capability is redacted from every kept copy. The move is always one
+  atomic rename, never a copy. If the worktree is on another volume than the
+  control repository's `features/` (for example `.mycelink/worktrees`
+  linked to another drive), the quarantine is made beside the worktree,
+  outside it, on its volume; if no same-volume rename is possible the
+  capture fails closed with `RESULT_CAPTURE_FAILED`. Keep worktrees on a
+  volume where that holds.
 - What this does and does not stop. Within one OS user, capabilities and
   the controller key stop confused or shortcut-taking agents, including a
   worker that omits or unsets its token to run a controller command, and

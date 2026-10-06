@@ -35,7 +35,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { NodeResult } from './adapter.js';
 import { packBytes, type ContextPack } from './context-pack.js';
@@ -419,8 +419,12 @@ export const RESULT_QUARANTINE_PREFIX = '.result-quarantine-';
  * at. After capture every path that is checked and read is controller-owned:
  * a worker or its leftover processes can no longer swap it, so the checks
  * hold without comparing file identities across `fstat` and `lstat` (which
- * disagree on `dev` on Node 22 for Windows). A rename that cannot be done on
- * one volume fails closed (`RESULT_CAPTURE_FAILED`); nothing is copied.
+ * disagree on `dev` on Node 22 for Windows). When the worktree is on another
+ * volume than the controller copy, the quarantine is made beside the
+ * worktree, outside it, and the same rename is used; the redacted copy is
+ * then written to the controller path. If no same-volume rename is
+ * possible, capture fails closed (`RESULT_CAPTURE_FAILED`); nothing is ever
+ * copied out of a worktree.
  *
  * The captured file must be a regular file that is not a link, has exactly
  * one name (so it is not a hard link to a file outside the worktree), is
@@ -433,8 +437,12 @@ export interface CollectOptions {
   resultFile?: string;
   /** Redact the capability with this hash too, when its raw value is unknown. */
   capabilitySha256?: string;
-  /** Called once the result has left the slot, before it is validated. */
-  onMoved?: () => void;
+  /**
+   * Where a second, same-volume quarantine may be made when the slot cannot
+   * be renamed to the controller's volume (EXDEV). Defaults to the
+   * worktree's parent directory; `null` disables the fallback.
+   */
+  fallbackQuarantineDir?: string | null;
 }
 
 export function collectWorkerResult(
@@ -453,16 +461,34 @@ export function collectWorkerResult(
     );
 
   mkdirSync(dirname(controllerPath), { recursive: true });
-  const quarantine = mkdtempSync(join(dirname(controllerPath), RESULT_QUARANTINE_PREFIX));
+  // The slot moves with one atomic rename into a fresh quarantine, first
+  // beside the controller copy. A rename cannot cross volumes; when the
+  // worktree is on another volume, the quarantine is made beside the
+  // worktree instead (outside it, on its volume) and the same rename is
+  // used. Nothing is ever copied out of a worktree: if neither rename is
+  // possible, capture fails closed.
+  const bases = [dirname(controllerPath)];
+  const fallback = options.fallbackQuarantineDir === undefined ? dirname(resolve(cwd)) : options.fallbackQuarantineDir;
+  if (fallback !== null && resolve(fallback) !== resolve(dirname(controllerPath))) bases.push(fallback);
+  let quarantine: string | null = null;
+  let lastError: unknown = null;
+  for (const base of bases) {
+    const candidate = mkdtempSync(join(base, RESULT_QUARANTINE_PREFIX));
+    try {
+      retrySync(() => renameSync(join(cwd, WORKER_RESULT_DIR), join(candidate, 'slot')));
+      quarantine = candidate;
+      break;
+    } catch (err) {
+      removeQuarantine(candidate);
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fail('RESULT_MISSING');
+      lastError = err;
+      if ((err as NodeJS.ErrnoException).code !== 'EXDEV') break;
+    }
+  }
+  if (quarantine === null) return captureFailed('the result slot', lastError);
   const capturedDir = join(quarantine, 'slot');
   const captured = join(quarantine, WORKER_RESULT_FILE);
   try {
-    try {
-      retrySync(() => renameSync(join(cwd, WORKER_RESULT_DIR), capturedDir));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fail('RESULT_MISSING');
-      return captureFailed('the result slot', err);
-    }
     const dirSt = lstatSync(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail('RESULT_PATH_ESCAPE: the result slot was replaced by a link');
@@ -473,7 +499,6 @@ export function collectWorkerResult(
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fail('RESULT_MISSING');
       return captureFailed('the result', err);
     }
-    options.onMoved?.();
     return readCapturedResult(captured, expected, controllerPath, env, options.capabilitySha256);
   } finally {
     removeQuarantine(quarantine);

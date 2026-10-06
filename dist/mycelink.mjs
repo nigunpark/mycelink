@@ -10320,7 +10320,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve18.call(this, root, ref);
+      let _sch = resolve19.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -10347,7 +10347,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve18(root, ref) {
+    function resolve19(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -11177,7 +11177,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve18(baseURI, relativeURI, options) {
+    function resolve19(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -11546,7 +11546,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve18,
+      resolve: resolve19,
       resolveComponent,
       equal,
       serialize,
@@ -15362,7 +15362,7 @@ var require_dist2 = __commonJS({
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
 import { existsSync as existsSync23, mkdirSync as mkdirSync15, readFileSync as readFileSync17, readdirSync as readdirSync10 } from "node:fs";
-import { dirname as dirname9, join as join24, resolve as resolve17 } from "node:path";
+import { dirname as dirname9, join as join24, resolve as resolve18 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -18381,7 +18381,7 @@ function verifyCandidate(manifest, context) {
 // src/engine/orchestrator.ts
 import { existsSync as existsSync15, mkdirSync as mkdirSync11, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "node:fs";
 import { createHash as createHash8 } from "node:crypto";
-import { join as join18, resolve as resolve12 } from "node:path";
+import { join as join18, resolve as resolve13 } from "node:path";
 import { randomBytes as randomBytes4, randomUUID as randomUUID2 } from "node:crypto";
 
 // src/engine/capability.ts
@@ -18467,7 +18467,7 @@ import {
   unlinkSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
-import { dirname as dirname5, join as join14 } from "node:path";
+import { dirname as dirname5, join as join14, resolve as resolve11 } from "node:path";
 import { createHash as createHash6 } from "node:crypto";
 
 // src/sessions/context-pack.ts
@@ -18867,16 +18867,28 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
     `RESULT_CAPTURE_FAILED: could not move ${what} into quarantine (${err.code ?? "error"})`
   );
   mkdirSync8(dirname5(controllerPath), { recursive: true });
-  const quarantine = mkdtempSync(join14(dirname5(controllerPath), RESULT_QUARANTINE_PREFIX));
+  const bases = [dirname5(controllerPath)];
+  const fallback = options.fallbackQuarantineDir === void 0 ? dirname5(resolve11(cwd)) : options.fallbackQuarantineDir;
+  if (fallback !== null && resolve11(fallback) !== resolve11(dirname5(controllerPath))) bases.push(fallback);
+  let quarantine = null;
+  let lastError = null;
+  for (const base of bases) {
+    const candidate = mkdtempSync(join14(base, RESULT_QUARANTINE_PREFIX));
+    try {
+      retrySync(() => renameSync2(join14(cwd, WORKER_RESULT_DIR), join14(candidate, "slot")));
+      quarantine = candidate;
+      break;
+    } catch (err) {
+      removeQuarantine(candidate);
+      if (err.code === "ENOENT") return fail("RESULT_MISSING");
+      lastError = err;
+      if (err.code !== "EXDEV") break;
+    }
+  }
+  if (quarantine === null) return captureFailed("the result slot", lastError);
   const capturedDir = join14(quarantine, "slot");
   const captured = join14(quarantine, WORKER_RESULT_FILE);
   try {
-    try {
-      retrySync(() => renameSync2(join14(cwd, WORKER_RESULT_DIR), capturedDir));
-    } catch (err) {
-      if (err.code === "ENOENT") return fail("RESULT_MISSING");
-      return captureFailed("the result slot", err);
-    }
     const dirSt = lstatSync4(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
@@ -18887,7 +18899,6 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
       if (err.code === "ENOENT") return fail("RESULT_MISSING");
       return captureFailed("the result", err);
     }
-    options.onMoved?.();
     return readCapturedResult(captured, expected, controllerPath, env, options.capabilitySha256);
   } finally {
     removeQuarantine(quarantine);
@@ -18981,7 +18992,7 @@ import { hostname as hostname3 } from "node:os";
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
 import { existsSync as existsSync12, mkdirSync as mkdirSync9, readFileSync as readFileSync7, readdirSync as readdirSync4 } from "node:fs";
-import { join as join15, resolve as resolve11 } from "node:path";
+import { join as join15, resolve as resolve12 } from "node:path";
 
 // src/e2e/scheduler.ts
 function conflictReason(a, b) {
@@ -19148,7 +19159,7 @@ function attributeFailure(scenario, graph, failureOutput) {
 
 // src/e2e/runner.ts
 function loadScenarios(scenariosDir) {
-  const dir = resolve11(scenariosDir);
+  const dir = resolve12(scenariosDir);
   if (!existsSync12(dir)) return [];
   const out = [];
   for (const file of readdirSync4(dir).sort()) {
@@ -19181,7 +19192,7 @@ async function runE2E(args) {
   const selected = args.only && args.only.length > 0 ? args.scenarios.filter((s) => args.only.includes(s.id)) : args.scenarios;
   const plan = planShards(selected, args.resources);
   const owner = args.owner ?? "e2e-runner";
-  const evidenceRoot = resolve11(args.evidenceRoot, args.candidate.candidate_id);
+  const evidenceRoot = resolve12(args.evidenceRoot, args.candidate.candidate_id);
   mkdirSync9(evidenceRoot, { recursive: true });
   const leases = [];
   const results = [];
@@ -19796,7 +19807,7 @@ var Orchestrator = class {
   settleFault;
   preflightResult = null;
   constructor(options) {
-    this.controlRoot = resolve12(options.controlRoot);
+    this.controlRoot = resolve13(options.controlRoot);
     this.featureId = options.featureId;
     this.paths = featurePaths(this.controlRoot, options.featureId);
     this.workspace = loadWorkspace(this.controlRoot);
@@ -20734,7 +20745,7 @@ var Orchestrator = class {
           { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
           join18(this.sessionDir(nodeId), file),
           env,
-          { resultFile }
+          { resultFile, ...claim.worktree === null ? { fallbackQuarantineDir: null } : {} }
         );
         if (collected2.result !== null) {
           this.fault("result-captured");
@@ -20828,7 +20839,11 @@ var Orchestrator = class {
       { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
       join18(this.sessionDir(nodeId), file),
       process.env,
-      { resultFile, ...claim.capability_sha256 !== void 0 ? { capabilitySha256: claim.capability_sha256 } : {} }
+      {
+        resultFile,
+        ...claim.capability_sha256 !== void 0 ? { capabilitySha256: claim.capability_sha256 } : {},
+        ...claim.worktree === null ? { fallbackQuarantineDir: null } : {}
+      }
     );
     if (collected.result === null) {
       this.event("dispatch.attest_refused", nodeId, { claim_id: claim.claim_id, failure: collected.failure.slice(0, 300) });
@@ -21424,7 +21439,7 @@ function isProcessAlive(pid) {
 // src/sessions/claude-cli-adapter.ts
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync as existsSync16, mkdirSync as mkdirSync12, rmSync as rmSync7 } from "node:fs";
-import { dirname as dirname8, resolve as resolve13 } from "node:path";
+import { dirname as dirname8, resolve as resolve14 } from "node:path";
 import { randomUUID as randomUUID3 } from "node:crypto";
 var PermissionPolicyError = class extends Error {
   constructor(detail) {
@@ -21485,8 +21500,8 @@ var ClaudeCliAdapter = class {
   }
   spawn(request) {
     const sessionId = randomUUID3();
-    mkdirSync12(dirname8(resolve13(request.logPath)), { recursive: true });
-    mkdirSync12(dirname8(resolve13(request.resultPath)), { recursive: true });
+    mkdirSync12(dirname8(resolve14(request.logPath)), { recursive: true });
+    mkdirSync12(dirname8(resolve14(request.resultPath)), { recursive: true });
     if (existsSync16(request.resultPath)) rmSync7(request.resultPath, { force: true });
     const handle = {
       session_id: sessionId,
@@ -21561,7 +21576,7 @@ var ClaudeCliAdapter = class {
     child.stdin.on("error", () => {
     });
     child.stdin.end(prompt, "utf8");
-    const log = createWriteStream(resolve13(request.logPath), { flags: "a" });
+    const log = createWriteStream(resolve14(request.logPath), { flags: "a" });
     const outRedactor = new LineRedactor(workerEnv);
     const errRedactor = new LineRedactor(workerEnv);
     child.stdout.on("end", () => log.write(outRedactor.flush()));
@@ -21669,7 +21684,7 @@ var ClaudeCliAdapter = class {
         const collected = collectWorkerResult(
           state.request.cwd,
           state.request,
-          resolve13(state.request.resultPath),
+          resolve14(state.request.resultPath),
           state.workerEnv
         );
         state.result = collected.result;
@@ -21909,7 +21924,7 @@ function writeLoops(file, loops) {
 
 // src/hooks/entrypoint.ts
 import { existsSync as existsSync18, readFileSync as readFileSync12, readdirSync as readdirSync7 } from "node:fs";
-import { join as join19, relative as relative4, resolve as resolve14, sep as sep3 } from "node:path";
+import { join as join19, relative as relative4, resolve as resolve15, sep as sep3 } from "node:path";
 import { createHash as createHash9 } from "node:crypto";
 var MAX_BLOCK_BYTES = 1024;
 var MANAGED_PATTERNS = [
@@ -22004,10 +22019,10 @@ function activeNode(ctx, cwd) {
   };
   if (envNode) return pick(envNode);
   if (cwd) {
-    const here = resolve14(cwd);
+    const here = resolve15(cwd);
     for (const [id, runtime] of claimed) {
       const worktree = runtime.claim?.worktree;
-      if (worktree && (resolve14(worktree) === here || here.startsWith(resolve14(worktree) + sep3))) {
+      if (worktree && (resolve15(worktree) === here || here.startsWith(resolve15(worktree) + sep3))) {
         return pick(id);
       }
     }
@@ -22021,9 +22036,9 @@ function block(io, reason) {
 }
 async function runHook(event, args, io) {
   const input = readStdin(io);
-  const controlRoot = (typeof args.flags["control-root"] === "string" ? resolve14(args.flags["control-root"]) : null) ?? process.env["MYCELINK_CONTROL_ROOT"] ?? process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd();
+  const controlRoot = (typeof args.flags["control-root"] === "string" ? resolve15(args.flags["control-root"]) : null) ?? process.env["MYCELINK_CONTROL_ROOT"] ?? process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd();
   const explicit = typeof args.flags["feature"] === "string" ? args.flags["feature"] : void 0;
-  const ctx = loadHookContext(resolve14(controlRoot), explicit);
+  const ctx = loadHookContext(resolve15(controlRoot), explicit);
   switch (event) {
     case "session-start":
     case "SessionStart":
@@ -22145,7 +22160,7 @@ function preToolUse(ctx, io, input) {
   const tool = input.tool_name ?? "";
   const target = editTarget(input);
   if (target !== null && ["Edit", "Write", "NotebookEdit", "MultiEdit"].includes(tool)) {
-    const normalised = resolve14(target).replace(/\\/g, "/");
+    const normalised = resolve15(target).replace(/\\/g, "/");
     if (MANAGED_PATTERNS.some((p) => matchGlob(p, normalised))) {
       return block(
         io,
@@ -22172,14 +22187,14 @@ function preToolUse(ctx, io, input) {
   if (active !== null && target !== null && ["Edit", "Write", "MultiEdit"].includes(tool)) {
     const runtime = ctx.state.nodes[active.id];
     const worktree = runtime?.claim?.worktree;
-    const rel = worktree ? relative4(resolve14(worktree), resolve14(target)).replace(/\\/g, "/") : relative4(ctx.controlRoot, resolve14(target)).replace(/\\/g, "/");
+    const rel = worktree ? relative4(resolve15(worktree), resolve15(target)).replace(/\\/g, "/") : relative4(ctx.controlRoot, resolve15(target)).replace(/\\/g, "/");
     if (rel.startsWith("..")) {
       return block(
         io,
         `Blocked: ${active.id} may only edit inside its own worktree. "${target}" is outside it.`
       );
     }
-    if (worktree && !isInsideReal(worktree, resolve14(worktree, rel))) {
+    if (worktree && !isInsideReal(worktree, resolve15(worktree, rel))) {
       return block(
         io,
         `Blocked: "${rel}" resolves through a link to a location outside the worktree of ${active.id}.`
@@ -22221,7 +22236,7 @@ function postToolUse(ctx, io, input) {
       data: {
         tool: input.tool_name ?? null,
         // Path only, relative where possible; never the content.
-        path: target ? relative4(ctx.controlRoot, resolve14(target)).replace(/\\/g, "/") : null
+        path: target ? relative4(ctx.controlRoot, resolve15(target)).replace(/\\/g, "/") : null
       }
     });
   } catch {
@@ -22325,12 +22340,12 @@ function stopGuard(ctx, io, input) {
 
 // src/knowledge/cli.ts
 import { readFileSync as readFileSync14 } from "node:fs";
-import { resolve as resolve16 } from "node:path";
+import { resolve as resolve17 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
 import { existsSync as existsSync19, mkdirSync as mkdirSync13, readFileSync as readFileSync13, readdirSync as readdirSync8, statSync as statSync4 } from "node:fs";
-import { join as join20, relative as relative5, resolve as resolve15 } from "node:path";
+import { join as join20, relative as relative5, resolve as resolve16 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
   procedure: "procedures",
@@ -22358,7 +22373,7 @@ var EXCLUDED_BY_DEFAULT = /* @__PURE__ */ new Set([
   "archived"
 ]);
 function brainRoot(controlRoot, override) {
-  return resolve15(controlRoot, override ?? ".llmwiki");
+  return resolve16(controlRoot, override ?? ".llmwiki");
 }
 function initBrain(root) {
   for (const dir of [
@@ -22615,7 +22630,7 @@ function consolidate(root) {
   return findings;
 }
 function adoptCodewiki(controlRoot, brain) {
-  const codewiki = resolve15(controlRoot, ".codewiki");
+  const codewiki = resolve16(controlRoot, ".codewiki");
   if (!existsSync19(codewiki)) return { adopted: false, path: codewiki };
   mkdirSync13(join20(brain, "code"), { recursive: true });
   writeTextAtomic(
@@ -22661,7 +22676,7 @@ function memoryCommand(args, io, controlRoot) {
       const title = flagString(args, "title", id);
       const status = flagString(args, "status", "instructed_not_verified");
       const bodyFile = args.flags["body-file"];
-      const body = typeof bodyFile === "string" ? readFileSync14(resolve16(bodyFile), "utf8") : flagString(args, "body", "");
+      const body = typeof bodyFile === "string" ? readFileSync14(resolve17(bodyFile), "utf8") : flagString(args, "body", "");
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const frontmatter = {
         id,
@@ -23711,17 +23726,17 @@ var CONTROLLER_ONLY = {
 };
 function resolveControlRoot(args, cwd = process.cwd()) {
   const flag = args.flags["control-root"];
-  if (typeof flag === "string") return resolve17(flag);
+  if (typeof flag === "string") return resolve18(flag);
   const env = process.env["MYCELINK_CONTROL_ROOT"];
-  if (env) return resolve17(env);
-  let dir = resolve17(cwd);
+  if (env) return resolve18(env);
+  let dir = resolve18(cwd);
   for (let i = 0; i < 12; i++) {
     if (existsSync23(join24(dir, "mycelink.config.json"))) return dir;
     const parent = dirname9(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return resolve17(cwd);
+  return resolve18(cwd);
 }
 function emit2(io, args, value, human) {
   if (flagBool(args, "json")) io.out(JSON.stringify(value, null, 2));
@@ -23755,7 +23770,7 @@ function orchestratorFor(controlRoot, featureId) {
 }
 function requireController(args, operation) {
   if (args.positional[0] === "init") {
-    const target = resolve17(args.positional[1] ?? ".");
+    const target = resolve18(args.positional[1] ?? ".");
     if (!existsSync23(controlPaths(target).config)) {
       assertControllerRole(args, operation);
       return;
@@ -23895,7 +23910,7 @@ function doctor(args, io) {
   if (repoOk) {
     const manifest = loadRepositories(controlRoot);
     for (const repo of manifest.repositories) {
-      const path = resolve17(controlRoot, repo.path);
+      const path = resolve18(controlRoot, repo.path);
       push(`repo:${repo.name}`, isGitRepository(path), path);
     }
   }
@@ -23924,7 +23939,7 @@ function doctor(args, io) {
   return ok ? 0 : 1;
 }
 function cmdInit(args, io) {
-  const target = resolve17(requirePositional(args, 1, "control-repo-path"));
+  const target = resolve18(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
   if (!existsSync23(paths.repositoriesManifest)) {
     writeTextAtomic(
@@ -24002,7 +24017,7 @@ function repoGroup(args, io) {
   if (sub === "audit") {
     const manifest = loadRepositories(controlRoot);
     const rows = manifest.repositories.map((repo) => {
-      const path = resolve17(controlRoot, repo.path);
+      const path = resolve18(controlRoot, repo.path);
       const exists = isGitRepository(path);
       return {
         name: repo.name,
@@ -24028,7 +24043,7 @@ function repoGroup(args, io) {
     const manifest = loadRepositories(controlRoot);
     const lock = { schema_version: 1, generated_at: (/* @__PURE__ */ new Date()).toISOString(), repositories: {} };
     for (const repo of manifest.repositories) {
-      const path = resolve17(controlRoot, repo.path);
+      const path = resolve18(controlRoot, repo.path);
       const branch = featureId ? integrationBranchName(featureId) : repo.base_branch;
       const exists = runGit(path, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
         allowFail: true
@@ -24069,7 +24084,7 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync17(resolve17(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync17(resolve18(graphPath), "utf8"));
     }
     if (!existsSync23(paths.graph)) {
       io.err(
@@ -24189,13 +24204,13 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync17(resolve17(file), "utf8");
+      files[role] = readFileSync17(resolve18(file), "utf8");
     }
     const repositories = existsSync23(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join24(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
-    if (resolve17(out) === resolve17(paths.graph)) {
+    const out = typeof args.flags["out"] === "string" ? resolve18(args.flags["out"]) : join24(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    if (resolve18(out) === resolve18(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
@@ -24223,7 +24238,7 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync17(resolve17(source), "utf8"));
+    const parsed = import_yaml7.default.parse(readFileSync17(resolve18(source), "utf8"));
     const repositories = existsSync23(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
@@ -24611,7 +24626,7 @@ var WORKER_EVIDENCE_KINDS = /* @__PURE__ */ new Set(["red", "green", "refactor"]
 function claimedCwd(worktree, args, controlRoot) {
   const base = worktree ?? controlRoot;
   if (typeof args.flags["cwd"] !== "string") return base;
-  const requested = resolve17(String(args.flags["cwd"]));
+  const requested = resolve18(String(args.flags["cwd"]));
   if (!isInsideReal(base, requested)) {
     throw new Error(`CWD_OUTSIDE_WORKTREE: ${requested} is outside the claim's working directory ${base}.`);
   }
