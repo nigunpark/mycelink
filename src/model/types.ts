@@ -204,6 +204,8 @@ export interface NodeClaim {
   attempt?: number;
   /** After this, an unsettled host dispatch counts as abandoned. */
   expires_at?: string;
+  /** SHA-256 of the controller copy a settle captured for this claim. */
+  result_captured_sha256?: string;
   /** Set while a settle is verifying, so a second settle cannot run concurrently. */
   settling?: { pid: number; host: string; started_at: string } | null;
 }

@@ -18925,7 +18925,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { lstatSync as lstatSync5 } from "node:fs";
+import { closeSync as closeSync7, constants as fsConstants, fstatSync as fstatSync4, lstatSync as lstatSync5, openSync as openSync7 } from "node:fs";
 import { hostname as hostname3 } from "node:os";
 
 // src/e2e/runner.ts
@@ -20624,6 +20624,14 @@ var Orchestrator = class {
         }
       }
       const result = collected.result;
+      if (result !== null && !recaptured) {
+        const captured = createHash7("sha256").update(readFileSync10(controllerCopy)).digest("hex");
+        mutateState(this.paths.featureDir, (s) => {
+          const c = s.nodes[nodeId]?.claim;
+          if (c?.claim_id === claim.claim_id) c.result_captured_sha256 = captured;
+          return s;
+        });
+      }
       const usage = hostUsage(result, started);
       if (!recaptured) mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
       const status = result === null ? "failed" : statusForOutcome(result.outcome);
@@ -21113,18 +21121,34 @@ var Orchestrator = class {
     releaseAllForNode(this.paths.featureDir, nodeId);
     this.event("node.interrupted", nodeId, { claim_id: claimId, reason: reason.slice(0, 300), parked: true });
   }
-  /** Controller copy of a result already captured for this claim by an interrupted settle. */
+  /**
+   * The controller copy a settle of this same claim captured before it was
+   * interrupted. Only a copy whose bytes hash to what that settle recorded
+   * in the claim is accepted, so a file a worker planted in the sessions
+   * directory (claim ids are not secret) is never mistaken for one.
+   */
   capturedResultFor(nodeId, claim) {
+    if (claim.result_captured_sha256 === void 0) return null;
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
     const file = join18(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"), `result.attempt-${attempt}.json`);
+    let fd;
     try {
-      const st = lstatSync5(file);
-      if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_WORKER_RESULT_BYTES) return null;
-      const parsed = JSON.parse(readFileSync10(file, "utf8"));
+      fd = openSync7(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    } catch {
+      return null;
+    }
+    try {
+      const st = fstatSync4(fd);
+      if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync5(file).isSymbolicLink()) return null;
+      const bytes = readFileSync10(fd);
+      if (createHash7("sha256").update(bytes).digest("hex") !== claim.result_captured_sha256) return null;
+      const parsed = JSON.parse(bytes.toString("utf8"));
       if (validateAgainstSchema("node-result", parsed).length > 0) return null;
       return parsed.node_id === nodeId && parsed.claim_id === claim.claim_id ? parsed : null;
     } catch {
       return null;
+    } finally {
+      closeSync7(fd);
     }
   }
   /** Compact status summary suitable for a hook or a CLI line. */
@@ -21667,6 +21691,7 @@ var MANAGED_PATTERNS = [
   "**/repos.lock.yaml",
   "**/candidates/*.yaml",
   "**/deliveries/*.json",
+  "**/features/*/sessions/**",
   "**/.mycelink/*.json",
   "**/.mycelink/*.lock",
   // Security-relevant configuration: shell mode, permission bypass, and the

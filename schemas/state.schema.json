@@ -119,6 +119,7 @@
             "mode": { "enum": ["adapter", "host", "manual", "controller"] },
             "attempt": { "type": "integer", "minimum": 0 },
             "expires_at": { "type": "string" },
+            "result_captured_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "settling": {
               "type": ["object", "null"],
               "required": ["pid", "host", "started_at"],
