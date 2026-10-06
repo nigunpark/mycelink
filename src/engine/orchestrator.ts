@@ -28,6 +28,7 @@ import type {
   NodeState,
   PortfolioGraph,
   SettlementReceipt,
+  UsageTotals,
 } from '../model/types.js';
 import { featurePaths, nodeEvidenceDir, type FeaturePaths } from '../workspace/paths.js';
 import { loadWorkspace, repositoryPath, type Workspace } from '../workspace/workspace.js';
@@ -40,7 +41,24 @@ import {
   TransitionError,
 } from '../state/transition.js';
 import { canSchedule, computeReady, scheduleBatch, type SchedulePlan } from '../scheduler/ready.js';
-import { CAPABILITY_ENV, assertClaimCapability, capabilityMatches, newCapability } from './capability.js';
+import {
+  CAPABILITY_ENV,
+  CapabilityError,
+  assertClaimCapability,
+  capabilityMatches,
+  newCapability,
+} from './capability.js';
+import {
+  WORKER_RESULT_DIR,
+  WORKER_RESULT_FILE,
+  buildHostWorkerPrompt,
+  collectWorkerResult,
+  loadPromptPack,
+  prepareResultSlot,
+  renderGateCommand,
+} from '../sessions/worker-protocol.js';
+import { statusForOutcome } from '../sessions/adapter.js';
+import { lstatSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { isPidAlive } from '../state/process-lock.js';
 import {
@@ -163,6 +181,93 @@ export interface AttemptOutcome {
 }
 
 export type SettleReport = NodeRunReport & { idempotent: boolean };
+
+/** The plugin subagent a host dispatches a worker node to. */
+export const HOST_WORKER_AGENT = 'mycelink:module-worker';
+
+export type DispatchStatus =
+  | 'DISPATCHED'
+  | 'ALL_SETTLED'
+  | 'WAITING'
+  | 'BLOCKED'
+  | 'NEEDS_DECISION'
+  | 'BUDGET_EXHAUSTED'
+  | 'CANCELLED'
+  | 'NO_PROGRESS'
+  | 'INFRASTRUCTURE_FAILURE'
+  | 'MAX_STEPS';
+
+export interface PendingDispatch {
+  node_id: string;
+  claim_id: string;
+  state: NodeState;
+  expires_at: string;
+  expired: boolean;
+}
+
+export interface DispatchTicket {
+  schema: 'mycelink-dispatch-ticket/1';
+  feature_id: string;
+  node_id: string;
+  claim_id: string;
+  attempt: number;
+  /** Raw claim capability; settle and the gates need it. Only its hash is stored. */
+  capability: string;
+  expires_at: string;
+  agent: string;
+  repository: string | null;
+  worktree: string | null;
+  branch: string | null;
+  allowed_paths: string[];
+  forbidden_paths: string[];
+  verification_commands: GraphNode['verification_commands'];
+  gate_commands: { gate: string; command: string }[];
+  result_slot: string;
+  settle_command: string;
+  context_pack_path: string;
+  budget: { model: string; max_turns: number; max_wall_clock_minutes: number };
+  prompt: string;
+  resumed: boolean;
+  result_present: boolean;
+}
+
+export interface DispatchResult {
+  status: DispatchStatus;
+  detail: string;
+  ticket?: DispatchTicket;
+  controller_reports: NodeRunReport[];
+  pending: PendingDispatch[];
+  deferred: { node_id: string; reason: string }[];
+}
+
+function resultInSlot(cwd: string): boolean {
+  try {
+    return (
+      lstatSync(join(cwd, WORKER_RESULT_DIR)).isDirectory() &&
+      lstatSync(join(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE)).isFile()
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Usage of a host-run worker. The host's Agent tool reports no stream the
+ * controller can count, so the session is counted and the worker's own
+ * figures are taken only as bounded, non-negative integers.
+ */
+function hostUsage(result: NodeResult | null, startedMs: number): UsageTotals {
+  const n = (v: unknown, max: number): number =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), max) : 0;
+  const reported = result?.usage ?? {};
+  return {
+    model_turns: n(reported.model_turns, 10_000),
+    input_tokens: n(reported.input_tokens, 100_000_000),
+    output_tokens: n(reported.output_tokens, 100_000_000),
+    wall_clock_ms: Number.isNaN(startedMs) ? 0 : Math.max(0, Date.now() - startedMs),
+    sessions: 1,
+  };
+}
 
 /** A settle that started over this long ago is presumed dead even on another host. */
 const SETTLE_STALE_MS = 2 * 60 * 60 * 1000;
@@ -889,6 +994,279 @@ export class Orchestrator {
     return this.settleGuard(nodeId, capability, () => this.finalizeVerified(nodeId, null, []));
   }
 
+  // ---- host dispatch -----------------------------------------------------
+
+  /**
+   * Hand the host session its next unit of work.
+   *
+   * Controller nodes (candidate builds, E2E) are run here, inline: there is
+   * nothing for a model to decide about them. The first schedulable worker
+   * node is claimed in host mode and returned as a ticket for the host's own
+   * Agent tool. Nothing is spawned. The loop is bounded by
+   * `maxControllerSteps`, and a stop always says why.
+   */
+  async dispatchNext(options: { maxControllerSteps?: number } = {}): Promise<DispatchResult> {
+    const reports: NodeRunReport[] = [];
+    const maxSteps = options.maxControllerSteps ?? 10;
+    for (let step = 0; step <= maxSteps; step++) {
+      const state = this.state();
+      const pending = this.pendingDispatches(state);
+      const stop = (status: DispatchStatus, detail: string): DispatchResult => {
+        this.event('dispatch.stopped', null, { status, detail: detail.slice(0, 500) });
+        return { status, detail, controller_reports: reports, pending, deferred: [] };
+      };
+
+      if (state.feature_state === 'BUDGET_EXHAUSTED') return stop('BUDGET_EXHAUSTED', state.blocked_reason ?? '');
+      if (state.feature_state === 'CANCELLED') return stop('CANCELLED', state.blocked_reason ?? '');
+      const nodes = Object.values(state.nodes);
+      if (nodes.every((n) => n.state === 'DONE' || n.state === 'EXCLUDED')) {
+        this.promoteSettledFeature();
+        return stop('ALL_SETTLED', 'every node is DONE or EXCLUDED');
+      }
+      if (nodes.some((n) => n.state === 'NEEDS_DECISION')) {
+        return stop('NEEDS_DECISION', `pending decisions: ${state.pending_decisions.join(', ') || '(see DECISIONS.md)'}`);
+      }
+
+      const plan = this.plan();
+      const pick = plan.scheduled[0];
+      if (pick === undefined) {
+        const deferred = plan.deferred.map((d) => ({ node_id: d.node_id, reason: d.reason }));
+        if (pending.length > 0) {
+          return { ...stop('WAITING', `${pending.length} dispatched node(s) not settled yet`), deferred };
+        }
+        const parked = Object.entries(state.nodes).filter(([, n]) => n.state === 'BLOCKED' || n.state === 'BUDGET_EXHAUSTED');
+        if (parked.length > 0) {
+          return {
+            ...stop('BLOCKED', parked.map(([id, n]) => `${id}: ${n.blocked_reason ?? n.state}`).join('; ')),
+            deferred,
+          };
+        }
+        return { ...stop('NO_PROGRESS', deferred.map((d) => `${d.node_id}: ${d.reason}`).join('; ') || 'nothing is ready'), deferred };
+      }
+
+      const node = this.node(pick.node_id);
+      if (node.node_type === 'candidate-build' || node.node_type === 'e2e-scenario') {
+        reports.push(await this.runNode(node.id));
+        continue;
+      }
+
+      let claim: ClaimResult;
+      try {
+        claim = this.claim(node.id, { mode: 'host' });
+      } catch (err) {
+        // Lost a race to another dispatcher, or a lease is busy: look again.
+        if (err instanceof NotSchedulableError || err instanceof ResourceBusyError) continue;
+        // The claim was already released with its attempt refunded.
+        return stop('INFRASTRUCTURE_FAILURE', errorText(err));
+      }
+      const ticket = this.buildTicket(node.id, claim, { resumed: false });
+      this.event('dispatch.ticket', node.id, { claim_id: claim.claimId, attempt: claim.attempt, expires_at: claim.expiresAt });
+      return {
+        status: 'DISPATCHED',
+        detail: `dispatched ${node.id} (attempt ${claim.attempt})`,
+        ticket,
+        controller_reports: reports,
+        pending,
+        deferred: [],
+      };
+    }
+    return {
+      status: 'MAX_STEPS',
+      detail: `stopped after ${maxSteps} controller steps`,
+      controller_reports: reports,
+      pending: this.pendingDispatches(this.state()),
+      deferred: [],
+    };
+  }
+
+  /** Host-dispatched claims that have not been settled. */
+  pendingDispatches(state: FeatureState_ = this.state()): PendingDispatch[] {
+    const now = Date.now();
+    return Object.entries(state.nodes)
+      .filter(([, rt]) => rt.claim?.mode === 'host')
+      .map(([id, rt]) => {
+        const claim = rt.claim as NodeClaim;
+        const expires = claim.expires_at ?? claim.claimed_at;
+        return {
+          node_id: id,
+          claim_id: claim.claim_id,
+          state: rt.state,
+          expires_at: expires,
+          expired: Date.parse(expires) <= now,
+        };
+      });
+  }
+
+  /**
+   * Re-issue the ticket of an unsettled host dispatch whose capability the
+   * host lost (an interrupted session). The capability is rotated: the old
+   * one stops working everywhere, so a stray copy cannot settle later. The
+   * claim, worktree, branch and any result already in the slot are kept.
+   */
+  resumeDispatch(nodeId: string): DispatchResult {
+    const node = this.node(nodeId);
+    const capability = newCapability();
+    let claim: NodeClaim | null = null;
+    let attempt = 0;
+    mutateState(this.paths.featureDir, (s) => {
+      const rt = s.nodes[nodeId];
+      const live = rt?.claim ?? null;
+      if (!rt || live === null) throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim to resume.`);
+      if (live.mode !== 'host') {
+        throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${live.mode ?? 'legacy'} mode, not by a host dispatch.`);
+      }
+      if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
+      live.settling = null;
+      live.capability_sha256 = capability.sha256;
+      live.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
+      attempt = live.attempt ?? rt.attempts;
+      claim = structuredClone(live);
+      return s;
+    });
+    const held = claim as unknown as NodeClaim;
+    const cwd = held.worktree ?? this.controlRoot;
+    const ticket = this.buildTicket(
+      nodeId,
+      {
+        claimId: held.claim_id,
+        capability: capability.raw,
+        worktree: held.worktree,
+        branch: held.branch,
+        attempt,
+        mode: 'host',
+        expiresAt: held.expires_at as string,
+      },
+      { resumed: true, resultPresent: resultInSlot(cwd) },
+    );
+    this.event('dispatch.resumed', nodeId, { claim_id: held.claim_id, attempt });
+    return {
+      status: 'DISPATCHED',
+      detail: `re-issued ${nodeId} (attempt ${attempt}) with a new capability`,
+      ticket,
+      controller_reports: [],
+      pending: this.pendingDispatches(),
+      deferred: [],
+    };
+  }
+
+  /** The structured ticket the host's Agent tool fulfils. */
+  private buildTicket(
+    nodeId: string,
+    claim: ClaimResult,
+    options: { resumed: boolean; resultPresent?: boolean },
+  ): DispatchTicket {
+    const node = this.node(nodeId);
+    const packPath = this.writeContextPack(nodeId, claim.claimId);
+    const pack = loadPromptPack(packPath, { featureId: this.featureId, nodeId, claimId: claim.claimId });
+    const cwd = claim.worktree ?? this.controlRoot;
+    // A fresh dispatch starts from an empty slot; a resumed one keeps a
+    // result the worker may already have written.
+    const resultSlot = options.resumed && options.resultPresent ? join(cwd, WORKER_RESULT_DIR, WORKER_RESULT_FILE) : prepareResultSlot(cwd);
+    const gates = this.gateCommands(nodeId, claim.capability).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
+    const launcher = mycelinkCliPath().replace(/\\/g, '/');
+    const controlRoot = this.controlRoot.replace(/\\/g, '/');
+    return {
+      schema: 'mycelink-dispatch-ticket/1',
+      feature_id: this.featureId,
+      node_id: nodeId,
+      claim_id: claim.claimId,
+      attempt: claim.attempt,
+      capability: claim.capability,
+      expires_at: claim.expiresAt,
+      agent: HOST_WORKER_AGENT,
+      repository: node.repository,
+      worktree: claim.worktree,
+      branch: claim.branch,
+      allowed_paths: [...node.allowed_paths],
+      forbidden_paths: [...(node.forbidden_paths ?? [])],
+      verification_commands: node.verification_commands.map((v) => ({ ...v })),
+      gate_commands: gates.map((g) => ({ gate: g.gate, command: g.line })),
+      result_slot: resultSlot,
+      settle_command: renderGateCommand([
+        'node',
+        launcher,
+        'settle',
+        this.featureId,
+        nodeId,
+        '--control-root',
+        controlRoot,
+        '--capability',
+        claim.capability,
+        '--json',
+      ]),
+      context_pack_path: packPath,
+      budget: {
+        model: node.worker.model,
+        max_turns: node.worker.max_turns,
+        max_wall_clock_minutes: node.worker.max_wall_clock_minutes,
+      },
+      prompt: buildHostWorkerPrompt({ pack, worktree: claim.worktree, resultSlot, gates }),
+      resumed: options.resumed,
+      result_present: options.resultPresent ?? false,
+    };
+  }
+
+  /**
+   * Take a host-dispatched worker's result back and conclude the attempt.
+   *
+   * The result is moved out of the slot into a controller-owned quarantine
+   * and checked for links, size, schema and identity before anything reads
+   * it (see worker-protocol.ts). Its outcome only chooses the road; a
+   * submission is believed only after fresh verification and integration.
+   */
+  settle(nodeId: string, capability: string | undefined): SettleReport {
+    return this.settleGuard(nodeId, capability, (claim) => {
+      if (claim.mode !== 'host') {
+        throw new Error(`NOT_HOST_DISPATCH: ${nodeId} is claimed in ${claim.mode ?? 'legacy'} mode; use node finalize for a manual claim.`);
+      }
+      const started = Date.parse(claim.claimed_at);
+      const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
+      const cwd = claim.worktree ?? this.controlRoot;
+      const sessionDir = join(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, '_'));
+      mkdirSync(sessionDir, { recursive: true });
+      const controllerCopy = join(sessionDir, `result.attempt-${attempt}.json`);
+      // The capability is redacted from everything kept of the result: a
+      // worker may well echo its gate lines back in `commands`.
+      const env = { ...process.env, [CAPABILITY_ENV]: capability ?? '' };
+      const collected = collectWorkerResult(cwd, { featureId: this.featureId, nodeId, claimId: claim.claim_id }, controllerCopy, env);
+      const result = collected.result;
+
+      const usage = hostUsage(result, started);
+      mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, usage));
+      const status: SessionStatus = result === null ? 'failed' : statusForOutcome(result.outcome);
+      const failureReason =
+        collected.failure ?? (status === 'failed' && result !== null ? `WORKER_${result.outcome}` : null);
+      appendRun(this.paths.runs, {
+        attempt_id: `${nodeId}#${attempt}`,
+        idempotency_key: `${nodeId}#${attempt}#${claim.claim_id}`,
+        loop_id: `node-agent:${nodeId}`,
+        parent_loop_id: `feature-orchestration:${this.featureId}`,
+        node_id: nodeId,
+        candidate_sha: null,
+        input_hash: claim.claim_id.slice(0, 16),
+        started_at: new Date(Number.isNaN(started) ? Date.now() : started).toISOString(),
+        finished_at: new Date().toISOString(),
+        model_turns: usage.model_turns,
+        usage,
+        wall_clock_ms: usage.wall_clock_ms,
+        commands: (result?.commands ?? []).map((c) => c.command.join(' ')),
+        exit_codes: (result?.commands ?? []).map((c) => c.exit_code),
+        failure_fingerprint: result?.failure_fingerprint ?? failureReason,
+        evidence_paths: result?.evidence_paths ?? [],
+        transition: status,
+      });
+      return this.concludeAttempt(nodeId, null, { status, result, failureReason }, []);
+    });
+  }
+
+  /** RUNNING or CANDIDATE_READY becomes VERIFIED once every node is settled. */
+  private promoteSettledFeature(): void {
+    mutateState(this.paths.featureDir, (s) => {
+      if (s.feature_state === 'RUNNING' || s.feature_state === 'CANDIDATE_READY') s.feature_state = 'VERIFIED';
+      return s;
+    });
+  }
+
   /**
    * Cut an immutable candidate from every repository integration branch.
    *
@@ -1295,13 +1673,7 @@ export class Orchestrator {
     reason: FeatureRunReport['stop_reason'],
     reports: NodeRunReport[],
   ): FeatureRunReport {
-    const state = this.state();
-    if (reason === 'ALL_SETTLED' && state.feature_state === 'RUNNING') {
-      mutateState(this.paths.featureDir, (s) => {
-        s.feature_state = 'VERIFIED';
-        return s;
-      });
-    }
+    if (reason === 'ALL_SETTLED') this.promoteSettledFeature();
     this.event('feature.cycle_stopped', null, { reason, cycles });
     return {
       cycles,

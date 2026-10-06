@@ -88,7 +88,9 @@ const USAGE = `mycelink <group> <command> [options]
   loop validate|status|budget                loop contracts and the run ledger
   decision list|record|apply                 product decisions
   checkpoint create|validate|restore         feature checkpoints
-  orchestrate ready|once|run                 the feature orchestration cycle
+  dispatch <feature> [--resume <node>]       claim the next READY node for the host's Agent tool (JSON ticket)
+  settle <feature> <node> --capability <c>   verify, integrate and conclude a dispatched node from its result slot
+  orchestrate ready|once|run                 the feature orchestration cycle (standalone CLI adapter)
   memory <...>                               LLM Wiki Brain adapter
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
 
@@ -198,6 +200,10 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
         return checkpointGroup(args, io);
       case 'orchestrate':
         return await orchestrateGroup(args, io);
+      case 'dispatch':
+        return await dispatchCommand(args, io);
+      case 'settle':
+        return settleCommand(args, io);
       case 'memory':
         return memoryCommand(args, io, resolveControlRoot(args));
       case 'hook':
@@ -1559,6 +1565,62 @@ function checkpointGroup(args: ParsedArgs, io: CliIo): number {
 
   io.err(`Unknown checkpoint command "${sub}".`);
   return 2;
+}
+
+// ---- host dispatch --------------------------------------------------------
+
+/**
+ * `mycelink dispatch <feature>`: the host-native primary path.
+ *
+ * Runs any controller nodes that are due, then claims the next schedulable
+ * worker node in host mode and prints a ticket for the host's own Agent
+ * tool. It never starts a worker process.
+ */
+async function dispatchCommand(args: ParsedArgs, io: CliIo): Promise<number> {
+  assertControllerRole(args, 'dispatch');
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, 'feature-id');
+  const orchestrator = orchestratorFor(controlRoot, featureId);
+  const paths = featurePaths(controlRoot, featureId);
+  mutateState(paths.featureDir, (s) => {
+    if (s.feature_state === 'GRAPH_VALIDATED' || s.feature_state === 'PLAN_APPROVED') s.feature_state = 'RUNNING';
+    return s;
+  });
+
+  const resume = args.flags['resume'];
+  const result =
+    typeof resume === 'string'
+      ? orchestrator.resumeDispatch(resume)
+      : await orchestrator.dispatchNext({ maxControllerSteps: flagNumber(args, 'max-controller-steps', 10) });
+
+  emit(io, args, result, () =>
+    [
+      `dispatch: ${result.status} — ${result.detail}`,
+      ...result.controller_reports.map((r) => `controller ${r.node_id} -> ${r.outcome} (${r.state})`),
+      ...(result.ticket
+        ? [
+            `ticket: ${result.ticket.node_id} attempt ${result.ticket.attempt} -> agent ${result.ticket.agent}`,
+            `result slot: ${result.ticket.result_slot}`,
+            'Re-run with --json to get the full ticket (prompt and capability).',
+          ]
+        : []),
+      ...result.pending.map((x) => `pending ${x.node_id} until ${x.expires_at}${x.expired ? ' (expired)' : ''}`),
+    ].join('\n'),
+  );
+  return ['DISPATCHED', 'ALL_SETTLED', 'WAITING'].includes(result.status) ? 0 : 1;
+}
+
+/** `mycelink settle <feature> <node> --capability <c>`. */
+function settleCommand(args: ParsedArgs, io: CliIo): number {
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, 'feature-id');
+  const nodeId = requirePositional(args, 2, 'node-id');
+  const orchestrator = orchestratorFor(controlRoot, featureId);
+  const report = orchestrator.settle(nodeId, presentedCapability(args));
+  emit(io, args, { ...report, next: 'dispatch' }, () =>
+    `${report.node_id} -> ${report.outcome} (${report.state})${report.idempotent ? ' [already settled]' : ''} ${report.detail}`,
+  );
+  return report.outcome === 'DONE' ? 0 : 1;
 }
 
 // ---- orchestrate ----------------------------------------------------------

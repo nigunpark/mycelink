@@ -141,7 +141,7 @@ describe('claim authority', () => {
 
   it('the capability may also come from the worker environment', async () => {
     const c = await claim(p, CORE);
-    const ok = await cli(p, ['tdd', 'red', FEATURE_ID, CORE], { MYCELINK_CLAIM_CAPABILITY: c.capability });
+    const ok = await cli(p, ['tdd', 'red', FEATURE_ID, CORE], { MYCELINK_CLAIM_TOKEN: c.capability });
     expect(ok.code).toBe(0);
   });
 
@@ -194,7 +194,7 @@ describe('claim authority', () => {
       const flagged = await cli(p, [...argv, '--capability', c.capability]);
       expect(`${argv.join(' ')}:${flagged.code}`).not.toBe(`${argv.join(' ')}:0`);
       expect(flagged.err).toMatch(/ROLE_DENIED/);
-      const viaEnv = await cli(p, argv, { MYCELINK_CLAIM_CAPABILITY: c.capability });
+      const viaEnv = await cli(p, argv, { MYCELINK_CLAIM_TOKEN: c.capability });
       expect(viaEnv.err).toMatch(/ROLE_DENIED/);
     }
   });

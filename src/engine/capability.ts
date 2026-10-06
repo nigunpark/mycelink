@@ -20,7 +20,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ParsedArgs } from '../cli/args.js';
 import type { NodeRuntime } from '../model/types.js';
 
-export const CAPABILITY_ENV = 'MYCELINK_CLAIM_CAPABILITY';
+export const CAPABILITY_ENV = 'MYCELINK_CLAIM_TOKEN';
 const CAPABILITY_FORMAT = /^[0-9a-f]{64}$/;
 
 export type CapabilityCode = 'CAPABILITY_REQUIRED' | 'CAPABILITY_INVALID' | 'NOT_CLAIMED';
