@@ -234,28 +234,66 @@ Inside Claude Code (commands are namespaced by the plugin):
 /mycelink:verify FEAT-101
 ```
 
+`/mycelink:run FEAT-101` on its own runs every phase without stopping in
+between: init (if needed), PRD, plan, the dispatch/settle loop, the
+candidate and delivery. The phase commands are for running one step by hand.
+
 The same flow with the CLI (`node <plugin>/bin/mycelink.mjs`, shown as
 `mycelink`):
 
 ```bash
 # 1. Create and version a control repository, then register repositories.
 mycelink init ../control && git -C ../control init
-mycelink repo register --control-root ../control --name core --path ../core --base-branch main -- npm test
-mycelink repo register --control-root ../control --name api  --path ../api  --base-branch main -- python -m pytest
+#    Controller-only commands need the controller key. It is printed once
+#    and never stored; workers never receive it. Keep it as $KEY below.
+mycelink controller open --control-root ../control --json   # -> {"authority": "<key>", ...}
+mycelink repo register --control-root ../control --authority $KEY --name core --path ../core --base-branch main -- npm test
+mycelink repo register --control-root ../control --authority $KEY --name api  --path ../api  --base-branch main -- python -m pytest
 mycelink repo audit  --control-root ../control
 mycelink doctor      --control-root ../control
 
 # 2. Write features/FEAT-101/PRD.md and PORTFOLIO-GRAPH.yaml
 #    (/mycelink:prd and /mycelink:plan do this with you; see templates/).
 
-# 3. Validate, initialise, inspect, run, prove.
+# 3. Validate, initialise, inspect.
 mycelink graph validate     FEAT-101 --control-root ../control
-mycelink feature init       FEAT-101 --control-root ../control
+mycelink feature init       FEAT-101 --control-root ../control --authority $KEY
 mycelink orchestrate ready  FEAT-101 --control-root ../control
-mycelink orchestrate run    FEAT-101 --control-root ../control --json
+
+# 4. Run: the host loop /mycelink:run drives inside Claude Code.
+mycelink dispatch FEAT-101 --control-root ../control --authority $KEY --json
+#    -> {"status": "DISPATCHED", "ticket": {...}}: give ticket.prompt to the
+#       Agent tool (subagent mycelink:module-worker); it writes ticket.result_slot.
+mycelink settle   FEAT-101 <node-id> --capability <ticket.capability> --control-root ../control --json
+#    ... repeat dispatch/settle until dispatch reports ALL_SETTLED.
+
+# 5. Prove and deliver.
 mycelink feature verify     FEAT-101 --control-root ../control
 mycelink candidate verify   FEAT-101 --control-root ../control
+mycelink deliver            FEAT-101 --control-root ../control --authority $KEY --json
+
+# 6. A check that fails after a node was DONE (acceptance on the delivered
+#    commits, say) is repaired in the same feature, not a new feature id:
+mycelink node rework FEAT-101 <node-id> --reason "<failing check: input, expected, actual>" --control-root ../control --authority $KEY
+#    ... then dispatch/settle again; the new candidate binds every repository; deliver.
 ```
+
+Outside Claude Code, `mycelink orchestrate run FEAT-101 --json` drives the
+same cycle with the standalone CLI adapter, which spawns `claude -p`
+workers itself; `mycelink doctor` reports whether that executable can start.
+Neither `dispatch` nor `deliver` ever pushes. A candidate always binds
+every registered repository (one the feature never touched at its base), and
+pins only the global configuration and its own feature's files, so planning
+another feature does not invalidate it.
+
+`settle` and the gate commands take the claim's `--capability`, never the
+controller key. The first key of a control repository is opened before any
+work is dispatched. After that, a new key comes only from its holder
+(`controller open --authority $KEY`, which rotates it while no claim is
+live) or from you at an interactive terminal (`controller open --takeover`),
+so a worker can never mint one. A new Claude session that needs the key
+asks you to run the takeover and hand it over. See
+[docs/PERMISSION_MODEL.md](docs/PERMISSION_MODEL.md).
 
 `--control-root` can be omitted when you run from inside the control
 repository (it is found by walking up to `mycelink.config.json`) or when
@@ -330,7 +368,8 @@ verification commands (argv) and a worker budget.
 claude plugin marketplace update mycelink-marketplace
 claude plugin update mycelink@mycelink-marketplace
 # then, for every control repository, refresh the hook paths:
-node <new-install-path>/bin/mycelink.mjs init <control-repo>
+node <new-install-path>/bin/mycelink.mjs controller open --takeover --control-root <control-repo>   # in your terminal; prints a new key
+node <new-install-path>/bin/mycelink.mjs init <control-repo> --authority <key>
 node <new-install-path>/bin/mycelink.mjs doctor --control-root <control-repo>
 ```
 
@@ -377,7 +416,7 @@ entries from its `.claude/settings.json` by hand.
 | Symptom | Fix |
 |---|---|
 | `Mycelink runtime bundle is missing` | you are in a source checkout without `dist/`; run `npm ci && npm run build`, or install a release |
-| `doctor`: `hooks point at a missing launcher` | the plugin moved after an update; re-run `mycelink init <control-repo>` |
+| `doctor`: `hooks point at a missing launcher` | the plugin moved after an update; re-run `mycelink init <control-repo> --authority <key>` (the key from `mycelink controller open --takeover` in your terminal) |
 | `Unsafe feature id` / `Unsafe branch name` | ids are `UPPERCASE-123`; branch names must be valid Git refs and must not start with `-` |
 | `SHELL_NOT_ALLOWED` | the verifier asks for a shell; use argv, or set `allow_shell_commands: true` knowingly |
 | `BATCH_METACHARACTER` (Windows) | call the real executable instead of a `.cmd` shim, or drop the metacharacter |

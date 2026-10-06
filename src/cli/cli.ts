@@ -22,12 +22,12 @@ import {
 } from '../workspace/workspace.js';
 import { validateGraph, validateRepositories } from '../graph/validate.js';
 import { DEFAULT_BUDGET, initialState, loadState, mutateState, saveState } from '../state/feature-state.js';
-import { applyNodeTransition, recordFailure } from '../state/transition.js';
-import { computeReady, scheduleBatch } from '../scheduler/ready.js';
+import { applyNodeTransition, isDeclaredEdge, recordFailure } from '../state/transition.js';
+import { IN_FLIGHT_STATES, computeReady, scheduleBatch } from '../scheduler/ready.js';
 import { acquireResource, leaseStatus, recoverLeases, releaseAllForNode, releaseResource } from '../resources/leases.js';
 import { runVerification, verifierInvocation, type VerificationInvocation } from '../evidence/runner.js';
 import { createCandidate, listCandidates, loadCandidate, verifyCandidate } from '../git/candidate.js';
-import { integrateNodeBranch } from '../git/integrate.js';
+import { withFeatureLock } from '../engine/feature-lock.js';
 import { createWorkerWorktree, workerBranchName, integrationBranchName } from '../git/worktree.js';
 import { isGitRepository, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { Orchestrator } from '../engine/orchestrator.js';
@@ -46,6 +46,16 @@ import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
 import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
+import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
+import { preflightAdapter } from '../sessions/preflight.js';
+import { featureVerifyProblems } from '../engine/feature-verify.js';
+import { withLock } from '../state/process-lock.js';
+import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
+import { deliverFeature } from '../engine/deliver.js';
+import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
+import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
+import { isInsideReal } from '../security/paths.js';
+import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
 
 /** The installed package version, from the package.json that ships with it. */
 export function packageVersion(): string {
@@ -68,11 +78,14 @@ const USAGE = `mycelink <group> <command> [options]
 
   version | --version                        print the installed version
   doctor                                     environment and workspace health
+  controller open [--authority <current>|--takeover]  mint (first time) or rotate the controller key that controller-only commands need
   init <control-repo-path>                   create a control repository
   repo register|audit|lock                   repository manifest operations
-  feature init|verify|status|cancel          feature lifecycle
+  feature init|verify|status|cancel|supersede  feature lifecycle (supersede <old> --by <new> --reason <why>)
   graph compile|validate|ready|import|adapters  portfolio graph operations
-  node claim|begin|block|verify|release      node lifecycle
+  node claim|begin|block|verify|finalize|release|invalidate|rework  node lifecycle
+  node rework <feature> <node> --reason <why> [--acceptance <AC,..>] [--evidence <path,..>] [--decision <id>]
+                                 reopen DONE work found wrong, inside the same feature; the reason goes to its next worker
   context pack <feature> <node>              write a bounded worker context pack
   session spawn|status|stop|reconcile        worker sessions
   evidence record|validate                   evidence registration
@@ -84,11 +97,40 @@ const USAGE = `mycelink <group> <command> [options]
   loop validate|status|budget                loop contracts and the run ledger
   decision list|record|apply                 product decisions
   checkpoint create|validate|restore         feature checkpoints
-  orchestrate ready|once|run                 the feature orchestration cycle
+  dispatch <feature> [--resume <node>]       claim the next READY node for the host's Agent tool (JSON ticket)
+  settle <feature> <node> --capability <c>   verify, integrate and conclude a dispatched node from its result slot
+  deliver <feature> [--candidate <id>]       fast-forward every base branch to the verified candidate, then accept
+  orchestrate ready|once|run                 the feature orchestration cycle (standalone CLI adapter)
   memory <...>                               LLM Wiki Brain adapter
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
 
-Global: --control-root <path> --json`;
+Global: --control-root <path> --json   Controller-only commands also need --authority <key>.`;
+
+/**
+ * Every subcommand that changes controller state, graphs, manifests,
+ * decisions, leases or branches. Each needs positive controller authority
+ * (`--authority`, see engine/authority.ts) and refuses anyone presenting a
+ * claim capability; worker-scoped commands (tdd, evidence record, node
+ * begin/finalize, settle) are checked against the claim instead.
+ */
+export const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
+  init: '*',
+  dispatch: '*',
+  deliver: '*',
+  repo: new Set(['register', 'lock']),
+  graph: new Set(['compile', 'import']),
+  feature: new Set(['init', 'cancel', 'supersede']),
+  node: new Set(['claim', 'block', 'invalidate', 'rework', 'release', 'verify']),
+  session: new Set(['spawn', 'reconcile', 'stop']),
+  evidence: new Set(['migrate']),
+  branch: new Set(['create', 'integrate']),
+  candidate: new Set(['create']),
+  resource: new Set(['acquire', 'release', 'recover']),
+  e2e: new Set(['run', 'cleanup']),
+  decision: new Set(['record', 'apply']),
+  checkpoint: new Set(['restore']),
+  orchestrate: new Set(['once', 'run']),
+};
 
 /** Find the control repository: flag, env, or nearest ancestor with mycelink.config.json. */
 export function resolveControlRoot(args: ParsedArgs, cwd = process.cwd()): string {
@@ -131,7 +173,54 @@ function adapterFor(controlRoot: string): ClaudeCliAdapter {
 }
 
 function orchestratorFor(controlRoot: string, featureId: string): Orchestrator {
-  return new Orchestrator({ controlRoot, featureId, adapter: adapterFor(controlRoot) });
+  return new Orchestrator({
+    controlRoot,
+    featureId,
+    adapter: adapterFor(controlRoot),
+    preflight: () => preflightAdapter(loadConfig(controlRoot)),
+  });
+}
+
+/**
+ * Gate a controller-only command on positive controller authority. `init`
+ * of a directory that is not yet a control repository is the one bootstrap:
+ * there is nothing to protect there yet, and no claim can exist.
+ */
+function requireController(args: ParsedArgs, operation: string): void {
+  if (args.positional[0] === 'init') {
+    const target = resolve(args.positional[1] ?? '.');
+    if (!existsSync(controlPaths(target).config)) {
+      assertControllerRole(args, operation);
+      return;
+    }
+    assertControllerAuthority(args, target, operation);
+    return;
+  }
+  assertControllerAuthority(args, resolveControlRoot(args), operation);
+}
+
+/** `mycelink controller open [--takeover]`: mint the controller key (see engine/authority.ts). */
+function controllerGroup(args: ParsedArgs, io: CliIo): number {
+  const sub = requirePositional(args, 1, 'open');
+  if (sub !== 'open') {
+    io.err(`Unknown controller command "${sub}".`);
+    return 2;
+  }
+  assertControllerRole(args, 'controller open');
+  const current = args.flags['authority'];
+  const opened = openControllerAuthority(resolveControlRoot(args), {
+    takeover: flagBool(args, 'takeover'),
+    interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    ...(typeof current === 'string' ? { current } : current === true ? { current: '' } : {}),
+  });
+  emit(io, args, opened, () =>
+    [
+      `authority: ${opened.authority}`,
+      'Pass it as --authority to every controller command (dispatch, deliver, reconcile, decisions, ...).',
+      'It is shown once and never stored; never put it in a worker prompt, file or environment.',
+    ].join('\n'),
+  );
+  return 0;
 }
 
 function requirePositional(args: ParsedArgs, index: number, name: string): string {
@@ -157,9 +246,14 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
   }
 
   try {
+    const sub = args.positional[1] ?? '';
+    const only = CONTROLLER_ONLY[group];
+    if (only === '*' || only?.has(sub)) requireController(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
     switch (group) {
       case 'doctor':
         return doctor(args, io);
+      case 'controller':
+        return controllerGroup(args, io);
       case 'init':
         return cmdInit(args, io);
       case 'repo':
@@ -194,6 +288,12 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
         return checkpointGroup(args, io);
       case 'orchestrate':
         return await orchestrateGroup(args, io);
+      case 'dispatch':
+        return await dispatchCommand(args, io);
+      case 'settle':
+        return settleCommand(args, io);
+      case 'deliver':
+        return deliverCommand(args, io);
       case 'memory':
         return memoryCommand(args, io, resolveControlRoot(args));
       case 'hook':
@@ -214,7 +314,7 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 function doctor(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
   const paths = controlPaths(controlRoot);
-  const checks: { name: string; ok: boolean; detail: string }[] = [];
+  const checks: { name: string; ok: boolean; detail: string; level?: 'ok' | 'warn' }[] = [];
 
   const push = (name: string, ok: boolean, detail: string): void => {
     checks.push({ name, ok, detail });
@@ -252,6 +352,17 @@ function doctor(args: ParsedArgs, io: CliIo): number {
 
   const config = loadConfig(controlRoot);
   push('session adapter', true, config.session_adapter);
+  // The standalone adapter is optional: host dispatch (the plugin's primary
+  // path) never starts it. Its absence is reported, not failed.
+  const adapter = preflightAdapter(config);
+  checks.push({
+    name: 'worker adapter (standalone)',
+    ok: true,
+    level: adapter.ok ? 'ok' : 'warn',
+    detail: adapter.ok
+      ? `${adapter.detail}`
+      : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,
+  });
 
   if (existsSync(paths.config)) {
     const hooks = hookHealth(controlRoot);
@@ -265,7 +376,7 @@ function doctor(args: ParsedArgs, io: CliIo): number {
 
   const ok = checks.every((c) => c.ok);
   emit(io, args, { ok, checks }, () =>
-    checks.map((c) => `${c.ok ? 'ok  ' : 'FAIL'} ${c.name}: ${c.detail}`).join('\n'),
+    checks.map((c) => `${c.level === 'warn' ? 'warn' : c.ok ? 'ok  ' : 'FAIL'} ${c.name}: ${c.detail}`).join('\n'),
   );
   return ok ? 0 : 1;
 }
@@ -314,6 +425,8 @@ features. Conversation history is never the source of truth.
 - A node advances only on a real exit code recorded as evidence.
 - RED must fail because the behaviour is missing, not because of setup.
 - Only one full runtime may exist; E2E holds a capacity-1 lease.
+- Run features with \`/mycelink:run\` (dispatch, Agent, settle, deliver).
+  Never hand-progress nodes or do a worker's job in the host session.
 - Ask the user only for product decisions, recorded in \`DECISIONS.md\`.
 `;
 
@@ -409,11 +522,32 @@ function repoGroup(args: ParsedArgs, io: CliIo): number {
 
 function featureGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'init|verify|status|cancel');
+  const sub = requirePositional(args, 1, 'init|verify|status|cancel|supersede');
   const featureId = requirePositional(args, 2, 'feature-id');
   const paths = featurePaths(controlRoot, featureId);
 
   if (sub === 'init') {
+    assertControllerRole(args, 'feature init');
+    // Re-initialising rewrites STATE.json from scratch. Once any node has
+    // moved or failed, that would erase BLOCKED states and failure history,
+    // so it needs a recorded decision.
+    const existing = loadState(paths.featureDir)?.data;
+    const progressed =
+      existing !== undefined &&
+      Object.values(existing.nodes).some(
+        (n) => n.state !== 'PLANNED' || n.attempts > 0 || Object.keys(n.failure_counts).length > 0,
+      );
+    if (progressed) {
+      const decisionId = args.flags['decision'];
+      if (typeof decisionId !== 'string') {
+        throw new Error(
+          `STATE_EXISTS: ${featureId} already has progressed state; re-initialising would erase it. ` +
+            'Pass --decision <recorded decision id> to start over deliberately.',
+        );
+      }
+      assertDecisionUsable(paths.events, decisionId);
+      markDecisionApplied(paths.events, featureId, decisionId, 'feature init');
+    }
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags['graph'];
     if (typeof graphPath === 'string') {
@@ -478,35 +612,7 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'verify') {
-    const validation = validateFeatureGraph(controlRoot, featureId);
-    const doc = loadState(paths.featureDir);
-    const problems: string[] = validation.problems.map((p) => `${p.code}: ${p.detail}`);
-    if (doc === null) {
-      problems.push('NO_STATE: STATE.json is missing');
-    } else {
-      const state = doc.data;
-      if (state.graph_hash !== validation.graphHash) {
-        problems.push(
-          `GRAPH_DRIFT: STATE.json was created for graph ${state.graph_hash.slice(0, 12)} but the graph now hashes to ${validation.graphHash.slice(0, 12)}`,
-        );
-      }
-      for (const [id, runtime] of Object.entries(state.nodes)) {
-        if (runtime.state !== 'DONE' && runtime.state !== 'EXCLUDED') {
-          problems.push(`NODE_NOT_DONE: ${id} is ${runtime.state}`);
-        }
-      }
-      if (state.pending_decisions.length > 0) {
-        problems.push(`PENDING_DECISIONS: ${state.pending_decisions.join(', ')}`);
-      }
-      const leases = leaseStatus(paths.featureDir);
-      for (const [resource, status] of Object.entries(leases)) {
-        if (status.held > 0) problems.push(`LEAKED_LEASE: ${resource} held by ${status.holders.map((h) => h.node_id).join(', ')}`);
-      }
-      const live = liveSessions(paths.sessionsRegistry);
-      if (live.length > 0) {
-        problems.push(`LIVE_SESSIONS: ${live.map((s) => s.session_id).join(', ')}`);
-      }
-    }
+    const problems = featureVerifyProblems(controlRoot, featureId);
     emit(io, args, { ok: problems.length === 0, problems }, () =>
       problems.length === 0 ? `${featureId} verified.` : problems.join('\n'),
     );
@@ -514,12 +620,15 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'cancel') {
+    assertControllerRole(args, 'feature cancel');
     const graph = loadGraph(controlRoot, featureId);
     mutateState(paths.featureDir, (s) => {
       s.feature_state = 'CANCELLED';
       s.blocked_reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : 'cancelled by user';
       for (const [id, runtime] of Object.entries(s.nodes)) {
-        if (['CLAIMED', 'RED_PENDING', 'GREEN_PENDING'].includes(runtime.state)) {
+        // Every claim-holding state, not only the pending ones: a node at
+        // RED_VERIFIED or REGRESSION_VERIFIED still holds its claim.
+        if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== 'INTEGRATED') {
           s = applyNodeTransition(graph, s, id, 'PAUSED', { actor: 'mycelink', reason: 'feature cancelled' });
         }
       }
@@ -529,6 +638,97 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
       releaseAllForNode(paths.featureDir, nodeId);
     }
     emit(io, args, { feature_id: featureId, cancelled: true }, () => `${featureId} cancelled; claims and leases released.`);
+    return 0;
+  }
+
+  if (sub === 'supersede') {
+    assertControllerRole(args, 'feature supersede');
+    // Prefer `node rework` inside the feature. When a feature really is
+    // replaced, the replacement is explicit and the old one must be at rest.
+    const by = args.flags['by'];
+    const reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'].trim() : '';
+    if (typeof by !== 'string' || by === featureId || loadState(featurePaths(controlRoot, by).featureDir) === null) {
+      throw new Error(`SUPERSEDING_FEATURE_MISSING: --by must name another initialised feature (got ${typeof by === 'string' ? by : 'nothing'}).`);
+    }
+    if (reason === '') throw new Error('SUPERSEDE_REASON_REQUIRED: say why the feature is replaced (--reason).');
+    const first = loadState(paths.featureDir)?.data;
+    if (!first) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+    if (first.superseded_by === by) {
+      emit(io, args, { feature_id: featureId, superseded_by: by, idempotent: true }, () => `${featureId} is already superseded by ${by}.`);
+      return 0;
+    }
+    // Both features' delivery locks, always in the same order: not while a
+    // delivery of either runs, and two supersedes can never cross into a
+    // cycle. Everything is judged once both are held.
+    const [lockA, lockB] = [featureId, by].sort();
+    withFeatureLock(featurePaths(controlRoot, lockA as string).featureDir, 'feature supersede', () =>
+      withFeatureLock(featurePaths(controlRoot, lockB as string).featureDir, 'feature supersede', () => {
+        // No cycle: the replacement must not itself be (transitively) replaced by this one.
+        const seen = new Set<string>([featureId]);
+        for (let next: string | null | undefined = by; typeof next === 'string'; ) {
+          if (seen.has(next)) throw new Error(`SUPERSEDE_CYCLE: ${by} is already superseded, directly or not, by ${featureId}.`);
+          seen.add(next);
+          next = loadState(featurePaths(controlRoot, next).featureDir)?.data.superseded_by;
+        }
+        // The replacement must be a live, valid feature: never history, never stopped.
+        const target = loadState(featurePaths(controlRoot, by).featureDir)?.data;
+        const unusable =
+          !target
+            ? 'it has no STATE.json'
+            : typeof target.superseded_by === 'string'
+              ? `it is itself superseded by ${target.superseded_by}`
+              : target.feature_state === 'CANCELLED'
+                ? 'it is cancelled'
+                : null;
+        const validation = unusable === null ? validateFeatureGraph(controlRoot, by) : null;
+        const invalid =
+          unusable ??
+          (validation && validation.problems.length > 0
+            ? `its graph does not validate (${validation.problems.map((p) => p.code).join(', ')})`
+            : validation && target && target.graph_hash !== validation.graphHash
+              ? 'its graph changed since its STATE.json was created'
+              : null);
+        if (invalid !== null) {
+          throw new Error(`SUPERSEDING_FEATURE_NOT_VIABLE: ${by} cannot replace ${featureId}: ${invalid}.`);
+        }
+        const current = loadState(paths.featureDir)?.data;
+        if (!current) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+        if (typeof current.superseded_by === 'string' && current.superseded_by !== by) {
+          throw new Error(`ALREADY_SUPERSEDED: ${featureId} is superseded by ${current.superseded_by}.`);
+        }
+        const busy = [
+          ...Object.entries(current.nodes)
+            .filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state))
+            .map(([id, rt]) => `${id}=${rt.state}`),
+          ...Object.entries(leaseStatus(paths.featureDir))
+            .filter(([, st]) => st.held > 0)
+            .map(([resource]) => `lease ${resource}`),
+          ...liveSessions(paths.sessionsRegistry).map((x) => `session ${x.session_id}`),
+        ];
+        if (busy.length > 0) {
+          throw new Error(`FEATURE_NOT_QUIESCENT: ${featureId} still has work in flight (${busy.join(', ')}); settle, reconcile or cancel it first.`);
+        }
+        // Re-checked under the state lock.
+        mutateState(paths.featureDir, (s) => {
+          const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
+          if (started) throw new Error(`FEATURE_NOT_QUIESCENT: ${started[0]} started meanwhile.`);
+          if (s.feature_state !== 'COMPLETED') s.feature_state = 'CANCELLED';
+          s.blocked_reason = `superseded by ${by}: ${reason}`;
+          s.superseded_by = by;
+          s.superseded_reason = reason;
+          s.superseded_at = new Date().toISOString();
+          return s;
+        });
+      }),
+    );
+    appendEvent(paths.events, {
+      idempotency_key: `feature.superseded:${featureId}:${by}`,
+      type: 'feature.superseded',
+      actor: 'mycelink',
+      feature_id: featureId,
+      data: { superseded_by: by, reason: reason.slice(0, 500) },
+    });
+    emit(io, args, { feature_id: featureId, superseded_by: by, idempotent: false }, () => `${featureId} is superseded by ${by}; it is history now.`);
     return 0;
   }
 
@@ -659,17 +859,20 @@ function graphGroup(args: ParsedArgs, io: CliIo): number {
 
 function nodeGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'claim|begin|block|verify|release|invalidate');
+  const sub = requirePositional(args, 1, 'claim|begin|block|verify|finalize|release|invalidate|rework');
   const featureId = requirePositional(args, 2, 'feature-id');
   const nodeId = requirePositional(args, 3, 'node-id');
   const orchestrator = orchestratorFor(controlRoot, featureId);
 
   switch (sub) {
     case 'claim': {
-      const claim = orchestrator.claim(nodeId);
+      assertControllerRole(args, 'node claim');
+      // A manual claim goes through the same scheduler check as a dispatch.
+      const claim = orchestrator.claim(nodeId, { mode: 'manual' });
       const pack = orchestrator.writeContextPack(nodeId, claim.claimId);
       emit(io, args, { ...claim, context_pack: pack }, () =>
-        `Claimed ${nodeId} (${claim.claimId}) worktree=${claim.worktree ?? '-'} branch=${claim.branch ?? '-'}`,
+        `Claimed ${nodeId} (${claim.claimId}) worktree=${claim.worktree ?? '-'} branch=${claim.branch ?? '-'}\n` +
+        `capability: ${claim.capability} (pass it as --capability to tdd and node finalize; it is not stored)`,
       );
       return 0;
     }
@@ -678,13 +881,16 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       const paths = featurePaths(controlRoot, featureId);
       const node = graph.nodes.find((n) => n.id === nodeId);
       const target = node?.required_evidence.includes('red') ? 'RED_PENDING' : 'GREEN_PENDING';
-      mutateState(paths.featureDir, (s) =>
-        applyNodeTransition(graph, s, nodeId, target, { actor: 'mycelink' }),
-      );
+      const capability = presentedCapability(args);
+      mutateState(paths.featureDir, (s) => {
+        assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+        return applyNodeTransition(graph, s, nodeId, target, { actor: 'mycelink' });
+      });
       emit(io, args, { node_id: nodeId, state: target }, () => `${nodeId} -> ${target}`);
       return 0;
     }
     case 'block': {
+      assertControllerRole(args, 'node block');
       const graph = loadGraph(controlRoot, featureId);
       const paths = featurePaths(controlRoot, featureId);
       const reason = flagString(args, 'reason', 'blocked by operator');
@@ -696,25 +902,66 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       return 0;
     }
     case 'invalidate': {
+      assertControllerRole(args, 'node invalidate');
       // Cascades: a downstream node's evidence was produced against the old
       // upstream, so leaving it DONE would let a stale candidate look verified.
+      const decisionId = typeof args.flags['decision'] === 'string' ? args.flags['decision'] : undefined;
+      const eventsLog = featurePaths(controlRoot, featureId).events;
+      if (decisionId !== undefined) assertDecisionUsable(eventsLog, decisionId);
       const invalidated = orchestrator.invalidateWithDependents(
         nodeId,
         flagString(args, 'reason', 'invalidated'),
+        decisionId !== undefined ? { decisionId } : {},
       );
+      if (decisionId !== undefined) markDecisionApplied(eventsLog, featureId, decisionId, `node invalidate ${nodeId}`);
       emit(io, args, { node_id: nodeId, invalidated }, () =>
         `INVALIDATED: ${invalidated.join(', ')}`,
       );
       return 0;
     }
+    case 'rework': {
+      assertControllerRole(args, 'node rework');
+      // Repair within the same feature: never a follow-up feature id.
+      const reason = args.flags['reason'];
+      const decision = args.flags['decision'];
+      // Comma-separated: the acceptance criteria and evidence the failure points at.
+      const list = (name: string): string[] => {
+        const v = args.flags[name];
+        return typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter((x) => x !== '') : [];
+      };
+      const report = orchestrator.rework(nodeId, {
+        reason: typeof reason === 'string' ? reason : '',
+        ...(typeof decision === 'string' ? { decisionId: decision } : {}),
+        acceptance: list('acceptance'),
+        evidence: list('evidence'),
+      });
+      emit(io, args, { ...report, next: 'dispatch' }, () =>
+        [
+          `${report.idempotent ? 'already reworked' : 'reworked'} ${nodeId}: reopened ${report.reopened.join(', ')}`,
+          `candidate ${report.invalidated_candidate ?? '(none)'} is no longer current; dispatch again, then cut and deliver a new candidate.`,
+        ].join('\n'),
+      );
+      return 0;
+    }
+    case 'finalize': {
+      // The deterministic tail for a node driven through the gates by hand:
+      // fresh verification, gate advancement, integration, DONE, release.
+      const report = orchestrator.finalize(nodeId, presentedCapability(args));
+      emit(io, args, report, () =>
+        `${report.node_id} -> ${report.outcome} (${report.state})${report.idempotent ? ' [already settled]' : ''} ${report.detail}`,
+      );
+      return report.outcome === 'DONE' ? 0 : 1;
+    }
     case 'verify': {
-      const result = orchestrator.freshVerify(nodeId);
+      // A diagnostic: its logs never replace the evidence a settle recorded.
+      const result = orchestrator.freshVerify(nodeId, { labelPrefix: 'check' });
       emit(io, args, result, () =>
         `${result.ok ? 'ok  ' : 'FAIL'} ${nodeId}: ${result.detail}`,
       );
       return result.ok ? 0 : 1;
     }
     case 'release': {
+      assertControllerRole(args, 'node release');
       orchestrator.releaseClaim(nodeId, { removeWorktree: flagBool(args, 'remove-worktree') });
       emit(io, args, { node_id: nodeId, released: true }, () => `Released ${nodeId}`);
       return 0;
@@ -765,6 +1012,7 @@ async function sessionGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   }
 
   if (sub === 'spawn') {
+    assertControllerRole(args, 'session spawn');
     const nodeId = requirePositional(args, 3, 'node-id');
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const report = await orchestrator.runNode(nodeId);
@@ -773,15 +1021,24 @@ async function sessionGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   }
 
   if (sub === 'reconcile') {
+    assertControllerRole(args, 'session reconcile');
     const orchestrator = orchestratorFor(controlRoot, featureId);
-    const result = orchestrator.reconcile();
+    const result = orchestrator.reconcile({ abandonDispatches: flagBool(args, 'abandon-dispatches') });
     emit(io, args, result, () =>
-      `recovered leases: ${result.recoveredLeases}; orphaned sessions: ${result.orphanedSessions.length}; released nodes: ${result.releasedNodes.join(', ') || '(none)'}`,
+      [
+        `recovered leases: ${result.recoveredLeases}; orphaned sessions: ${result.orphanedSessions.length}; released nodes: ${result.releasedNodes.join(', ') || '(none)'}`,
+        `abandoned dispatches: ${result.abandoned_dispatches.join(', ') || '(none)'}; interrupted settles: ${result.interrupted_settles.join(', ') || '(none)'}`,
+        ...result.pending_dispatches.map(
+          (d) =>
+            `pending dispatch ${d.node_id}${d.result_present ? ' (result written: resume, then settle)' : ''}${d.expired ? ' (expired)' : ''}: mycelink dispatch ${featureId} --resume ${d.node_id} --json`,
+        ),
+      ].join('\n'),
     );
     return 0;
   }
 
   if (sub === 'stop') {
+    assertControllerRole(args, 'session stop');
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const result = orchestrator.reconcile();
     emit(io, args, result, () => `Stopped; ${result.orphanedSessions.length} sessions closed.`);
@@ -796,10 +1053,42 @@ async function sessionGroup(args: ParsedArgs, io: CliIo): Promise<number> {
 
 function evidenceGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'record|validate');
+  const sub = requirePositional(args, 1, 'record|validate|migrate');
   const featureId = requirePositional(args, 2, 'feature-id');
-  const nodeId = requirePositional(args, 3, 'node-id');
   const paths = featurePaths(controlRoot, featureId);
+
+  if (sub === 'migrate') {
+    // Rewrite legacy absolute output paths to control-root-relative ones.
+    // Only records that resolve safely into this feature are rewritten;
+    // the rest are left untouched and reported.
+    const migrated: string[] = [];
+    const refused: string[] = [];
+    mutateState(paths.featureDir, (s) => {
+      for (const [id, runtime] of Object.entries(s.nodes)) {
+        for (const record of Object.values(runtime.evidence)) {
+          if (!record) continue;
+          const resolved = resolveEvidenceOutput(controlRoot, featureId, record);
+          if (!resolved.ok) {
+            refused.push(`${id} ${record.kind}: ${resolved.problem}`);
+            continue;
+          }
+          const rel = relativeInside(controlRoot, resolved.path);
+          if (rel !== null && rel !== record.output_path) {
+            record.output_path = rel;
+            record.cwd = relativeInside(controlRoot, record.cwd) ?? record.cwd;
+            migrated.push(`${id} ${record.kind}`);
+          }
+        }
+      }
+      return s;
+    });
+    emit(io, args, { ok: refused.length === 0, migrated, refused }, () =>
+      [`migrated ${migrated.length} record(s)`, ...refused].join('\n'),
+    );
+    return refused.length === 0 ? 0 : 1;
+  }
+
+  const nodeId = requirePositional(args, 3, 'node-id');
 
   if (sub === 'validate') {
     const doc = loadState(paths.featureDir);
@@ -817,8 +1106,9 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
           problems.push(`FAILED_EVIDENCE: ${kind} exited ${record.exit_code}`);
         } else if (kind === 'red' && record.red_reason !== 'behaviour-missing') {
           problems.push(`INVALID_RED: ${record.red_reason ?? 'unclassified'}`);
-        } else if (!existsSync(record.output_path)) {
-          problems.push(`MISSING_OUTPUT: ${record.output_path}`);
+        } else {
+          const problem = checkEvidenceOutput(controlRoot, featureId, record);
+          if (problem !== null) problems.push(problem);
         }
       }
     }
@@ -830,7 +1120,16 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
 
   if (sub === 'record') {
     const kind = flagString(args, 'kind') as EvidenceKind;
-    const cwd = flagString(args, 'cwd', process.cwd());
+    // A worker may attest only what it does itself. Regression, review, E2E
+    // and candidate evidence come from controller paths (fresh verification,
+    // the E2E runner, candidate builds), never from a claim holder's argv.
+    if (!WORKER_EVIDENCE_KINDS.has(kind)) {
+      throw new Error(`EVIDENCE_KIND_NOT_ALLOWED: "${kind}" evidence is recorded by the controller, not by evidence record.`);
+    }
+    const capability = presentedCapability(args);
+    const runtime = loadState(paths.featureDir)?.data.nodes[nodeId];
+    assertClaimCapability(nodeId, runtime, capability);
+    const cwd = claimedCwd(runtime?.claim?.worktree ?? null, args, controlRoot);
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     const record = runVerification({
@@ -840,10 +1139,13 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
       command: args.passthrough,
       cwd,
       evidenceDir: nodeEvidenceDir(controlRoot, featureId, nodeId),
+      pathBase: controlRoot,
     });
     mutateState(paths.featureDir, (s) => {
-      const runtime = s.nodes[nodeId];
-      if (runtime) runtime.evidence[kind] = record;
+      // The claim may have been released or rotated while the command ran.
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+      const rt = s.nodes[nodeId];
+      if (rt) rt.evidence[kind] = record;
       return s;
     });
     emit(io, args, record, () => `${kind} exit=${record.exit_code} evidence=${record.output_path}`);
@@ -874,6 +1176,32 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   const doc = loadState(paths.featureDir);
   const runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
+  // Only the holder of the node's current claim may record its gates.
+  const capability = presentedCapability(args);
+  assertClaimCapability(nodeId, runtime, capability);
+
+  // A gate that could not move the node is refused before it runs anything:
+  // running the verifier anyway records evidence for nothing and, when it
+  // fails, counts a failure the gate order caused.
+  const gatePending = phase === 'red' ? 'RED_PENDING' : phase === 'green' ? 'GREEN_PENDING' : null;
+  const gateVerified =
+    phase === 'red' ? 'RED_VERIFIED' : phase === 'green' ? 'GREEN_VERIFIED' : 'REGRESSION_VERIFIED';
+  const via = gatePending ?? runtime.state;
+  const redMissing = phase === 'green' && node.required_evidence.includes('red') && runtime.evidence['red'] === undefined;
+  if (redMissing || !isDeclaredEdge(runtime.state, via) || !isDeclaredEdge(via, gateVerified)) {
+    const next = redMissing
+      ? 'red'
+      : runtime.state === 'RED_VERIFIED' || runtime.state === 'GREEN_PENDING'
+        ? 'green'
+        : runtime.state === 'GREEN_VERIFIED'
+          ? 'regression'
+          : runtime.state === 'CLAIMED' || runtime.state === 'RED_PENDING'
+            ? 'red'
+            : null;
+    throw new Error(
+      `GATE_OUT_OF_ORDER: ${nodeId} is ${runtime.state}; the ${phase} gate cannot run now${next ? ` (next: the ${next} gate)` : ''}. Nothing was run or recorded.`,
+    );
+  }
 
   const declared = node.verification_commands[0];
   // An explicit `-- <argv>` from the operator is always argv; a declared
@@ -883,10 +1211,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   else if (declared !== undefined && declared.command.length > 0) invocation = verifierInvocation(declared);
   else throw new Error('No command given and the node declares no verifier.');
 
-  const cwd =
-    typeof args.flags['cwd'] === 'string'
-      ? resolve(String(args.flags['cwd']))
-      : (runtime.claim?.worktree ?? controlRoot);
+  const cwd = claimedCwd(runtime.claim?.worktree ?? null, args, controlRoot);
 
   const repoDecl = node.repository
     ? loadRepositories(controlRoot).repositories.find((r) => r.name === node.repository)
@@ -903,9 +1228,13 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
     ...(phase === 'red' ? { expectExit: -1 } : {}),
     baselineFailures: repoDecl?.baseline_failures ?? [],
     allowShell: loadConfig(controlRoot).allow_shell_commands,
+    pathBase: controlRoot,
   });
 
   mutateState(paths.featureDir, (s) => {
+    // Re-checked where the evidence lands: the claim may have been released
+    // or rotated while the command ran, and then this evidence is not its.
+    assertClaimCapability(nodeId, s.nodes[nodeId], capability);
     const rt = s.nodes[nodeId];
     if (rt) rt.evidence[kind] = record;
     return s;
@@ -917,6 +1246,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
 
   try {
     mutateState(paths.featureDir, (s) => {
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
       let next = s;
       if (pending !== null && next.nodes[nodeId]?.state !== pending) {
         next = applyNodeTransition(graph, next, nodeId, pending, { actor: 'mycelink' });
@@ -941,6 +1271,22 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   return 0;
 }
 
+/**
+ * Where a worker-scoped command runs: the claim's worktree, or a `--cwd`
+ * inside it. A gate run somewhere else would prove nothing about the claim.
+ */
+const WORKER_EVIDENCE_KINDS: ReadonlySet<string> = new Set(['red', 'green', 'refactor']);
+
+function claimedCwd(worktree: string | null, args: ParsedArgs, controlRoot: string): string {
+  const base = worktree ?? controlRoot;
+  if (typeof args.flags['cwd'] !== 'string') return base;
+  const requested = resolve(String(args.flags['cwd']));
+  if (!isInsideReal(base, requested)) {
+    throw new Error(`CWD_OUTSIDE_WORKTREE: ${requested} is outside the claim's working directory ${base}.`);
+  }
+  return requested;
+}
+
 // ---- branch / candidate ---------------------------------------------------
 
 function branchGroup(args: ParsedArgs, io: CliIo): number {
@@ -955,32 +1301,42 @@ function branchGroup(args: ParsedArgs, io: CliIo): number {
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node?.repository) throw new Error(`Node "${nodeId}" has no repository.`);
     const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
+    const repoPath = repositoryPath(workspace, node.repository);
+    // Like a claim, a new branch starts where the feature's integration is.
+    const integration = integrationBranchName(featureId);
     const created = createWorkerWorktree({
-      repoPath: repositoryPath(workspace, node.repository),
+      repoPath,
       featureId,
       nodeId,
       baseBranch: repoDecl?.base_branch ?? 'main',
       worktreeRoot: workspace.paths.worktreesDir,
       repositoryName: node.repository,
+      ...(runGit(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${integration}`], { allowFail: true }).exitCode === 0
+        ? { startPoint: integration }
+        : {}),
     });
     emit(io, args, created, () => `${created.branch} -> ${created.worktree}`);
     return 0;
   }
 
   if (sub === 'integrate') {
+    assertControllerRole(args, 'branch integrate');
     const nodeId = requirePositional(args, 3, 'node-id');
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node?.repository) throw new Error(`Node "${nodeId}" has no repository.`);
-    const repoDecl = workspace.repositories.repositories.find((r) => r.name === node.repository);
-    const result = integrateNodeBranch({
-      repoPath: repositoryPath(workspace, node.repository),
-      featureId,
-      nodeBranch: workerBranchName(featureId, nodeId),
-      baseBranch: repoDecl?.base_branch ?? 'main',
-      integrationRoot: workspace.paths.integrationDir,
-      repositoryName: node.repository,
-    });
+    // Only freshly verified work may reach the integration branch.
+    const state = loadState(featurePaths(controlRoot, featureId).featureDir)?.data.nodes[nodeId]?.state;
+    if (state !== 'REVIEW_VERIFIED' && state !== 'INTEGRATED' && state !== 'DONE') {
+      throw new Error(
+        `NODE_NOT_VERIFIED: ${nodeId} is ${state ?? 'unknown'}; only a node past fresh verification may be integrated. ` +
+          'Settle or finalize it instead.',
+      );
+    }
+    // The same road as a settle: only from the head the controller recorded,
+    // journaled before the branch moves.
+    const result = orchestratorFor(controlRoot, featureId).integrateNode(nodeId);
+    if (result === null) throw new Error(`Node "${nodeId}" has no repository.`);
     emit(io, args, result, () => `${result.strategy} -> ${result.sha}`);
     return 0;
   }
@@ -1019,40 +1375,54 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
   const featureId = requirePositional(args, 2, 'feature-id');
   const paths = featurePaths(controlRoot, featureId);
 
-  const repoRefs = workspace.repositories.repositories
-    .filter((repo) => {
-      const branch = integrationBranchName(featureId);
-      return (
-        runGit(repositoryPath(workspace, repo.name), ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
-          allowFail: true,
-        }).exitCode === 0
-      );
-    })
-    .map((repo) => ({
-      name: repo.name,
-      path: repositoryPath(workspace, repo.name),
-      branch: integrationBranchName(featureId),
-    }));
+  // A candidate binds every registered repository (see engine/portfolio.ts).
+  const repoRefs = portfolioRefs(workspace, featureId);
 
   if (sub === 'create') {
-    const contracts = existsSync(workspace.paths.contractsDir)
-      ? readdirSync(workspace.paths.contractsDir)
-          .filter((f) => !f.startsWith('.'))
-          .map((f) => `contracts/${f}`)
-      : [];
-    const manifest = createCandidate({
-      controlRepo: controlRoot,
-      featureDir: paths.featureDir,
-      featureId,
-      repositories: repoRefs,
-      contracts,
-    });
-    mutateState(paths.featureDir, (s) => {
-      s.candidates.push(manifest.candidate_id);
-      s.current_candidate = manifest.candidate_id;
-      if (s.feature_state === 'RUNNING') s.feature_state = 'CANDIDATE_READY';
-      return s;
-    });
+    assertControllerRole(args, 'candidate create');
+    // Checked, bound and made current under the feature's delivery lock:
+    // never in the middle of a delivery, a rework or a supersede, and the
+    // work it binds is judged once the lock is held.
+    const manifest = withFeatureLock(
+      paths.featureDir,
+      'candidate create',
+      () => {
+        const graph = loadGraph(controlRoot, featureId);
+        const state = loadState(paths.featureDir)?.data;
+        if (!state) throw new Error(`NO_STATE: ${featureId} has no STATE.json.`);
+        const unfinished = Object.entries(state.nodes)
+          .filter(([id, rt]) => {
+            const type = graph.nodes.find((n) => n.id === id)?.node_type;
+            if (type === 'candidate-build' || type === 'e2e-scenario') return false;
+            return rt.state !== 'DONE' && rt.state !== 'EXCLUDED';
+          })
+          .map(([id, rt]) => `${id}=${rt.state}`);
+        if (unfinished.length > 0) {
+          throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(', ')}`);
+        }
+        const contracts = existsSync(workspace.paths.contractsDir)
+          ? readdirSync(workspace.paths.contractsDir)
+              .filter((f) => !f.startsWith('.'))
+              .map((f) => `contracts/${f}`)
+          : [];
+        const cut = createCandidate({
+          controlRepo: controlRoot,
+          featureDir: paths.featureDir,
+          featureId,
+          // Only integration branches exactly where the controller left them.
+          repositories: portfolioRefs(workspace, featureId, { create: true, trust: { graph, state } }),
+          contracts,
+        });
+        mutateState(paths.featureDir, (s) => {
+          if (!s.candidates.includes(cut.candidate_id)) s.candidates.push(cut.candidate_id);
+          s.current_candidate = cut.candidate_id;
+          if (s.feature_state === 'RUNNING') s.feature_state = 'CANDIDATE_READY';
+          return s;
+        });
+        return cut;
+      },
+      5_000,
+    );
     emit(io, args, manifest, () =>
       `${manifest.candidate_id}: ${Object.entries(manifest.repositories)
         .map(([n, r]) => `${n}@${r.sha.slice(0, 12)}`)
@@ -1066,7 +1436,11 @@ function candidateGroup(args: ParsedArgs, io: CliIo): number {
       args.positional[3] ?? loadState(paths.featureDir)?.data.current_candidate ?? '';
     if (id === '') throw new Error('No candidate id given and no current candidate recorded.');
     const manifest = loadCandidate(paths.featureDir, id);
-    const result = verifyCandidate(manifest, { controlRepo: controlRoot, repositories: repoRefs });
+    const result = verifyCandidate(manifest, {
+      controlRepo: controlRoot,
+      repositories: repoRefs,
+      requiredRepositories: registeredRepositories(workspace),
+    });
     emit(io, args, result, () =>
       result.ok
         ? `${id} still matches every repository.`
@@ -1198,6 +1572,7 @@ async function e2eGroup(args: ParsedArgs, io: CliIo): Promise<number> {
       scenarios,
       resources: graph.resources,
       cwd: controlRoot,
+      pathBase: controlRoot,
       ...(only ? { only } : {}),
       ...(typeof args.flags['deploy'] === 'string' ? { deployCommand: String(args.flags['deploy']).split(' ') } : {}),
       ...(typeof args.flags['healthcheck'] === 'string'
@@ -1326,7 +1701,9 @@ function decisionGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'apply') {
+    assertControllerRole(args, 'decision apply');
     const decisionId = requirePositional(args, 3, 'decision-id');
+    assertDecisionUsable(paths.events, decisionId);
     const graph = loadGraph(controlRoot, featureId);
     const unblocked: string[] = [];
     mutateState(paths.featureDir, (s) => {
@@ -1346,6 +1723,7 @@ function decisionGroup(args: ParsedArgs, io: CliIo): number {
       }
       return next;
     });
+    markDecisionApplied(paths.events, featureId, decisionId, 'decision apply');
     emit(io, args, { decision_id: decisionId, unblocked }, () =>
       `Applied ${decisionId}; unblocked ${unblocked.join(', ') || '(none)'}.`,
     );
@@ -1403,17 +1781,116 @@ function checkpointGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'restore') {
+    assertControllerRole(args, 'checkpoint restore');
     const name = requirePositional(args, 3, 'checkpoint-file');
     assertPlainFileName(name);
+    // Restoring rewrites STATE.json wholesale, outside the state machine:
+    // it could unblock parked nodes or revive invalidated work, so it needs
+    // a recorded decision, like any other way out of a parked state.
+    const decisionId = args.flags['decision'];
+    if (typeof decisionId !== 'string') {
+      throw new Error('DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.');
+    }
+    assertDecisionUsable(paths.events, decisionId);
     const file = join(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync(file, 'utf8')) as { state: Parameters<typeof saveState>[1] };
-    saveState(paths.featureDir, checkpoint.state);
+    const restored = structuredClone(checkpoint.state);
+    // No claim survives a restore: its capability may since have been
+    // rotated or abandoned, and its holder is not this checkpoint.
+    for (const runtime of Object.values(restored.nodes)) {
+      if (runtime.claim !== null && IN_FLIGHT_STATES.has(runtime.state)) runtime.state = 'READY';
+      runtime.claim = null;
+    }
+    saveState(paths.featureDir, restored);
+    for (const nodeId of Object.keys(restored.nodes)) releaseAllForNode(paths.featureDir, nodeId);
+    markDecisionApplied(paths.events, featureId, decisionId, `checkpoint restore ${name}`);
     emit(io, args, { restored: name }, () => `Restored ${name}.`);
     return 0;
   }
 
   io.err(`Unknown checkpoint command "${sub}".`);
   return 2;
+}
+
+// ---- host dispatch --------------------------------------------------------
+
+/**
+ * `mycelink dispatch <feature>`: the host-native primary path.
+ *
+ * Runs any controller nodes that are due, then claims the next schedulable
+ * worker node in host mode and prints a ticket for the host's own Agent
+ * tool. It never starts a worker process.
+ */
+async function dispatchCommand(args: ParsedArgs, io: CliIo): Promise<number> {
+  assertControllerRole(args, 'dispatch');
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, 'feature-id');
+  const orchestrator = orchestratorFor(controlRoot, featureId);
+  const paths = featurePaths(controlRoot, featureId);
+  mutateState(paths.featureDir, (s) => {
+    if (s.feature_state === 'GRAPH_VALIDATED' || s.feature_state === 'PLAN_APPROVED') s.feature_state = 'RUNNING';
+    return s;
+  });
+
+  const resume = args.flags['resume'];
+  const result =
+    typeof resume === 'string'
+      ? orchestrator.resumeDispatch(resume)
+      : await orchestrator.dispatchNext({ maxControllerSteps: flagNumber(args, 'max-controller-steps', 10) });
+
+  emit(io, args, result, () =>
+    [
+      `dispatch: ${result.status} — ${result.detail}`,
+      ...result.controller_reports.map((r) => `controller ${r.node_id} -> ${r.outcome} (${r.state})`),
+      ...(result.ticket
+        ? [
+            `ticket: ${result.ticket.node_id} attempt ${result.ticket.attempt} -> agent ${result.ticket.agent}`,
+            `result slot: ${result.ticket.result_slot}`,
+            'Re-run with --json to get the full ticket (prompt and capability).',
+          ]
+        : []),
+      ...result.pending.map((x) => `pending ${x.node_id} until ${x.expires_at}${x.expired ? ' (expired)' : ''}`),
+    ].join('\n'),
+  );
+  return ['DISPATCHED', 'ALL_SETTLED', 'WAITING'].includes(result.status) ? 0 : 1;
+}
+
+/** `mycelink settle <feature> <node> --capability <c>`. */
+function settleCommand(args: ParsedArgs, io: CliIo): number {
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, 'feature-id');
+  const nodeId = requirePositional(args, 2, 'node-id');
+  const orchestrator = orchestratorFor(controlRoot, featureId);
+  const report = orchestrator.settle(nodeId, presentedCapability(args));
+  emit(io, args, { ...report, next: 'dispatch' }, () =>
+    `${report.node_id} -> ${report.outcome} (${report.state})${report.idempotent ? ' [already settled]' : ''} ${report.detail}`,
+  );
+  return report.outcome === 'DONE' ? 0 : 1;
+}
+
+/**
+ * `mycelink deliver <feature>`: fast-forward each base branch to exactly the
+ * current candidate (all checks first, rollback on a mid-way failure, never
+ * a push), write the delivery manifest, then run and record acceptance.
+ */
+function deliverCommand(args: ParsedArgs, io: CliIo): number {
+  assertControllerRole(args, 'deliver');
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, 'feature-id');
+  const candidateId = typeof args.flags['candidate'] === 'string' ? args.flags['candidate'] : undefined;
+  const result = deliverFeature(controlRoot, featureId, candidateId !== undefined ? { candidateId } : {});
+  emit(io, args, result, () =>
+    [
+      `${result.candidate_id}: ${result.status}${result.idempotent ? ' (already delivered)' : ''}`,
+      ...Object.entries(result.repositories).map(
+        ([name, r]) => `${name} ${r.base_branch}: ${r.before.slice(0, 12)} -> ${(r.after ?? '?').slice(0, 12)} (${r.method})`,
+      ),
+      ...result.acceptance.map(
+        (a) => `${a.failure_fingerprint === null ? 'ok  ' : 'FAIL'} acceptance ${a.repository} exit ${a.exit_code} ${a.output_path}`,
+      ),
+    ].join('\n'),
+  );
+  return result.ok ? 0 : 1;
 }
 
 // ---- orchestrate ----------------------------------------------------------
@@ -1435,6 +1912,7 @@ async function orchestrateGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     return 0;
   }
 
+  assertControllerRole(args, `orchestrate ${sub}`);
   const paths = featurePaths(controlRoot, featureId);
   mutateState(paths.featureDir, (s) => {
     if (s.feature_state === 'GRAPH_VALIDATED' || s.feature_state === 'PLAN_APPROVED') {
@@ -1459,7 +1937,13 @@ async function orchestrateGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     emit(io, args, report, () =>
       [
         `stop: ${report.stop_reason} after ${report.cycles} cycle(s); feature ${report.feature_state}`,
-        ...report.reports.map((r) => `${r.node_id} -> ${r.outcome} (${r.state})`),
+        ...(report.stop_reason === 'ADAPTER_UNAVAILABLE' && report.adapter
+          ? [`adapter: ${report.adapter.detail ?? 'unavailable'} (nothing was charged; fix it and re-run, or use mycelink dispatch)`]
+          : []),
+        // Every node that did not finish says why, not only in --json.
+        ...report.reports.map(
+          (r) => `${r.node_id} -> ${r.outcome} (${r.state})${r.outcome === 'DONE' ? '' : `: ${r.detail.slice(0, 300)}`}`,
+        ),
       ].join('\n'),
     );
     return report.stop_reason === 'ALL_SETTLED' ? 0 : 1;

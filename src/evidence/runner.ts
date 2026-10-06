@@ -9,10 +9,11 @@
 import { createHash } from 'node:crypto';
 import { runCommandSync, runShellScriptSync, shellScriptOf } from '../security/exec.js';
 import { redactText } from '../security/redact.js';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { EvidenceKind, EvidenceRecord } from '../model/types.js';
 import { resolveRef } from '../git/git.js';
+import { relativeInside } from './paths.js';
 
 /**
  * What a verification runs: an argv command, or (opted in per command and
@@ -49,6 +50,12 @@ interface VerificationOptions {
   scenarioId?: string | null;
   /** From the control repository's `allow_shell_commands`; never from a graph. */
   allowShell?: boolean;
+  /**
+   * The control root. When given, `output_path` (and `cwd` when it is inside)
+   * are stored relative to it, so the record still resolves after the control
+   * repository moves. The evidence directory must be inside it.
+   */
+  pathBase?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -224,7 +231,10 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
 
   const label = args.label ?? args.kind;
   const outputPath = join(evidenceDir, `${safe(args.nodeId)}.${safe(label)}.log`);
-  writeFileSync(outputPath, output, 'utf8');
+  // Remove whatever is at the path (a planted link is unlinked, never
+  // followed) and create the file exclusively.
+  rmSync(outputPath, { force: true });
+  writeFileSync(outputPath, output, { encoding: 'utf8', flag: 'wx' });
   const outputSha = createHash('sha256').update(Buffer.from(output, 'utf8')).digest('hex');
 
   const baseline = args.baselineFailures ?? [];
@@ -240,6 +250,15 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
 
   const succeeded = exitCode === expectExit || onlyBaseline;
 
+  let storedOutput = outputPath;
+  let storedCwd = cwd;
+  if (args.pathBase !== undefined) {
+    const rel = relativeInside(args.pathBase, outputPath);
+    if (rel === null) throw new Error(`Evidence output ${outputPath} is outside the control root ${args.pathBase}.`);
+    storedOutput = rel;
+    storedCwd = relativeInside(args.pathBase, cwd) ?? cwd;
+  }
+
   const record: EvidenceRecord = {
     kind: args.kind,
     node_id: args.nodeId,
@@ -247,10 +266,10 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
     exit_code: exitCode,
     started_at: startedAt.toISOString(),
     finished_at: finishedAt.toISOString(),
-    cwd,
+    cwd: storedCwd,
     repository: args.repository,
     commit_sha: safeHead(cwd),
-    output_path: outputPath,
+    output_path: storedOutput,
     output_sha256: outputSha,
     failure_fingerprint: succeeded ? null : failureFingerprint(filtered, exitCode),
   };

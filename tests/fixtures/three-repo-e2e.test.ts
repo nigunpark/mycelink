@@ -32,6 +32,7 @@ import { readEvents } from '../../src/state/event-log.js';
 import { planShards } from '../../src/e2e/scheduler.js';
 import { loadScenarios } from '../../src/e2e/runner.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -52,7 +53,7 @@ async function harness(p: Portfolio, argv: string[]): Promise<RunResult> {
       err += t + '\n';
     },
   };
-  const code = await main([...argv, '--control-root', p.control], io);
+  const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
   return { code, out, err };
 }
 
@@ -242,7 +243,9 @@ describe('three-repository portfolio, end to end', () => {
       expect(red, `${nodeId} red evidence`).toBeDefined();
       expect(red?.exit_code).not.toBe(0);
       expect(red?.red_reason).toBe('behaviour-missing');
-      expect(existsSync(red?.output_path ?? '')).toBe(true);
+      // Stored relative to the control root, so a moved workspace still resolves it.
+      expect(red?.output_path).toMatch(new RegExp(`^features/${FEATURE_ID}/evidence/`));
+      expect(existsSync(join(p.control, red?.output_path ?? '-'))).toBe(true);
 
       const green = state?.nodes[nodeId]?.evidence.green;
       expect(green?.exit_code).toBe(0);

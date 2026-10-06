@@ -123,6 +123,20 @@ export interface TransitionOptions {
   inputChanged?: boolean;
   /** Recorded on INTEGRATED. */
   integratedSha?: string;
+  /**
+   * INVALIDATED for a controller-authorized rework: the node's own DONE work
+   * is reopened because a later check found it wrong. Its inputs did not
+   * change, so its attempts and failure fingerprints carry on (no fresh
+   * budget), and all its evidence, RED included, is dropped: the repair must
+   * prove itself from a new RED.
+   */
+  rework?: boolean;
+  /**
+   * The attempt ended for an infrastructure reason (no worker could start,
+   * the host was interrupted), not because of the task. Returning to READY
+   * gives the attempt back and counts an interruption instead.
+   */
+  refundAttempt?: boolean;
   now?: string;
 }
 
@@ -225,6 +239,11 @@ function checkEvidenceGate(
   }
 }
 
+/** Whether `from -> to` is a declared edge (no evidence or justification checks). */
+export function isDeclaredEdge(from: NodeState, to: NodeState): boolean {
+  return from === to || EDGES[from].includes(to);
+}
+
 /**
  * Apply a node transition to a cloned state. Pure: never touches disk.
  * Callers persist the result through `mutateState`.
@@ -254,7 +273,10 @@ export function applyNodeTransition(
     );
   }
 
-  if (JUSTIFIED_EXITS.has(from) && to === 'READY') {
+  // Every way out of a parked state needs the same justification: READY
+  // directly, or INVALIDATED / PAUSED / EXCLUDED, each of which leads back to
+  // READY. Moving between parked states (BLOCKED <-> NEEDS_DECISION) does not.
+  if (JUSTIFIED_EXITS.has(from) && !JUSTIFIED_EXITS.has(to)) {
     if (!options.decisionId && options.inputChanged !== true) {
       throw new TransitionError(
         'UNBLOCK_REQUIRES_JUSTIFICATION',
@@ -271,6 +293,10 @@ export function applyNodeTransition(
   runtime.updated_at = now;
 
   if (to === 'CLAIMED') runtime.attempts += 1;
+  if (options.refundAttempt === true && to === 'READY') {
+    runtime.attempts = Math.max(0, runtime.attempts - 1);
+    runtime.interruptions = (runtime.interruptions ?? 0) + 1;
+  }
   if (CLAIM_RELEASING.has(to)) runtime.claim = null;
 
   if (to === 'BLOCKED' || to === 'NEEDS_DECISION' || to === 'BUDGET_EXHAUSTED') {
@@ -284,12 +310,15 @@ export function applyNodeTransition(
       runtime.attempts = 0;
       runtime.failure_counts = {};
       runtime.last_failure_fingerprint = null;
+      if (runtime.rework_brief) runtime.rework_brief.attempt_base = 0;
     }
   }
 
   if (to === 'INTEGRATED' && options.integratedSha) {
     runtime.integrated_sha = options.integratedSha;
   }
+  // The rework is repaired; a later reopening has a reason of its own.
+  if (to === 'DONE' && runtime.rework_brief) runtime.rework_brief = null;
   if (to === 'INVALIDATED') {
     // RED is a historical fact: a test once proved the behaviour was missing,
     // and an upstream change does not undo that. Everything downstream of it
@@ -297,14 +326,24 @@ export function applyNodeTransition(
     // Keeping RED also means a node whose behaviour still holds can be
     // re-verified without manufacturing a fake failing test.
     const red = runtime.evidence.red;
-    runtime.evidence = red ? { red } : {};
+    runtime.evidence = red && options.rework !== true ? { red } : {};
     runtime.integrated_sha = null;
-    // Invalidation means the inputs changed, so this is a different problem.
-    // Carrying the old attempt count and fingerprints forward would exhaust
-    // the budget before the new problem had a single attempt.
-    runtime.attempts = 0;
-    runtime.failure_counts = {};
-    runtime.last_failure_fingerprint = null;
+    if (JUSTIFIED_EXITS.has(from) || options.rework === true) {
+      // A parked node keeps the history that parked it, and a reworked node
+      // the history of the work found wrong: attempts and fingerprints
+      // travel through INVALIDATED. A rework's own attempts are counted from
+      // its brief's attempt_base (scheduler/ready.ts), never by resetting them.
+      runtime.blocked_reason = null;
+    } else {
+      // Invalidating finished or in-flight work means its inputs changed, so
+      // this is a different problem. Carrying the old attempt count and
+      // fingerprints forward would exhaust the budget before the new problem
+      // had a single attempt.
+      runtime.attempts = 0;
+      runtime.failure_counts = {};
+      runtime.last_failure_fingerprint = null;
+      if (runtime.rework_brief) runtime.rework_brief.attempt_base = 0;
+    }
   }
 
   return next;
@@ -336,10 +375,19 @@ export function recordFailure(
   const runtime = next.nodes[nodeId];
   if (!runtime) throw new TransitionError('UNKNOWN_NODE', nodeId, `No runtime state.`);
 
-  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
-  runtime.failure_counts[fingerprint] = count;
   runtime.last_failure_fingerprint = fingerprint;
   runtime.updated_at = options.now ?? new Date().toISOString();
+  // A fingerprint counts once per claim: a worker iterating on a failing
+  // gate inside one attempt is not looping. The same fingerprint in another
+  // attempt counts again, which is what stops a real loop.
+  const claim = runtime.claim;
+  if (claim) {
+    const counted = claim.counted_fingerprints ?? [];
+    if (counted.includes(fingerprint)) return next;
+    claim.counted_fingerprints = [...counted, fingerprint].slice(-50);
+  }
+  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
+  runtime.failure_counts[fingerprint] = count;
 
   const limit =
     options.maxSameFailure ?? node.worker.max_same_failure ?? next.budget.max_same_failure;

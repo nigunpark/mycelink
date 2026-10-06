@@ -37,6 +37,10 @@
       ]
     },
     "graph_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "accepted_deliveries": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
     "created_at": { "type": "string" },
     "updated_at": { "type": "string" },
     "nodes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/nodeRuntime" } },
@@ -62,7 +66,46 @@
     "blocked_reason": { "type": ["string", "null"] },
     "pending_decisions": { "type": "array", "items": { "type": "string" } },
     "candidates": { "type": "array", "items": { "type": "string" } },
-    "current_candidate": { "type": ["string", "null"] }
+    "current_candidate": { "type": ["string", "null"] },
+    "integration_heads": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
+    },
+    "pending_integrations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["node_id", "verified_sha", "from", "to", "strategy"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": { "type": "string", "minLength": 1 },
+          "verified_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "from": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "to": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "strategy": { "enum": ["fast-forward", "merge"] }
+        }
+      }
+    },
+    "superseded_by": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
+    "superseded_reason": { "type": "string", "minLength": 1 },
+    "superseded_at": { "type": "string" },
+    "reworks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "reason", "decision_id", "at", "reopened", "invalidated_candidate", "delivered"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": { "type": "string" },
+          "reason": { "type": "string", "minLength": 1 },
+          "decision_id": { "type": ["string", "null"] },
+          "at": { "type": "string" },
+          "reopened": { "type": "array", "items": { "type": "string" } },
+          "invalidated_candidate": { "type": ["string", "null"] },
+          "delivered": { "type": "boolean" }
+        }
+      }
+    }
   },
   "$defs": {
     "usage": {
@@ -114,7 +157,39 @@
             "owner": { "type": "string" },
             "worktree": { "type": ["string", "null"] },
             "branch": { "type": ["string", "null"] },
-            "claimed_at": { "type": "string" }
+            "claimed_at": { "type": "string" },
+            "capability_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "mode": { "enum": ["adapter", "host", "manual", "controller"] },
+            "attempt": { "type": "integer", "minimum": 0 },
+            "expires_at": { "type": "string" },
+            "result_captured_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "dispatch_id": { "type": "string", "pattern": "^[0-9a-f-]{8,64}$" },
+            "result_file": { "type": "string", "pattern": "^result(-[0-9a-f-]{8,64})?\\.json$" },
+            "result_captured_dispatch_id": { "type": "string" },
+            "result_captured_file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
+            "usage_counted_for": { "type": "string" },
+            "dispatched_at": { "type": "string" },
+            "counted_fingerprints": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
+            "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+            "capture_pending": {
+              "type": ["object", "null"],
+              "required": ["file", "dispatch_id"],
+              "additionalProperties": false,
+              "properties": {
+                "file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
+                "dispatch_id": { "type": "string" }
+              }
+            },
+            "settling": {
+              "type": ["object", "null"],
+              "required": ["pid", "host", "started_at"],
+              "additionalProperties": false,
+              "properties": {
+                "pid": { "type": "integer" },
+                "host": { "type": "string" },
+                "started_at": { "type": "string" }
+              }
+            }
           }
         },
         "evidence": { "type": "object", "additionalProperties": true },
@@ -123,7 +198,69 @@
         "integrated_sha": { "type": ["string", "null"] },
         "blocked_reason": { "type": ["string", "null"] },
         "usage": { "$ref": "#/$defs/usage" },
-        "updated_at": { "type": "string" }
+        "updated_at": { "type": "string" },
+        "interruptions": { "type": "integer", "minimum": 0 },
+        "branch_base_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+        "fresh_branch_required": { "type": "boolean" },
+        "rework_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["at", "reason", "decision_id", "attempts", "failure_counts", "integrated_sha", "branch_head", "archived_ref", "candidate_id", "evidence"],
+            "additionalProperties": false,
+            "properties": {
+              "at": { "type": "string" },
+              "reason": { "type": "string", "minLength": 1 },
+              "decision_id": { "type": ["string", "null"] },
+              "attempts": { "type": "integer", "minimum": 0 },
+              "failure_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+              "integrated_sha": { "type": ["string", "null"] },
+              "branch_head": { "type": ["string", "null"] },
+              "archived_ref": { "type": ["string", "null"] },
+              "candidate_id": { "type": ["string", "null"] },
+              "evidence": { "type": "object", "additionalProperties": true }
+            }
+          }
+        },
+        "rework_brief": {
+          "type": ["object", "null"],
+          "required": ["generation", "limit", "at", "reason", "reason_sha256", "decision_id", "acceptance_criteria", "evidence", "replaced", "attempt_base"],
+          "additionalProperties": false,
+          "properties": {
+            "generation": { "type": "integer", "minimum": 1 },
+            "limit": { "type": "integer", "minimum": 1 },
+            "at": { "type": "string" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "reason_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "decision_id": { "type": ["string", "null"] },
+            "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+            "evidence": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 200 } },
+            "replaced": {
+              "type": "object",
+              "required": ["integrated_sha", "candidate_id", "archived_ref"],
+              "additionalProperties": false,
+              "properties": {
+                "integrated_sha": { "type": ["string", "null"] },
+                "candidate_id": { "type": ["string", "null"] },
+                "archived_ref": { "type": ["string", "null"] }
+              }
+            },
+            "attempt_base": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "last_settlement": {
+          "type": ["object", "null"],
+          "required": ["capability_sha256", "claim_id", "outcome", "state", "detail", "settled_at"],
+          "additionalProperties": false,
+          "properties": {
+            "capability_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "claim_id": { "type": "string" },
+            "outcome": { "type": "string" },
+            "state": { "type": "string" },
+            "detail": { "type": "string" },
+            "settled_at": { "type": "string" }
+          }
+        }
       }
     }
   }

@@ -15,7 +15,7 @@
  * junctions on the deepest existing ancestor, so a link inside a worktree that
  * points elsewhere cannot be used to write outside it.
  */
-import { existsSync, realpathSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, realpathSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export type PathProblem =
@@ -162,4 +162,58 @@ export function resolveInside(root: string, rel: string, what = 'path'): string 
   const target = resolve(root, rel);
   if (!isInsideReal(root, target)) throw new UnsafePathError('OUTSIDE_ROOT', rel, what);
   return target;
+}
+
+/**
+ * True when `path`, looked up now without following a final link, names the
+ * file behind an already opened descriptor (`opened` is its fstat), and that
+ * file has no other name.
+ *
+ * Where an open follows a final link (Windows has no O_NOFOLLOW), a link
+ * swapped in before the open and put back afterwards leaves a regular file at
+ * the path while the descriptor reaches the link's target; comparing the
+ * device and file id catches that. The link count is taken from the same
+ * lookup, so a hard link added after the descriptor's fstat is seen too.
+ *
+ * A path lookup is not always a trustworthy source of the device: on Windows,
+ * Node 22.12's libuv fills stat()/lstat() from GetFileInformationByName and
+ * leaves `dev` at 0, while fstat() on a handle reports the volume serial. A
+ * lookup that reports no device is therefore settled through a descriptor:
+ * the path is opened again, its fstat must carry the opened file's device and
+ * id, and a second lookup must still find the same unlinked regular file.
+ * Nothing is read or written through that second descriptor. Path spelling
+ * (8.3 short names, case) plays no part. Anything that cannot be looked up or
+ * opened is false.
+ */
+export function namesOpenedFile(path: string, opened: BigIntStats): boolean {
+  const before = plainFileAt(path, opened);
+  if (before === null) return false;
+  if (before.dev === opened.dev) return true;
+  if (before.dev !== 0n) return false;
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return false;
+  }
+  let reached: BigIntStats;
+  try {
+    reached = fstatSync(fd, { bigint: true });
+  } finally {
+    closeSync(fd);
+  }
+  if (reached.dev !== opened.dev || reached.ino !== opened.ino) return false;
+  return plainFileAt(path, opened) !== null;
+}
+
+/** The lookup of `path` when it is a regular file, not a link, with one name and the opened file's id. */
+function plainFileAt(path: string, opened: BigIntStats): BigIntStats | null {
+  let now: BigIntStats;
+  try {
+    now = lstatSync(path, { bigint: true });
+  } catch {
+    return null;
+  }
+  if (now.isSymbolicLink() || !now.isFile() || now.nlink !== 1n || now.ino !== opened.ino) return null;
+  return now;
 }

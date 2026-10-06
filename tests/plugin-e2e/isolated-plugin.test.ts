@@ -169,6 +169,7 @@ describeIfClaude('isolated plugin harness', () => {
       'cancel',
       'decision',
       'verify',
+      'deliver',
     ]) {
       expect(out, `command ${command} missing from inventory`).toContain(command);
     }
@@ -180,6 +181,7 @@ describeIfClaude('isolated plugin harness', () => {
       'integration-failure-attribution',
       'e2e-scheduling',
       'brain-memory',
+      'host-dispatch',
     ]) {
       expect(out, `skill ${skill} missing from inventory`).toContain(skill);
     }

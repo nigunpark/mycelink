@@ -42,7 +42,124 @@ trusted to that degree, prefer a script file in the repository invoked via
 argv (`[node, scripts/verify.mjs]`) instead, and keep it off in shared or
 automated environments.
 
-## Worker sessions
+## Host-dispatched workers (primary path)
+
+Inside Claude Code, `/mycelink:run` does not start worker processes.
+`mycelink dispatch` claims one node and prints a ticket; the host session's
+own Agent tool runs the `module-worker` subagent on it, under the host
+session's permissions, and `mycelink settle` takes the result back.
+
+- Each claim has a random 256-bit capability. Only its SHA-256 is stored;
+  the raw value is printed once in the ticket and appears in the gate
+  commands the subagent runs. Gates, evidence, finalize and settle require
+  the current claim's capability; a stale (rotated or abandoned) one fails
+  closed.
+- Controller-only commands (every entry of the CLI's controller-only table:
+  init of an existing control repository, repo register/lock, graph
+  compile/import, feature init/cancel/supersede, node claim/block/invalidate/
+  rework/release/verify, session spawn/reconcile/stop, evidence migrate, branch
+  create/integrate, candidate create, resource acquire/release/recover, e2e
+  run/cleanup, decision record/apply, checkpoint restore, orchestrate
+  once/run, dispatch, deliver) need **positive controller authority**:
+  `--authority <key>`. Not presenting a capability is not enough, because a
+  subagent can always leave out its own. Anyone presenting a capability is
+  refused as well, with or without a key.
+- The key is a random 256-bit value minted by `mycelink controller open`
+  and printed once to the caller; only its SHA-256 is stored, in
+  `.mycelink/controller-authority.json` (hook-protected). It never enters a
+  ticket, prompt, context pack, worktree, result or environment variable;
+  the plugin's commands tell the host to keep it in its own context and pass
+  it on the command line.
+- The first key of a control repository can be minted by anyone, but only
+  before one exists, which is before anything can be dispatched (dispatch
+  needs it), so before any worker exists. After that a key is minted only
+  by presenting the current one (rotation, refused while any claim is live)
+  or by `mycelink controller open --takeover`, which requires an interactive
+  terminal on stdin and stdout. An agent's Bash tool has none; a worker that
+  deliberately wraps the command in a pseudo-terminal (`script`, `winpty`)
+  defeats that check, which is circumvention, not protocol use, and it
+  revokes the host's key, so the host notices on its next command. "No claim is
+  live" alone is never treated as proof that no worker runs: a worker holds
+  its own claim capability and can end its claim (settle it, or fail a gate
+  into BLOCKED) while it keeps running. A new host session that lost the
+  key asks the operator for a takeover.
+- Each dispatch generation has a random dispatch id and its own result file,
+  `<worktree>/.mycelink-worker/result-<dispatch-id>.json`. A resume issues a
+  new generation; settle reads only the current generation's file and
+  accepts only a result naming its dispatch id, so a worker from before the
+  resume cannot affect the resumed attempt. A result the old generation had
+  already written is validated and captured into the controller (with its
+  capability redacted by hash) before the rotation, or discarded.
+- The result slot directory is `<worktree>/.mycelink-worker/`. Settle moves
+  it into a controller-owned quarantine before reading it and applies the
+  same link, hard-link, size, schema and identity checks as print mode; the
+  capability is redacted from every kept copy. The move is always one
+  atomic rename, never a copy. If the worktree is on another volume than the
+  control repository's `features/` (for example `.mycelink/worktrees`
+  linked to another drive), the quarantine is made beside the worktree,
+  outside it, on its volume; if no same-volume rename is possible the
+  capture fails closed with `RESULT_CAPTURE_FAILED`. Keep worktrees on a
+  volume where that holds.
+- Ownership is fenced against the node's own delta: the commit its branch
+  was created from is pinned in the claim (`base_sha`), and fresh
+  verification diffs from there, advanced only to integration commits the
+  controller itself recorded in STATE.json. Work an upstream node
+  integrated is not the dependent's, and a branch that no longer contains
+  its base fails closed (`BASE_NOT_ANCESTOR`). The integration branch itself
+  is trusted only at the head the controller recorded (the newest
+  integrated commit in that repository, or the base branch when nothing was
+  integrated there): a new worker branch, an integration and a candidate
+  all refuse a `feature/<id>` branch moved any other way, including a
+  pre-existing one in a repository no node touches
+  (`INTEGRATION_BRANCH_MOVED`). An integration journals the exact commit it
+  will move the branch to (`pending_integrations`) before moving it, under
+  a per-repository lock; an integration that died after the move resumes
+  only when the branch is at exactly that journaled commit. Which commits
+  the branch contains, or what its first parent is, is never evidence: a
+  merge that contains the verified commit plus anything else is refused.
+  `branch integrate` takes the same road. Same-user code that rewrites
+  STATE.json is outside this, as above.
+- A candidate pins the global configuration and its own feature's files. A
+  verifier, scenario or contract stored under another feature's directory is
+  not pinned; keep shared files outside `features/`.
+- `node rework` is controller-only and never a way to launder history: the
+  reopened node keeps its lifetime attempts and failure fingerprints (each
+  approved rework gets its own bounded allowance of `max_attempts`, counted
+  from the attempts at the rework, and the same failure twice still parks
+  it), its reason reaches the next worker only as a bounded, redacted,
+  hash-bound brief inside the context pack's data delimiters (refused if it
+  holds the controller key or control characters), a parked node is
+  never its target (that needs a recorded decision), a parked dependent is
+  reopened only with a recorded decision that is consumed once, the number of
+  reworks per node is bounded, and it is refused while anything is in
+  flight or when a delivered base branch moved past the integration branch.
+  `feature supersede` likewise requires the old feature to be at rest, and
+  its replacement to be usable: initialised, not itself superseded, not
+  cancelled, with a graph that validates and still matches its STATE.json
+  (`SUPERSEDING_FEATURE_NOT_VIABLE`), never in a cycle. It holds both
+  features' delivery locks, in a fixed order.
+  Delivery, rework, supersede and every candidate cut (the candidate node
+  and `candidate create`) hold the feature's delivery lock, so the current
+  candidate never changes under a running delivery or across a rework
+  (`FEATURE_BUSY` when another holds it).
+- What this does and does not stop. Within one OS user, capabilities and
+  the controller key stop confused or shortcut-taking agents, including a
+  worker that omits or unsets its token to run a controller command, and
+  they make deliberate misuse require going outside the protocol. They are
+  not an OS boundary against hostile code running as that user: such code
+  can read the host's transcript or process list (where the key appears on
+  command lines), rewrite the stored hash, or edit controller files
+  directly when project hooks are not loaded. A dispatch id is stored in
+  STATE.json, so a deliberately misbehaving earlier-generation worker could
+  read it and write the current generation's result file, or replace the
+  slot directory to make a resumed attempt fail (never succeed). Nothing
+  stops any process from creating its own control repository with
+  `mycelink init` and opening a key for that; it gives no authority over the
+  real one, but its repositories are only as protected as git itself makes
+  them. Use OS-level isolation (a separate user, container or
+  VM for workers) where that matters.
+
+## Worker sessions (standalone CLI adapter)
 
 Worker sessions run `claude -p` in print mode with the node's worktree as
 working directory. Print mode cannot ask for interactive approval, so a worker

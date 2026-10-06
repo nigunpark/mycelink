@@ -6,6 +6,8 @@
  * with control characters corrupts logs. All are refused at the boundary.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   assertCandidateId,
   assertFeatureId,
@@ -21,6 +23,7 @@ import { candidateFile } from '../../src/git/candidate.js';
 import { main } from '../../src/cli/cli.js';
 import { clone, VALID_GRAPH, VALID_REPOSITORIES } from '../helpers/graph-fixtures.js';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { controllerArgv } from '../helpers/authority.js';
 
 afterEach(() => cleanupTmpRoots());
 
@@ -142,9 +145,10 @@ describe('candidate ids and plain file names', () => {
 
   it('checkpoint restore refuses a path outside the checkpoints directory', async () => {
     const root = makeTmpDir('names-');
+    writeFileSync(join(root, 'mycelink.config.json'), '{}\n');
     const err: string[] = [];
     const code = await main(
-      ['checkpoint', 'restore', 'FEAT-1', '../../STATE.json', '--control-root', root],
+      controllerArgv(['checkpoint', 'restore', 'FEAT-1', '../../STATE.json', '--control-root', root]),
       { out: () => undefined, err: (t) => err.push(t) },
     );
     expect(code).not.toBe(0);

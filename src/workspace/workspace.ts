@@ -1,7 +1,18 @@
 /**
  * Loading and initialising a control repository.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
 import type {
@@ -14,6 +25,7 @@ import { validateGraph, validateRepositories } from '../graph/validate.js';
 import { loadState } from '../state/feature-state.js';
 import { featurePaths, controlPaths, type FeaturePaths, type ControlPaths } from './paths.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
+import { namesOpenedFile } from '../security/paths.js';
 
 export interface MycelinkConfig {
   schema_version: 1;
@@ -159,7 +171,72 @@ export function initControlRepo(controlRoot: string, config: Partial<MycelinkCon
   }
   const keep = join(paths.featuresDir, '.gitkeep');
   if (!existsSync(keep)) writeFileSync(keep, '');
+  ensureScratchIgnored(paths.controlRoot);
   return paths;
+}
+
+/** The ignore line `init` writes: anchored, so only the root scratch area matches. */
+export const SCRATCH_IGNORE_ENTRY = '/.mycelink/';
+const EQUIVALENT_SCRATCH_ENTRIES = new Set(['.mycelink', '.mycelink/', '/.mycelink', '/.mycelink/']);
+
+/**
+ * Make sure `<control>/.gitignore` ignores the `.mycelink/` scratch area.
+ *
+ * Existing content is kept and the entry is appended once. The file is opened
+ * once, without following a final link where the platform allows it, and is
+ * then read and written only through that descriptor. A link, a non-regular
+ * file, a file with more than one name (a hard link to something outside the
+ * repository) or a path that no longer names the file opened is refused
+ * rather than written through.
+ */
+export function ensureScratchIgnored(controlRoot: string): void {
+  const file = join(controlRoot, '.gitignore');
+  const refuse: (why: string) => never = (why) => {
+    throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
+  };
+  const nofollow = constants.O_NOFOLLOW ?? 0;
+  const nonblock = constants.O_NONBLOCK ?? 0;
+  const isLink = (): boolean => {
+    try {
+      return lstatSync(file).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+  let fd: number;
+  let created = false;
+  try {
+    fd = openSync(file, constants.O_RDWR | constants.O_APPEND | nofollow | nonblock);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK') refuse('it is a link');
+    if (code === 'EISDIR') refuse('it is not a regular file');
+    if (code !== 'ENOENT') throw err;
+    // O_EXCL fails if anything, a link included, appeared in the meantime.
+    try {
+      fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | nofollow | nonblock, 0o666);
+      created = true;
+    } catch (createErr) {
+      if ((createErr as NodeJS.ErrnoException).code !== 'EEXIST') throw createErr;
+      refuse(isLink() ? 'it is a link' : 'it appeared while it was being created');
+    }
+  }
+  try {
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isFile()) refuse('it is not a regular file');
+    if (opened.nlink !== 1n) refuse('it has more than one name (hard link)');
+    // Where the open follows links (Windows has no O_NOFOLLOW), a link swapped
+    // in before the open is caught here, before anything is written through it.
+    if (!namesOpenedFile(file, opened)) refuse(isLink() ? 'it is a link' : 'it was replaced while it was opened');
+    if (opened.size > 1024n * 1024n) refuse('it is larger than 1 MiB');
+    const text = created ? '' : readFileSync(fd, 'utf8');
+    const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
+    if (present) return;
+    const prefix = text === '' || text.endsWith('\n') ? '' : '\n';
+    writeSync(fd, `${prefix}${SCRATCH_IGNORE_ENTRY}\n`);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Create the directory skeleton for one feature. */

@@ -33,4 +33,6 @@ Then run `mycelink graph validate <feature>` and fix every problem until it
 exits 0. Report the node list, the dependency order, the first READY set, and
 any product question that must go to the user before work starts.
 
-Stop there. Planning and implementing are different jobs.
+Then return that report to the caller, who continues the run (feature init,
+dispatch). Planning and implementing are different jobs: you do not
+implement nodes.

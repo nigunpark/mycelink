@@ -22,11 +22,21 @@ const OFFERABLE_STATES: ReadonlySet<NodeState> = new Set<NodeState>([
   'INVALIDATED',
 ]);
 
-/** Node states that mean the node is currently occupying a writer slot. */
-const IN_FLIGHT_STATES: ReadonlySet<NodeState> = new Set<NodeState>([
+/**
+ * Node states that mean an attempt holds a claim: a worktree, a writer slot
+ * and its resources. Every state between CLAIMED and DONE counts, not only
+ * the pending ones, because the claim is held until the attempt settles.
+ */
+export const IN_FLIGHT_STATES: ReadonlySet<NodeState> = new Set<NodeState>([
   'CLAIMED',
   'RED_PENDING',
+  'RED_VERIFIED',
   'GREEN_PENDING',
+  'GREEN_VERIFIED',
+  'REFACTOR_VERIFIED',
+  'REGRESSION_VERIFIED',
+  'REVIEW_VERIFIED',
+  'INTEGRATED',
 ]);
 
 export interface ScheduleOptions {
@@ -131,6 +141,18 @@ export function inFlightResources(
   return held;
 }
 
+/**
+ * Attempts the node has used against its current allowance: since its
+ * current rework generation began, or in all when it is not in a rework.
+ * Each approved rework (bounded in number) gets worker.max_attempts of its
+ * own; the lifetime count is never reset by it. A base past the lifetime
+ * count (attempts reset by a recorded decision) counts from zero.
+ */
+export function generationAttempts(runtime: Pick<FeatureState_['nodes'][string], 'attempts' | 'rework_brief'>): number {
+  const base = runtime.rework_brief?.attempt_base ?? 0;
+  return base <= runtime.attempts ? runtime.attempts - base : runtime.attempts;
+}
+
 function countInFlight(graph: PortfolioGraph, state: FeatureState_): number {
   let n = 0;
   for (const node of graph.nodes) {
@@ -140,11 +162,137 @@ function countInFlight(graph: PortfolioGraph, state: FeatureState_): number {
   return n;
 }
 
+/** Conflict of `node` with nodes already in flight or already picked. */
+function conflictWith(
+  graph: PortfolioGraph,
+  node: GraphNode,
+  runtime: FeatureState_['nodes'][string],
+  occupied: readonly GraphNode[],
+  held: Record<string, number>,
+  writerSlots: number,
+  writerConcurrency: number,
+): DeferredNode | null {
+  const id = node.id;
+  const used = generationAttempts(runtime);
+  if (used >= node.worker.max_attempts) {
+    return {
+      node_id: id,
+      reason: 'ATTEMPTS_EXHAUSTED',
+      detail:
+        used === runtime.attempts
+          ? `attempts ${runtime.attempts} >= max_attempts ${node.worker.max_attempts}`
+          : `attempts ${used} in rework generation ${runtime.rework_brief?.generation} >= max_attempts ${node.worker.max_attempts} (lifetime ${runtime.attempts})`,
+    };
+  }
+
+  // Ownership conflicts against nodes in flight or already picked: two
+  // workers editing the same subtree of one repository would collide at
+  // integration even though their worktrees are separate.
+  const pathConflict = occupied.find((other) => {
+    if (other.repository === null || node.repository === null) return false;
+    if (other.repository !== node.repository) return false;
+    return pathsOverlap(other.allowed_paths, node.allowed_paths);
+  });
+  if (pathConflict) {
+    return {
+      node_id: id,
+      reason: 'PATH_OWNERSHIP_CONFLICT',
+      detail: `overlaps allowed_paths of ${pathConflict.id} in repository ${node.repository}`,
+    };
+  }
+
+  const mine = new Set(node.contract_outputs ?? []);
+  const contractConflict = occupied.find((other) => (other.contract_outputs ?? []).some((c) => mine.has(c)));
+  if (contractConflict) {
+    return {
+      node_id: id,
+      reason: 'CONTRACT_OWNERSHIP_CONFLICT',
+      detail: `writes a contract also produced by ${contractConflict.id}`,
+    };
+  }
+
+  const blockingResource = node.required_resources.find((res) => {
+    const capacity = graph.resources[res]?.capacity ?? 0;
+    return (held[res] ?? 0) + 1 > capacity;
+  });
+  if (blockingResource !== undefined) {
+    return {
+      node_id: id,
+      reason: 'RESOURCE_CAPACITY',
+      detail: `resource "${blockingResource}" is at capacity ${graph.resources[blockingResource]?.capacity ?? 0}`,
+    };
+  }
+
+  if (writerSlots <= 0) {
+    return { node_id: id, reason: 'WIP_LIMIT', detail: `writer concurrency limit ${writerConcurrency} reached` };
+  }
+  return null;
+}
+
+function inFlightNodes(graph: PortfolioGraph, state: FeatureState_): GraphNode[] {
+  return graph.nodes.filter((n) => {
+    const runtime = state.nodes[n.id];
+    return runtime !== undefined && IN_FLIGHT_STATES.has(runtime.state);
+  });
+}
+
+function heldUnits(graph: PortfolioGraph, state: FeatureState_, options: ScheduleOptions): Record<string, number> {
+  const held: Record<string, number> = { ...inFlightResources(graph, state) };
+  for (const [res, n] of Object.entries(options.heldResources ?? {})) {
+    held[res] = (held[res] ?? 0) + n;
+  }
+  return held;
+}
+
+export type ScheduleCheck =
+  | { ok: true }
+  | { ok: false; reason: DeferReason | 'UNKNOWN_NODE' | 'NOT_OFFERABLE' | 'DEPENDENCIES_NOT_DONE'; detail: string };
+
+/**
+ * Whether one node may be claimed right now, judged against everything
+ * already in flight. Unlike {@link scheduleBatch} it does not care about
+ * batch order: an explicit claim of a conflict-free node is allowed even if a
+ * batch would have picked others first.
+ */
+export function canSchedule(
+  graph: PortfolioGraph,
+  state: FeatureState_,
+  nodeId: string,
+  options: ScheduleOptions,
+): ScheduleCheck {
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  const runtime = state.nodes[nodeId];
+  if (!node || !runtime) return { ok: false, reason: 'UNKNOWN_NODE', detail: `"${nodeId}" is not in the graph` };
+  if (!OFFERABLE_STATES.has(runtime.state)) {
+    return { ok: false, reason: 'NOT_OFFERABLE', detail: `${nodeId} is ${runtime.state}` };
+  }
+  if (!dependenciesSatisfied(node, state)) {
+    const pending = node.depends_on.filter((d) => !SATISFIED_DEPENDENCY_STATES.has(state.nodes[d]?.state ?? 'PLANNED'));
+    return {
+      ok: false,
+      reason: 'DEPENDENCIES_NOT_DONE',
+      detail: pending.map((d) => `${d}=${state.nodes[d]?.state ?? 'missing'}`).join(', '),
+    };
+  }
+  const conflict = conflictWith(
+    graph,
+    node,
+    runtime,
+    inFlightNodes(graph, state),
+    heldUnits(graph, state, options),
+    options.writerConcurrency - countInFlight(graph, state),
+    options.writerConcurrency,
+  );
+  return conflict === null ? { ok: true } : { ok: false, reason: conflict.reason, detail: conflict.detail };
+}
+
 /**
  * Pick a conflict-free batch from the READY set.
  *
  * Nodes are considered in deterministic graph order, so the same inputs always
  * produce the same plan — a precondition for reproducible orchestration.
+ * Conflicts are checked against nodes already in flight as well as against
+ * the batch itself.
  */
 export function scheduleBatch(
   graph: PortfolioGraph,
@@ -152,94 +300,26 @@ export function scheduleBatch(
   options: ScheduleOptions,
 ): SchedulePlan {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const ready = computeReady(graph, state);
-
-  const held: Record<string, number> = { ...inFlightResources(graph, state) };
-  for (const [res, n] of Object.entries(options.heldResources ?? {})) {
-    held[res] = (held[res] ?? 0) + n;
-  }
-
+  const held = heldUnits(graph, state, options);
+  const occupied = inFlightNodes(graph, state);
   let writerSlots = options.writerConcurrency - countInFlight(graph, state);
 
   const scheduled: ScheduledNode[] = [];
   const deferred: DeferredNode[] = [];
 
-  for (const id of ready) {
+  for (const id of computeReady(graph, state)) {
     const node = byId.get(id);
     const runtime = state.nodes[id];
     if (!node || !runtime) continue;
-
-    if (runtime.attempts >= node.worker.max_attempts) {
-      deferred.push({
-        node_id: id,
-        reason: 'ATTEMPTS_EXHAUSTED',
-        detail: `attempts ${runtime.attempts} >= max_attempts ${node.worker.max_attempts}`,
-      });
+    const conflict = conflictWith(graph, node, runtime, occupied, held, writerSlots, options.writerConcurrency);
+    if (conflict !== null) {
+      deferred.push(conflict);
       continue;
     }
-
-    // Ownership conflicts against nodes already picked for this batch.
-    const pathConflict = scheduled.find((s) => {
-      const other = byId.get(s.node_id);
-      if (!other) return false;
-      if (other.repository === null || node.repository === null) return false;
-      if (other.repository !== node.repository) return false;
-      return pathsOverlap(other.allowed_paths, node.allowed_paths);
-    });
-    if (pathConflict) {
-      deferred.push({
-        node_id: id,
-        reason: 'PATH_OWNERSHIP_CONFLICT',
-        detail: `overlaps allowed_paths of ${pathConflict.node_id} in repository ${node.repository}`,
-      });
-      continue;
-    }
-
-    const contractConflict = scheduled.find((s) => {
-      const other = byId.get(s.node_id);
-      if (!other) return false;
-      const mine = new Set(node.contract_outputs ?? []);
-      return (other.contract_outputs ?? []).some((c) => mine.has(c));
-    });
-    if (contractConflict) {
-      deferred.push({
-        node_id: id,
-        reason: 'CONTRACT_OWNERSHIP_CONFLICT',
-        detail: `writes a contract also produced by ${contractConflict.node_id}`,
-      });
-      continue;
-    }
-
-    // Resource capacity, counting this batch's own reservations.
-    const blockingResource = node.required_resources.find((res) => {
-      const capacity = graph.resources[res]?.capacity ?? 0;
-      return (held[res] ?? 0) + 1 > capacity;
-    });
-    if (blockingResource !== undefined) {
-      deferred.push({
-        node_id: id,
-        reason: 'RESOURCE_CAPACITY',
-        detail: `resource "${blockingResource}" is at capacity ${graph.resources[blockingResource]?.capacity ?? 0}`,
-      });
-      continue;
-    }
-
-    if (writerSlots <= 0) {
-      deferred.push({
-        node_id: id,
-        reason: 'WIP_LIMIT',
-        detail: `writer concurrency limit ${options.writerConcurrency} reached`,
-      });
-      continue;
-    }
-
     for (const res of node.required_resources) held[res] = (held[res] ?? 0) + 1;
     writerSlots--;
-    scheduled.push({
-      node_id: id,
-      repository: node.repository,
-      resources: [...node.required_resources],
-    });
+    occupied.push(node);
+    scheduled.push({ node_id: id, repository: node.repository, resources: [...node.required_resources] });
   }
 
   return { scheduled, deferred };

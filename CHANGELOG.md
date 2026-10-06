@@ -10,11 +10,97 @@ under **Breaking**.
 
 ### Breaking
 
+- **Host-native execution is the plugin's primary path.** `/mycelink:run`
+  now loops `mycelink dispatch` → the host's Agent tool with the
+  `module-worker` subagent → `mycelink settle`, then `mycelink deliver`.
+  It no longer runs `orchestrate run`, which spawns a nested `claude` that
+  could not start in the 2026-10-06 eval sandbox. `orchestrate run` remains
+  as the standalone CLI adapter.
+- Claims carry a random capability (only its SHA-256 is stored). `tdd`,
+  `evidence record`, `node begin`, `node finalize` and `settle` require
+  it (`--capability` or `MYCELINK_CLAIM_TOKEN`); controller-only commands
+  refuse anyone presenting one. `node claim` now goes through the scheduler
+  and prints the capability once.
+- **Controller-only commands need positive controller authority.** Every
+  command in the controller-only table (including `dispatch`, `deliver`,
+  `session reconcile`, `decision record/apply`, `feature init`, `repo
+  register` and `init` of an existing control repository) now requires
+  `--authority <key>` from `mycelink controller open`. Omitting or unsetting
+  a worker capability no longer grants controller access. The key is
+  printed once and only its hash is stored. Once a key exists, a new one is
+  minted only by presenting it (rotation, with no claim live) or by
+  `--takeover` from an interactive terminal, so a worker that ends its own
+  claim still cannot mint one. The plugin commands open and pass it for you.
+- **A resumed dispatch revokes the previous worker's result authority.**
+  Every host dispatch generation has a dispatch id and its own result file
+  (`.mycelink-worker/result-<dispatch-id>.json`); results must carry
+  `dispatch_id`. `dispatch --resume` captures and validates a result the old
+  generation already wrote before rotating, and ignores anything it writes
+  afterwards. Previously a stale worker could write SUBMITTED, BLOCKED,
+  NEEDS_DECISION or RETRYABLE into the slot the resumed dispatch used.
+- Leaving BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED by any route
+  (including INVALIDATED, PAUSED, EXCLUDED and re-running `feature init`)
+  needs a decision recorded with `decision record`; the failure history is
+  kept.
+- Evidence `output_path` is stored relative to the control root; run
+  `mycelink evidence migrate <feature>` for older absolute records.
+- Candidates pin canonical content hashes of the control repository's
+  semantic inputs instead of control HEAD (`CONTROL_INPUT_DRIFT`,
+  `CONTROL_INPUT_MISSING`, `CONTROL_INPUT_ADDED`). Older candidates keep the
+  strict HEAD check.
+- Slash-command arguments are numbered from `$0`, as current Claude Code
+  numbers them.
+
 - Worker sessions receive their brief on stdin and write their result to
   `.mycelink-worker/result.json` in the worktree. Custom worker agents or
   skills that read `$MYCELINK_CONTEXT_PACK` or write `$MYCELINK_RESULT_PATH`
   must follow the bundled `module-worker` agent and `node-worker` skill
   instead; those variables are no longer set.
+- A release candidate binds every registered repository (one the feature
+  never touched is bound at its base on a new `feature/<id>` branch), and
+  `candidate verify` and `deliver` refuse one that leaves a registered
+  repository out (`REPOSITORY_NOT_BOUND`). Candidate control inputs are the
+  global configuration plus the target feature's own files only.
+
+### Fixed
+
+- A dependent node in the same repository as its upstream failed
+  `OWNERSHIP_VIOLATION` because its fence was measured from the base branch
+  and so included the upstream's integrated files. A node branch now starts
+  at the integration head; the exact base is pinned in the claim
+  (`base_sha`) and fresh verification fences only the node's own delta.
+- `/mycelink:prd` and `/mycelink:plan` no longer tell the host to stop after
+  their phase when they are part of a run.
+- `dispatch` no longer retries a failing controller node inline until it is
+  BLOCKED. A candidate build that finds uncommitted files in the control
+  repository returns `PRECONDITION_FAILED` with nothing charged, and any
+  other controller failure stops dispatch with `CONTROLLER_FAILED` (seen in
+  the existing-informed real-model eval run).
+- `tdd` refuses a gate whose transition is illegal (`GATE_OUT_OF_ORDER`)
+  before running the verifier, and a failure fingerprint counts once per
+  claim, so a worker can iterate on a failing gate within one attempt (the
+  greenfield real-model eval run BLOCKED a node in its first attempt).
+  `/mycelink:init` and `/mycelink:plan` now commit the control-plane files.
+- Result capture works when worktrees live on another volume than the
+  control repository: the slot is renamed into a quarantine beside the
+  worktree instead of failing with EXDEV. It is still one atomic rename
+  with the same link, hard-link, size, schema and identity checks; nothing
+  is copied, and capture still fails closed when no same-volume rename
+  exists.
+- Delivery rollback is a compare-and-swap: a base is restored only while it
+  is still exactly at the candidate this delivery installed. A base someone
+  committed on in the meantime is never reset; the manifest records
+  `PARTIAL_DELIVERY` and names it. Before, a checked-out base was put back
+  with `reset --keep`, discarding such a commit.
+- A repeated `deliver` trusts an ACCEPTED manifest only if it is byte-for-byte
+  the one whose passing acceptance was recorded in STATE.json, and its shape,
+  binding to the candidate and every acceptance output's hash still check
+  out; otherwise acceptance runs again.
+- Settle counts a worker's usage exactly once per dispatch generation: the
+  captured result's hash and the usage are recorded in one STATE.json
+  write, a capture announces its controller copy before taking it so a
+  settle that dies after writing it can finish, and a settle that dies after
+  concluding the attempt is answered from a provisional receipt.
 
 ### Changed
 
@@ -30,7 +116,69 @@ under **Breaking**.
   `npm run build` sets the bundle's mode explicitly. Before this, rebuilding
   on Linux or macOS flipped the bundle's mode and failed the CI build check.
 
+### Added
+
+- `mycelink node rework <feature> <node> --reason <why> [--decision <id>]`
+  (controller-only): repair a check that failed after a node was DONE inside
+  the same feature. The node keeps its attempts and failure fingerprints,
+  its replaced work is kept as `rework_history`, its dependents and every
+  candidate-build/E2E node are reopened, the current candidate stops being
+  current, and its branch is archived so it is re-dispatched from the
+  current integration state. Refused while work is in flight, when a parked
+  node would be reopened without a decision, past its rework limit, or when
+  a delivered base moved past the integration branch.
+- A rework's reason now reaches the worker. `node rework` stores it (with
+  optional `--acceptance` and `--evidence` references) as the node's
+  `rework_brief`: at most 2000 bytes, no control characters, redacted of
+  credential shapes, refused if it holds the controller key, bound to the
+  rework record by its SHA-256 and re-checked before every dispatch
+  (`REWORK_BRIEF_INVALID`). Tickets carry it as `rework` and the context
+  pack inside its data delimiters, and the worker prompt and skills require
+  a focused failing regression test from it before any production change.
+  Found by a real-model run where QA's "201-char reason accepted" never
+  reached the worker, which saw its own green suite and parked the node.
+- Each approved rework is a generation with its own allowance of
+  `max_attempts` attempts, counted from the lifetime attempts at the rework;
+  lifetime attempts, fingerprints and history are kept. A worker's
+  `INVALID_RED_EVIDENCE` (BLOCKED or RETRYABLE) inside a rework is a recorded,
+  retryable failure under one fingerprint, so the same mistake twice parks
+  the node. `REWORK_BUDGET_EXHAUSTED` is gone; `REWORK_LIMIT` bounds reworks.
+- `mycelink feature supersede <old> --by <new> --reason <why>`: an explicit,
+  audited `superseded_by` for a feature at rest; a superseded feature never
+  verifies as complete. The replacement must be usable (not superseded, not
+  cancelled, its graph valid and unchanged since init:
+  `SUPERSEDING_FEATURE_NOT_VIABLE`), never in a cycle, and both features'
+  delivery locks are held while it is recorded.
+- `/mycelink:run` chains every phase (init, PRD, plan, dispatch, settle,
+  candidate, deliver) without stopping between them, and documents rework.
+- `mycelink dispatch <feature> [--resume <node>]`: runs due controller nodes
+  inline and claims the next schedulable worker node for the host, printing
+  a JSON ticket (capability, ids, attempt, worktree, allowed paths,
+  verification and gate commands, result slot, settle command, bounded
+  prompt). It never spawns a process.
+- `mycelink settle <feature> <node> --capability <c>`: quarantines and
+  validates the result slot, then parks, records a failure, or fresh-verifies,
+  integrates and marks the node DONE. Idempotent per claim.
+- `mycelink node finalize`: the same deterministic tail for manually driven
+  nodes, so nothing is stranded at REGRESSION_VERIFIED.
+- `mycelink deliver <feature>`: fast-forwards every base branch to exactly
+  the candidate SHA after checking every repository first, journals a
+  delivery manifest, rolls back on a mid-way failure, runs final acceptance,
+  and never pushes. `/mycelink:deliver` and the `host-dispatch` skill.
+- Adapter preflight (`doctor` and before `orchestrate run` claims anything):
+  resolves the worker executable as the shell-less spawn would and probes
+  `--version`.
+
 ### Fixed
+
+- Spawn failures and claim-setup failures are infrastructure: the claim is
+  released with its attempt refunded, nothing is BLOCKED, and the run stops
+  with the resumable `ADAPTER_UNAVAILABLE`.
+- Reconcile tells abandoned host dispatches, dead settles and orphaned
+  sessions (interruptions, no failure recorded) from task failures.
+- `init` writes a safe `/.mycelink/` entry to the control repository's
+  `.gitignore`.
+- Worker worktrees are removed when a node reaches DONE.
 
 - **Real worker sessions could never start their node (beta blocker).** The
   worker prompt told Claude Code to read `$MYCELINK_CONTEXT_PACK` and write
@@ -128,6 +276,23 @@ These issues were found by CodeQL on the worker-transport pull request.
 - On Windows, batch shims and shell scripts run through the system
   `%SystemRoot%\System32\cmd.exe`. Before, they used `ComSpec`, which could
   come from a command's own environment.
+- A crashed integration was resumed whenever the integration branch
+  contained the verified node commit and its first parent was the recorded
+  head. A same-user process could forge that shape (a merge of the recorded
+  head and the verified commit carrying unverified content, moved onto
+  `feature/<id>` between fresh verification and integration) and have it
+  recorded as the trusted head; `branch integrate` likewise adopted such a
+  merge as already integrated. An integration now journals the exact commit
+  it produces (`pending_integrations` in STATE.json) before moving the
+  branch, under a per-repository lock, and a resume accepts only that
+  commit; anything else is `INTEGRATION_BRANCH_MOVED`. Merges are computed
+  with `git merge-tree` and the branch is fast-forwarded to the journaled
+  commit. `branch integrate` goes through the same path.
+- A candidate was cut and made current outside the feature's delivery
+  lock, so it could become current in the middle of a delivery or right
+  after a rework reopened the work it binds. The candidate node and
+  `candidate create` now check, bind and record it under that lock;
+  a busy lock hands the candidate node back unspent (`FEATURE_BUSY`).
 
 ## [0.2.0-beta.1]
 

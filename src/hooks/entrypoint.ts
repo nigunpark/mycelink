@@ -29,7 +29,7 @@ import { appendEvent } from '../state/event-log.js';
 import { matchGlob } from '../git/worktree.js';
 import { isSafeFeatureId } from '../security/names.js';
 import { isInsideReal } from '../security/paths.js';
-import { WORKER_RESULT_REL } from '../sessions/worker-protocol.js';
+import { isWorkerResultRel } from '../sessions/worker-protocol.js';
 import type { FeatureState_, GraphNode, PortfolioGraph } from '../model/types.js';
 
 export interface HookInput {
@@ -67,6 +67,8 @@ const MANAGED_PATTERNS = [
   '**/leases.json',
   '**/repos.lock.yaml',
   '**/candidates/*.yaml',
+  '**/deliveries/*.json',
+  '**/features/*/sessions/**',
   '**/.mycelink/*.json',
   '**/.mycelink/*.lock',
   // Security-relevant configuration: shell mode, permission bypass, and the
@@ -405,7 +407,7 @@ function preToolUse(ctx: HookContext, io: CliIo, input: HookInput): number {
     // The controller-assigned result file is the one path every worker must
     // be able to write, before RED and outside its fence; the controller
     // collects it with its own containment, schema and identity checks.
-    if (rel === WORKER_RESULT_REL) return 0;
+    if (isWorkerResultRel(rel)) return 0;
 
     const allowed = active.node.allowed_paths.some((g) => matchGlob(g, rel));
     const forbidden = (active.node.forbidden_paths ?? []).some((g) => matchGlob(g, rel));

@@ -10,6 +10,7 @@
     "schema_version": { "const": 1 },
     "node_id": { "type": "string" },
     "claim_id": { "type": "string" },
+    "dispatch_id": { "type": "string", "pattern": "^[0-9a-f-]{8,64}$" },
     "outcome": { "enum": ["SUBMITTED", "RETRYABLE", "BLOCKED", "NEEDS_DECISION", "BUDGET_EXHAUSTED"] },
     "commands": {
       "type": "array",

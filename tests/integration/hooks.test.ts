@@ -24,6 +24,8 @@ import { mutateState } from '../../src/state/feature-state.js';
 import { buildHookSettings } from '../../src/workspace/hook-settings.js';
 import { readEvents } from '../../src/state/event-log.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { asController } from '../helpers/authority.js';
+import { controllerArgv } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -52,7 +54,7 @@ function runHookProcess(
 
 async function cli(p: Portfolio, argv: string[]): Promise<number> {
   const io: CliIo = { out: () => {}, err: () => {} };
-  return main([...argv, '--control-root', p.control], io);
+  return main([...asController(argv, p.control), '--control-root', p.control], io);
 }
 
 describe('hook registration', () => {
@@ -505,7 +507,7 @@ describe('generated settings are valid JSON Claude Code can load', () => {
     const p = createPortfolio();
     const io: CliIo = { out: () => {}, err: () => {} };
     const target = join(p.root, 'fresh-control');
-    expect(await main(['init', target], io)).toBe(0);
+    expect(await main(controllerArgv(['init', target]), io)).toBe(0);
 
     const file = join(target, '.claude', 'settings.json');
     expect(existsSync(file)).toBe(true);
@@ -522,8 +524,8 @@ describe('generated settings are valid JSON Claude Code can load', () => {
     const p = createPortfolio();
     const io: CliIo = { out: () => {}, err: () => {} };
     const target = join(p.root, 'twice-control');
-    await main(['init', target], io);
-    await main(['init', target], io);
+    await main(controllerArgv(['init', target]), io);
+    await main(controllerArgv(['init', target]), io);
     const settings = JSON.parse(
       readFileSync(join(target, '.claude', 'settings.json'), 'utf8'),
     ) as { hooks: Record<string, unknown[]> };
@@ -544,7 +546,7 @@ describe('generated settings are valid JSON Claude Code can load', () => {
       }),
       'utf8',
     );
-    await main(['init', target], io);
+    await main(controllerArgv(['init', target]), io);
     const settings = JSON.parse(
       readFileSync(join(target, '.claude', 'settings.json'), 'utf8'),
     ) as { hooks: Record<string, { hooks: { command: string }[] }[]>; permissions: unknown };
