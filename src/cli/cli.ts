@@ -23,7 +23,7 @@ import {
 import { validateGraph, validateRepositories } from '../graph/validate.js';
 import { DEFAULT_BUDGET, initialState, loadState, mutateState, saveState } from '../state/feature-state.js';
 import { applyNodeTransition, recordFailure } from '../state/transition.js';
-import { computeReady, scheduleBatch } from '../scheduler/ready.js';
+import { IN_FLIGHT_STATES, computeReady, scheduleBatch } from '../scheduler/ready.js';
 import { acquireResource, leaseStatus, recoverLeases, releaseAllForNode, releaseResource } from '../resources/leases.js';
 import { runVerification, verifierInvocation, type VerificationInvocation } from '../evidence/runner.js';
 import { createCandidate, listCandidates, loadCandidate, verifyCandidate } from '../git/candidate.js';
@@ -48,6 +48,8 @@ import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
 import { assertDecisionRecorded } from '../state/decisions.js';
 import { preflightAdapter } from '../sessions/preflight.js';
+import { featureVerifyProblems } from '../engine/feature-verify.js';
+import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { isInsideReal } from '../security/paths.js';
 import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
@@ -91,6 +93,7 @@ const USAGE = `mycelink <group> <command> [options]
   checkpoint create|validate|restore         feature checkpoints
   dispatch <feature> [--resume <node>]       claim the next READY node for the host's Agent tool (JSON ticket)
   settle <feature> <node> --capability <c>   verify, integrate and conclude a dispatched node from its result slot
+  deliver <feature> [--candidate <id>]       fast-forward every base branch to the verified candidate, then accept
   orchestrate ready|once|run                 the feature orchestration cycle (standalone CLI adapter)
   memory <...>                               LLM Wiki Brain adapter
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
@@ -210,6 +213,8 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
         return await dispatchCommand(args, io);
       case 'settle':
         return settleCommand(args, io);
+      case 'deliver':
+        return deliverCommand(args, io);
       case 'memory':
         return memoryCommand(args, io, resolveControlRoot(args));
       case 'hook':
@@ -525,51 +530,7 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   }
 
   if (sub === 'verify') {
-    const validation = validateFeatureGraph(controlRoot, featureId);
-    const doc = loadState(paths.featureDir);
-    const problems: string[] = validation.problems.map((p) => `${p.code}: ${p.detail}`);
-    if (doc === null) {
-      problems.push('NO_STATE: STATE.json is missing');
-    } else {
-      const state = doc.data;
-      if (state.graph_hash !== validation.graphHash) {
-        problems.push(
-          `GRAPH_DRIFT: STATE.json was created for graph ${state.graph_hash.slice(0, 12)} but the graph now hashes to ${validation.graphHash.slice(0, 12)}`,
-        );
-      }
-      const graph = loadGraph(controlRoot, featureId);
-      for (const [id, runtime] of Object.entries(state.nodes)) {
-        if (runtime.state !== 'DONE' && runtime.state !== 'EXCLUDED') {
-          problems.push(`NODE_NOT_DONE: ${id} is ${runtime.state}`);
-        }
-        if (runtime.state !== 'DONE') continue;
-        // A DONE node's required evidence must still be on disk, unchanged.
-        const node = graph.nodes.find((n) => n.id === id);
-        for (const kind of node?.required_evidence ?? []) {
-          const record = runtime.evidence[kind];
-          if (!record) {
-            problems.push(`MISSING_EVIDENCE: ${id} ${kind}`);
-            continue;
-          }
-          const problem = checkEvidenceOutput(controlRoot, featureId, record);
-          if (problem !== null) {
-            const [code, ...rest] = problem.split(': ');
-            problems.push(`${code}: ${id} ${kind} ${rest.join(': ')}`);
-          }
-        }
-      }
-      if (state.pending_decisions.length > 0) {
-        problems.push(`PENDING_DECISIONS: ${state.pending_decisions.join(', ')}`);
-      }
-      const leases = leaseStatus(paths.featureDir);
-      for (const [resource, status] of Object.entries(leases)) {
-        if (status.held > 0) problems.push(`LEAKED_LEASE: ${resource} held by ${status.holders.map((h) => h.node_id).join(', ')}`);
-      }
-      const live = liveSessions(paths.sessionsRegistry);
-      if (live.length > 0) {
-        problems.push(`LIVE_SESSIONS: ${live.map((s) => s.session_id).join(', ')}`);
-      }
-    }
+    const problems = featureVerifyProblems(controlRoot, featureId);
     emit(io, args, { ok: problems.length === 0, problems }, () =>
       problems.length === 0 ? `${featureId} verified.` : problems.join('\n'),
     );
@@ -583,7 +544,9 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
       s.feature_state = 'CANCELLED';
       s.blocked_reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : 'cancelled by user';
       for (const [id, runtime] of Object.entries(s.nodes)) {
-        if (['CLAIMED', 'RED_PENDING', 'GREEN_PENDING'].includes(runtime.state)) {
+        // Every claim-holding state, not only the pending ones: a node at
+        // RED_VERIFIED or REGRESSION_VERIFIED still holds its claim.
+        if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== 'INTEGRATED') {
           s = applyNodeTransition(graph, s, id, 'PAUSED', { actor: 'mycelink', reason: 'feature cancelled' });
         }
       }
@@ -1638,6 +1601,31 @@ function settleCommand(args: ParsedArgs, io: CliIo): number {
     `${report.node_id} -> ${report.outcome} (${report.state})${report.idempotent ? ' [already settled]' : ''} ${report.detail}`,
   );
   return report.outcome === 'DONE' ? 0 : 1;
+}
+
+/**
+ * `mycelink deliver <feature>`: fast-forward each base branch to exactly the
+ * current candidate (all checks first, rollback on a mid-way failure, never
+ * a push), write the delivery manifest, then run and record acceptance.
+ */
+function deliverCommand(args: ParsedArgs, io: CliIo): number {
+  assertControllerRole(args, 'deliver');
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, 'feature-id');
+  const candidateId = typeof args.flags['candidate'] === 'string' ? args.flags['candidate'] : undefined;
+  const result = deliverFeature(controlRoot, featureId, candidateId !== undefined ? { candidateId } : {});
+  emit(io, args, result, () =>
+    [
+      `${result.candidate_id}: ${result.status}${result.idempotent ? ' (already delivered)' : ''}`,
+      ...Object.entries(result.repositories).map(
+        ([name, r]) => `${name} ${r.base_branch}: ${r.before.slice(0, 12)} -> ${(r.after ?? '?').slice(0, 12)} (${r.method})`,
+      ),
+      ...result.acceptance.map(
+        (a) => `${a.failure_fingerprint === null ? 'ok  ' : 'FAIL'} acceptance ${a.repository} exit ${a.exit_code} ${a.output_path}`,
+      ),
+    ].join('\n'),
+  );
+  return result.ok ? 0 : 1;
 }
 
 // ---- orchestrate ----------------------------------------------------------

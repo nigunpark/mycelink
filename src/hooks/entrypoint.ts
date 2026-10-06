@@ -67,6 +67,7 @@ const MANAGED_PATTERNS = [
   '**/leases.json',
   '**/repos.lock.yaml',
   '**/candidates/*.yaml',
+  '**/deliveries/*.json',
   '**/.mycelink/*.json',
   '**/.mycelink/*.lock',
   // Security-relevant configuration: shell mode, permission bypass, and the

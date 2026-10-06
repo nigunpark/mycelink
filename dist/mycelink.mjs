@@ -15361,8 +15361,8 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync21, mkdirSync as mkdirSync14, readFileSync as readFileSync15, readdirSync as readdirSync9 } from "node:fs";
-import { dirname as dirname9, join as join22, resolve as resolve17 } from "node:path";
+import { existsSync as existsSync22, mkdirSync as mkdirSync15, readFileSync as readFileSync16, readdirSync as readdirSync9 } from "node:fs";
+import { dirname as dirname9, join as join23, resolve as resolve17 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -21565,6 +21565,7 @@ var MANAGED_PATTERNS = [
   "**/leases.json",
   "**/repos.lock.yaml",
   "**/candidates/*.yaml",
+  "**/deliveries/*.json",
   "**/.mycelink/*.json",
   "**/.mycelink/*.lock",
   // Security-relevant configuration: shell mode, permission bypass, and the
@@ -22461,13 +22462,13 @@ function parsePrd(markdown) {
   const { body, data } = splitFrontmatter(markdown);
   requireApproved(data, "PRD");
   const titleMatch = /^#\s+(.+)$/m.exec(body);
-  const acceptance = [];
+  const acceptance2 = [];
   const line = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]*(AC-[A-Za-z0-9_.-]+)[ \t]*[:\-—][ \t]*([^\r\n]+?)[ \t]*$/gm;
   let match;
   while ((match = line.exec(body)) !== null) {
-    acceptance.push({ id: match[1], text: match[2] });
+    acceptance2.push({ id: match[1], text: match[2] });
   }
-  if (acceptance.length === 0) {
+  if (acceptance2.length === 0) {
     throw new Error(
       "The PRD declares no acceptance criteria. Every criterion needs a stable AC-n id so the graph can trace coverage; a PRD without them cannot be compiled."
     );
@@ -22479,7 +22480,7 @@ function parsePrd(markdown) {
   return {
     feature_id: featureId,
     title: (titleMatch?.[1] ?? featureId).trim(),
-    acceptance_criteria: acceptance
+    acceptance_criteria: acceptance2
   };
 }
 function items(value) {
@@ -22819,9 +22820,267 @@ function preflightAdapter(config, env = process.env) {
   return probe([resolved, "--version"], base);
 }
 
+// src/engine/feature-verify.ts
+function featureVerifyProblems(controlRoot, featureId) {
+  const paths = featurePaths(controlRoot, featureId);
+  const validation = validateFeatureGraph(controlRoot, featureId);
+  const doc = loadState(paths.featureDir);
+  const problems = validation.problems.map((p) => `${p.code}: ${p.detail}`);
+  if (doc === null) {
+    problems.push("NO_STATE: STATE.json is missing");
+    return problems;
+  }
+  const state = doc.data;
+  if (state.graph_hash !== validation.graphHash) {
+    problems.push(
+      `GRAPH_DRIFT: STATE.json was created for graph ${state.graph_hash.slice(0, 12)} but the graph now hashes to ${validation.graphHash.slice(0, 12)}`
+    );
+  }
+  const graph = loadGraph(controlRoot, featureId);
+  for (const [id, runtime] of Object.entries(state.nodes)) {
+    if (runtime.state !== "DONE" && runtime.state !== "EXCLUDED") {
+      problems.push(`NODE_NOT_DONE: ${id} is ${runtime.state}`);
+    }
+    if (runtime.state !== "DONE") continue;
+    const node = graph.nodes.find((n) => n.id === id);
+    for (const kind of node?.required_evidence ?? []) {
+      const record = runtime.evidence[kind];
+      if (!record) {
+        problems.push(`MISSING_EVIDENCE: ${id} ${kind}`);
+        continue;
+      }
+      const problem = checkEvidenceOutput(controlRoot, featureId, record);
+      if (problem !== null) {
+        const [code, ...rest] = problem.split(": ");
+        problems.push(`${code}: ${id} ${kind} ${rest.join(": ")}`);
+      }
+    }
+  }
+  if (state.pending_decisions.length > 0) {
+    problems.push(`PENDING_DECISIONS: ${state.pending_decisions.join(", ")}`);
+  }
+  for (const [resource, status] of Object.entries(leaseStatus(paths.featureDir))) {
+    if (status.held > 0) problems.push(`LEAKED_LEASE: ${resource} held by ${status.holders.map((h) => h.node_id).join(", ")}`);
+  }
+  const live = liveSessions(paths.sessionsRegistry);
+  if (live.length > 0) problems.push(`LIVE_SESSIONS: ${live.map((s) => s.session_id).join(", ")}`);
+  return problems;
+}
+
+// src/engine/deliver.ts
+import { existsSync as existsSync21, mkdirSync as mkdirSync14, readFileSync as readFileSync15 } from "node:fs";
+import { join as join22 } from "node:path";
+var DeliveryRefusedError = class extends Error {
+  problems;
+  constructor(problems) {
+    super(`DELIVERY_REFUSED: nothing was moved. ${problems.join("; ")}`);
+    this.name = "DeliveryRefusedError";
+    this.problems = problems;
+  }
+};
+var DeliveryFailedError = class extends Error {
+  constructor(detail) {
+    super(`DELIVERY_FAILED: ${detail}`);
+    this.name = "DeliveryFailedError";
+  }
+};
+function manifestFile(featureDir, candidateId) {
+  assertCandidateId(candidateId);
+  return join22(featureDir, "deliveries", `${candidateId}.json`);
+}
+function readManifest(file) {
+  if (!existsSync21(file)) return null;
+  return JSON.parse(readFileSync15(file, "utf8"));
+}
+function save3(file, manifest) {
+  mkdirSync14(join22(file, ".."), { recursive: true });
+  writeTextAtomic(file, JSON.stringify(manifest, null, 2) + "\n");
+}
+function deliverFeature(controlRoot, featureId, options = {}) {
+  const workspace = loadWorkspace(controlRoot);
+  const paths = featurePaths(controlRoot, featureId);
+  const state = loadState(paths.featureDir)?.data;
+  if (!state) throw new DeliveryRefusedError([`NO_STATE: ${featureId} has no STATE.json`]);
+  const current = state.current_candidate;
+  const candidateId = options.candidateId ?? current;
+  if (!candidateId) throw new DeliveryRefusedError(["NO_CANDIDATE: no current candidate recorded"]);
+  if (candidateId !== current) {
+    throw new DeliveryRefusedError([`CANDIDATE_NOT_CURRENT: ${candidateId} is not the current candidate ${current ?? "(none)"}`]);
+  }
+  const file = manifestFile(paths.featureDir, candidateId);
+  const candidate = loadCandidate(paths.featureDir, candidateId);
+  const names = Object.keys(candidate.repositories).sort();
+  const existing = readManifest(file);
+  if (existing?.status === "ACCEPTED" && names.every((n) => {
+    const decl = workspace.repositories.repositories.find((r) => r.name === n);
+    return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === candidate.repositories[n]?.sha;
+  })) {
+    return { ...existing, ok: true, idempotent: true };
+  }
+  const problems = [];
+  if (state.feature_state === "CANCELLED") problems.push("FEATURE_CANCELLED");
+  const unverified = featureVerifyProblems(controlRoot, featureId);
+  if (unverified.length > 0) problems.push(`FEATURE_NOT_VERIFIED: ${unverified.join("; ")}`);
+  const refs = names.map((name) => ({
+    name,
+    path: repositoryPath(workspace, name),
+    branch: candidate.repositories[name]?.branch
+  }));
+  const drift = verifyCandidate(candidate, { controlRepo: controlRoot, repositories: refs });
+  if (!drift.ok) problems.push(`CANDIDATE_DRIFT: ${drift.problems.map((p) => `${p.code} ${p.detail}`).join("; ")}`);
+  const plan = {};
+  for (const name of names) {
+    const decl = workspace.repositories.repositories.find((r) => r.name === name);
+    if (!decl) {
+      problems.push(`UNKNOWN_REPOSITORY: ${name} is not in repositories.yaml`);
+      continue;
+    }
+    const repo = repositoryPath(workspace, name);
+    const base = decl.base_branch;
+    const target = candidate.repositories[name]?.sha;
+    const has = runGit(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${base}`], { allowFail: true });
+    if (has.exitCode !== 0) {
+      problems.push(`BASE_MISSING: ${name} has no branch ${base}`);
+      continue;
+    }
+    const before = has.stdout.trim();
+    const checkout = listWorktrees(repo).find((w) => w.branch === base && !w.prunable)?.path ?? null;
+    let method;
+    if (before === target) {
+      method = "already-delivered";
+    } else if (!isAncestor(repo, before, target)) {
+      problems.push(`NON_FAST_FORWARD: ${name} ${base} is at ${before.slice(0, 12)}, which is not an ancestor of the candidate ${target.slice(0, 12)}`);
+      continue;
+    } else {
+      method = checkout ? "fast-forward-checkout" : "update-ref";
+    }
+    if (checkout && method !== "already-delivered" && !isWorktreeClean(checkout)) {
+      problems.push(`BASE_CHECKOUT_DIRTY: ${name} has uncommitted changes in ${checkout}`);
+      continue;
+    }
+    plan[name] = { base_branch: base, before, target, after: null, method, checkout };
+  }
+  if (problems.length > 0) {
+    appendEvent(paths.events, {
+      idempotency_key: `delivery.refused:${candidateId}:${Date.now()}`,
+      type: "delivery.refused",
+      actor: "mycelink",
+      feature_id: featureId,
+      data: { candidate_id: candidateId, problems: problems.map((p) => p.slice(0, 300)).slice(0, 20) }
+    });
+    throw new DeliveryRefusedError(problems);
+  }
+  const manifest = {
+    schema: "mycelink-delivery/1",
+    feature_id: featureId,
+    candidate_id: candidateId,
+    status: "DELIVERING",
+    started_at: (/* @__PURE__ */ new Date()).toISOString(),
+    delivered_at: null,
+    accepted_at: null,
+    repositories: plan,
+    acceptance: [],
+    error: null
+  };
+  save3(file, manifest);
+  const moved = [];
+  try {
+    for (const name of names) {
+      const step = plan[name];
+      const repo = repositoryPath(workspace, name);
+      if (step.method === "fast-forward-checkout") {
+        runGit(step.checkout, ["merge", "--ff-only", "--quiet", step.target]);
+        moved.push(name);
+      } else if (step.method === "update-ref") {
+        runGit(repo, ["update-ref", `refs/heads/${step.base_branch}`, step.target, step.before]);
+        moved.push(name);
+      }
+      step.after = resolveRef(repo, step.base_branch);
+      if (step.after !== step.target) {
+        throw new Error(`${name} ${step.base_branch} ended at ${step.after}, not the candidate ${step.target}`);
+      }
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const rollback = [];
+    for (const name of moved.reverse()) {
+      const step = plan[name];
+      const repo = repositoryPath(workspace, name);
+      const r = step.method === "fast-forward-checkout" ? runGit(step.checkout, ["reset", "--keep", step.before], { allowFail: true }) : runGit(repo, ["update-ref", `refs/heads/${step.base_branch}`, step.before, step.target], { allowFail: true });
+      step.after = resolveRef(repo, step.base_branch);
+      rollback.push(r.exitCode === 0 && step.after === step.before ? `${name} restored` : `${name} NOT restored (at ${step.after})`);
+    }
+    manifest.status = "ROLLED_BACK";
+    manifest.error = `${detail.slice(0, 1e3)} | rollback: ${rollback.join(", ") || "nothing to undo"}`;
+    save3(file, manifest);
+    throw new DeliveryFailedError(manifest.error);
+  }
+  manifest.status = "DELIVERED";
+  manifest.delivered_at = (/* @__PURE__ */ new Date()).toISOString();
+  save3(file, manifest);
+  appendEvent(paths.events, {
+    idempotency_key: `delivery.delivered:${candidateId}`,
+    type: "delivery.delivered",
+    actor: "mycelink",
+    feature_id: featureId,
+    data: { candidate_id: candidateId, repositories: Object.fromEntries(names.map((n) => [n, plan[n]?.after ?? null])) }
+  });
+  const evidenceDir = join22(paths.evidenceDir, "delivery", candidateId);
+  manifest.acceptance = names.map((name) => acceptance(controlRoot, workspace, name, plan[name], candidateId, evidenceDir));
+  const passed = manifest.acceptance.every((a) => a.failure_fingerprint === null);
+  manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
+  manifest.accepted_at = passed ? (/* @__PURE__ */ new Date()).toISOString() : null;
+  save3(file, manifest);
+  if (passed) {
+    mutateState(paths.featureDir, (s) => {
+      s.feature_state = "COMPLETED";
+      return s;
+    });
+  }
+  return { ...manifest, ok: passed, idempotent: false };
+}
+function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir) {
+  const decl = workspace.repositories.repositories.find((r) => r.name === name);
+  const repo = repositoryPath(workspace, name);
+  const command = decl?.commands.test ?? [];
+  const dir = join22(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
+  runGit(repo, ["worktree", "remove", "--force", dir], { allowFail: true });
+  runGit(repo, ["worktree", "prune"], { allowFail: true });
+  mkdirSync14(join22(workspace.paths.workDir, "acceptance"), { recursive: true });
+  runGit(repo, ["worktree", "add", "--detach", dir, step.base_branch]);
+  try {
+    const sha = resolveRef(dir, "HEAD");
+    if (sha !== step.target) throw new Error(`${name} acceptance checkout is at ${sha}, not the candidate ${step.target}`);
+    const record = runVerification({
+      kind: "regression",
+      nodeId: `delivery.${candidateId}`,
+      repository: name,
+      command,
+      cwd: dir,
+      evidenceDir,
+      label: `acceptance-${name}`,
+      baselineFailures: decl?.baseline_failures ?? [],
+      candidateId,
+      pathBase: controlRoot
+    });
+    return {
+      repository: name,
+      sha,
+      command: record.command,
+      exit_code: record.exit_code,
+      failure_fingerprint: record.failure_fingerprint,
+      output_path: record.output_path,
+      output_sha256: record.output_sha256
+    };
+  } finally {
+    runGit(repo, ["worktree", "remove", "--force", dir], { allowFail: true });
+    runGit(repo, ["worktree", "prune"], { allowFail: true });
+  }
+}
+
 // src/cli/cli.ts
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync15(join22(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync16(join23(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -22850,6 +23109,7 @@ var USAGE = `mycelink <group> <command> [options]
   checkpoint create|validate|restore         feature checkpoints
   dispatch <feature> [--resume <node>]       claim the next READY node for the host's Agent tool (JSON ticket)
   settle <feature> <node> --capability <c>   verify, integrate and conclude a dispatched node from its result slot
+  deliver <feature> [--candidate <id>]       fast-forward every base branch to the verified candidate, then accept
   orchestrate ready|once|run                 the feature orchestration cycle (standalone CLI adapter)
   memory <...>                               LLM Wiki Brain adapter
   hook <event>                               Claude Code hook entrypoint (stdin JSON)
@@ -22862,7 +23122,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve17(env);
   let dir = resolve17(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync21(join22(dir, "mycelink.config.json"))) return dir;
+    if (existsSync22(join23(dir, "mycelink.config.json"))) return dir;
     const parent = dirname9(dir);
     if (parent === dir) break;
     dir = parent;
@@ -22957,6 +23217,8 @@ async function main(argv, io = defaultIo) {
         return await dispatchCommand(args, io);
       case "settle":
         return settleCommand(args, io);
+      case "deliver":
+        return deliverCommand(args, io);
       case "memory":
         return memoryCommand(args, io, resolveControlRoot(args));
       case "hook":
@@ -22982,18 +23244,18 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync21(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync21(paths.config), paths.config);
+  push("control-root", existsSync22(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync22(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync21(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync22(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync16(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync21(paths.repositoriesManifest)) {
+  } else if (existsSync22(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
-    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
+    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync16(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
   }
   push("repositories.yaml", repoOk, repoDetail);
   if (repoOk) {
@@ -23012,11 +23274,11 @@ function doctor(args, io) {
     level: adapter.ok ? "ok" : "warn",
     detail: adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
-  if (existsSync21(paths.config)) {
+  if (existsSync22(paths.config)) {
     const hooks = hookHealth(controlRoot);
     push("hooks", hooks.ok, hooks.detail);
   }
-  const features = existsSync21(paths.featuresDir) ? readdirSync9(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync22(paths.featuresDir) ? readdirSync9(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -23030,14 +23292,14 @@ function doctor(args, io) {
 function cmdInit(args, io) {
   const target = resolve17(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync21(paths.repositoriesManifest)) {
+  if (!existsSync22(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync21(join22(target, "CLAUDE.md"))) {
-    writeTextAtomic(join22(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync22(join23(target, "CLAUDE.md"))) {
+    writeTextAtomic(join23(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -23083,7 +23345,7 @@ function repoGroup(args, io) {
     const path = flagString(args, "path");
     const baseBranch = flagString(args, "base-branch", "main");
     const testCommand = args.passthrough.length > 0 ? args.passthrough : ["npm", "test"];
-    const manifest = existsSync21(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync22(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync16(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     manifest.repositories = manifest.repositories.filter((r) => r["name"] !== name);
     manifest.repositories.push({
       name,
@@ -23170,9 +23432,9 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync15(resolve17(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync16(resolve17(graphPath), "utf8"));
     }
-    if (!existsSync21(paths.graph)) {
+    if (!existsSync22(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -23188,7 +23450,7 @@ function featureGroup(args, io) {
     const wip = args.flags["writer-concurrency"];
     if (typeof wip === "string") budget.max_writer_concurrency = Number(wip);
     saveState(paths.featureDir, initialState(graph, validation.graphHash, budget));
-    if (!existsSync21(paths.loops)) {
+    if (!existsSync22(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -23197,7 +23459,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync21(file)) writeTextAtomic(file, body);
+      if (!existsSync22(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -23231,50 +23493,7 @@ function featureGroup(args, io) {
     return 0;
   }
   if (sub === "verify") {
-    const validation = validateFeatureGraph(controlRoot, featureId);
-    const doc = loadState(paths.featureDir);
-    const problems = validation.problems.map((p) => `${p.code}: ${p.detail}`);
-    if (doc === null) {
-      problems.push("NO_STATE: STATE.json is missing");
-    } else {
-      const state = doc.data;
-      if (state.graph_hash !== validation.graphHash) {
-        problems.push(
-          `GRAPH_DRIFT: STATE.json was created for graph ${state.graph_hash.slice(0, 12)} but the graph now hashes to ${validation.graphHash.slice(0, 12)}`
-        );
-      }
-      const graph = loadGraph(controlRoot, featureId);
-      for (const [id, runtime] of Object.entries(state.nodes)) {
-        if (runtime.state !== "DONE" && runtime.state !== "EXCLUDED") {
-          problems.push(`NODE_NOT_DONE: ${id} is ${runtime.state}`);
-        }
-        if (runtime.state !== "DONE") continue;
-        const node = graph.nodes.find((n) => n.id === id);
-        for (const kind of node?.required_evidence ?? []) {
-          const record = runtime.evidence[kind];
-          if (!record) {
-            problems.push(`MISSING_EVIDENCE: ${id} ${kind}`);
-            continue;
-          }
-          const problem = checkEvidenceOutput(controlRoot, featureId, record);
-          if (problem !== null) {
-            const [code, ...rest] = problem.split(": ");
-            problems.push(`${code}: ${id} ${kind} ${rest.join(": ")}`);
-          }
-        }
-      }
-      if (state.pending_decisions.length > 0) {
-        problems.push(`PENDING_DECISIONS: ${state.pending_decisions.join(", ")}`);
-      }
-      const leases = leaseStatus(paths.featureDir);
-      for (const [resource, status] of Object.entries(leases)) {
-        if (status.held > 0) problems.push(`LEAKED_LEASE: ${resource} held by ${status.holders.map((h) => h.node_id).join(", ")}`);
-      }
-      const live = liveSessions(paths.sessionsRegistry);
-      if (live.length > 0) {
-        problems.push(`LIVE_SESSIONS: ${live.map((s) => s.session_id).join(", ")}`);
-      }
-    }
+    const problems = featureVerifyProblems(controlRoot, featureId);
     emit2(
       io,
       args,
@@ -23290,7 +23509,7 @@ function featureGroup(args, io) {
       s.feature_state = "CANCELLED";
       s.blocked_reason = typeof args.flags["reason"] === "string" ? args.flags["reason"] : "cancelled by user";
       for (const [id, runtime] of Object.entries(s.nodes)) {
-        if (["CLAIMED", "RED_PENDING", "GREEN_PENDING"].includes(runtime.state)) {
+        if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== "INTEGRATED") {
           s = applyNodeTransition(graph, s, id, "PAUSED", { actor: "mycelink", reason: "feature cancelled" });
         }
       }
@@ -23333,17 +23552,17 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync15(resolve17(file), "utf8");
+      files[role] = readFileSync16(resolve17(file), "utf8");
     }
-    const repositories = existsSync21(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync22(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join22(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join23(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
     if (resolve17(out) === resolve17(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
-    mkdirSync14(dirname9(out), { recursive: true });
+    mkdirSync15(dirname9(out), { recursive: true });
     const header = `# DRAFT generated by the "${adapter.name}" adapter (${adapter.verification}).
 # Requires human review. Not approved. Rename to PORTFOLIO-GRAPH.yaml only after review,
 # then run: mycelink graph validate ${featureId}
@@ -23367,15 +23586,15 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync15(resolve17(source), "utf8"));
-    const repositories = existsSync21(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const parsed = import_yaml7.default.parse(readFileSync16(resolve17(source), "utf8"));
+    const repositories = existsSync22(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
       return 1;
     }
     const paths = featurePaths(controlRoot, featureId);
-    mkdirSync14(paths.featureDir, { recursive: true });
+    mkdirSync15(paths.featureDir, { recursive: true });
     writeTextAtomic(paths.graph, import_yaml7.default.stringify(parsed, { lineWidth: 0 }));
     emit2(
       io,
@@ -23847,7 +24066,7 @@ function candidateGroup(args, io) {
     if (unfinished.length > 0) {
       throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(", ")}`);
     }
-    const contracts = existsSync21(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+    const contracts = existsSync22(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
     const manifest = createCandidate({
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
@@ -23977,7 +24196,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join22(paths.evidenceDir, "e2e"),
+      evidenceRoot: join23(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -24081,7 +24300,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync21(paths.decisions) ? readFileSync15(paths.decisions, "utf8") : "";
+    const body = existsSync22(paths.decisions) ? readFileSync16(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -24139,12 +24358,12 @@ function checkpointGroup(args, io) {
   const sub = requirePositional(args, 1, "create|validate|restore");
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
-  mkdirSync14(paths.checkpointsDir, { recursive: true });
+  mkdirSync15(paths.checkpointsDir, { recursive: true });
   if (sub === "create") {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join22(paths.checkpointsDir, `${stamp}.json`);
+    const file = join23(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -24159,13 +24378,13 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync21(paths.checkpointsDir) ? readdirSync9(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync22(paths.checkpointsDir) ? readdirSync9(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync15(join22(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync16(join23(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -24180,8 +24399,8 @@ function checkpointGroup(args, io) {
     assertControllerRole(args, "checkpoint restore");
     const name = requirePositional(args, 3, "checkpoint-file");
     assertPlainFileName(name);
-    const file = join22(paths.checkpointsDir, name);
-    const checkpoint = JSON.parse(readFileSync15(file, "utf8"));
+    const file = join23(paths.checkpointsDir, name);
+    const checkpoint = JSON.parse(readFileSync16(file, "utf8"));
     saveState(paths.featureDir, checkpoint.state);
     emit2(io, args, { restored: name }, () => `Restored ${name}.`);
     return 0;
@@ -24231,6 +24450,28 @@ function settleCommand(args, io) {
     () => `${report.node_id} -> ${report.outcome} (${report.state})${report.idempotent ? " [already settled]" : ""} ${report.detail}`
   );
   return report.outcome === "DONE" ? 0 : 1;
+}
+function deliverCommand(args, io) {
+  assertControllerRole(args, "deliver");
+  const controlRoot = resolveControlRoot(args);
+  const featureId = requirePositional(args, 1, "feature-id");
+  const candidateId = typeof args.flags["candidate"] === "string" ? args.flags["candidate"] : void 0;
+  const result = deliverFeature(controlRoot, featureId, candidateId !== void 0 ? { candidateId } : {});
+  emit2(
+    io,
+    args,
+    result,
+    () => [
+      `${result.candidate_id}: ${result.status}${result.idempotent ? " (already delivered)" : ""}`,
+      ...Object.entries(result.repositories).map(
+        ([name, r]) => `${name} ${r.base_branch}: ${r.before.slice(0, 12)} -> ${(r.after ?? "?").slice(0, 12)} (${r.method})`
+      ),
+      ...result.acceptance.map(
+        (a) => `${a.failure_fingerprint === null ? "ok  " : "FAIL"} acceptance ${a.repository} exit ${a.exit_code} ${a.output_path}`
+      )
+    ].join("\n")
+  );
+  return result.ok ? 0 : 1;
 }
 async function orchestrateGroup(args, io) {
   const controlRoot = resolveControlRoot(args);
