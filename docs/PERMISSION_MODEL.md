@@ -56,8 +56,8 @@ session's permissions, and `mycelink settle` takes the result back.
   closed.
 - Controller-only commands (every entry of the CLI's controller-only table:
   init of an existing control repository, repo register/lock, graph
-  compile/import, feature init/cancel, node claim/block/invalidate/release/
-  verify, session spawn/reconcile/stop, evidence migrate, branch
+  compile/import, feature init/cancel/supersede, node claim/block/invalidate/
+  rework/release/verify, session spawn/reconcile/stop, evidence migrate, branch
   create/integrate, candidate create, resource acquire/release/recover, e2e
   run/cleanup, decision record/apply, checkpoint restore, orchestrate
   once/run, dispatch, deliver) need **positive controller authority**:
@@ -100,6 +100,21 @@ session's permissions, and `mycelink settle` takes the result back.
   outside it, on its volume; if no same-volume rename is possible the
   capture fails closed with `RESULT_CAPTURE_FAILED`. Keep worktrees on a
   volume where that holds.
+- Ownership is fenced against the node's own delta: the commit its branch
+  was created from is pinned in the claim (`base_sha`), and fresh
+  verification diffs from there, advanced only to integration commits the
+  controller itself recorded in STATE.json. Work an upstream node
+  integrated is not the dependent's; a commit placed on the integration
+  branch any other way stays in the node's diff, and a branch that no longer
+  contains its base fails closed (`BASE_NOT_ANCESTOR`). Same-user code that
+  rewrites STATE.json is outside this, as above.
+- `node rework` is controller-only and never a way to buy budget: the
+  reopened node keeps its attempts and failure fingerprints, a parked node is
+  never its target (that needs a recorded decision), a parked dependent is
+  reopened only with a recorded decision that is consumed once, the number of
+  reworks per node is bounded, and it is refused while anything is in
+  flight or when a delivered base branch moved past the integration branch.
+  `feature supersede` likewise requires the old feature to be at rest.
 - What this does and does not stop. Within one OS user, capabilities and
   the controller key stop confused or shortcut-taking agents, including a
   worker that omits or unsets its token to run a controller command, and

@@ -56,9 +56,21 @@ under **Breaking**.
   skills that read `$MYCELINK_CONTEXT_PACK` or write `$MYCELINK_RESULT_PATH`
   must follow the bundled `module-worker` agent and `node-worker` skill
   instead; those variables are no longer set.
+- A release candidate binds every registered repository (one the feature
+  never touched is bound at its base on a new `feature/<id>` branch), and
+  `candidate verify` and `deliver` refuse one that leaves a registered
+  repository out (`REPOSITORY_NOT_BOUND`). Candidate control inputs are the
+  global configuration plus the target feature's own files only.
 
 ### Fixed
 
+- A dependent node in the same repository as its upstream failed
+  `OWNERSHIP_VIOLATION` because its fence was measured from the base branch
+  and so included the upstream's integrated files. A node branch now starts
+  at the integration head; the exact base is pinned in the claim
+  (`base_sha`) and fresh verification fences only the node's own delta.
+- `/mycelink:prd` and `/mycelink:plan` no longer tell the host to stop after
+  their phase when they are part of a run.
 - `dispatch` no longer retries a failing controller node inline until it is
   BLOCKED. A candidate build that finds uncommitted files in the control
   repository returns `PRECONDITION_FAILED` with nothing charged, and any
@@ -106,6 +118,20 @@ under **Breaking**.
 
 ### Added
 
+- `mycelink node rework <feature> <node> --reason <why> [--decision <id>]`
+  (controller-only): repair a check that failed after a node was DONE inside
+  the same feature. The node keeps its attempts and failure fingerprints,
+  its replaced work is kept as `rework_history`, its dependents and every
+  candidate-build/E2E node are reopened, the current candidate stops being
+  current, and its branch is archived so it is re-dispatched from the
+  current integration state. Refused while work is in flight, when a parked
+  node would be reopened without a decision, past its budget or rework
+  limit, or when a delivered base moved past the integration branch.
+- `mycelink feature supersede <old> --by <new> --reason <why>`: an explicit,
+  audited `superseded_by` for a feature at rest; a superseded feature never
+  verifies as complete.
+- `/mycelink:run` chains every phase (init, PRD, plan, dispatch, settle,
+  candidate, deliver) without stopping between them, and documents rework.
 - `mycelink dispatch <feature> [--resume <node>]`: runs due controller nodes
   inline and claims the next schedulable worker node for the host, printing
   a JSON ticket (capability, ids, attempt, worktree, allowed paths,

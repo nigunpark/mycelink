@@ -234,6 +234,10 @@ Inside Claude Code (commands are namespaced by the plugin):
 /mycelink:verify FEAT-101
 ```
 
+`/mycelink:run FEAT-101` on its own runs every phase without stopping in
+between: init (if needed), PRD, plan, the dispatch/settle loop, the
+candidate and delivery. The phase commands are for running one step by hand.
+
 The same flow with the CLI (`node <plugin>/bin/mycelink.mjs`, shown as
 `mycelink`):
 
@@ -267,12 +271,20 @@ mycelink settle   FEAT-101 <node-id> --capability <ticket.capability> --control-
 mycelink feature verify     FEAT-101 --control-root ../control
 mycelink candidate verify   FEAT-101 --control-root ../control
 mycelink deliver            FEAT-101 --control-root ../control --authority $KEY --json
+
+# 6. A check that fails after a node was DONE (acceptance on the delivered
+#    commits, say) is repaired in the same feature, not a new feature id:
+mycelink node rework FEAT-101 <node-id> --reason "<failing check>" --control-root ../control --authority $KEY
+#    ... then dispatch/settle again; the new candidate binds every repository; deliver.
 ```
 
 Outside Claude Code, `mycelink orchestrate run FEAT-101 --json` drives the
 same cycle with the standalone CLI adapter, which spawns `claude -p`
 workers itself; `mycelink doctor` reports whether that executable can start.
-Neither `dispatch` nor `deliver` ever pushes.
+Neither `dispatch` nor `deliver` ever pushes. A candidate always binds
+every registered repository (one the feature never touched at its base), and
+pins only the global configuration and its own feature's files, so planning
+another feature does not invalidate it.
 
 `settle` and the gate commands take the claim's `--capability`, never the
 controller key. The first key of a control repository is opened before any
