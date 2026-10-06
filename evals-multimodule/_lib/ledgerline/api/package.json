@@ -1,0 +1,11 @@
+{
+  "name": "@ledgerline/api",
+  "version": "2.3.1",
+  "private": true,
+  "type": "module",
+  "bin": { "ledger-api": "bin/ledger-api.mjs" },
+  "scripts": {
+    "start": "node bin/ledger-api.mjs",
+    "test": "node --test"
+  }
+}
