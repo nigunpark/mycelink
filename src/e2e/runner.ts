@@ -15,6 +15,7 @@ import YAML from 'yaml';
 import type { EvidenceRecord, PortfolioGraph, ResourceDecl } from '../model/types.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { runVerification } from '../evidence/runner.js';
+import { evidenceOutputFile } from '../evidence/paths.js';
 import { redactValue } from '../security/redact.js';
 import { acquireResource, releaseResource, type Lease } from '../resources/leases.js';
 import { attributeFailure, planShards, type AttributionResult, type E2EPlan, type E2EScenario } from './scheduler.js';
@@ -71,6 +72,8 @@ export interface E2ERunArgs {
   only?: string[];
   owner?: string;
   timeoutMs?: number;
+  /** Control root: evidence paths are recorded relative to it. */
+  pathBase?: string;
 }
 
 /**
@@ -146,6 +149,7 @@ export async function runE2E(args: E2ERunArgs): Promise<E2ERunResult> {
         label,
         candidateId: args.candidate.candidate_id,
         ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
+        ...(args.pathBase !== undefined ? { pathBase: args.pathBase } : {}),
       });
       if (record.failure_fingerprint !== null) {
         preflightFailure = `${label} failed (exit ${record.exit_code}, ${record.failure_fingerprint})`;
@@ -215,6 +219,7 @@ async function runScenario(
       candidateId: args.candidate.candidate_id,
       scenarioId: scenario.id,
       ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
+      ...(args.pathBase !== undefined ? { pathBase: args.pathBase } : {}),
     });
 
   try {
@@ -230,7 +235,7 @@ async function runScenario(
           attribution: attributeFailure(
             scenario,
             args.graph,
-            readFileSync(setup.output_path, 'utf8'),
+            readFileSync(evidenceOutputFile(args.pathBase, setup), 'utf8'),
           ),
         };
       }
@@ -246,7 +251,7 @@ async function runScenario(
       evidence,
       attribution: passed
         ? null
-        : attributeFailure(scenario, args.graph, readFileSync(test.output_path, 'utf8')),
+        : attributeFailure(scenario, args.graph, readFileSync(evidenceOutputFile(args.pathBase, test), 'utf8')),
     };
   } finally {
     // Cleanup runs whether the scenario passed, failed or threw.

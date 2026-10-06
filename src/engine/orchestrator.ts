@@ -395,6 +395,7 @@ export class Orchestrator {
           label: `fresh-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
           allowShell: this.workspace.config.allow_shell_commands,
+          pathBase: this.controlRoot,
           ...(verifier.expect_exit !== undefined ? { expectExit: verifier.expect_exit } : {}),
         });
         evidence.push(record);
@@ -419,6 +420,7 @@ export class Orchestrator {
             evidenceDir,
             label: 'fresh-regression',
             baselineFailures: repoDecl?.baseline_failures ?? [],
+            pathBase: this.controlRoot,
           });
           evidence.push(record);
           if (record.failure_fingerprint !== null) {
@@ -652,11 +654,11 @@ export class Orchestrator {
         exit_code: 0,
         started_at: new Date().toISOString(),
         finished_at: new Date().toISOString(),
-        cwd: this.controlRoot,
+        cwd: '.',
         repository: null,
         commit_sha: manifest.control_commit,
-        output_path: join(this.paths.candidatesDir, `${manifest.candidate_id}.yaml`),
-        output_sha256: manifest.manifest_sha256,
+        output_path: `features/${this.featureId}/candidates/${manifest.candidate_id}.yaml`,
+        output_sha256: sha256OfFile(join(this.paths.candidatesDir, `${manifest.candidate_id}.yaml`)),
         failure_fingerprint: null,
         candidate_id: manifest.candidate_id,
       };
@@ -804,6 +806,7 @@ export class Orchestrator {
           ),
         ),
         cwd: this.controlRoot,
+        pathBase: this.controlRoot,
       });
 
       for (const scenarioResult of result.results) {
@@ -1118,6 +1121,10 @@ export class Orchestrator {
     if (isWorktreeClean(this.controlRoot)) return null;
     return commitAll(this.controlRoot, message);
   }
+}
+
+function sha256OfFile(file: string): string {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
 }
 
 function isProcessAlive(pid: number): boolean {

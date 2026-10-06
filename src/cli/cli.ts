@@ -46,6 +46,7 @@ import type { EvidenceKind, PortfolioGraph } from '../model/types.js';
 import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
+import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
 
 /** The installed package version, from the package.json that ships with it. */
 export function packageVersion(): string {
@@ -490,9 +491,25 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
           `GRAPH_DRIFT: STATE.json was created for graph ${state.graph_hash.slice(0, 12)} but the graph now hashes to ${validation.graphHash.slice(0, 12)}`,
         );
       }
+      const graph = loadGraph(controlRoot, featureId);
       for (const [id, runtime] of Object.entries(state.nodes)) {
         if (runtime.state !== 'DONE' && runtime.state !== 'EXCLUDED') {
           problems.push(`NODE_NOT_DONE: ${id} is ${runtime.state}`);
+        }
+        if (runtime.state !== 'DONE') continue;
+        // A DONE node's required evidence must still be on disk, unchanged.
+        const node = graph.nodes.find((n) => n.id === id);
+        for (const kind of node?.required_evidence ?? []) {
+          const record = runtime.evidence[kind];
+          if (!record) {
+            problems.push(`MISSING_EVIDENCE: ${id} ${kind}`);
+            continue;
+          }
+          const problem = checkEvidenceOutput(controlRoot, featureId, record);
+          if (problem !== null) {
+            const [code, ...rest] = problem.split(': ');
+            problems.push(`${code}: ${id} ${kind} ${rest.join(': ')}`);
+          }
         }
       }
       if (state.pending_decisions.length > 0) {
@@ -796,10 +813,42 @@ async function sessionGroup(args: ParsedArgs, io: CliIo): Promise<number> {
 
 function evidenceGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'record|validate');
+  const sub = requirePositional(args, 1, 'record|validate|migrate');
   const featureId = requirePositional(args, 2, 'feature-id');
-  const nodeId = requirePositional(args, 3, 'node-id');
   const paths = featurePaths(controlRoot, featureId);
+
+  if (sub === 'migrate') {
+    // Rewrite legacy absolute output paths to control-root-relative ones.
+    // Only records that resolve safely into this feature are rewritten;
+    // the rest are left untouched and reported.
+    const migrated: string[] = [];
+    const refused: string[] = [];
+    mutateState(paths.featureDir, (s) => {
+      for (const [id, runtime] of Object.entries(s.nodes)) {
+        for (const record of Object.values(runtime.evidence)) {
+          if (!record) continue;
+          const resolved = resolveEvidenceOutput(controlRoot, featureId, record);
+          if (!resolved.ok) {
+            refused.push(`${id} ${record.kind}: ${resolved.problem}`);
+            continue;
+          }
+          const rel = relativeInside(controlRoot, resolved.path);
+          if (rel !== null && rel !== record.output_path) {
+            record.output_path = rel;
+            record.cwd = relativeInside(controlRoot, record.cwd) ?? record.cwd;
+            migrated.push(`${id} ${record.kind}`);
+          }
+        }
+      }
+      return s;
+    });
+    emit(io, args, { ok: refused.length === 0, migrated, refused }, () =>
+      [`migrated ${migrated.length} record(s)`, ...refused].join('\n'),
+    );
+    return refused.length === 0 ? 0 : 1;
+  }
+
+  const nodeId = requirePositional(args, 3, 'node-id');
 
   if (sub === 'validate') {
     const doc = loadState(paths.featureDir);
@@ -817,8 +866,9 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
           problems.push(`FAILED_EVIDENCE: ${kind} exited ${record.exit_code}`);
         } else if (kind === 'red' && record.red_reason !== 'behaviour-missing') {
           problems.push(`INVALID_RED: ${record.red_reason ?? 'unclassified'}`);
-        } else if (!existsSync(record.output_path)) {
-          problems.push(`MISSING_OUTPUT: ${record.output_path}`);
+        } else {
+          const problem = checkEvidenceOutput(controlRoot, featureId, record);
+          if (problem !== null) problems.push(problem);
         }
       }
     }
@@ -840,6 +890,7 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
       command: args.passthrough,
       cwd,
       evidenceDir: nodeEvidenceDir(controlRoot, featureId, nodeId),
+      pathBase: controlRoot,
     });
     mutateState(paths.featureDir, (s) => {
       const runtime = s.nodes[nodeId];
@@ -903,6 +954,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
     ...(phase === 'red' ? { expectExit: -1 } : {}),
     baselineFailures: repoDecl?.baseline_failures ?? [],
     allowShell: loadConfig(controlRoot).allow_shell_commands,
+    pathBase: controlRoot,
   });
 
   mutateState(paths.featureDir, (s) => {
@@ -1198,6 +1250,7 @@ async function e2eGroup(args: ParsedArgs, io: CliIo): Promise<number> {
       scenarios,
       resources: graph.resources,
       cwd: controlRoot,
+      pathBase: controlRoot,
       ...(only ? { only } : {}),
       ...(typeof args.flags['deploy'] === 'string' ? { deployCommand: String(args.flags['deploy']).split(' ') } : {}),
       ...(typeof args.flags['healthcheck'] === 'string'
