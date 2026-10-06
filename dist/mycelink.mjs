@@ -15545,7 +15545,7 @@ import {
   constants,
   existsSync as existsSync5,
   fstatSync,
-  lstatSync,
+  lstatSync as lstatSync2,
   mkdirSync as mkdirSync3,
   openSync as openSync3,
   readFileSync as readFileSync4,
@@ -15616,7 +15616,7 @@ function validateAgainstSchema(name, value) {
 }
 
 // src/security/paths.ts
-import { existsSync as existsSync2, realpathSync } from "node:fs";
+import { existsSync as existsSync2, lstatSync, realpathSync } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join4, relative, resolve as resolve3, sep as sep2 } from "node:path";
 var RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)$/i;
 function namespaceProblem(p) {
@@ -15693,6 +15693,15 @@ function isInsideReal(root, target) {
   if (namespaceProblem(target) !== null) return false;
   if (!lexicallyInside(resolve3(root), resolve3(target))) return false;
   return lexicallyInside(realpathDeepest(root), realpathDeepest(target));
+}
+function namesOpenedFile(path, opened) {
+  let now;
+  try {
+    now = lstatSync(path, { bigint: true });
+  } catch {
+    return false;
+  }
+  return !now.isSymbolicLink() && now.isFile() && now.dev === opened.dev && now.ino === opened.ino;
 }
 
 // src/graph/validate.ts
@@ -16567,25 +16576,39 @@ function ensureScratchIgnored(controlRoot) {
   const refuse = (why) => {
     throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
   };
-  let st;
+  const nofollow = constants.O_NOFOLLOW ?? 0;
+  const nonblock = constants.O_NONBLOCK ?? 0;
+  const isLink2 = () => {
+    try {
+      return lstatSync2(file).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+  let fd;
+  let created = false;
   try {
-    st = lstatSync(file);
+    fd = openSync3(file, constants.O_RDWR | constants.O_APPEND | nofollow | nonblock);
   } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-    writeFileSync(file, `${SCRATCH_IGNORE_ENTRY}
-`, { encoding: "utf8", flag: "wx" });
-    return;
+    const code = err.code;
+    if (code === "ELOOP" || code === "EMLINK") refuse("it is a link");
+    if (code === "EISDIR") refuse("it is not a regular file");
+    if (code !== "ENOENT") throw err;
+    try {
+      fd = openSync3(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | nofollow | nonblock, 438);
+      created = true;
+    } catch (createErr) {
+      if (createErr.code !== "EEXIST") throw createErr;
+      refuse(isLink2() ? "it is a link" : "it appeared while it was being created");
+    }
   }
-  if (st.isSymbolicLink()) refuse("it is a link");
-  if (!st.isFile()) refuse("it is not a regular file");
-  const fd = openSync3(file, constants.O_RDWR | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
   try {
-    const opened = fstatSync(fd);
-    if (lstatSync(file).isSymbolicLink()) refuse("it is a link");
+    const opened = fstatSync(fd, { bigint: true });
     if (!opened.isFile()) refuse("it is not a regular file");
-    if (opened.nlink !== 1) refuse("it has more than one name (hard link)");
-    if (opened.size > 1024 * 1024) refuse("it is larger than 1 MiB");
-    const text = readFileSync4(fd, "utf8");
+    if (opened.nlink !== 1n) refuse("it has more than one name (hard link)");
+    if (!namesOpenedFile(file, opened)) refuse(isLink2() ? "it is a link" : "it was replaced while it was opened");
+    if (opened.size > 1024n * 1024n) refuse("it is larger than 1 MiB");
+    const text = created ? "" : readFileSync4(fd, "utf8");
     const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
     if (present) return;
     const prefix = text === "" || text.endsWith("\n") ? "" : "\n";
@@ -17600,7 +17623,7 @@ function isAncestor(repo, ancestor, descendant) {
 
 // src/evidence/paths.ts
 import { createHash as createHash2 } from "node:crypto";
-import { closeSync as closeSync4, constants as constants2, fstatSync as fstatSync2, lstatSync as lstatSync2, openSync as openSync4, readFileSync as readFileSync5 } from "node:fs";
+import { closeSync as closeSync4, constants as constants2, fstatSync as fstatSync2, lstatSync as lstatSync3, openSync as openSync4, readFileSync as readFileSync5 } from "node:fs";
 import { relative as relative2, resolve as resolve6 } from "node:path";
 var MAX_EVIDENCE_BYTES = 64 * 1024 * 1024;
 function relativeInside(base, target) {
@@ -17643,27 +17666,24 @@ function resolveEvidenceOutput(controlRoot, featureId, record) {
 function checkEvidenceOutput(controlRoot, featureId, record) {
   const resolved = resolveEvidenceOutput(controlRoot, featureId, record);
   if (!resolved.ok) return resolved.problem;
-  let st;
-  try {
-    st = lstatSync2(resolved.path);
-  } catch {
-    return `MISSING_OUTPUT: ${record.output_path}`;
-  }
-  if (st.isSymbolicLink() || !st.isFile()) {
-    return `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
-  }
+  const notRegular = `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
   let fd;
   try {
-    fd = openSync4(resolved.path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
-  } catch {
-    return `UNSAFE_EVIDENCE_PATH: ${record.output_path} could not be opened without following a link`;
+    fd = openSync4(resolved.path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0));
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      return `UNSAFE_EVIDENCE_PATH: ${record.output_path} could not be opened without following a link`;
+    }
+    try {
+      return lstatSync3(resolved.path).isSymbolicLink() ? notRegular : `MISSING_OUTPUT: ${record.output_path}`;
+    } catch {
+      return `MISSING_OUTPUT: ${record.output_path}`;
+    }
   }
   try {
-    const opened = fstatSync2(fd);
-    if (!opened.isFile() || lstatSync2(resolved.path).isSymbolicLink()) {
-      return `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
-    }
-    if (opened.size > MAX_EVIDENCE_BYTES) return `OUTPUT_TOO_LARGE: ${record.output_path}`;
+    const opened = fstatSync2(fd, { bigint: true });
+    if (!opened.isFile() || opened.nlink !== 1n || !namesOpenedFile(resolved.path, opened)) return notRegular;
+    if (opened.size > BigInt(MAX_EVIDENCE_BYTES)) return `OUTPUT_TOO_LARGE: ${record.output_path}`;
     const sha = createHash2("sha256").update(readFileSync5(fd)).digest("hex");
     if (sha !== record.output_sha256) {
       return `OUTPUT_HASH_MISMATCH: ${record.output_path} hashes to ${sha.slice(0, 12)}, record says ${record.output_sha256.slice(0, 12)}`;
@@ -17854,7 +17874,7 @@ function safeHead(cwd) {
 // src/git/candidate.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash4 } from "node:crypto";
-import { existsSync as existsSync10, lstatSync as lstatSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, readlinkSync } from "node:fs";
+import { existsSync as existsSync10, lstatSync as lstatSync4, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, readlinkSync } from "node:fs";
 import { basename as basename2, join as join13, relative as relative3, resolve as resolve10 } from "node:path";
 
 // src/git/integrate.ts
@@ -18169,7 +18189,7 @@ function controlInputs(controlRepo, featureId) {
     const full = join13(control, ...path.split("/"));
     let st;
     try {
-      st = lstatSync3(full);
+      st = lstatSync4(full);
     } catch {
       continue;
     }
@@ -18508,7 +18528,7 @@ import {
   constants as constants3,
   existsSync as existsSync12,
   fstatSync as fstatSync3,
-  lstatSync as lstatSync4,
+  lstatSync as lstatSync5,
   mkdirSync as mkdirSync9,
   mkdtempSync,
   openSync as openSync5,
@@ -19133,7 +19153,7 @@ function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   assertResultFile(resultFile);
   const dir = join16(cwd, WORKER_RESULT_DIR);
   if (existsSync12(dir) || isLink(dir)) {
-    const st = lstatSync4(dir);
+    const st = lstatSync5(dir);
     if (st.isSymbolicLink()) removeLink(dir);
     else if (!st.isDirectory()) rmSync6(dir, { force: true });
   }
@@ -19150,7 +19170,7 @@ function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
 }
 function isLink(path) {
   try {
-    return lstatSync4(path).isSymbolicLink();
+    return lstatSync5(path).isSymbolicLink();
   } catch {
     return false;
   }
@@ -19186,7 +19206,7 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
   const capturedDir = join16(quarantine, "slot");
   const captured = join16(quarantine, WORKER_RESULT_FILE);
   try {
-    const dirSt = lstatSync4(capturedDir);
+    const dirSt = lstatSync5(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
@@ -19212,7 +19232,7 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
   }
   try {
     const st = fstatSync3(fd, { bigint: true });
-    if (lstatSync4(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
+    if (lstatSync5(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
     }
@@ -19245,7 +19265,7 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
 function removeTree(path) {
   let st;
   try {
-    st = lstatSync4(path);
+    st = lstatSync5(path);
   } catch {
     return;
   }
@@ -19283,7 +19303,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { closeSync as closeSync7, constants as fsConstants, fstatSync as fstatSync4, lstatSync as lstatSync5, openSync as openSync7 } from "node:fs";
+import { closeSync as closeSync7, constants as fsConstants, fstatSync as fstatSync4, lstatSync as lstatSync6, openSync as openSync7 } from "node:fs";
 import { hostname as hostname3 } from "node:os";
 
 // src/engine/portfolio.ts
@@ -20173,7 +20193,7 @@ var NotSchedulableError = class extends Error {
 var HOST_WORKER_AGENT = "mycelink:module-worker";
 function resultInSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   try {
-    return lstatSync5(join20(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync5(join20(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
+    return lstatSync6(join20(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync6(join20(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
   } catch {
     return false;
   }
@@ -22236,12 +22256,12 @@ var Orchestrator = class {
 };
 function slotTouched(cwd, resultFile) {
   try {
-    if (!lstatSync5(join20(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+    if (!lstatSync6(join20(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
   } catch {
     return false;
   }
   try {
-    lstatSync5(join20(cwd, WORKER_RESULT_DIR, resultFile));
+    lstatSync6(join20(cwd, WORKER_RESULT_DIR, resultFile));
     return true;
   } catch {
     return false;
@@ -22263,7 +22283,7 @@ function readControllerCopy(file, sha256, nodeId, claimId, dispatchId) {
   }
   try {
     const st = fstatSync4(fd);
-    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync5(file).isSymbolicLink()) return null;
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync6(file).isSymbolicLink()) return null;
     const bytes = readFileSync11(fd);
     if (sha256 !== null && createHash9("sha256").update(bytes).digest("hex") !== sha256) return null;
     const parsed = JSON.parse(bytes.toString("utf8"));

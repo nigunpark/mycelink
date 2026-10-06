@@ -15,7 +15,7 @@
  * junctions on the deepest existing ancestor, so a link inside a worktree that
  * points elsewhere cannot be used to write outside it.
  */
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export type PathProblem =
@@ -162,4 +162,23 @@ export function resolveInside(root: string, rel: string, what = 'path'): string 
   const target = resolve(root, rel);
   if (!isInsideReal(root, target)) throw new UnsafePathError('OUTSIDE_ROOT', rel, what);
   return target;
+}
+
+/**
+ * True when `path`, looked up now without following a final link, names the
+ * file behind an already opened descriptor (`opened` is its fstat).
+ *
+ * Where an open follows a final link (Windows has no O_NOFOLLOW), a link
+ * swapped in before the open and put back afterwards leaves a regular file at
+ * the path while the descriptor reaches the link's target; comparing the
+ * device and file id catches that. Anything that cannot be looked up is false.
+ */
+export function namesOpenedFile(path: string, opened: BigIntStats): boolean {
+  let now: BigIntStats;
+  try {
+    now = lstatSync(path, { bigint: true });
+  } catch {
+    return false;
+  }
+  return !now.isSymbolicLink() && now.isFile() && now.dev === opened.dev && now.ino === opened.ino;
 }

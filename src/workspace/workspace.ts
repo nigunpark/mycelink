@@ -25,6 +25,7 @@ import { validateGraph, validateRepositories } from '../graph/validate.js';
 import { loadState } from '../state/feature-state.js';
 import { featurePaths, controlPaths, type FeaturePaths, type ControlPaths } from './paths.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
+import { namesOpenedFile } from '../security/paths.js';
 
 export interface MycelinkConfig {
   schema_version: 1;
@@ -182,37 +183,53 @@ const EQUIVALENT_SCRATCH_ENTRIES = new Set(['.mycelink', '.mycelink/', '/.myceli
  * Make sure `<control>/.gitignore` ignores the `.mycelink/` scratch area.
  *
  * Existing content is kept and the entry is appended once. The file is opened
- * without following a final link, and a link, a non-regular file or a file
- * with more than one name (a hard link to something outside the repository)
- * is refused rather than written through.
+ * once, without following a final link where the platform allows it, and is
+ * then read and written only through that descriptor. A link, a non-regular
+ * file, a file with more than one name (a hard link to something outside the
+ * repository) or a path that no longer names the file opened is refused
+ * rather than written through.
  */
 export function ensureScratchIgnored(controlRoot: string): void {
   const file = join(controlRoot, '.gitignore');
-  const refuse = (why: string): never => {
+  const refuse: (why: string) => never = (why) => {
     throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
   };
-  let st;
+  const nofollow = constants.O_NOFOLLOW ?? 0;
+  const nonblock = constants.O_NONBLOCK ?? 0;
+  const isLink = (): boolean => {
+    try {
+      return lstatSync(file).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+  let fd: number;
+  let created = false;
   try {
-    st = lstatSync(file);
+    fd = openSync(file, constants.O_RDWR | constants.O_APPEND | nofollow | nonblock);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    // 'wx' fails if something appeared in the meantime; it never follows a link.
-    writeFileSync(file, `${SCRATCH_IGNORE_ENTRY}\n`, { encoding: 'utf8', flag: 'wx' });
-    return;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK') refuse('it is a link');
+    if (code === 'EISDIR') refuse('it is not a regular file');
+    if (code !== 'ENOENT') throw err;
+    // O_EXCL fails if anything, a link included, appeared in the meantime.
+    try {
+      fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | nofollow | nonblock, 0o666);
+      created = true;
+    } catch (createErr) {
+      if ((createErr as NodeJS.ErrnoException).code !== 'EEXIST') throw createErr;
+      refuse(isLink() ? 'it is a link' : 'it appeared while it was being created');
+    }
   }
-  if (st.isSymbolicLink()) refuse('it is a link');
-  if (!st.isFile()) refuse('it is not a regular file');
-
-  const fd = openSync(file, constants.O_RDWR | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
   try {
-    const opened = fstatSync(fd);
-    // Where the open follows links (Windows has no O_NOFOLLOW), a link swapped
-    // in after the lstat is caught here, before anything is written through it.
-    if (lstatSync(file).isSymbolicLink()) refuse('it is a link');
+    const opened = fstatSync(fd, { bigint: true });
     if (!opened.isFile()) refuse('it is not a regular file');
-    if (opened.nlink !== 1) refuse('it has more than one name (hard link)');
-    if (opened.size > 1024 * 1024) refuse('it is larger than 1 MiB');
-    const text = readFileSync(fd, 'utf8');
+    if (opened.nlink !== 1n) refuse('it has more than one name (hard link)');
+    // Where the open follows links (Windows has no O_NOFOLLOW), a link swapped
+    // in before the open is caught here, before anything is written through it.
+    if (!namesOpenedFile(file, opened)) refuse(isLink() ? 'it is a link' : 'it was replaced while it was opened');
+    if (opened.size > 1024n * 1024n) refuse('it is larger than 1 MiB');
+    const text = created ? '' : readFileSync(fd, 'utf8');
     const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
     if (present) return;
     const prefix = text === '' || text.endsWith('\n') ? '' : '\n';

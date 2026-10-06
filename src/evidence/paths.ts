@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import type { EvidenceRecord } from '../model/types.js';
-import { classifyRelativePath, isInsideReal } from '../security/paths.js';
+import { classifyRelativePath, isInsideReal, namesOpenedFile } from '../security/paths.js';
 import { featurePaths } from '../workspace/paths.js';
 
 export type ResolvedEvidence = { ok: true; path: string } | { ok: false; problem: string };
@@ -77,6 +77,11 @@ export function resolveEvidenceOutput(
 /**
  * Null when the output exists as a regular, unlinked file whose content still
  * hashes to what the record says; otherwise a coded problem.
+ *
+ * The path is opened once and everything after that goes through the
+ * descriptor, so nothing swapped in at the path after the open is hashed.
+ * Where the open follows a final link (Windows has no O_NOFOLLOW) the path is
+ * looked up again afterwards and must still name the very file opened.
  */
 export function checkEvidenceOutput(
   controlRoot: string,
@@ -85,27 +90,25 @@ export function checkEvidenceOutput(
 ): string | null {
   const resolved = resolveEvidenceOutput(controlRoot, featureId, record);
   if (!resolved.ok) return resolved.problem;
-  let st;
-  try {
-    st = lstatSync(resolved.path);
-  } catch {
-    return `MISSING_OUTPUT: ${record.output_path}`;
-  }
-  if (st.isSymbolicLink() || !st.isFile()) {
-    return `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
-  }
+  const notRegular = `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
   let fd: number;
   try {
-    fd = openSync(resolved.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  } catch {
-    return `UNSAFE_EVIDENCE_PATH: ${record.output_path} could not be opened without following a link`;
+    fd = openSync(resolved.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      return `UNSAFE_EVIDENCE_PATH: ${record.output_path} could not be opened without following a link`;
+    }
+    // A dangling link fails the open the same way a missing file does.
+    try {
+      return lstatSync(resolved.path).isSymbolicLink() ? notRegular : `MISSING_OUTPUT: ${record.output_path}`;
+    } catch {
+      return `MISSING_OUTPUT: ${record.output_path}`;
+    }
   }
   try {
-    const opened = fstatSync(fd);
-    if (!opened.isFile() || lstatSync(resolved.path).isSymbolicLink()) {
-      return `UNSAFE_EVIDENCE_PATH: ${record.output_path} is not a regular file`;
-    }
-    if (opened.size > MAX_EVIDENCE_BYTES) return `OUTPUT_TOO_LARGE: ${record.output_path}`;
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || opened.nlink !== 1n || !namesOpenedFile(resolved.path, opened)) return notRegular;
+    if (opened.size > BigInt(MAX_EVIDENCE_BYTES)) return `OUTPUT_TOO_LARGE: ${record.output_path}`;
     const sha = createHash('sha256').update(readFileSync(fd)).digest('hex');
     if (sha !== record.output_sha256) {
       return `OUTPUT_HASH_MISMATCH: ${record.output_path} hashes to ${sha.slice(0, 12)}, record says ${record.output_sha256.slice(0, 12)}`;
