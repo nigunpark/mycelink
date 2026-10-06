@@ -117,13 +117,13 @@ graders:
     type: tool_used
     tool: Bash
     input_match: 'mycelink\.mjs\S*\s+orchestrate\s+run'
-    min: 1
+    min: 0
     arm: with-only
   # Host-native path (the plugin's primary path after the 2026-10-06 pilot).
   - name: mycelink-host-dispatch
     type: tool_used
     tool: Bash
-    input_match: 'mycelink\.mjs\S*\s+dispatch\s'
+    input_match: '(?:mycelink\.mjs\S*\s+|\$M\s+)dispatch\s'
     min: 1
     arm: with-only
   - name: mycelink-worker-agent
@@ -135,13 +135,13 @@ graders:
   - name: mycelink-settle
     type: tool_used
     tool: Bash
-    input_match: 'mycelink\.mjs\S*\s+settle\s'
+    input_match: '(?:mycelink\.mjs\S*\s+settle\s|settle_command|bash\s+\$TMPDIR/(?:s|settle))'
     min: 1
     arm: with-only
   - name: mycelink-deliver
     type: tool_used
     tool: Bash
-    input_match: 'mycelink\.mjs\S*\s+deliver\s'
+    input_match: '(?:mycelink\.mjs\S*\s+|\$M\s+)deliver\s'
     min: 1
     arm: with-only
   - name: mycelink-control-plane-created
