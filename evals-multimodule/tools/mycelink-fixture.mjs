@@ -4,20 +4,27 @@
  *
  * Builds an existing-cold workspace, turns platform/ into a Mycelink control
  * repository, registers the four module repositories, writes a real
- * four-layer graph for LEDGER-142 and runs `mycelink orchestrate run` with the
- * repository's fake Claude executable (tests/fake-claude/claude.mjs). Each
- * fake worker performs real TDD inside its Mycelink worktree — writes a
- * failing test, records RED, applies the reference implementation, commits,
- * records GREEN and regression — so every artifact (STATE.json, evidence,
- * sessions, leases, integration branches, candidate) is genuine.
+ * four-layer graph for LEDGER-142 and drives it to delivery.
  *
- * Finally each module's main branch is fast-forwarded to the integration
- * branch (the "delivery"), so the verifier's orchestration path can be
- * exercised positively: candidate SHAs == delivered SHAs.
+ * The default mode is the plugin's primary, host-native path: `mycelink
+ * dispatch` hands out one ticket at a time, a deterministic stand-in for the
+ * host's Agent tool fulfils it the way the module-worker subagent would
+ * (absolute paths in the worktree, the ticket's exact gate lines through a
+ * shell, a commit, a JSON result in the ticket's result slot), and `mycelink
+ * settle` takes it back. Mode "adapter" instead runs `mycelink orchestrate
+ * run` with the repository's fake Claude executable
+ * (tests/fake-claude/claude.mjs). Either way each worker performs real TDD
+ * — failing test, RED, reference implementation, commit, GREEN, regression —
+ * so every artifact (STATE.json, evidence, leases, integration branches,
+ * candidate) is genuine.
  *
- *   node evals-multimodule/tools/mycelink-fixture.mjs <empty-dir>
+ * Finally `mycelink deliver` fast-forwards each module's main branch to the
+ * candidate and records acceptance, so the verifier's orchestration path can
+ * be exercised positively: candidate SHAs == delivered SHAs.
+ *
+ *   node evals-multimodule/tools/mycelink-fixture.mjs <empty-dir> [host|adapter]
  */
-import { spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -212,14 +219,90 @@ function scenarios(control) {
   return { nodes };
 }
 
-export function buildOrchestratedWorkspace(ws, { log = () => {} } = {}) {
-  if (!existsSync(FAKE_CLAUDE)) throw new Error(`fake Claude executable missing: ${FAKE_CLAUDE}`);
+/** What each module's worker writes: the RED test, then the reference implementation. */
+function workFor(module) {
+  const coreSrc = { ...filesOf(join(LIB, 'ledgerline', 'core', 'src')), ...filesOf(join(LIB, 'reference-solution', 'core', 'src')) };
+  const corePkg = JSON.parse(readFileSync(join(LIB, 'reference-solution', 'core', 'package.json'), 'utf8'));
+  const vendored = Object.fromEntries(Object.entries(coreSrc).map(([k, v]) => [`vendor/ledger-core/${k}`, v]));
+  const lock = { package: corePkg.name, version: corePkg.version, tree_sha256: treeSha256(coreSrc) };
+  const [redFile, redBody] = RED_TESTS[module];
+  let impl = filesOf(join(LIB, 'reference-solution', module));
+  if (CONSUMERS.includes(module)) impl = { ...impl, ...vendored, 'vendor/ledger-core.lock.json': JSON.stringify(lock, null, 2) + '\n' };
+  return { tests: { [redFile]: redBody }, impl };
+}
+
+function writeAll(root, files) {
+  for (const [rel, body] of Object.entries(files)) {
+    const full = join(root, ...rel.split('/'));
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, body);
+  }
+  return Object.keys(files);
+}
+
+/** The module-worker subagent, deterministically: one ticket, real TDD, one result. */
+function fulfilTicket(ticket, control) {
+  const module = ticket.repository;
+  const { tests, impl } = workFor(module);
+  const gate = (name) => {
+    const line = ticket.gate_commands.find((g) => g.gate === name)?.command;
+    if (!line) throw new Error(`ticket for ${ticket.node_id} offers no ${name} gate`);
+    // Like the Bash tool: the exact line, from the host's working directory.
+    execSync(line, { cwd: control, stdio: 'pipe' });
+    return { command: [`gate:${name}`], exit_code: 0 };
+  };
+  const changed = writeAll(ticket.worktree, tests);
+  const commands = [gate('red')];
+  changed.push(...writeAll(ticket.worktree, impl));
+  git(ticket.worktree, ['add', '--all']);
+  git(ticket.worktree, ['commit', '--quiet', '-m', `${module}: refunds (${FEATURE})`], { time: Date.parse('2026-10-01T11:00:00Z') });
+  commands.push(gate('green'), gate('regression'));
+  const result = {
+    schema_version: 1,
+    node_id: ticket.node_id,
+    claim_id: ticket.claim_id,
+    outcome: 'SUBMITTED',
+    commands,
+    commit_sha: git(ticket.worktree, ['rev-parse', 'HEAD']).stdout,
+    changed_paths: changed,
+    evidence_paths: [],
+    failure_fingerprint: null,
+    decision_request: null,
+    usage: { model_turns: 3, input_tokens: 300, output_tokens: 150 },
+  };
+  mkdirSync(dirname(ticket.result_slot), { recursive: true });
+  writeFileSync(ticket.result_slot, JSON.stringify(result, null, 2));
+}
+
+/** The bounded host loop /mycelink:run describes: dispatch -> Agent -> settle. */
+function hostLoop(control, env, log) {
+  for (let i = 0; i < 20; i++) {
+    const d = JSON.parse(mycelink(['dispatch', FEATURE, '--control-root', control, '--json'], { env, allowFail: true }).stdout);
+    if (d.status !== 'DISPATCHED') return d;
+    fulfilTicket(d.ticket, control);
+    const s = mycelink(['settle', FEATURE, d.ticket.node_id, '--capability', d.ticket.capability, '--control-root', control, '--json'], { env, allowFail: true });
+    const report = JSON.parse(s.stdout);
+    log(`settle ${d.ticket.node_id}: ${report.outcome}`);
+    if (report.outcome !== 'DONE') throw new Error(`settle ${d.ticket.node_id} -> ${report.outcome}: ${report.detail}`);
+  }
+  return { status: 'MAX_ITERATIONS' };
+}
+
+export function buildOrchestratedWorkspace(ws, { log = () => {}, mode = 'host' } = {}) {
+  if (mode !== 'host' && mode !== 'adapter') throw new Error(`unknown mode ${mode}; expected host | adapter`);
+  if (mode === 'adapter' && !existsSync(FAKE_CLAUDE)) throw new Error(`fake Claude executable missing: ${FAKE_CLAUDE}`);
   scaffold(ws, 'existing-cold', { runTests: false });
   const control = join(ws, 'platform');
   mycelink(['init', control]);
   const configPath = join(control, 'mycelink.config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
-  writeFileSync(configPath, JSON.stringify({ ...config, claude_executable: FAKE_CLAUDE, session_adapter: 'fake-claude', claude_extra_args: [] }, null, 2) + '\n');
+  // Host mode needs no worker executable at all; point the standalone adapter
+  // at nothing so an accidental nested spawn could not succeed.
+  const adapter =
+    mode === 'adapter'
+      ? { claude_executable: FAKE_CLAUDE, session_adapter: 'fake-claude', claude_extra_args: [] }
+      : { claude_executable: join(ws, 'no-claude-here'), session_adapter: 'claude-background', claude_extra_args: [] };
+  writeFileSync(configPath, JSON.stringify({ ...config, ...adapter }, null, 2) + '\n');
   for (const m of MODULES) {
     mycelink(['repo', 'register', '--control-root', control, '--name', m, '--path', `../repos/${m}`, '--base-branch', 'main', '--', 'node', '--test']);
   }
@@ -227,9 +310,10 @@ export function buildOrchestratedWorkspace(ws, { log = () => {} } = {}) {
   mkdirSync(featureDir, { recursive: true });
   writeFileSync(join(featureDir, 'PRD.md'), readFileSync(join(control, 'requirements', 'LEDGER-142-partial-refunds.md'), 'utf8'));
   writeFileSync(join(featureDir, 'PORTFOLIO-GRAPH.yaml'), JSON.stringify(graph(), null, 2) + '\n');
-  // `mycelink init` does not ignore its scratch area; candidate-build refuses a
-  // control repository made dirty by worktrees under .mycelink/.
-  writeFileSync(join(control, '.gitignore'), '.mycelink/\n');
+  // `mycelink init` itself ignores its .mycelink/ scratch area; nothing is added by hand.
+  if (!/^\/\.mycelink\/$/m.test(readFileSync(join(control, '.gitignore'), 'utf8'))) {
+    throw new Error('mycelink init did not write the .mycelink/ ignore entry');
+  }
   git(control, ['add', '--all']);
   git(control, ['commit', '--quiet', '-m', `${FEATURE}: control plane`], { time: Date.parse('2026-10-01T10:00:00Z') });
 
@@ -238,31 +322,39 @@ export function buildOrchestratedWorkspace(ws, { log = () => {} } = {}) {
   const env = { FAKE_CLAUDE_SCENARIO: scenarioFile };
   mycelink(['graph', 'validate', FEATURE, '--control-root', control, '--json'], { env });
   mycelink(['feature', 'init', FEATURE, '--control-root', control, '--json'], { env });
-  const run = mycelink(['orchestrate', 'run', FEATURE, '--control-root', control, '--json', '--max-cycles', '20'], { env, allowFail: true });
+
   let report;
-  try {
-    report = JSON.parse(run.stdout);
-  } catch {
-    throw new Error(`orchestrate run produced no JSON (exit ${run.status})\n${run.stdout}\n${run.stderr}`);
+  if (mode === 'host') {
+    report = hostLoop(control, env, log);
+    report.stop_reason = report.status;
+  } else {
+    const run = mycelink(['orchestrate', 'run', FEATURE, '--control-root', control, '--json', '--max-cycles', '20'], { env, allowFail: true });
+    try {
+      report = JSON.parse(run.stdout);
+    } catch {
+      throw new Error(`orchestrate run produced no JSON (exit ${run.status})\n${run.stdout}\n${run.stderr}`);
+    }
   }
-  log(`orchestrate run: ${report.stop_reason}`);
+  log(`${mode}: ${report.stop_reason}`);
   if (report.stop_reason !== 'ALL_SETTLED') {
-    throw new Error(`orchestrate run stopped with ${report.stop_reason}: ${JSON.stringify(report.reports?.filter((r) => r.outcome !== 'DONE'))}`);
+    throw new Error(`${mode} run stopped with ${report.stop_reason}: ${report.detail ?? JSON.stringify(report.reports?.filter((r) => r.outcome !== 'DONE'))}`);
   }
-  // Delivery: fast-forward each primary checkout to the integration branch.
-  for (const m of MODULES) git(join(ws, 'repos', m), ['merge', '--quiet', '--ff-only', `feature/${FEATURE}`]);
-  return { control, report };
+  // Delivery: the controller fast-forwards each module's main branch to the
+  // candidate and records final acceptance.
+  const delivery = JSON.parse(mycelink(['deliver', FEATURE, '--control-root', control, '--json'], { env }).stdout);
+  log(`deliver: ${delivery.status}`);
+  return { control, report, delivery };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const target = process.argv[2];
   if (!target) {
-    console.error('usage: node mycelink-fixture.mjs <empty-dir>');
+    console.error('usage: node mycelink-fixture.mjs <empty-dir> [host|adapter]');
     process.exit(2);
   }
   try {
-    const { control, report } = buildOrchestratedWorkspace(resolve(target), { log: console.log });
-    console.log(JSON.stringify({ control, stop_reason: report.stop_reason }, null, 2));
+    const { control, report, delivery } = buildOrchestratedWorkspace(resolve(target), { log: console.log, mode: process.argv[3] ?? 'host' });
+    console.log(JSON.stringify({ control, stop_reason: report.stop_reason, delivery: delivery.status }, null, 2));
   } catch (error) {
     console.error(error.message);
     process.exit(1);

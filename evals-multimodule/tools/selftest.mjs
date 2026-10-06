@@ -430,16 +430,27 @@ try {
     if (linked) record('git-safe: a symlinked .git pointer is followed and the executing config refused', unsafeGitConfig(repo).includes('core.fsmonitor'));
   }
 
-  // ------------------- 8. genuine Mycelink orchestration (fake Claude) ----
+  // ------------------- 8. genuine Mycelink orchestration (host dispatch) ----
   {
     const ows = freshDir('mycelink');
     const { buildOrchestratedWorkspace, FEATURE } = await import(pathToFileURL(join(TOOLS, 'mycelink-fixture.mjs')).href);
     let built = null;
     try {
-      built = buildOrchestratedWorkspace(ows);
-      record('mycelink: fake-Claude orchestration of LEDGER-142 settles', true, built.report.stop_reason);
+      // The plugin's primary path: dispatch tickets, a deterministic Agent, settle, deliver.
+      built = buildOrchestratedWorkspace(ows, { mode: 'host' });
+      record(
+        'mycelink: host-dispatch orchestration of LEDGER-142 settles and delivers',
+        built.report.stop_reason === 'ALL_SETTLED' && built.delivery.status === 'ACCEPTED',
+        `${built.report.stop_reason} / ${built.delivery.status}`,
+      );
     } catch (error) {
-      record('mycelink: fake-Claude orchestration of LEDGER-142 settles', false, error.message.split('\n')[0]);
+      record('mycelink: host-dispatch orchestration of LEDGER-142 settles and delivers', false, error.message.split('\n')[0]);
+    }
+    if (built) {
+      record(
+        'mycelink: delivery moved every module main to exactly the candidate',
+        MODULES.every((m) => built.delivery.repositories?.[m]?.after === git(join(ows, 'repos', m), ['rev-parse', 'main']).stdout),
+      );
     }
     if (built) {
       spawnSync(process.execPath, [join(ows, 'acceptance', 'run.mjs')], { cwd: ows, encoding: 'utf8', windowsHide: true });
@@ -467,6 +478,19 @@ try {
       git(api, ['commit', '--quiet', '-m', 'late change outside the candidate'], { time: Date.parse('2026-10-03T00:00:00Z') });
       v = verifier(ows, ['--require-mycelink']);
       record('mycelink: delivery that drifted from the candidate is rejected', v.code === 1 && v.json?.completion?.ok === true && Boolean(failedCheck(v, `candidate-equals-delivery:${FEATURE}`)));
+    }
+
+    // The optional standalone CLI adapter (nested fake `claude -p` workers).
+    const aws = freshDir('mycelink-adapter');
+    try {
+      const adapter = buildOrchestratedWorkspace(aws, { mode: 'adapter' });
+      record(
+        'mycelink: standalone-adapter orchestration settles and delivers',
+        adapter.report.stop_reason === 'ALL_SETTLED' && adapter.delivery.status === 'ACCEPTED',
+        `${adapter.report.stop_reason} / ${adapter.delivery.status}`,
+      );
+    } catch (error) {
+      record('mycelink: standalone-adapter orchestration settles and delivers', false, error.message.split('\n')[0]);
     }
   }
 

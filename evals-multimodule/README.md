@@ -100,7 +100,9 @@ evals-multimodule/
                                   only, never copied into a workspace
   tools/verify-workspace.mjs      independent post-run verifier (JSON, fails closed)
   tools/selftest.mjs              model-free self-test of everything above
-  tools/mycelink-fixture.mjs      genuine Mycelink orchestration with the fake Claude
+  tools/mycelink-fixture.mjs      genuine Mycelink orchestration and delivery: host dispatch
+                                  with a deterministic Agent (default) or the standalone
+                                  adapter with the fake Claude
 ```
 
 ## Requirements
@@ -295,7 +297,16 @@ Before interpreting any result:
 1. **Plugin activation (with-only indicators, not scored under ablation):**
    - `mycelink-skill-invoked`: a `mycelink:*` skill or command ran.
    - `mycelink-controller-used`: the launcher ran.
-   - `mycelink-orchestrate-run`: the controller dispatched work.
+   - `mycelink-host-dispatch`, `mycelink-worker-agent`, `mycelink-settle`,
+     `mycelink-deliver`: the plugin's primary, host-native path ran —
+     `mycelink dispatch` handed out a ticket, the Agent tool ran the
+     `module-worker` subagent, `mycelink settle` took the result back, and
+     `mycelink deliver` moved the base branches. Added after the 2026-10-06
+     pilot; that pilot's runs do not have them.
+   - `mycelink-orchestrate-run`: the standalone CLI adapter (nested
+     `claude -p` workers) was invoked. Since the host-native change the
+     plugin no longer tells the model to use it, so expect it to be absent.
+     It only means "a recognised invocation", not that workers ran.
    - `mycelink-control-plane-created`, `mycelink-feature-state-recorded`,
      `mycelink-candidate-created`: Mycelink artifacts the run created.
 
@@ -348,14 +359,15 @@ non-activation and the with/without comparison is not a plugin evaluation.
 
 ## Known caveats
 
-- **Nested workers inside the harness are still unproven.** The first pilot
-  never activated the plugin, so it did not exercise them.
-  `mycelink orchestrate run` spawns `claude -p` worker sessions. Whether they
-  authenticate and reach the API from inside the eval child (sandbox HOME,
-  `--setting-sources user`, and on Linux/macOS the OS sandbox's network and
-  local-bind rules) has not been exercised with a real model yet. The
-  orchestration path itself is proven only with Mycelink's fake Claude
-  (`tools/mycelink-fixture.mjs`).
+- **Nested workers could not start inside the harness.** In the
+  2026-10-06 forced-activation pilot every `orchestrate run` stopped
+  because the `claude -p` worker could not be spawned. The plugin's
+  primary path is now host-native (`dispatch` → Agent tool → `settle` →
+  `deliver`) and needs no worker executable; it is proven model-free by
+  `tools/mycelink-fixture.mjs` (a deterministic stand-in for the Agent
+  tool) and has **not yet been exercised with a real model** in this
+  harness. The standalone adapter path is proven only with Mycelink's fake
+  Claude.
 - **Project hooks are inert in eval runs.** The child runs with
   `--setting-sources user`, so the PreToolUse enforcement hooks that
   `mycelink init` installs in a control repo's `.claude/settings.json` don't
