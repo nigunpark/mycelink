@@ -6,10 +6,10 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 
 # Write the PRD
 
-Feature: `$1`
+Feature: `$0`
 Requirement: `$ARGUMENTS`
 
-The PRD is a file, not a conversation. Write `features/$1/PRD.md` in the
+The PRD is a file, not a conversation. Write `features/$0/PRD.md` in the
 control repository containing:
 
 - the user or operator behaviour being added
