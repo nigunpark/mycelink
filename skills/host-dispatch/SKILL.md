@@ -97,4 +97,10 @@ repeat at most 3 × (number of graph nodes) times:
 `M deliver <feature> --json --authority <key>` fast-forwards every base branch to exactly the
 candidate SHA after checking every repository first (fast-forward possible,
 checkout clean, candidate current and undrifted), writes the delivery
-manifest and runs final acceptance. It never pushes. It is safe to re-run.
+manifest and runs final acceptance. It never pushes. It is safe to re-run:
+an accepted manifest is re-checked (every acceptance output must still hash
+to what it records) before it answers, otherwise acceptance runs again.
+If a later repository fails, what this delivery moved is put back only
+where nobody has committed since; a base that moved is left alone and the
+manifest says `PARTIAL_DELIVERY` — report it for manual recovery, do not
+retry blindly.

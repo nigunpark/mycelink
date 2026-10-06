@@ -23272,7 +23272,42 @@ function manifestFile(featureDir, candidateId) {
 }
 function readManifest(file) {
   if (!existsSync21(file)) return null;
-  return JSON.parse(readFileSync15(file, "utf8"));
+  try {
+    return JSON.parse(readFileSync15(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+var SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+function untrustedManifest(controlRoot, featureId, candidateId, targets, raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return "not a JSON object";
+  const m = raw;
+  if (m.schema !== "mycelink-delivery/1") return "wrong schema";
+  if (m.status !== "ACCEPTED") return `status ${String(m.status)}`;
+  if (m.feature_id !== featureId || m.candidate_id !== candidateId) return "names another feature or candidate";
+  if (typeof m.accepted_at !== "string" || typeof m.delivered_at !== "string") return "missing timestamps";
+  if (m.repositories === null || typeof m.repositories !== "object" || Array.isArray(m.repositories)) return "no repositories";
+  const names = Object.keys(targets).sort();
+  if (Object.keys(m.repositories).sort().join("\0") !== names.join("\0")) return "repositories differ from the candidate";
+  for (const name of names) {
+    const r = m.repositories[name];
+    if (!r || r.target !== targets[name] || r.after !== targets[name]) return `${name} is not recorded at the candidate commit`;
+  }
+  if (!Array.isArray(m.acceptance) || m.acceptance.length !== names.length) return "acceptance records do not cover every repository";
+  const seen = /* @__PURE__ */ new Set();
+  for (const a of m.acceptance) {
+    if (a === null || typeof a !== "object" || typeof a.repository !== "string" || !(a.repository in targets)) return "malformed acceptance record";
+    if (seen.has(a.repository)) return `duplicate acceptance for ${a.repository}`;
+    seen.add(a.repository);
+    if (typeof a.sha !== "string" || !SHA.test(a.sha) || a.sha !== targets[a.repository]) return `${a.repository} acceptance ran on another commit`;
+    if (a.exit_code !== 0 || a.failure_fingerprint !== null) return `${a.repository} acceptance did not pass`;
+    if (!Array.isArray(a.command) || typeof a.output_path !== "string" || typeof a.output_sha256 !== "string") {
+      return `${a.repository} acceptance record is incomplete`;
+    }
+    const problem = checkEvidenceOutput(controlRoot, featureId, { output_path: a.output_path, output_sha256: a.output_sha256 });
+    if (problem !== null) return `${a.repository} acceptance output: ${problem}`;
+  }
+  return null;
 }
 function save3(file, manifest) {
   mkdirSync14(join22(file, ".."), { recursive: true });
@@ -23302,11 +23337,20 @@ function deliverLocked(controlRoot, featureId, options) {
   const candidate = loadCandidate(paths.featureDir, candidateId);
   const names = Object.keys(candidate.repositories).sort();
   const existing = readManifest(file);
+  const targets = Object.fromEntries(names.map((n) => [n, candidate.repositories[n]?.sha]));
   if (existing?.status === "ACCEPTED" && names.every((n) => {
     const decl = workspace.repositories.repositories.find((r) => r.name === n);
-    return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === candidate.repositories[n]?.sha;
+    return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
   })) {
-    return { ...existing, ok: true, idempotent: true };
+    const why = untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
+    if (why === null) return { ...existing, ok: true, idempotent: true };
+    appendEvent(paths.events, {
+      idempotency_key: `delivery.manifest_untrusted:${candidateId}:${Date.now()}`,
+      type: "delivery.manifest_untrusted",
+      actor: "mycelink",
+      feature_id: featureId,
+      data: { candidate_id: candidateId, reason: why.slice(0, 300) }
+    });
   }
   const problems = [];
   if (state.feature_state === "CANCELLED") problems.push("FEATURE_CANCELLED");
@@ -23396,16 +23440,29 @@ function deliverLocked(controlRoot, featureId, options) {
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     const rollback = [];
+    const stranded = [];
     for (const name of moved.reverse()) {
       const step = plan[name];
       const repo = repositoryPath(workspace, name);
-      const r = step.method === "fast-forward-checkout" ? runGit(step.checkout, ["reset", "--keep", step.before], { allowFail: true }) : runGit(repo, ["update-ref", `refs/heads/${step.base_branch}`, step.before, step.target], { allowFail: true });
+      const outcome = restoreBase(repo, step);
       step.after = resolveRef(repo, step.base_branch);
-      rollback.push(r.exitCode === 0 && step.after === step.before ? `${name} restored` : `${name} NOT restored (at ${step.after})`);
+      if (outcome === null) {
+        rollback.push(`${name} restored`);
+      } else {
+        stranded.push(name);
+        rollback.push(`${name} NOT restored (${outcome}; at ${step.after}) - manual recovery needed`);
+      }
     }
-    manifest.status = "ROLLED_BACK";
-    manifest.error = `${detail.slice(0, 1e3)} | rollback: ${rollback.join(", ") || "nothing to undo"}`;
+    manifest.status = stranded.length > 0 ? "PARTIAL_DELIVERY" : "ROLLED_BACK";
+    manifest.error = (stranded.length > 0 ? `PARTIAL_DELIVERY: ${stranded.join(", ")} left as found for manual recovery. ` : "") + `${detail.slice(0, 1e3)} | rollback: ${rollback.join(", ") || "nothing to undo"}`;
     save3(file, manifest);
+    appendEvent(paths.events, {
+      idempotency_key: `delivery.${manifest.status === "PARTIAL_DELIVERY" ? "partial" : "rolled_back"}:${candidateId}:${Date.now()}`,
+      type: manifest.status === "PARTIAL_DELIVERY" ? "delivery.partial" : "delivery.rolled_back",
+      actor: "mycelink",
+      feature_id: featureId,
+      data: { candidate_id: candidateId, stranded, error: manifest.error.slice(0, 500) }
+    });
     throw new DeliveryFailedError(manifest.error);
   }
   manifest.status = "DELIVERED";
@@ -23431,6 +23488,24 @@ function deliverLocked(controlRoot, featureId, options) {
     });
   }
   return { ...manifest, ok: passed, idempotent: false };
+}
+function restoreBase(repo, step) {
+  const ref = `refs/heads/${step.base_branch}`;
+  const now = resolveRef(repo, step.base_branch);
+  if (now !== step.target) return `${step.base_branch} moved to ${String(now).slice(0, 12)} after this delivery`;
+  if (step.method === "update-ref") {
+    const r = runGit(repo, ["update-ref", ref, step.before, step.target], { allowFail: true });
+    return r.exitCode === 0 ? null : `compare-and-swap refused: ${r.stderr.trim().slice(0, 200)}`;
+  }
+  const checkout = step.checkout;
+  if (!isWorktreeClean(checkout)) return `${checkout} has uncommitted changes`;
+  const cas = runGit(repo, ["update-ref", ref, step.before, step.target], { allowFail: true });
+  if (cas.exitCode !== 0) return `compare-and-swap refused: ${cas.stderr.trim().slice(0, 200)}`;
+  const files = runGit(checkout, ["read-tree", "-m", "-u", step.target, step.before], { allowFail: true });
+  if (files.exitCode !== 0) {
+    return `ref restored but the checkout's files were not (${files.stderr.trim().slice(0, 200)}); run git -C "${checkout}" checkout -- . after checking it`;
+  }
+  return null;
 }
 function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir) {
   const decl = workspace.repositories.repositories.find((r) => r.name === name);

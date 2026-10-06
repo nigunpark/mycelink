@@ -58,6 +58,14 @@ under **Breaking**.
 
 ### Fixed
 
+- Delivery rollback is a compare-and-swap: a base is restored only while it
+  is still exactly at the candidate this delivery installed. A base someone
+  committed on in the meantime is never reset; the manifest records
+  `PARTIAL_DELIVERY` and names it. Before, a checked-out base was put back
+  with `reset --keep`, discarding such a commit.
+- A repeated `deliver` trusts an ACCEPTED manifest only after re-checking its
+  shape, its binding to the candidate and every acceptance output's hash;
+  otherwise acceptance runs again.
 - Settle counts a worker's usage exactly once per dispatch generation: the
   captured result's hash and the usage are recorded in one STATE.json
   write, a capture announces its controller copy before taking it so a
