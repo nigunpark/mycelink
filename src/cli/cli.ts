@@ -82,7 +82,8 @@ const USAGE = `mycelink <group> <command> [options]
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
   graph compile|validate|ready|import|adapters  portfolio graph operations
-  node claim|begin|block|verify|finalize|release|invalidate  node lifecycle
+  node claim|begin|block|verify|finalize|release|invalidate|rework  node lifecycle
+  node rework <feature> <node> --reason <why> [--decision <id>]  reopen DONE work found wrong, inside the same feature
   context pack <feature> <node>              write a bounded worker context pack
   session spawn|status|stop|reconcile        worker sessions
   evidence record|validate                   evidence registration
@@ -117,7 +118,7 @@ export const CONTROLLER_ONLY: Record<string, ReadonlySet<string> | '*'> = {
   repo: new Set(['register', 'lock']),
   graph: new Set(['compile', 'import']),
   feature: new Set(['init', 'cancel']),
-  node: new Set(['claim', 'block', 'invalidate', 'release', 'verify']),
+  node: new Set(['claim', 'block', 'invalidate', 'rework', 'release', 'verify']),
   session: new Set(['spawn', 'reconcile', 'stop']),
   evidence: new Set(['migrate']),
   branch: new Set(['create', 'integrate']),
@@ -765,7 +766,7 @@ function graphGroup(args: ParsedArgs, io: CliIo): number {
 
 function nodeGroup(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, 'claim|begin|block|verify|finalize|release|invalidate');
+  const sub = requirePositional(args, 1, 'claim|begin|block|verify|finalize|release|invalidate|rework');
   const featureId = requirePositional(args, 2, 'feature-id');
   const nodeId = requirePositional(args, 3, 'node-id');
   const orchestrator = orchestratorFor(controlRoot, featureId);
@@ -822,6 +823,23 @@ function nodeGroup(args: ParsedArgs, io: CliIo): number {
       if (decisionId !== undefined) markDecisionApplied(eventsLog, featureId, decisionId, `node invalidate ${nodeId}`);
       emit(io, args, { node_id: nodeId, invalidated }, () =>
         `INVALIDATED: ${invalidated.join(', ')}`,
+      );
+      return 0;
+    }
+    case 'rework': {
+      assertControllerRole(args, 'node rework');
+      // Repair within the same feature: never a follow-up feature id.
+      const reason = args.flags['reason'];
+      const decision = args.flags['decision'];
+      const report = orchestrator.rework(nodeId, {
+        reason: typeof reason === 'string' ? reason : '',
+        ...(typeof decision === 'string' ? { decisionId: decision } : {}),
+      });
+      emit(io, args, { ...report, next: 'dispatch' }, () =>
+        [
+          `${report.idempotent ? 'already reworked' : 'reworked'} ${nodeId}: reopened ${report.reopened.join(', ')}`,
+          `candidate ${report.invalidated_candidate ?? '(none)'} is no longer current; dispatch again, then cut and deliver a new candidate.`,
+        ].join('\n'),
       );
       return 0;
     }

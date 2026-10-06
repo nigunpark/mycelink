@@ -27,6 +27,8 @@ import type {
   NodeRuntime,
   NodeState,
   PortfolioGraph,
+  ReworkHistoryEntry,
+  ReworkRecord,
   SettlementReceipt,
   UsageTotals,
 } from '../model/types.js';
@@ -78,12 +80,14 @@ import {
   removeWorkerWorktree,
   verifyChangedPaths,
   workerBranchName,
+  worktreeDirName,
 } from '../git/worktree.js';
 import { createCandidate, loadCandidate } from '../git/candidate.js';
 import { portfolioRefs } from './portfolio.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { DirtyWorktreeError, integrateNodeBranch } from '../git/integrate.js';
-import { branchExists, commitAll, isAncestor, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
+import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
+import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
 import { buildContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
 import { runVerification, verifierInvocation } from '../evidence/runner.js';
@@ -168,6 +172,26 @@ export interface FeatureRunReport {
   feature_state: string;
   /** The adapter preflight, when one ran. */
   adapter?: PreflightResult;
+}
+
+/** Node types the controller runs itself; never a rework target. */
+const CONTROLLER_NODE_TYPES: ReadonlySet<string> = new Set(['candidate-build', 'e2e-scenario']);
+
+export type ReworkReport = ReworkRecord & {
+  feature_id: string;
+  idempotent: boolean;
+  /** Archive refs the reopened nodes' old branches were kept under. */
+  archived_refs: string[];
+};
+
+/** A rework that would be unsafe or unjustified; nothing was changed. */
+export class ReworkRefusedError extends Error {
+  readonly code: string;
+  constructor(code: string, detail: string) {
+    super(`${code}: ${detail}`);
+    this.name = 'ReworkRefusedError';
+    this.code = code;
+  }
 }
 
 /** Interruptions a node may absorb before reconcile parks it instead of retrying. */
@@ -568,6 +592,9 @@ export class Orchestrator {
     const repoPath = repositoryPath(this.workspace, node.repository);
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
     const integration = integrationBranchName(this.featureId);
+    // A rework replaces the branch: its old commits are kept under an
+    // archive ref and the node starts again from the integration head.
+    if (this.state().nodes[nodeId]?.fresh_branch_required === true) this.archiveWorkerBranch(nodeId);
     const created = createWorkerWorktree({
       repoPath,
       featureId: this.featureId,
@@ -581,7 +608,10 @@ export class Orchestrator {
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
       if (!rt) return s;
-      if (created.startSha !== null) rt.branch_base_sha = created.startSha;
+      if (created.startSha !== null) {
+        rt.branch_base_sha = created.startSha;
+        delete rt.fresh_branch_required;
+      }
       baseSha = rt.branch_base_sha ?? null;
       const claim = rt.claim;
       if (claim?.claim_id === claimId) {
@@ -1740,6 +1770,286 @@ export class Orchestrator {
         evidence,
       );
     }
+  }
+
+  // ---- rework within the feature -------------------------------------------
+
+  /**
+   * Reopen a DONE producer node whose work a later check (fresh
+   * verification, E2E, the candidate, delivery acceptance, the product's own
+   * acceptance suite) found wrong, inside this same feature.
+   *
+   * Controller-authorized and recorded: a non-empty reason is required, and
+   * a parked node anywhere in the cascade needs a recorded decision (which is
+   * consumed). Everything is checked before anything changes, and refused
+   * when unsafe: work still in flight, a stopped feature, a delivered base
+   * branch that has since moved past the integration branch, the node's
+   * attempt budget or rework limit spent. Then, in one STATE.json write: the
+   * node goes DONE -> INVALIDATED keeping its attempts and fingerprints (no
+   * fresh budget) with the replaced work in its rework_history; every DONE
+   * or parked dependent, and every candidate-build and E2E node, is
+   * invalidated in dependency order; the current candidate stops being
+   * current and the feature returns to RUNNING. Worker branches of reopened
+   * nodes are archived, so each is dispatched again from the current
+   * integration state and fenced to its own new delta. Repeating the same
+   * rework before the node is DONE again changes nothing.
+   */
+  rework(nodeId: string, options: { reason: string; decisionId?: string }): ReworkReport {
+    const reason = options.reason.trim();
+    const decisionId = options.decisionId ?? null;
+    if (reason === '') throw new ReworkRefusedError('REWORK_REASON_REQUIRED', `${nodeId}: say why the node's DONE work is wrong (--reason).`);
+    const graph = this.graph();
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node) throw new Error(`Node "${nodeId}" is not in the graph.`);
+    if (node.repository === null || CONTROLLER_NODE_TYPES.has(node.node_type)) {
+      throw new ReworkRefusedError(
+        'REWORK_NOT_A_PRODUCER',
+        `${nodeId} is a ${node.node_type} node; rework the producer node the failure is attributed to (controller nodes are re-run after it).`,
+      );
+    }
+    const state = this.state();
+    const runtime = state.nodes[nodeId] as NodeRuntime;
+
+    if (runtime.state !== 'DONE') {
+      const last = runtime.rework_history?.[runtime.rework_history.length - 1];
+      const record = [...(state.reworks ?? [])].reverse().find((r) => r.node_id === nodeId);
+      if (
+        last !== undefined &&
+        record !== undefined &&
+        last.reason === reason &&
+        last.decision_id === decisionId &&
+        runtime.integrated_sha === null &&
+        !IN_FLIGHT_STATES.has(runtime.state)
+      ) {
+        // The same rework again (a retried command): finish what it started.
+        const archived = record.reopened.map((id) => this.archiveWorkerBranch(id)).filter((r): r is string => r !== null);
+        return { feature_id: this.featureId, ...record, idempotent: true, archived_refs: archived };
+      }
+      throw new ReworkRefusedError(
+        'REWORK_NOT_DONE',
+        `${nodeId} is ${runtime.state}; only DONE work is reworked. A parked node is resumed with a recorded decision (decision apply), never by a rework.`,
+      );
+    }
+    if (state.feature_state === 'CANCELLED' || state.feature_state === 'BUDGET_EXHAUSTED') {
+      throw new ReworkRefusedError('REWORK_FEATURE_STOPPED', `${this.featureId} is ${state.feature_state}.`);
+    }
+    const busy = Object.entries(state.nodes)
+      .filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state))
+      .map(([id, rt]) => `${id}=${rt.state}`);
+    if (busy.length > 0) {
+      throw new ReworkRefusedError('REWORK_IN_FLIGHT', `settle or reconcile the work in flight first: ${busy.join(', ')}.`);
+    }
+    const reworked = runtime.rework_history?.length ?? 0;
+    if (reworked >= state.budget.max_same_failure) {
+      throw new ReworkRefusedError(
+        'REWORK_LIMIT',
+        `${nodeId} was already reworked ${reworked} time(s), the limit (max_same_failure ${state.budget.max_same_failure}); report it instead.`,
+      );
+    }
+    if (runtime.attempts >= node.worker.max_attempts) {
+      throw new ReworkRefusedError(
+        'REWORK_BUDGET_EXHAUSTED',
+        `${nodeId} has used ${runtime.attempts} of ${node.worker.max_attempts} attempts; a rework would have none left.`,
+      );
+    }
+
+    const cascade = this.reworkCascade(graph, nodeId);
+    const parked = cascade.filter((id) => {
+      const st = state.nodes[id]?.state;
+      return st === 'BLOCKED' || st === 'NEEDS_DECISION' || st === 'BUDGET_EXHAUSTED';
+    });
+    if (parked.length > 0 && decisionId === null) {
+      throw new ReworkRefusedError(
+        'REWORK_PARKED',
+        `${parked.join(', ')} ${parked.length === 1 ? 'is' : 'are'} parked; record a decision and pass --decision to reopen ${parked.length === 1 ? 'it' : 'them'} with the rework.`,
+      );
+    }
+    const paused = cascade.filter((id) => state.nodes[id]?.state === 'PAUSED');
+    if (paused.length > 0) throw new ReworkRefusedError('REWORK_PAUSED', `${paused.join(', ')} paused.`);
+    if (decisionId !== null) assertDecisionUsable(this.paths.events, decisionId);
+
+    const delivered = this.featureDelivered(state);
+    if (delivered) {
+      const moved = this.movedBases();
+      if (moved.length > 0) {
+        throw new ReworkRefusedError(
+          'REWORK_BASE_MOVED',
+          `the delivered base moved past the feature's integration branch in ${moved.join('; ')}; a replacement candidate could not fast-forward it. Reconcile those bases by hand first.`,
+        );
+      }
+    }
+
+    // What the rework replaces, before anything changes.
+    const at = new Date().toISOString();
+    const repoPath = repositoryPath(this.workspace, node.repository);
+    const branch = workerBranchName(this.featureId, nodeId);
+    const head = branchExists(repoPath, branch) ? resolveRef(repoPath, branch) : null;
+    const entry: ReworkHistoryEntry = {
+      at,
+      reason,
+      decision_id: decisionId,
+      attempts: runtime.attempts,
+      failure_counts: { ...runtime.failure_counts },
+      integrated_sha: runtime.integrated_sha,
+      branch_head: head,
+      archived_ref: head !== null ? this.archiveRefName(nodeId, head) : null,
+      candidate_id: state.current_candidate,
+      evidence: Object.fromEntries(
+        Object.entries(runtime.evidence).map(([kind, r]) => [
+          kind,
+          { output_path: r.output_path, output_sha256: r.output_sha256, exit_code: r.exit_code, commit_sha: r.commit_sha },
+        ]),
+      ),
+    };
+
+    const reopened: string[] = [];
+    let candidate: string | null = null;
+    mutateState(this.paths.featureDir, (s) => {
+      // Re-checked under the lock: nothing may have started meanwhile.
+      if (s.nodes[nodeId]?.state !== 'DONE') throw new ReworkRefusedError('REWORK_NOT_DONE', `${nodeId} changed while it was being reworked.`);
+      const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
+      if (started) throw new ReworkRefusedError('REWORK_IN_FLIGHT', `${started[0]} started while the rework was prepared.`);
+      let next = s;
+      for (const id of cascade) {
+        const rt = next.nodes[id] as NodeRuntime;
+        const root = id === nodeId;
+        const from = rt.state;
+        if (root) {
+          rt.rework_history = [...(rt.rework_history ?? []), entry];
+          next = applyNodeTransition(graph, next, id, 'INVALIDATED', { actor: this.owner, reason: `rework: ${reason}`, rework: true });
+        } else if (from === 'DONE') {
+          next = applyNodeTransition(graph, next, id, 'INVALIDATED', { actor: this.owner, reason: `upstream ${nodeId} reworked: ${reason}`, inputChanged: true });
+        } else if (from === 'BLOCKED' || from === 'NEEDS_DECISION' || from === 'BUDGET_EXHAUSTED') {
+          // Its history stays with it: INVALIDATED from a parked state keeps
+          // attempts and fingerprints (see transition.ts).
+          next = applyNodeTransition(graph, next, id, 'INVALIDATED', {
+            actor: this.owner,
+            reason: `upstream ${nodeId} reworked: ${reason}`,
+            decisionId: decisionId as string,
+          });
+        } else {
+          continue; // PLANNED, READY or already INVALIDATED: nothing trusted to reopen.
+        }
+        reopened.push(id);
+        const reopenedNode = graph.nodes.find((n) => n.id === id);
+        if (reopenedNode?.repository && !CONTROLLER_NODE_TYPES.has(reopenedNode.node_type)) {
+          const n = next.nodes[id] as NodeRuntime;
+          n.fresh_branch_required = true;
+          n.branch_base_sha = null;
+        }
+      }
+      candidate = next.current_candidate;
+      next.current_candidate = null;
+      if (['CANDIDATE_READY', 'E2E_RUNNING', 'VERIFIED', 'COMPLETED'].includes(next.feature_state)) next.feature_state = 'RUNNING';
+      const record: ReworkRecord = { node_id: nodeId, reason, decision_id: decisionId, at, reopened, invalidated_candidate: candidate, delivered };
+      next.reworks = [...(next.reworks ?? []), record];
+      return next;
+    });
+    if (decisionId !== null) markDecisionApplied(this.paths.events, this.featureId, decisionId, `node rework ${nodeId}`);
+    this.event('node.reworked', nodeId, {
+      reason: reason.slice(0, 500),
+      decision_id: decisionId,
+      reopened,
+      invalidated_candidate: candidate,
+      delivered,
+      archived_ref: entry.archived_ref,
+    });
+    const archived = reopened.map((id) => this.archiveWorkerBranch(id)).filter((r): r is string => r !== null);
+    return {
+      feature_id: this.featureId,
+      node_id: nodeId,
+      reason,
+      decision_id: decisionId,
+      at,
+      reopened,
+      invalidated_candidate: candidate,
+      delivered,
+      idempotent: false,
+      archived_refs: archived,
+    };
+  }
+
+  /** The node, its transitive dependents in dependency order, then every other controller node. */
+  private reworkCascade(graph: PortfolioGraph, nodeId: string): string[] {
+    const dependents = new Map<string, string[]>();
+    for (const n of graph.nodes) for (const dep of n.depends_on) dependents.set(dep, [...(dependents.get(dep) ?? []), n.id]);
+    const reach = new Set<string>([nodeId]);
+    const queue = [nodeId];
+    while (queue.length > 0) {
+      for (const next of dependents.get(queue.shift() as string) ?? []) {
+        if (!reach.has(next)) {
+          reach.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    // The candidate binds the whole portfolio, so every candidate build and
+    // E2E run is stale once any producer is reworked.
+    for (const n of graph.nodes) if (CONTROLLER_NODE_TYPES.has(n.node_type)) reach.add(n.id);
+    // Graph declaration order is a topological order of a validated graph
+    // only by convention; order by dependency depth instead.
+    const depth = new Map<string, number>();
+    const depthOf = (id: string): number => {
+      const known = depth.get(id);
+      if (known !== undefined) return known;
+      const n = graph.nodes.find((x) => x.id === id);
+      const d = n === undefined || n.depends_on.length === 0 ? 0 : 1 + Math.max(...n.depends_on.map(depthOf));
+      depth.set(id, d);
+      return d;
+    };
+    const index = new Map(graph.nodes.map((n, i) => [n.id, i]));
+    return [...reach].sort((a, b) =>
+      a === nodeId ? -1 : b === nodeId ? 1 : depthOf(a) - depthOf(b) || (index.get(a) ?? 0) - (index.get(b) ?? 0),
+    );
+  }
+
+  /** Whether any delivery of this feature moved (or tried to move) its base branches. */
+  private featureDelivered(state: FeatureState_): boolean {
+    if (Object.keys(state.accepted_deliveries ?? {}).length > 0) return true;
+    const dir = join(this.paths.featureDir, 'deliveries');
+    return existsSync(dir) && readdirSync(dir).some((f) => f.endsWith('.json'));
+  }
+
+  /** Repositories whose base branch is no longer an ancestor of this feature's integration branch. */
+  private movedBases(): string[] {
+    const branch = integrationBranchName(this.featureId);
+    const moved: string[] = [];
+    for (const repo of this.workspace.repositories.repositories) {
+      const path = repositoryPath(this.workspace, repo.name);
+      if (!branchExists(path, branch) || !branchExists(path, repo.base_branch)) continue;
+      const base = resolveRef(path, repo.base_branch);
+      const integration = resolveRef(path, branch);
+      if (!isAncestor(path, base, integration)) moved.push(`${repo.name} (${repo.base_branch} at ${base.slice(0, 12)})`);
+    }
+    return moved;
+  }
+
+  private archiveRefName(nodeId: string, head: string): string {
+    const suffix = workerBranchName(this.featureId, nodeId).slice(`wip/${this.featureId}/`.length);
+    return `refs/mycelink/archive/${this.featureId}/${suffix}/${head}`;
+  }
+
+  /**
+   * Keep a reopened node's old branch under an archive ref and delete the
+   * branch (and any worktree on it), so its next claim starts afresh from
+   * the integration head. Idempotent; returns the archive ref, or null when
+   * there was no branch.
+   */
+  private archiveWorkerBranch(nodeId: string): string | null {
+    const node = this.node(nodeId);
+    if (node.repository === null || this.state().nodes[nodeId]?.fresh_branch_required !== true) return null;
+    const repoPath = repositoryPath(this.workspace, node.repository);
+    const branch = workerBranchName(this.featureId, nodeId);
+    if (!branchExists(repoPath, branch)) return null;
+    const head = resolveRef(repoPath, branch);
+    const ref = this.archiveRefName(nodeId, head);
+    runGit(repoPath, ['update-ref', ref, head]);
+    const expected = resolve(join(this.workspace.paths.worktreesDir, worktreeDirName(node.repository, nodeId)));
+    for (const w of listWorktrees(repoPath)) {
+      if (w.branch === branch || resolve(w.path) === expected) removeWorkerWorktree(repoPath, w.path);
+    }
+    runGit(repoPath, ['branch', '-D', branch]);
+    return ref;
   }
 
   /**

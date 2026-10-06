@@ -16840,9 +16840,9 @@ function applyNodeTransition(graph, state, nodeId, to, options) {
   }
   if (to === "INVALIDATED") {
     const red = runtime.evidence.red;
-    runtime.evidence = red ? { red } : {};
+    runtime.evidence = red && options.rework !== true ? { red } : {};
     runtime.integrated_sha = null;
-    if (JUSTIFIED_EXITS.has(from)) {
+    if (JUSTIFIED_EXITS.has(from) || options.rework === true) {
       runtime.blocked_reason = null;
     } else {
       runtime.attempts = 0;
@@ -19359,92 +19359,9 @@ async function runScenario(scenario, shardIndex, args, evidenceRoot) {
   }
 }
 
-// src/workspace/hook-settings.ts
-import { existsSync as existsSync13, readFileSync as readFileSync8 } from "node:fs";
-import { join as join16 } from "node:path";
-function mycelinkCliPath() {
-  return join16(packageRoot(), "bin", "mycelink.mjs");
-}
-function cmd(event, launcher) {
-  return `node "${launcher.replace(/\\/g, "/")}" hook ${event}`;
-}
-function buildHookSettings(launcher = mycelinkCliPath()) {
-  const simple = (event, timeout) => [
-    { hooks: [{ type: "command", command: cmd(event, launcher), timeout }] }
-  ];
-  return {
-    // Inject the bounded canonical snapshot (<= 4 KiB).
-    SessionStart: simple("session-start", 10),
-    // Inject only the changed state delta (<= 2 KiB).
-    UserPromptSubmit: simple("user-prompt-submit", 5),
-    // Checkpoint before a compaction; the summary is never state.
-    PreCompact: simple("pre-compact", 10),
-    PostCompact: simple("post-compact", 10),
-    // Authorise edits, guard the RED gate, block controller bypasses.
-    PreToolUse: [
-      {
-        matcher: "Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task",
-        hooks: [{ type: "command", command: cmd("pre-tool-use", launcher), timeout: 10 }]
-      }
-    ],
-    // Compact event metadata only; never echoes the payload.
-    PostToolUse: [
-      {
-        matcher: "Edit|Write|MultiEdit|NotebookEdit|Bash",
-        hooks: [{ type: "command", command: cmd("post-tool-use", launcher), timeout: 10 }]
-      }
-    ],
-    // No task outside the graph; no completion without evidence.
-    TaskCreated: simple("task-created", 10),
-    TaskCompleted: simple("task-completed", 10),
-    // Reclaim a dying worker's claim and leases.
-    SubagentStop: simple("subagent-stop", 10),
-    SessionEnd: simple("session-end", 10),
-    // No false completion and no leaked lease.
-    Stop: simple("stop", 15)
-  };
-}
-function installHooks(controlRoot, launcher = mycelinkCliPath()) {
-  const file = join16(controlRoot, ".claude", "settings.json");
-  const existing = existsSync13(file) ? JSON.parse(readFileSync8(file, "utf8")) : {};
-  const ours = buildHookSettings(launcher);
-  const merged = { ...existing.hooks ?? {} };
-  for (const [event, matchers] of Object.entries(ours)) {
-    const keep = (merged[event] ?? []).filter((m) => !m.hooks.some((h) => isOurHook(h.command)));
-    merged[event] = [...keep, ...matchers];
-  }
-  writeTextAtomic(file, JSON.stringify({ ...existing, hooks: merged }, null, 2) + "\n");
-  return file;
-}
-function isOurHook(command) {
-  return /mycelink\.mjs" hook [a-z-]+$/.test(command);
-}
-function hookHealth(controlRoot) {
-  const file = join16(controlRoot, ".claude", "settings.json");
-  let settings = {};
-  try {
-    settings = existsSync13(file) ? JSON.parse(readFileSync8(file, "utf8")) : {};
-  } catch {
-    return { ok: false, detail: `${file} is not valid JSON` };
-  }
-  const commands = Object.values(settings.hooks ?? {}).flat().flatMap((m) => m.hooks.map((h) => h.command)).filter(isOurHook);
-  if (commands.length === 0) {
-    return { ok: false, detail: 'Mycelink hooks are not installed; run "mycelink init <control-repo>"' };
-  }
-  const launchers = new Set(commands.map((c) => /"([^"]+mycelink\.mjs)"/.exec(c)?.[1] ?? ""));
-  const missing = [...launchers].filter((l) => l === "" || !existsSync13(l));
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      detail: `hooks point at a missing launcher (${missing.join(", ")}); re-run "mycelink init <control-repo>" after updating the plugin`
-    };
-  }
-  return { ok: true, detail: [...launchers].join(", ") };
-}
-
 // src/state/event-log.ts
-import { appendFileSync, closeSync as closeSync6, existsSync as existsSync14, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync6, readFileSync as readFileSync9, readdirSync as readdirSync5, renameSync as renameSync3, writeSync as writeSync4 } from "node:fs";
-import { basename as basename3, dirname as dirname6, join as join17 } from "node:path";
+import { appendFileSync, closeSync as closeSync6, existsSync as existsSync13, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync6, readFileSync as readFileSync8, readdirSync as readdirSync5, renameSync as renameSync3, writeSync as writeSync4 } from "node:fs";
+import { basename as basename3, dirname as dirname6, join as join16 } from "node:path";
 import { createHash as createHash7 } from "node:crypto";
 var EventTooLargeError = class extends Error {
   bytes;
@@ -19464,8 +19381,8 @@ function lockFileFor(log) {
   return log + ".lock";
 }
 function parseJsonl(file) {
-  if (!existsSync14(file)) return [];
-  const raw = readFileSync9(file, "utf8");
+  if (!existsSync13(file)) return [];
+  const raw = readFileSync8(file, "utf8");
   const out = [];
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
@@ -19483,8 +19400,8 @@ function parseJsonl(file) {
 function listRotatedSegments(log) {
   const dir = dirname6(log);
   const base = basename3(log).replace(/\.jsonl$/, "");
-  if (!existsSync14(dir)) return [];
-  return readdirSync5(dir).filter((f) => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{5}\\.jsonl$`).test(f)).sort().map((f) => join17(dir, f));
+  if (!existsSync13(dir)) return [];
+  return readdirSync5(dir).filter((f) => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{5}\\.jsonl$`).test(f)).sort().map((f) => join16(dir, f));
 }
 function nextSegmentPath(log) {
   const existing = listRotatedSegments(log);
@@ -19492,8 +19409,8 @@ function nextSegmentPath(log) {
   return log.replace(/\.jsonl$/, "") + "." + String(n).padStart(5, "0") + ".jsonl";
 }
 function repairTornTail(log) {
-  if (!existsSync14(log)) return false;
-  const raw = readFileSync9(log, "utf8");
+  if (!existsSync13(log)) return false;
+  const raw = readFileSync8(log, "utf8");
   if (raw === "" || raw.endsWith("\n")) return false;
   const lastNewline = raw.lastIndexOf("\n");
   const keep = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
@@ -19555,8 +19472,8 @@ function appendEvent(log, input, options = {}) {
       repairTornTail(log);
       const existing = findByKey(log, input.idempotency_key);
       if (existing) return { appended: false, event: existing };
-      if (existsSync14(log)) {
-        const size = Buffer.byteLength(readFileSync9(log, "utf8"), "utf8");
+      if (existsSync13(log)) {
+        const size = Buffer.byteLength(readFileSync8(log, "utf8"), "utf8");
         if (size + probe2 > maxBytes) {
           renameSync3(log, nextSegmentPath(log));
         }
@@ -19593,6 +19510,133 @@ function readEvents(log, options = {}) {
     events = events.slice(events.length - options.limit);
   }
   return events;
+}
+
+// src/state/decisions.ts
+var DecisionNotRecordedError = class extends Error {
+  constructor(decisionId) {
+    super(
+      `DECISION_NOT_RECORDED: decision "${decisionId}" has no recorded answer; record it with "mycelink decision record <feature> <decision-id> --answer ..." first.`
+    );
+    this.name = "DecisionNotRecordedError";
+  }
+};
+var DecisionAlreadyAppliedError = class extends Error {
+  constructor(decisionId) {
+    super(
+      `DECISION_ALREADY_APPLIED: decision "${decisionId}" was already used to unblock work; record a new decision for a new problem.`
+    );
+    this.name = "DecisionAlreadyAppliedError";
+  }
+};
+function isDecisionApplied(eventsLog, decisionId) {
+  return readEvents(eventsLog, { includeRotated: true, type: "decision.applied" }).some(
+    (e) => e.data?.decision_id === decisionId
+  );
+}
+function assertDecisionUsable(eventsLog, decisionId) {
+  assertDecisionRecorded(eventsLog, decisionId);
+  if (isDecisionApplied(eventsLog, decisionId)) throw new DecisionAlreadyAppliedError(decisionId);
+}
+function markDecisionApplied(eventsLog, featureId, decisionId, use) {
+  appendEvent(eventsLog, {
+    idempotency_key: `decision.applied:${decisionId}`,
+    type: "decision.applied",
+    actor: "mycelink",
+    feature_id: featureId,
+    data: { decision_id: decisionId, use }
+  });
+}
+function isDecisionRecorded(eventsLog, decisionId) {
+  return readEvents(eventsLog, { includeRotated: true, type: "decision.recorded" }).some(
+    (e) => e.data?.decision_id === decisionId
+  );
+}
+function assertDecisionRecorded(eventsLog, decisionId) {
+  if (!isDecisionRecorded(eventsLog, decisionId)) throw new DecisionNotRecordedError(decisionId);
+}
+
+// src/workspace/hook-settings.ts
+import { existsSync as existsSync14, readFileSync as readFileSync9 } from "node:fs";
+import { join as join17 } from "node:path";
+function mycelinkCliPath() {
+  return join17(packageRoot(), "bin", "mycelink.mjs");
+}
+function cmd(event, launcher) {
+  return `node "${launcher.replace(/\\/g, "/")}" hook ${event}`;
+}
+function buildHookSettings(launcher = mycelinkCliPath()) {
+  const simple = (event, timeout) => [
+    { hooks: [{ type: "command", command: cmd(event, launcher), timeout }] }
+  ];
+  return {
+    // Inject the bounded canonical snapshot (<= 4 KiB).
+    SessionStart: simple("session-start", 10),
+    // Inject only the changed state delta (<= 2 KiB).
+    UserPromptSubmit: simple("user-prompt-submit", 5),
+    // Checkpoint before a compaction; the summary is never state.
+    PreCompact: simple("pre-compact", 10),
+    PostCompact: simple("post-compact", 10),
+    // Authorise edits, guard the RED gate, block controller bypasses.
+    PreToolUse: [
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task",
+        hooks: [{ type: "command", command: cmd("pre-tool-use", launcher), timeout: 10 }]
+      }
+    ],
+    // Compact event metadata only; never echoes the payload.
+    PostToolUse: [
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        hooks: [{ type: "command", command: cmd("post-tool-use", launcher), timeout: 10 }]
+      }
+    ],
+    // No task outside the graph; no completion without evidence.
+    TaskCreated: simple("task-created", 10),
+    TaskCompleted: simple("task-completed", 10),
+    // Reclaim a dying worker's claim and leases.
+    SubagentStop: simple("subagent-stop", 10),
+    SessionEnd: simple("session-end", 10),
+    // No false completion and no leaked lease.
+    Stop: simple("stop", 15)
+  };
+}
+function installHooks(controlRoot, launcher = mycelinkCliPath()) {
+  const file = join17(controlRoot, ".claude", "settings.json");
+  const existing = existsSync14(file) ? JSON.parse(readFileSync9(file, "utf8")) : {};
+  const ours = buildHookSettings(launcher);
+  const merged = { ...existing.hooks ?? {} };
+  for (const [event, matchers] of Object.entries(ours)) {
+    const keep = (merged[event] ?? []).filter((m) => !m.hooks.some((h) => isOurHook(h.command)));
+    merged[event] = [...keep, ...matchers];
+  }
+  writeTextAtomic(file, JSON.stringify({ ...existing, hooks: merged }, null, 2) + "\n");
+  return file;
+}
+function isOurHook(command) {
+  return /mycelink\.mjs" hook [a-z-]+$/.test(command);
+}
+function hookHealth(controlRoot) {
+  const file = join17(controlRoot, ".claude", "settings.json");
+  let settings = {};
+  try {
+    settings = existsSync14(file) ? JSON.parse(readFileSync9(file, "utf8")) : {};
+  } catch {
+    return { ok: false, detail: `${file} is not valid JSON` };
+  }
+  const commands = Object.values(settings.hooks ?? {}).flat().flatMap((m) => m.hooks.map((h) => h.command)).filter(isOurHook);
+  if (commands.length === 0) {
+    return { ok: false, detail: 'Mycelink hooks are not installed; run "mycelink init <control-repo>"' };
+  }
+  const launchers = new Set(commands.map((c) => /"([^"]+mycelink\.mjs)"/.exec(c)?.[1] ?? ""));
+  const missing = [...launchers].filter((l) => l === "" || !existsSync14(l));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      detail: `hooks point at a missing launcher (${missing.join(", ")}); re-run "mycelink init <control-repo>" after updating the plugin`
+    };
+  }
+  return { ok: true, detail: [...launchers].join(", ") };
 }
 
 // src/sessions/registry.ts
@@ -19771,6 +19815,15 @@ function runSummary(runsFile, nodeId) {
 }
 
 // src/engine/orchestrator.ts
+var CONTROLLER_NODE_TYPES = /* @__PURE__ */ new Set(["candidate-build", "e2e-scenario"]);
+var ReworkRefusedError = class extends Error {
+  code;
+  constructor(code, detail) {
+    super(`${code}: ${detail}`);
+    this.name = "ReworkRefusedError";
+    this.code = code;
+  }
+};
 var MAX_INTERRUPTIONS = 3;
 var CLAIM_GRACE_MS = 15 * 60 * 1e3;
 var STOPPED_FEATURE_STATES = /* @__PURE__ */ new Set([
@@ -20028,6 +20081,7 @@ var Orchestrator = class {
     const repoPath = repositoryPath(this.workspace, node.repository);
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
     const integration = integrationBranchName(this.featureId);
+    if (this.state().nodes[nodeId]?.fresh_branch_required === true) this.archiveWorkerBranch(nodeId);
     const created = createWorkerWorktree({
       repoPath,
       featureId: this.featureId,
@@ -20041,7 +20095,10 @@ var Orchestrator = class {
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
       if (!rt) return s;
-      if (created.startSha !== null) rt.branch_base_sha = created.startSha;
+      if (created.startSha !== null) {
+        rt.branch_base_sha = created.startSha;
+        delete rt.fresh_branch_required;
+      }
       baseSha = rt.branch_base_sha ?? null;
       const claim = rt.claim;
       if (claim?.claim_id === claimId) {
@@ -21036,6 +21093,256 @@ var Orchestrator = class {
         evidence
       );
     }
+  }
+  // ---- rework within the feature -------------------------------------------
+  /**
+   * Reopen a DONE producer node whose work a later check (fresh
+   * verification, E2E, the candidate, delivery acceptance, the product's own
+   * acceptance suite) found wrong, inside this same feature.
+   *
+   * Controller-authorized and recorded: a non-empty reason is required, and
+   * a parked node anywhere in the cascade needs a recorded decision (which is
+   * consumed). Everything is checked before anything changes, and refused
+   * when unsafe: work still in flight, a stopped feature, a delivered base
+   * branch that has since moved past the integration branch, the node's
+   * attempt budget or rework limit spent. Then, in one STATE.json write: the
+   * node goes DONE -> INVALIDATED keeping its attempts and fingerprints (no
+   * fresh budget) with the replaced work in its rework_history; every DONE
+   * or parked dependent, and every candidate-build and E2E node, is
+   * invalidated in dependency order; the current candidate stops being
+   * current and the feature returns to RUNNING. Worker branches of reopened
+   * nodes are archived, so each is dispatched again from the current
+   * integration state and fenced to its own new delta. Repeating the same
+   * rework before the node is DONE again changes nothing.
+   */
+  rework(nodeId, options) {
+    const reason = options.reason.trim();
+    const decisionId = options.decisionId ?? null;
+    if (reason === "") throw new ReworkRefusedError("REWORK_REASON_REQUIRED", `${nodeId}: say why the node's DONE work is wrong (--reason).`);
+    const graph = this.graph();
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node) throw new Error(`Node "${nodeId}" is not in the graph.`);
+    if (node.repository === null || CONTROLLER_NODE_TYPES.has(node.node_type)) {
+      throw new ReworkRefusedError(
+        "REWORK_NOT_A_PRODUCER",
+        `${nodeId} is a ${node.node_type} node; rework the producer node the failure is attributed to (controller nodes are re-run after it).`
+      );
+    }
+    const state = this.state();
+    const runtime = state.nodes[nodeId];
+    if (runtime.state !== "DONE") {
+      const last = runtime.rework_history?.[runtime.rework_history.length - 1];
+      const record = [...state.reworks ?? []].reverse().find((r) => r.node_id === nodeId);
+      if (last !== void 0 && record !== void 0 && last.reason === reason && last.decision_id === decisionId && runtime.integrated_sha === null && !IN_FLIGHT_STATES.has(runtime.state)) {
+        const archived2 = record.reopened.map((id) => this.archiveWorkerBranch(id)).filter((r) => r !== null);
+        return { feature_id: this.featureId, ...record, idempotent: true, archived_refs: archived2 };
+      }
+      throw new ReworkRefusedError(
+        "REWORK_NOT_DONE",
+        `${nodeId} is ${runtime.state}; only DONE work is reworked. A parked node is resumed with a recorded decision (decision apply), never by a rework.`
+      );
+    }
+    if (state.feature_state === "CANCELLED" || state.feature_state === "BUDGET_EXHAUSTED") {
+      throw new ReworkRefusedError("REWORK_FEATURE_STOPPED", `${this.featureId} is ${state.feature_state}.`);
+    }
+    const busy = Object.entries(state.nodes).filter(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state)).map(([id, rt]) => `${id}=${rt.state}`);
+    if (busy.length > 0) {
+      throw new ReworkRefusedError("REWORK_IN_FLIGHT", `settle or reconcile the work in flight first: ${busy.join(", ")}.`);
+    }
+    const reworked = runtime.rework_history?.length ?? 0;
+    if (reworked >= state.budget.max_same_failure) {
+      throw new ReworkRefusedError(
+        "REWORK_LIMIT",
+        `${nodeId} was already reworked ${reworked} time(s), the limit (max_same_failure ${state.budget.max_same_failure}); report it instead.`
+      );
+    }
+    if (runtime.attempts >= node.worker.max_attempts) {
+      throw new ReworkRefusedError(
+        "REWORK_BUDGET_EXHAUSTED",
+        `${nodeId} has used ${runtime.attempts} of ${node.worker.max_attempts} attempts; a rework would have none left.`
+      );
+    }
+    const cascade = this.reworkCascade(graph, nodeId);
+    const parked = cascade.filter((id) => {
+      const st = state.nodes[id]?.state;
+      return st === "BLOCKED" || st === "NEEDS_DECISION" || st === "BUDGET_EXHAUSTED";
+    });
+    if (parked.length > 0 && decisionId === null) {
+      throw new ReworkRefusedError(
+        "REWORK_PARKED",
+        `${parked.join(", ")} ${parked.length === 1 ? "is" : "are"} parked; record a decision and pass --decision to reopen ${parked.length === 1 ? "it" : "them"} with the rework.`
+      );
+    }
+    const paused = cascade.filter((id) => state.nodes[id]?.state === "PAUSED");
+    if (paused.length > 0) throw new ReworkRefusedError("REWORK_PAUSED", `${paused.join(", ")} paused.`);
+    if (decisionId !== null) assertDecisionUsable(this.paths.events, decisionId);
+    const delivered = this.featureDelivered(state);
+    if (delivered) {
+      const moved = this.movedBases();
+      if (moved.length > 0) {
+        throw new ReworkRefusedError(
+          "REWORK_BASE_MOVED",
+          `the delivered base moved past the feature's integration branch in ${moved.join("; ")}; a replacement candidate could not fast-forward it. Reconcile those bases by hand first.`
+        );
+      }
+    }
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const repoPath = repositoryPath(this.workspace, node.repository);
+    const branch = workerBranchName(this.featureId, nodeId);
+    const head = branchExists(repoPath, branch) ? resolveRef(repoPath, branch) : null;
+    const entry = {
+      at,
+      reason,
+      decision_id: decisionId,
+      attempts: runtime.attempts,
+      failure_counts: { ...runtime.failure_counts },
+      integrated_sha: runtime.integrated_sha,
+      branch_head: head,
+      archived_ref: head !== null ? this.archiveRefName(nodeId, head) : null,
+      candidate_id: state.current_candidate,
+      evidence: Object.fromEntries(
+        Object.entries(runtime.evidence).map(([kind, r]) => [
+          kind,
+          { output_path: r.output_path, output_sha256: r.output_sha256, exit_code: r.exit_code, commit_sha: r.commit_sha }
+        ])
+      )
+    };
+    const reopened = [];
+    let candidate = null;
+    mutateState(this.paths.featureDir, (s) => {
+      if (s.nodes[nodeId]?.state !== "DONE") throw new ReworkRefusedError("REWORK_NOT_DONE", `${nodeId} changed while it was being reworked.`);
+      const started = Object.entries(s.nodes).find(([, rt]) => rt.claim !== null || IN_FLIGHT_STATES.has(rt.state));
+      if (started) throw new ReworkRefusedError("REWORK_IN_FLIGHT", `${started[0]} started while the rework was prepared.`);
+      let next = s;
+      for (const id of cascade) {
+        const rt = next.nodes[id];
+        const root = id === nodeId;
+        const from = rt.state;
+        if (root) {
+          rt.rework_history = [...rt.rework_history ?? [], entry];
+          next = applyNodeTransition(graph, next, id, "INVALIDATED", { actor: this.owner, reason: `rework: ${reason}`, rework: true });
+        } else if (from === "DONE") {
+          next = applyNodeTransition(graph, next, id, "INVALIDATED", { actor: this.owner, reason: `upstream ${nodeId} reworked: ${reason}`, inputChanged: true });
+        } else if (from === "BLOCKED" || from === "NEEDS_DECISION" || from === "BUDGET_EXHAUSTED") {
+          next = applyNodeTransition(graph, next, id, "INVALIDATED", {
+            actor: this.owner,
+            reason: `upstream ${nodeId} reworked: ${reason}`,
+            decisionId
+          });
+        } else {
+          continue;
+        }
+        reopened.push(id);
+        const reopenedNode = graph.nodes.find((n) => n.id === id);
+        if (reopenedNode?.repository && !CONTROLLER_NODE_TYPES.has(reopenedNode.node_type)) {
+          const n = next.nodes[id];
+          n.fresh_branch_required = true;
+          n.branch_base_sha = null;
+        }
+      }
+      candidate = next.current_candidate;
+      next.current_candidate = null;
+      if (["CANDIDATE_READY", "E2E_RUNNING", "VERIFIED", "COMPLETED"].includes(next.feature_state)) next.feature_state = "RUNNING";
+      const record = { node_id: nodeId, reason, decision_id: decisionId, at, reopened, invalidated_candidate: candidate, delivered };
+      next.reworks = [...next.reworks ?? [], record];
+      return next;
+    });
+    if (decisionId !== null) markDecisionApplied(this.paths.events, this.featureId, decisionId, `node rework ${nodeId}`);
+    this.event("node.reworked", nodeId, {
+      reason: reason.slice(0, 500),
+      decision_id: decisionId,
+      reopened,
+      invalidated_candidate: candidate,
+      delivered,
+      archived_ref: entry.archived_ref
+    });
+    const archived = reopened.map((id) => this.archiveWorkerBranch(id)).filter((r) => r !== null);
+    return {
+      feature_id: this.featureId,
+      node_id: nodeId,
+      reason,
+      decision_id: decisionId,
+      at,
+      reopened,
+      invalidated_candidate: candidate,
+      delivered,
+      idempotent: false,
+      archived_refs: archived
+    };
+  }
+  /** The node, its transitive dependents in dependency order, then every other controller node. */
+  reworkCascade(graph, nodeId) {
+    const dependents = /* @__PURE__ */ new Map();
+    for (const n of graph.nodes) for (const dep of n.depends_on) dependents.set(dep, [...dependents.get(dep) ?? [], n.id]);
+    const reach = /* @__PURE__ */ new Set([nodeId]);
+    const queue = [nodeId];
+    while (queue.length > 0) {
+      for (const next of dependents.get(queue.shift()) ?? []) {
+        if (!reach.has(next)) {
+          reach.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    for (const n of graph.nodes) if (CONTROLLER_NODE_TYPES.has(n.node_type)) reach.add(n.id);
+    const depth = /* @__PURE__ */ new Map();
+    const depthOf = (id) => {
+      const known = depth.get(id);
+      if (known !== void 0) return known;
+      const n = graph.nodes.find((x) => x.id === id);
+      const d = n === void 0 || n.depends_on.length === 0 ? 0 : 1 + Math.max(...n.depends_on.map(depthOf));
+      depth.set(id, d);
+      return d;
+    };
+    const index = new Map(graph.nodes.map((n, i) => [n.id, i]));
+    return [...reach].sort(
+      (a, b) => a === nodeId ? -1 : b === nodeId ? 1 : depthOf(a) - depthOf(b) || (index.get(a) ?? 0) - (index.get(b) ?? 0)
+    );
+  }
+  /** Whether any delivery of this feature moved (or tried to move) its base branches. */
+  featureDelivered(state) {
+    if (Object.keys(state.accepted_deliveries ?? {}).length > 0) return true;
+    const dir = join18(this.paths.featureDir, "deliveries");
+    return existsSync15(dir) && readdirSync6(dir).some((f) => f.endsWith(".json"));
+  }
+  /** Repositories whose base branch is no longer an ancestor of this feature's integration branch. */
+  movedBases() {
+    const branch = integrationBranchName(this.featureId);
+    const moved = [];
+    for (const repo of this.workspace.repositories.repositories) {
+      const path = repositoryPath(this.workspace, repo.name);
+      if (!branchExists(path, branch) || !branchExists(path, repo.base_branch)) continue;
+      const base = resolveRef(path, repo.base_branch);
+      const integration = resolveRef(path, branch);
+      if (!isAncestor(path, base, integration)) moved.push(`${repo.name} (${repo.base_branch} at ${base.slice(0, 12)})`);
+    }
+    return moved;
+  }
+  archiveRefName(nodeId, head) {
+    const suffix = workerBranchName(this.featureId, nodeId).slice(`wip/${this.featureId}/`.length);
+    return `refs/mycelink/archive/${this.featureId}/${suffix}/${head}`;
+  }
+  /**
+   * Keep a reopened node's old branch under an archive ref and delete the
+   * branch (and any worktree on it), so its next claim starts afresh from
+   * the integration head. Idempotent; returns the archive ref, or null when
+   * there was no branch.
+   */
+  archiveWorkerBranch(nodeId) {
+    const node = this.node(nodeId);
+    if (node.repository === null || this.state().nodes[nodeId]?.fresh_branch_required !== true) return null;
+    const repoPath = repositoryPath(this.workspace, node.repository);
+    const branch = workerBranchName(this.featureId, nodeId);
+    if (!branchExists(repoPath, branch)) return null;
+    const head = resolveRef(repoPath, branch);
+    const ref = this.archiveRefName(nodeId, head);
+    runGit(repoPath, ["update-ref", ref, head]);
+    const expected = resolve13(join18(this.workspace.paths.worktreesDir, worktreeDirName(node.repository, nodeId)));
+    for (const w of listWorktrees(repoPath)) {
+      if (w.branch === branch || resolve13(w.path) === expected) removeWorkerWorktree(repoPath, w.path);
+    }
+    runGit(repoPath, ["branch", "-D", branch]);
+    return ref;
   }
   /**
    * Invalidate a node and everything that transitively depends on it.
@@ -23195,50 +23502,6 @@ function listAdapters() {
 }
 registerAdapter(eccAdapter);
 
-// src/state/decisions.ts
-var DecisionNotRecordedError = class extends Error {
-  constructor(decisionId) {
-    super(
-      `DECISION_NOT_RECORDED: decision "${decisionId}" has no recorded answer; record it with "mycelink decision record <feature> <decision-id> --answer ..." first.`
-    );
-    this.name = "DecisionNotRecordedError";
-  }
-};
-var DecisionAlreadyAppliedError = class extends Error {
-  constructor(decisionId) {
-    super(
-      `DECISION_ALREADY_APPLIED: decision "${decisionId}" was already used to unblock work; record a new decision for a new problem.`
-    );
-    this.name = "DecisionAlreadyAppliedError";
-  }
-};
-function isDecisionApplied(eventsLog, decisionId) {
-  return readEvents(eventsLog, { includeRotated: true, type: "decision.applied" }).some(
-    (e) => e.data?.decision_id === decisionId
-  );
-}
-function assertDecisionUsable(eventsLog, decisionId) {
-  assertDecisionRecorded(eventsLog, decisionId);
-  if (isDecisionApplied(eventsLog, decisionId)) throw new DecisionAlreadyAppliedError(decisionId);
-}
-function markDecisionApplied(eventsLog, featureId, decisionId, use) {
-  appendEvent(eventsLog, {
-    idempotency_key: `decision.applied:${decisionId}`,
-    type: "decision.applied",
-    actor: "mycelink",
-    feature_id: featureId,
-    data: { decision_id: decisionId, use }
-  });
-}
-function isDecisionRecorded(eventsLog, decisionId) {
-  return readEvents(eventsLog, { includeRotated: true, type: "decision.recorded" }).some(
-    (e) => e.data?.decision_id === decisionId
-  );
-}
-function assertDecisionRecorded(eventsLog, decisionId) {
-  if (!isDecisionRecorded(eventsLog, decisionId)) throw new DecisionNotRecordedError(decisionId);
-}
-
 // src/sessions/preflight.ts
 import { accessSync, constants as constants4, existsSync as existsSync20, statSync as statSync5 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23803,7 +24066,8 @@ var USAGE = `mycelink <group> <command> [options]
   repo register|audit|lock                   repository manifest operations
   feature init|verify|status|cancel          feature lifecycle
   graph compile|validate|ready|import|adapters  portfolio graph operations
-  node claim|begin|block|verify|finalize|release|invalidate  node lifecycle
+  node claim|begin|block|verify|finalize|release|invalidate|rework  node lifecycle
+  node rework <feature> <node> --reason <why> [--decision <id>]  reopen DONE work found wrong, inside the same feature
   context pack <feature> <node>              write a bounded worker context pack
   session spawn|status|stop|reconcile        worker sessions
   evidence record|validate                   evidence registration
@@ -23830,7 +24094,7 @@ var CONTROLLER_ONLY = {
   repo: /* @__PURE__ */ new Set(["register", "lock"]),
   graph: /* @__PURE__ */ new Set(["compile", "import"]),
   feature: /* @__PURE__ */ new Set(["init", "cancel"]),
-  node: /* @__PURE__ */ new Set(["claim", "block", "invalidate", "release", "verify"]),
+  node: /* @__PURE__ */ new Set(["claim", "block", "invalidate", "rework", "release", "verify"]),
   session: /* @__PURE__ */ new Set(["spawn", "reconcile", "stop"]),
   evidence: /* @__PURE__ */ new Set(["migrate"]),
   branch: /* @__PURE__ */ new Set(["create", "integrate"]),
@@ -24411,7 +24675,7 @@ function graphGroup(args, io) {
 }
 function nodeGroup(args, io) {
   const controlRoot = resolveControlRoot(args);
-  const sub = requirePositional(args, 1, "claim|begin|block|verify|finalize|release|invalidate");
+  const sub = requirePositional(args, 1, "claim|begin|block|verify|finalize|release|invalidate|rework");
   const featureId = requirePositional(args, 2, "feature-id");
   const nodeId = requirePositional(args, 3, "node-id");
   const orchestrator = orchestratorFor(controlRoot, featureId);
@@ -24471,6 +24735,25 @@ capability: ${claim.capability} (pass it as --capability to tdd and node finaliz
         args,
         { node_id: nodeId, invalidated },
         () => `INVALIDATED: ${invalidated.join(", ")}`
+      );
+      return 0;
+    }
+    case "rework": {
+      assertControllerRole(args, "node rework");
+      const reason = args.flags["reason"];
+      const decision = args.flags["decision"];
+      const report = orchestrator.rework(nodeId, {
+        reason: typeof reason === "string" ? reason : "",
+        ...typeof decision === "string" ? { decisionId: decision } : {}
+      });
+      emit2(
+        io,
+        args,
+        { ...report, next: "dispatch" },
+        () => [
+          `${report.idempotent ? "already reworked" : "reworked"} ${nodeId}: reopened ${report.reopened.join(", ")}`,
+          `candidate ${report.invalidated_candidate ?? "(none)"} is no longer current; dispatch again, then cut and deliver a new candidate.`
+        ].join("\n")
       );
       return 0;
     }

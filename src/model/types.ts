@@ -194,6 +194,43 @@ export interface NodeRuntime {
    * branch fences the same delta.
    */
   branch_base_sha?: string | null;
+  /**
+   * Set by a rework: the next claim archives the node's old branch and
+   * starts a new one from the current integration head.
+   */
+  fresh_branch_required?: boolean;
+  /** Each controller-authorized rework of this node, oldest first: what it replaced and why. */
+  rework_history?: ReworkHistoryEntry[];
+}
+
+/** The DONE work a rework reopened, kept as history. */
+export interface ReworkHistoryEntry {
+  at: string;
+  reason: string;
+  decision_id: string | null;
+  /** The node's attempts and failure fingerprints at the rework; both carry on. */
+  attempts: number;
+  failure_counts: Record<string, number>;
+  integrated_sha: string | null;
+  /** The worker branch head the rework archived, and the ref it was archived to. */
+  branch_head: string | null;
+  archived_ref: string | null;
+  /** The candidate that stopped being current. */
+  candidate_id: string | null;
+  evidence: Partial<Record<EvidenceKind, { output_path: string; output_sha256: string; exit_code: number; commit_sha: string | null }>>;
+}
+
+/** One rework of a feature, as recorded in STATE.json. */
+export interface ReworkRecord {
+  node_id: string;
+  reason: string;
+  decision_id: string | null;
+  at: string;
+  /** Every node the rework moved out of DONE (or a parked state), target first. */
+  reopened: string[];
+  invalidated_candidate: string | null;
+  /** Whether the feature had already been delivered when it was reworked. */
+  delivered: boolean;
 }
 
 export type ClaimMode = 'adapter' | 'host' | 'manual' | 'controller';
@@ -280,6 +317,8 @@ export interface FeatureState_ {
   current_candidate: string | null;
   /** SHA-256 of each ACCEPTED delivery manifest, by candidate id, recorded when acceptance passed. */
   accepted_deliveries?: Record<string, string>;
+  /** Controller-authorized reworks within this feature, oldest first. */
+  reworks?: ReworkRecord[];
 }
 
 export interface Problem {

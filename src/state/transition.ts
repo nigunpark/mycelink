@@ -124,6 +124,14 @@ export interface TransitionOptions {
   /** Recorded on INTEGRATED. */
   integratedSha?: string;
   /**
+   * INVALIDATED for a controller-authorized rework: the node's own DONE work
+   * is reopened because a later check found it wrong. Its inputs did not
+   * change, so its attempts and failure fingerprints carry on (no fresh
+   * budget), and all its evidence, RED included, is dropped: the repair must
+   * prove itself from a new RED.
+   */
+  rework?: boolean;
+  /**
    * The attempt ended for an infrastructure reason (no worker could start,
    * the host was interrupted), not because of the task. Returning to READY
    * gives the attempt back and counts an interruption instead.
@@ -315,12 +323,12 @@ export function applyNodeTransition(
     // Keeping RED also means a node whose behaviour still holds can be
     // re-verified without manufacturing a fake failing test.
     const red = runtime.evidence.red;
-    runtime.evidence = red ? { red } : {};
+    runtime.evidence = red && options.rework !== true ? { red } : {};
     runtime.integrated_sha = null;
-    if (JUSTIFIED_EXITS.has(from)) {
-      // A parked node keeps the history that parked it: its attempts and
-      // fingerprints travel through INVALIDATED, so the identical failure
-      // re-blocks at once rather than buying a fresh retry budget.
+    if (JUSTIFIED_EXITS.has(from) || options.rework === true) {
+      // A parked node keeps the history that parked it, and a reworked node
+      // the history of the work found wrong: attempts and fingerprints
+      // travel through INVALIDATED, so neither buys a fresh retry budget.
       runtime.blocked_reason = null;
     } else {
       // Invalidating finished or in-flight work means its inputs changed, so
