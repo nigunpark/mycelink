@@ -75,7 +75,10 @@ session's permissions, and `mycelink settle` takes the result back.
   needs it), so before any worker exists. After that a key is minted only
   by presenting the current one (rotation, refused while any claim is live)
   or by `mycelink controller open --takeover`, which requires an interactive
-  terminal on stdin and stdout; an agent's Bash tool has none. "No claim is
+  terminal on stdin and stdout. An agent's Bash tool has none; a worker that
+  deliberately wraps the command in a pseudo-terminal (`script`, `winpty`)
+  defeats that check, which is circumvention, not protocol use, and it
+  revokes the host's key, so the host notices on its next command. "No claim is
   live" alone is never treated as proof that no worker runs: a worker holds
   its own claim capability and can end its claim (settle it, or fail a gate
   into BLOCKED) while it keeps running. A new host session that lost the
@@ -106,7 +109,12 @@ session's permissions, and `mycelink settle` takes the result back.
   command lines), rewrite the stored hash, or edit controller files
   directly when project hooks are not loaded. A dispatch id is stored in
   STATE.json, so a deliberately misbehaving earlier-generation worker could
-  read it and write the current generation's result file. Use OS-level isolation (a separate user, container or
+  read it and write the current generation's result file, or replace the
+  slot directory to make a resumed attempt fail (never succeed). Nothing
+  stops any process from creating its own control repository with
+  `mycelink init` and opening a key for that; it gives no authority over the
+  real one, but its repositories are only as protected as git itself makes
+  them. Use OS-level isolation (a separate user, container or
   VM for workers) where that matters.
 
 ## Worker sessions (standalone CLI adapter)
