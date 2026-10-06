@@ -7746,11 +7746,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants4);
+          this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -7767,10 +7767,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants4);
+        this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -7831,8 +7831,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants4) {
-        this.code = optimizeExpr(this.code, names, constants4);
+      optimizeNames(names, constants5) {
+        this.code = optimizeExpr(this.code, names, constants5);
         return this;
       }
       get names() {
@@ -7861,12 +7861,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants4))
+          if (n.optimizeNames(names, constants5))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -7919,12 +7919,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants4);
-        if (!(super.optimizeNames(names, constants4) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants5);
+        if (!(super.optimizeNames(names, constants5) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants4);
+        this.condition = optimizeExpr(this.condition, names, constants5);
         return this;
       }
       get names() {
@@ -7947,10 +7947,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants4);
+        this.iteration = optimizeExpr(this.iteration, names, constants5);
         return this;
       }
       get names() {
@@ -7986,10 +7986,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants4);
+        this.iterable = optimizeExpr(this.iterable, names, constants5);
         return this;
       }
       get names() {
@@ -8031,11 +8031,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a, _b;
-        super.optimizeNames(names, constants4);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants4);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
+        super.optimizeNames(names, constants5);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants5);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants5);
         return this;
       }
       get names() {
@@ -8336,7 +8336,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants4) {
+    function optimizeExpr(expr, names, constants5) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -8351,14 +8351,14 @@ var require_codegen = __commonJS({
         return items2;
       }, []));
       function replaceName(n) {
-        const c = constants4[n.str];
+        const c = constants5[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants4[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants5[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -15361,8 +15361,8 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync20, mkdirSync as mkdirSync14, readFileSync as readFileSync15, readdirSync as readdirSync9 } from "node:fs";
-import { dirname as dirname9, join as join21, resolve as resolve17 } from "node:path";
+import { existsSync as existsSync21, mkdirSync as mkdirSync14, readFileSync as readFileSync15, readdirSync as readdirSync9 } from "node:fs";
+import { dirname as dirname9, join as join22, resolve as resolve17 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -19369,9 +19369,9 @@ function appendEvent(log, input, options = {}) {
     // Event logs and the run ledger are durable and often committed.
     data: redactValue(input.data ?? {})
   };
-  const probe = Buffer.byteLength(JSON.stringify(draft), "utf8");
-  if (probe > maxEventBytes) {
-    throw new EventTooLargeError(probe, maxEventBytes);
+  const probe2 = Buffer.byteLength(JSON.stringify(draft), "utf8");
+  if (probe2 > maxEventBytes) {
+    throw new EventTooLargeError(probe2, maxEventBytes);
   }
   return withLock(
     lockFileFor(log),
@@ -19381,7 +19381,7 @@ function appendEvent(log, input, options = {}) {
       if (existing) return { appended: false, event: existing };
       if (existsSync14(log)) {
         const size = Buffer.byteLength(readFileSync9(log, "utf8"), "utf8");
-        if (size + probe > maxBytes) {
+        if (size + probe2 > maxBytes) {
           renameSync3(log, nextSegmentPath(log));
         }
       }
@@ -19601,6 +19601,16 @@ var STOPPED_FEATURE_STATES = /* @__PURE__ */ new Set([
   "CANCELLED",
   "PAUSED"
 ]);
+var ClaimSetupError = class extends Error {
+  code = "CLAIM_SETUP_FAILED";
+  constructor(nodeId, cause) {
+    super(`CLAIM_SETUP_FAILED: ${nodeId}: ${errorText(cause)}`);
+    this.name = "ClaimSetupError";
+  }
+};
+function isInfrastructureFailure(reason) {
+  return typeof reason === "string" && reason.startsWith("SPAWN_FAILED");
+}
 var NotSchedulableError = class extends Error {
   code = "NOT_SCHEDULABLE";
   reason;
@@ -19656,6 +19666,8 @@ var Orchestrator = class {
   owner;
   workerEnv;
   recall;
+  preflight;
+  preflightResult = null;
   constructor(options) {
     this.controlRoot = resolve12(options.controlRoot);
     this.featureId = options.featureId;
@@ -19665,6 +19677,12 @@ var Orchestrator = class {
     this.owner = options.owner ?? "mycelink";
     this.workerEnv = options.workerEnv ?? {};
     this.recall = options.recall;
+    this.preflight = options.preflight;
+  }
+  /** The adapter preflight, run at most once per orchestrator. */
+  adapterReady() {
+    if (this.preflightResult === null) this.preflightResult = this.preflight ? this.preflight() : { ok: true };
+    return this.preflightResult;
   }
   graph() {
     return loadGraph(this.controlRoot, this.featureId);
@@ -19814,7 +19832,8 @@ var Orchestrator = class {
       }
     } catch (err) {
       this.releaseForInfrastructure(nodeId, claimId, `claim setup failed: ${errorText(err)}`);
-      throw err;
+      if (err instanceof ResourceBusyError) throw err;
+      throw new ClaimSetupError(nodeId, err);
     }
     this.event("node.claimed", nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
     return { claimId, capability: capability.raw, worktree, branch, attempt, mode, expiresAt };
@@ -20030,6 +20049,10 @@ var Orchestrator = class {
     let sessionId = null;
     if (node.node_type === "candidate-build") return this.runCandidateNode(nodeId);
     if (node.node_type === "e2e-scenario") return await this.runE2ENode(nodeId);
+    const adapter = this.adapterReady();
+    if (!adapter.ok) {
+      return this.report(nodeId, "INFRASTRUCTURE_FAILURE", null, `ADAPTER_UNAVAILABLE: ${adapter.detail ?? "unavailable"}`, evidence);
+    }
     try {
       const { claimId, capability, worktree, branch } = this.claim(nodeId, { mode: "adapter" });
       const packPath = this.writeContextPack(nodeId, claimId);
@@ -20075,6 +20098,10 @@ var Orchestrator = class {
       if (previous) markTerminal(this.paths.sessionsRegistry, previous.session_id, "stopped");
       const observation = await this.adapter.wait(handle);
       recordObservation(this.paths.sessionsRegistry, handle.session_id, observation);
+      if (isInfrastructureFailure(observation.failure_reason)) {
+        this.releaseForInfrastructure(nodeId, claimId, observation.failure_reason ?? "SPAWN_FAILED");
+        return this.report(nodeId, "INFRASTRUCTURE_FAILURE", sessionId, observation.failure_reason ?? "SPAWN_FAILED", evidence);
+      }
       mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, observation.usage));
       appendRun(this.paths.runs, {
         attempt_id: `${nodeId}#${attempt}`,
@@ -20105,6 +20132,9 @@ var Orchestrator = class {
       const detail = err instanceof Error ? err.message : String(err);
       if (err instanceof ResourceBusyError || err instanceof NotSchedulableError) {
         return this.report(nodeId, "RETRY", sessionId, detail, evidence);
+      }
+      if (err instanceof ClaimSetupError) {
+        return this.report(nodeId, "INFRASTRUCTURE_FAILURE", sessionId, detail, evidence);
       }
       return this.failAttempt(nodeId, sessionId, detail, evidence);
     }
@@ -20823,7 +20853,9 @@ var Orchestrator = class {
     const plan = this.plan();
     const reports = [];
     for (const scheduled of plan.scheduled) {
-      reports.push(await this.runNode(scheduled.node_id));
+      const report = await this.runNode(scheduled.node_id);
+      reports.push(report);
+      if (report.outcome === "INFRASTRUCTURE_FAILURE") break;
     }
     return {
       scheduled: plan.scheduled.map((s) => s.node_id),
@@ -20837,6 +20869,9 @@ var Orchestrator = class {
     let cycles = 0;
     for (; cycles < maxCycles; cycles++) {
       const state = this.state();
+      if (cycles === 0 && this.preflight !== void 0 && !this.adapterReady().ok) {
+        return this.finish(0, "ADAPTER_UNAVAILABLE", all);
+      }
       if (state.feature_state === "BUDGET_EXHAUSTED") {
         return this.finish(cycles, "BUDGET_EXHAUSTED", all);
       }
@@ -20849,6 +20884,9 @@ var Orchestrator = class {
       }
       const cycle = await this.runOnce();
       all.push(...cycle.reports);
+      if (cycle.reports.some((r) => r.outcome === "INFRASTRUCTURE_FAILURE")) {
+        return this.finish(cycles + 1, "ADAPTER_UNAVAILABLE", all);
+      }
       if (cycle.scheduled.length === 0) {
         const after = this.state();
         const blocked = Object.values(after.nodes).some(
@@ -20869,7 +20907,8 @@ var Orchestrator = class {
       cycles,
       stop_reason: reason,
       reports,
-      feature_state: this.state().feature_state
+      feature_state: this.state().feature_state,
+      ...this.preflightResult !== null ? { adapter: this.preflightResult } : {}
     };
   }
   // ---- reconciliation ---------------------------------------------------
@@ -22235,8 +22274,8 @@ function memoryCommand(args, io, controlRoot) {
         const maxBytes = Number(args.flags["max-bytes"] ?? 2048);
         const kept = [];
         for (const selection of selections) {
-          const probe = [...kept, selection];
-          if (Buffer.byteLength(JSON.stringify(probe), "utf8") > maxBytes) break;
+          const probe2 = [...kept, selection];
+          if (Buffer.byteLength(JSON.stringify(probe2), "utf8") > maxBytes) break;
           kept.push(selection);
         }
         emit(
@@ -22632,9 +22671,82 @@ function assertDecisionRecorded(eventsLog, decisionId) {
   if (!isDecisionRecorded(eventsLog, decisionId)) throw new DecisionNotRecordedError(decisionId);
 }
 
+// src/sessions/preflight.ts
+import { accessSync, constants as constants4, existsSync as existsSync20, statSync as statSync5 } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter as delimiter2, isAbsolute as isAbsolute3, join as join21 } from "node:path";
+var PROBE_TIMEOUT_MS = 15e3;
+var VERSION = /(\d+\.\d+\.\d+)/;
+function isRunnableFile(p) {
+  try {
+    if (!existsSync20(p) || !statSync5(p).isFile()) return false;
+    if (process.platform !== "win32") accessSync(p, constants4.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function resolveExecutable(exe, env = process.env) {
+  if (exe === "") return null;
+  if (process.platform === "win32") return resolveWindowsExecutable(exe, env);
+  if (isAbsolute3(exe) || exe.includes("/")) return isRunnableFile(exe) ? exe : null;
+  for (const dir of (env["PATH"] ?? "").split(delimiter2).filter(Boolean)) {
+    const candidate = join21(dir, exe);
+    if (isRunnableFile(candidate)) return candidate;
+  }
+  return null;
+}
+function probe(argv, base) {
+  const run = runCommandSync(argv, { cwd: tmpdir(), timeoutMs: PROBE_TIMEOUT_MS });
+  if (run.spawnError !== null) {
+    return { ...base, ok: false, detail: `could not be started: ${run.spawnError}` };
+  }
+  if (run.timedOut) return { ...base, ok: false, detail: `--version did not answer within ${PROBE_TIMEOUT_MS} ms` };
+  if (run.exitCode !== 0) {
+    const tail = (run.stderr || run.stdout).trim().split(/\r?\n/).slice(-1)[0] ?? "";
+    return { ...base, ok: false, detail: `--version exited ${run.exitCode}${tail ? `: ${tail.slice(0, 200)}` : ""}` };
+  }
+  const version = VERSION.exec(run.stdout)?.[1] ?? null;
+  if (version === null) return { ...base, ok: false, detail: "--version printed no version number" };
+  return { ...base, ok: true, version, detail: `${base.resolved} answers --version ${version}; authentication not checked` };
+}
+function preflightAdapter(config, env = process.env) {
+  const fakeOverride = env["MYCELINK_FAKE_CLAUDE"];
+  if (config.session_adapter === "fake-claude" || fakeOverride) {
+    const script = fakeOverride ?? config.claude_executable;
+    const base2 = {
+      ok: false,
+      adapter: "fake-claude",
+      executable: script,
+      resolved: isRunnableFile(script) || existsSync20(script) && statSync5(script).isFile() ? script : null,
+      version: null,
+      auth: "not-checked"
+    };
+    if (base2.resolved === null) return { ...base2, detail: `fake worker script ${script} not found` };
+    return probe([process.execPath, script, "--version"], base2);
+  }
+  const executable = config.claude_executable;
+  const resolved = resolveExecutable(executable, env);
+  const base = {
+    ok: false,
+    adapter: "claude-background",
+    executable,
+    resolved,
+    version: null,
+    auth: "not-checked"
+  };
+  if (resolved === null) {
+    return {
+      ...base,
+      detail: `worker executable "${executable}" not found on the controller's PATH (spawned without a shell)`
+    };
+  }
+  return probe([resolved, "--version"], base);
+}
+
 // src/cli/cli.ts
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync15(join21(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync15(join22(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -22675,7 +22787,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve17(env);
   let dir = resolve17(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync20(join21(dir, "mycelink.config.json"))) return dir;
+    if (existsSync21(join22(dir, "mycelink.config.json"))) return dir;
     const parent = dirname9(dir);
     if (parent === dir) break;
     dir = parent;
@@ -22705,7 +22817,12 @@ function adapterFor(controlRoot) {
   });
 }
 function orchestratorFor(controlRoot, featureId) {
-  return new Orchestrator({ controlRoot, featureId, adapter: adapterFor(controlRoot) });
+  return new Orchestrator({
+    controlRoot,
+    featureId,
+    adapter: adapterFor(controlRoot),
+    preflight: () => preflightAdapter(loadConfig(controlRoot))
+  });
 }
 function requirePositional(args, index, name) {
   const value = args.positional[index];
@@ -22790,15 +22907,15 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync20(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync20(paths.config), paths.config);
+  push("control-root", existsSync21(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync21(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync20(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync21(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync20(paths.repositoriesManifest)) {
+  } else if (existsSync21(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
     repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
@@ -22813,32 +22930,39 @@ function doctor(args, io) {
   }
   const config = loadConfig(controlRoot);
   push("session adapter", true, config.session_adapter);
-  if (existsSync20(paths.config)) {
+  const adapter = preflightAdapter(config);
+  checks.push({
+    name: "worker adapter (standalone)",
+    ok: true,
+    level: adapter.ok ? "ok" : "warn",
+    detail: adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
+  });
+  if (existsSync21(paths.config)) {
     const hooks = hookHealth(controlRoot);
     push("hooks", hooks.ok, hooks.detail);
   }
-  const features = existsSync20(paths.featuresDir) ? readdirSync9(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync21(paths.featuresDir) ? readdirSync9(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
     io,
     args,
     { ok, checks },
-    () => checks.map((c) => `${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`).join("\n")
+    () => checks.map((c) => `${c.level === "warn" ? "warn" : c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`).join("\n")
   );
   return ok ? 0 : 1;
 }
 function cmdInit(args, io) {
   const target = resolve17(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync20(paths.repositoriesManifest)) {
+  if (!existsSync21(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync20(join21(target, "CLAUDE.md"))) {
-    writeTextAtomic(join21(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync21(join22(target, "CLAUDE.md"))) {
+    writeTextAtomic(join22(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -22884,7 +23008,7 @@ function repoGroup(args, io) {
     const path = flagString(args, "path");
     const baseBranch = flagString(args, "base-branch", "main");
     const testCommand = args.passthrough.length > 0 ? args.passthrough : ["npm", "test"];
-    const manifest = existsSync20(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync21(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync15(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     manifest.repositories = manifest.repositories.filter((r) => r["name"] !== name);
     manifest.repositories.push({
       name,
@@ -22973,7 +23097,7 @@ function featureGroup(args, io) {
     if (typeof graphPath === "string") {
       writeTextAtomic(paths.graph, readFileSync15(resolve17(graphPath), "utf8"));
     }
-    if (!existsSync20(paths.graph)) {
+    if (!existsSync21(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -22989,7 +23113,7 @@ function featureGroup(args, io) {
     const wip = args.flags["writer-concurrency"];
     if (typeof wip === "string") budget.max_writer_concurrency = Number(wip);
     saveState(paths.featureDir, initialState(graph, validation.graphHash, budget));
-    if (!existsSync20(paths.loops)) {
+    if (!existsSync21(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -22998,7 +23122,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync20(file)) writeTextAtomic(file, body);
+      if (!existsSync21(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -23136,10 +23260,10 @@ function graphGroup(args, io) {
       }
       files[role] = readFileSync15(resolve17(file), "utf8");
     }
-    const repositories = existsSync20(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync21(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join21(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    const out = typeof args.flags["out"] === "string" ? resolve17(args.flags["out"]) : join22(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
     if (resolve17(out) === resolve17(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
@@ -23169,7 +23293,7 @@ function graphGroup(args, io) {
   if (sub === "compile") {
     const source = flagString(args, "from");
     const parsed = import_yaml7.default.parse(readFileSync15(resolve17(source), "utf8"));
-    const repositories = existsSync20(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync21(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
@@ -23648,7 +23772,7 @@ function candidateGroup(args, io) {
     if (unfinished.length > 0) {
       throw new Error(`NODES_NOT_DONE: a candidate binds finished work only; not done: ${unfinished.join(", ")}`);
     }
-    const contracts = existsSync20(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+    const contracts = existsSync21(workspace.paths.contractsDir) ? readdirSync9(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
     const manifest = createCandidate({
       controlRepo: controlRoot,
       featureDir: paths.featureDir,
@@ -23778,7 +23902,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join21(paths.evidenceDir, "e2e"),
+      evidenceRoot: join22(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -23882,7 +24006,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync20(paths.decisions) ? readFileSync15(paths.decisions, "utf8") : "";
+    const body = existsSync21(paths.decisions) ? readFileSync15(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -23945,7 +24069,7 @@ function checkpointGroup(args, io) {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join21(paths.checkpointsDir, `${stamp}.json`);
+    const file = join22(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -23960,13 +24084,13 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync20(paths.checkpointsDir) ? readdirSync9(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync21(paths.checkpointsDir) ? readdirSync9(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync15(join21(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync15(join22(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -23981,7 +24105,7 @@ function checkpointGroup(args, io) {
     assertControllerRole(args, "checkpoint restore");
     const name = requirePositional(args, 3, "checkpoint-file");
     assertPlainFileName(name);
-    const file = join21(paths.checkpointsDir, name);
+    const file = join22(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync15(file, "utf8"));
     saveState(paths.featureDir, checkpoint.state);
     emit2(io, args, { restored: name }, () => `Restored ${name}.`);
@@ -24079,7 +24203,11 @@ async function orchestrateGroup(args, io) {
       report,
       () => [
         `stop: ${report.stop_reason} after ${report.cycles} cycle(s); feature ${report.feature_state}`,
-        ...report.reports.map((r) => `${r.node_id} -> ${r.outcome} (${r.state})`)
+        ...report.stop_reason === "ADAPTER_UNAVAILABLE" && report.adapter ? [`adapter: ${report.adapter.detail ?? "unavailable"} (nothing was charged; fix it and re-run, or use mycelink dispatch)`] : [],
+        // Every node that did not finish says why, not only in --json.
+        ...report.reports.map(
+          (r) => `${r.node_id} -> ${r.outcome} (${r.state})${r.outcome === "DONE" ? "" : `: ${r.detail.slice(0, 300)}`}`
+        )
       ].join("\n")
     );
     return report.stop_reason === "ALL_SETTLED" ? 0 : 1;

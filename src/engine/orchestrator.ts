@@ -59,6 +59,7 @@ import {
 } from '../sessions/worker-protocol.js';
 import { statusForOutcome } from '../sessions/adapter.js';
 import { lstatSync } from 'node:fs';
+import type { PreflightResult } from '../sessions/preflight.js';
 import { hostname } from 'node:os';
 import { isPidAlive } from '../state/process-lock.js';
 import {
@@ -104,6 +105,12 @@ export interface OrchestratorOptions {
   workerEnv?: Record<string, string>;
   /** Optional LLM Wiki Brain recall injected into each context pack. */
   recall?: (node: GraphNode) => MemoryRef[];
+  /**
+   * Checks that the worker adapter can start at all. Run once, before the
+   * first worker node is claimed; a failure stops the run with
+   * ADAPTER_UNAVAILABLE instead of charging the node.
+   */
+  preflight?: () => PreflightResult;
 }
 
 export interface NodeRunReport {
@@ -117,7 +124,9 @@ export interface NodeRunReport {
     | 'NEEDS_DECISION'
     | 'BUDGET_EXHAUSTED'
     | 'VERIFICATION_FAILED'
-    | 'OWNERSHIP_VIOLATION';
+    | 'OWNERSHIP_VIOLATION'
+    /** The worker could not be started; the claim was handed back unspent. */
+    | 'INFRASTRUCTURE_FAILURE';
   session_id: string | null;
   state: NodeState;
   detail: string;
@@ -138,9 +147,13 @@ export interface FeatureRunReport {
     | 'NEEDS_DECISION'
     | 'BUDGET_EXHAUSTED'
     | 'NO_PROGRESS'
-    | 'MAX_CYCLES';
+    | 'MAX_CYCLES'
+    /** The worker adapter cannot start; nothing was charged. Resumable. */
+    | 'ADAPTER_UNAVAILABLE';
   reports: NodeRunReport[];
   feature_state: string;
+  /** The adapter preflight, when one ran. */
+  adapter?: PreflightResult;
 }
 
 /** How long past its wall-clock budget an unsettled claim is still presumed alive. */
@@ -151,6 +164,20 @@ const STOPPED_FEATURE_STATES: ReadonlySet<FeatureState> = new Set<FeatureState>(
   'CANCELLED',
   'PAUSED',
 ]);
+
+/** The claim was taken but its resources or worktree could not be set up. */
+export class ClaimSetupError extends Error {
+  readonly code = 'CLAIM_SETUP_FAILED';
+  constructor(nodeId: string, cause: unknown) {
+    super(`CLAIM_SETUP_FAILED: ${nodeId}: ${errorText(cause)}`);
+    this.name = 'ClaimSetupError';
+  }
+}
+
+/** A worker that never started is an environment failure, not a task failure. */
+export function isInfrastructureFailure(reason: string | null | undefined): boolean {
+  return typeof reason === 'string' && reason.startsWith('SPAWN_FAILED');
+}
 
 export class NotSchedulableError extends Error {
   readonly code = 'NOT_SCHEDULABLE';
@@ -301,6 +328,8 @@ export class Orchestrator {
   private readonly owner: string;
   private readonly workerEnv: Record<string, string>;
   private readonly recall: ((node: GraphNode) => MemoryRef[]) | undefined;
+  private readonly preflight: (() => PreflightResult) | undefined;
+  private preflightResult: PreflightResult | null = null;
 
   constructor(options: OrchestratorOptions) {
     this.controlRoot = resolve(options.controlRoot);
@@ -311,6 +340,13 @@ export class Orchestrator {
     this.owner = options.owner ?? 'mycelink';
     this.workerEnv = options.workerEnv ?? {};
     this.recall = options.recall;
+    this.preflight = options.preflight;
+  }
+
+  /** The adapter preflight, run at most once per orchestrator. */
+  adapterReady(): PreflightResult {
+    if (this.preflightResult === null) this.preflightResult = this.preflight ? this.preflight() : { ok: true };
+    return this.preflightResult;
   }
 
   graph(): PortfolioGraph {
@@ -475,7 +511,8 @@ export class Orchestrator {
       }
     } catch (err) {
       this.releaseForInfrastructure(nodeId, claimId, `claim setup failed: ${errorText(err)}`);
-      throw err;
+      if (err instanceof ResourceBusyError) throw err;
+      throw new ClaimSetupError(nodeId, err);
     }
 
     this.event('node.claimed', nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
@@ -717,6 +754,12 @@ export class Orchestrator {
     if (node.node_type === 'candidate-build') return this.runCandidateNode(nodeId);
     if (node.node_type === 'e2e-scenario') return await this.runE2ENode(nodeId);
 
+    const adapter = this.adapterReady();
+    if (!adapter.ok) {
+      // Found before anything was claimed: an environment problem, not the node's.
+      return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', null, `ADAPTER_UNAVAILABLE: ${adapter.detail ?? 'unavailable'}`, evidence);
+    }
+
     try {
       const { claimId, capability, worktree, branch } = this.claim(nodeId, { mode: 'adapter' });
       const packPath = this.writeContextPack(nodeId, claimId);
@@ -768,6 +811,13 @@ export class Orchestrator {
       const observation = await this.adapter.wait(handle);
       recordObservation(this.paths.sessionsRegistry, handle.session_id, observation);
 
+      if (isInfrastructureFailure(observation.failure_reason)) {
+        // No worker ever ran: hand the claim back unspent and stop, rather
+        // than charging the node and blocking it after two identical tries.
+        this.releaseForInfrastructure(nodeId, claimId, observation.failure_reason ?? 'SPAWN_FAILED');
+        return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, observation.failure_reason ?? 'SPAWN_FAILED', evidence);
+      }
+
       mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, observation.usage));
 
       appendRun(this.paths.runs, {
@@ -801,6 +851,10 @@ export class Orchestrator {
       if (err instanceof ResourceBusyError || err instanceof NotSchedulableError) {
         // Nothing was claimed (or the claim was already released): no failure.
         return this.report(nodeId, 'RETRY', sessionId, detail, evidence);
+      }
+      if (err instanceof ClaimSetupError) {
+        // The claim was released with its attempt refunded by claim() itself.
+        return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, detail, evidence);
       }
       return this.failAttempt(nodeId, sessionId, detail, evidence);
     }
@@ -1624,7 +1678,10 @@ export class Orchestrator {
     const plan = this.plan();
     const reports: NodeRunReport[] = [];
     for (const scheduled of plan.scheduled) {
-      reports.push(await this.runNode(scheduled.node_id));
+      const report = await this.runNode(scheduled.node_id);
+      reports.push(report);
+      // The adapter is down for everyone; do not burn through the batch.
+      if (report.outcome === 'INFRASTRUCTURE_FAILURE') break;
     }
     return {
       scheduled: plan.scheduled.map((s) => s.node_id),
@@ -1640,6 +1697,9 @@ export class Orchestrator {
 
     for (; cycles < maxCycles; cycles++) {
       const state = this.state();
+      if (cycles === 0 && this.preflight !== undefined && !this.adapterReady().ok) {
+        return this.finish(0, 'ADAPTER_UNAVAILABLE', all);
+      }
       if (state.feature_state === 'BUDGET_EXHAUSTED') {
         return this.finish(cycles, 'BUDGET_EXHAUSTED', all);
       }
@@ -1653,6 +1713,9 @@ export class Orchestrator {
 
       const cycle = await this.runOnce();
       all.push(...cycle.reports);
+      if (cycle.reports.some((r) => r.outcome === 'INFRASTRUCTURE_FAILURE')) {
+        return this.finish(cycles + 1, 'ADAPTER_UNAVAILABLE', all);
+      }
 
       if (cycle.scheduled.length === 0) {
         const after = this.state();
@@ -1680,6 +1743,7 @@ export class Orchestrator {
       stop_reason: reason,
       reports,
       feature_state: this.state().feature_state,
+      ...(this.preflightResult !== null ? { adapter: this.preflightResult } : {}),
     };
   }
 

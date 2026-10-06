@@ -64,6 +64,13 @@ function readPrompt() {
   }
 }
 
+// `claude --version` answers without reading a prompt, as the real CLI does;
+// the adapter preflight probes it.
+if (has('--version')) {
+  process.stdout.write('2.1.290 (Claude Code) [mycelink fake]\n');
+  process.exit(0);
+}
+
 const prompt = readPrompt();
 
 function packFromPrompt(text) {

@@ -47,6 +47,7 @@ import { assertPlainFileName } from '../security/names.js';
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { packageRoot } from '../util/paths.js';
 import { assertDecisionRecorded } from '../state/decisions.js';
+import { preflightAdapter } from '../sessions/preflight.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { isInsideReal } from '../security/paths.js';
 import { checkEvidenceOutput, relativeInside, resolveEvidenceOutput } from '../evidence/paths.js';
@@ -137,7 +138,12 @@ function adapterFor(controlRoot: string): ClaudeCliAdapter {
 }
 
 function orchestratorFor(controlRoot: string, featureId: string): Orchestrator {
-  return new Orchestrator({ controlRoot, featureId, adapter: adapterFor(controlRoot) });
+  return new Orchestrator({
+    controlRoot,
+    featureId,
+    adapter: adapterFor(controlRoot),
+    preflight: () => preflightAdapter(loadConfig(controlRoot)),
+  });
 }
 
 function requirePositional(args: ParsedArgs, index: number, name: string): string {
@@ -224,7 +230,7 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 function doctor(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
   const paths = controlPaths(controlRoot);
-  const checks: { name: string; ok: boolean; detail: string }[] = [];
+  const checks: { name: string; ok: boolean; detail: string; level?: 'ok' | 'warn' }[] = [];
 
   const push = (name: string, ok: boolean, detail: string): void => {
     checks.push({ name, ok, detail });
@@ -262,6 +268,17 @@ function doctor(args: ParsedArgs, io: CliIo): number {
 
   const config = loadConfig(controlRoot);
   push('session adapter', true, config.session_adapter);
+  // The standalone adapter is optional: host dispatch (the plugin's primary
+  // path) never starts it. Its absence is reported, not failed.
+  const adapter = preflightAdapter(config);
+  checks.push({
+    name: 'worker adapter (standalone)',
+    ok: true,
+    level: adapter.ok ? 'ok' : 'warn',
+    detail: adapter.ok
+      ? `${adapter.detail}`
+      : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,
+  });
 
   if (existsSync(paths.config)) {
     const hooks = hookHealth(controlRoot);
@@ -275,7 +292,7 @@ function doctor(args: ParsedArgs, io: CliIo): number {
 
   const ok = checks.every((c) => c.ok);
   emit(io, args, { ok, checks }, () =>
-    checks.map((c) => `${c.ok ? 'ok  ' : 'FAIL'} ${c.name}: ${c.detail}`).join('\n'),
+    checks.map((c) => `${c.level === 'warn' ? 'warn' : c.ok ? 'ok  ' : 'FAIL'} ${c.name}: ${c.detail}`).join('\n'),
   );
   return ok ? 0 : 1;
 }
@@ -1667,7 +1684,13 @@ async function orchestrateGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     emit(io, args, report, () =>
       [
         `stop: ${report.stop_reason} after ${report.cycles} cycle(s); feature ${report.feature_state}`,
-        ...report.reports.map((r) => `${r.node_id} -> ${r.outcome} (${r.state})`),
+        ...(report.stop_reason === 'ADAPTER_UNAVAILABLE' && report.adapter
+          ? [`adapter: ${report.adapter.detail ?? 'unavailable'} (nothing was charged; fix it and re-run, or use mycelink dispatch)`]
+          : []),
+        // Every node that did not finish says why, not only in --json.
+        ...report.reports.map(
+          (r) => `${r.node_id} -> ${r.outcome} (${r.state})${r.outcome === 'DONE' ? '' : `: ${r.detail.slice(0, 300)}`}`,
+        ),
       ].join('\n'),
     );
     return report.stop_reason === 'ALL_SETTLED' ? 0 : 1;
