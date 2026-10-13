@@ -20,6 +20,10 @@ import { execSync, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Pipes are asynchronous on macOS and Windows (synchronous on Linux): a stand-in that exits right after its last
+// line would drop what was still buffered, cutting its own stream mid-line. Write through, as a real CLI does.
+for (const stream of [process.stdout, process.stderr]) stream._handle?.setBlocking?.(true);
+
 const plan = JSON.parse(readFileSync(process.env.FAKE_CLAUDE_PLAN, 'utf8'));
 const given = process.argv.slice(2);
 readFileSync(0, 'utf8');

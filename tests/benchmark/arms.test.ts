@@ -54,6 +54,8 @@ function qaPrompt(sent: string, defect: any, original: string): string {
 const AGENT_TESTS = Object.fromEntries(Object.entries(TOY.referenceTests).map(([p, body]) => [p, `// written by the agent\n${body}`]));
 // libuv copies these into every child environment on Windows.
 const WINDOWS_REQUIRED = ['HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR'];
+/** What macOS's CoreFoundation sets in every process it starts, whatever environment it was given. */
+const MACOS_REQUIRED = ['__CF_USER_TEXT_ENCODING'];
 
 let toy: Toy;
 let project: any;
@@ -126,7 +128,7 @@ describe('normal arms', () => {
     expect(b.home).toBe(withMycelink.home);
     expect(a.home).not.toBe(b.home);
     // Nothing of the operator's environment reaches a session beyond the passed list (bwrap's --chdir sets PWD, the workspace).
-    const allowed = new Set([...PASSED_ENV, ...Object.keys(PROXY_ENV), 'HOME', 'USERPROFILE', 'TMPDIR', 'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'FAKE_CLAUDE_PLAN', 'MYCELINK_PROVENANCE', ...(ISOLATED ? ['PWD'] : []), ...(process.platform === 'win32' ? WINDOWS_REQUIRED : [])].map((k) => k.toUpperCase()));
+    const allowed = new Set([...PASSED_ENV, ...Object.keys(PROXY_ENV), 'HOME', 'USERPROFILE', 'TMPDIR', 'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'FAKE_CLAUDE_PLAN', 'MYCELINK_PROVENANCE', ...(ISOLATED ? ['PWD'] : []), ...(process.platform === 'win32' ? WINDOWS_REQUIRED : []), ...(process.platform === 'darwin' ? MACOS_REQUIRED : [])].map((k) => k.toUpperCase()));
     expect(a.env.filter((k: string) => !allowed.has(k.toUpperCase()))).toEqual([]);
     expect(a.env).not.toContain('BENCH_OPERATOR_MARKER');
     for (const run of [without, withMycelink]) {
