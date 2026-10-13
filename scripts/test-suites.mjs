@@ -28,16 +28,22 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Each suite: its directory, what it leaves out, how many files run at once, and how many shards it is cut into. */
+/**
+ * Each suite: its directory, what it leaves out, how many files run at once, how many shards it is cut into, and the
+ * bound on one test or hook where it is not the config's 120 s. The workflow suites (integration, fixtures,
+ * benchmark) drive real git repositories and CLI processes through whole scenarios; on hosted runners they take two
+ * to three times as long as on a developer machine, so they get the 300 s bound the longest replays already declare.
+ * A test that hangs still fails; nothing is retried.
+ */
 export const SUITES = {
   unit: { dir: 'tests/unit', maxWorkers: 3, shards: 1 },
-  integration: { dir: 'tests/integration', maxWorkers: 3, shards: 5 },
+  integration: { dir: 'tests/integration', maxWorkers: 3, shards: 5, timeoutMs: 300_000 },
   security: { dir: 'tests/security', maxWorkers: 3, shards: 1 },
-  fixtures: { dir: 'tests/fixtures', maxWorkers: 2, shards: 2 },
+  fixtures: { dir: 'tests/fixtures', maxWorkers: 2, shards: 2, timeoutMs: 300_000 },
   release: { dir: 'tests/release', maxWorkers: 2, shards: 1 },
   'plugin-e2e': { dir: 'tests/plugin-e2e', maxWorkers: 1, shards: 1 },
   // The model-free tests of the public-project benchmark (evals-public-projects); real pilots are opt-in elsewhere.
-  benchmark: { dir: 'tests/benchmark', exclude: ['tests/benchmark/fixtures/'], maxWorkers: 2, shards: 3 },
+  benchmark: { dir: 'tests/benchmark', exclude: ['tests/benchmark/fixtures/'], maxWorkers: 2, shards: 3, timeoutMs: 300_000 },
 };
 
 /** Directories under tests/ that hold no suite: helpers, the fake Claude, the opt-in pilot. */
@@ -113,16 +119,16 @@ export function selection(spec) {
   const m = /^([a-z0-9-]+)(?::(\d+)\/(\d+))?$/.exec(spec);
   if (m === null || SUITES[m[1]] === undefined) throw new Error(`unknown suite ${spec} (suites: ${Object.keys(SUITES).join(', ')})`);
   const suite = m[1];
-  const { maxWorkers } = SUITES[suite];
-  if (m[2] === undefined) return { suite, label: suite, files: testFiles(SUITES[suite].dir, SUITES[suite].exclude), maxWorkers };
+  const { maxWorkers, timeoutMs = null } = SUITES[suite];
+  if (m[2] === undefined) return { suite, label: suite, files: testFiles(SUITES[suite].dir, SUITES[suite].exclude), maxWorkers, timeoutMs };
   const i = Number(m[2]);
   const n = Number(m[3]);
   if (n !== SUITES[suite].shards || i < 1 || i > n) throw new Error(`${spec}: ${suite} has shards 1..${SUITES[suite].shards}`);
-  return { suite, label: `${suite} ${i}/${n}`, files: shardsOf(suite, n)[i - 1].files, maxWorkers };
+  return { suite, label: `${suite} ${i}/${n}`, files: shardsOf(suite, n)[i - 1].files, maxWorkers, timeoutMs };
 }
 
 /** Run one selection as its own Vitest process; returns its exit status. */
-function runSelection({ label, files, maxWorkers }) {
+function runSelection({ label, files, maxWorkers, timeoutMs }) {
   // Vitest takes file arguments as filters that match by substring: each must name exactly one collected file.
   const all = collectedFiles();
   for (const f of files) {
@@ -133,9 +139,10 @@ function runSelection({ label, files, maxWorkers }) {
     process.stdout.write(`\n== ${label}: no test files\n`);
     return 0;
   }
-  process.stdout.write(`\n== ${label}: ${files.length} file(s), at most ${maxWorkers} at once\n`);
+  process.stdout.write(`\n== ${label}: ${files.length} file(s), at most ${maxWorkers} at once${timeoutMs ? `, ${timeoutMs / 1000} s a test` : ''}\n`);
   const vitest = join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
-  const r = spawnSync(process.execPath, [vitest, 'run', ...files, `--maxWorkers=${maxWorkers}`], { cwd: ROOT, stdio: 'inherit' });
+  const bound = timeoutMs ? [`--testTimeout=${timeoutMs}`, `--hookTimeout=${timeoutMs}`] : [];
+  const r = spawnSync(process.execPath, [vitest, 'run', ...files, `--maxWorkers=${maxWorkers}`, ...bound], { cwd: ROOT, stdio: 'inherit' });
   return r.status ?? 1;
 }
 
