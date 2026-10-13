@@ -21842,7 +21842,7 @@ function darwinInfo(pid) {
   };
 }
 function windowsSnapshot() {
-  const script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '' }) }";
+  const script = "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
   const r = spawnSync6("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8",
     timeout: 6e4,
