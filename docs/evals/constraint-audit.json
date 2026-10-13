@@ -1593,7 +1593,8 @@
       "charges_product_attempt": "n/a",
       "tests": [
         "tests/benchmark/controller-txn.test.ts",
-        "tests/benchmark/controller-rollback.test.ts"
+        "tests/benchmark/controller-rollback.test.ts",
+        "tests/benchmark/controller-rollback-fence.test.ts"
       ],
       "anchor": {
         "file": "evals-public-projects/lib/controller-txn.mjs",
@@ -2963,7 +2964,7 @@
     "test_files_naming_case": {
       "CSET-201": 24,
       "CSET-202": 40,
-      "CSET-203": 105,
+      "CSET-203": 106,
       "PCM-101": 23,
       "PCM-102": 2,
       "PCM-103": 5

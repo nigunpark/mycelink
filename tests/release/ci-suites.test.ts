@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 // @ts-expect-error -- plain ESM script without type declarations
-import { CI_GROUPS, SUITES, collectedFiles, selection, shardsOf } from '../../scripts/test-suites.mjs';
+import { CI_GROUPS, DEFAULT_WEIGHT, SUITES, collectedFiles, selection, shardsOf } from '../../scripts/test-suites.mjs';
 
 const ROOT = resolve(process.cwd());
 const workflow = (f: string) => YAML.parse(readFileSync(join(ROOT, '.github', 'workflows', f), 'utf8')) as { jobs: Record<string, any> };
@@ -59,6 +59,20 @@ describe('the suites', () => {
     const weights = JSON.parse(readFileSync(join(ROOT, 'scripts', 'test-weights.json'), 'utf8')) as Record<string, number>;
     const collected = new Set(collectedFiles());
     expect(Object.keys(weights).filter((f) => !collected.has(f))).toEqual([]);
+  });
+
+  // CI 38443874383: one benchmark file held a third of its suite, and the shard it filled ran into the 60-minute job
+  // bound on Windows. However many shards a suite has, none can be shorter than its heaviest file.
+  it('balance each sharded suite: every benchmark file weighed, none heavier than an even share, no shard far above one', () => {
+    const weights = JSON.parse(readFileSync(join(ROOT, 'scripts', 'test-weights.json'), 'utf8')) as Record<string, number>;
+    expect(selection('benchmark').files.filter((f: string) => weights[f] === undefined)).toEqual([]);
+    for (const s of suites.filter((x) => SUITES[x].shards > 1)) {
+      const shards = shardsOf(s) as { files: string[]; weight: number }[];
+      const share = shards.reduce((n, x) => n + x.weight, 0) / shards.length;
+      const heaviest = Math.max(...shards.flatMap((x) => x.files.map((f) => weights[f] ?? DEFAULT_WEIGHT)));
+      expect(heaviest, s).toBeLessThanOrEqual(share);
+      expect(Math.max(...shards.map((x) => x.weight)), s).toBeLessThanOrEqual(share * 1.25);
+    }
   });
 });
 
