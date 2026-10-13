@@ -111,10 +111,15 @@ function darwinInfo(pid: number): ProcessInfo | null {
   };
 }
 
-/** Every process on a Windows machine, from one CIM query. */
+/**
+ * Every process on a Windows machine, from one WMI query. It asks WMI itself (a WQL searcher, the three properties
+ * only) and names no cmdlet: `Get-CimInstance` had PowerShell discover its module first, which in a session's bare
+ * environment meant analysing every module on its path — seconds a call on a hosted runner (CI 38443874383). The start
+ * it reads is the one Get-CimInstance gave, to the digit: identities recorded before compare equal.
+ */
 function windowsSnapshot(): Snapshot | null {
   const script =
-    "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '' }) }";
+    "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
   const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
     timeout: 60_000,
