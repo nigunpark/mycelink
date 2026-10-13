@@ -44013,6 +44013,7 @@ var defaultIo = {
 };
 var USAGE = `mycelink <group> <command> [options]
 
+  help | --help | -h                         print this usage
   version | --version                        print the installed version
   doctor                                     environment and workspace health
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
@@ -44191,9 +44192,10 @@ async function main(argv, io = defaultIo) {
     io.out(packageVersion());
     return 0;
   }
-  if (group === void 0 || group === "help" || flagBool(args, "help")) {
+  const help = group === "help" || args.flags["help"] !== void 0 && args.flags["help"] !== "false" || args.positional.includes("-h");
+  if (help || group === void 0) {
     io.out(USAGE);
-    return group === void 0 ? 1 : 0;
+    return help ? 0 : 1;
   }
   try {
     const sub = args.positional[1] ?? "";

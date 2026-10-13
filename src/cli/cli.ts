@@ -97,6 +97,7 @@ const defaultIo: CliIo = {
 
 const USAGE = `mycelink <group> <command> [options]
 
+  help | --help | -h                         print this usage
   version | --version                        print the installed version
   doctor                                     environment and workspace health
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
@@ -311,9 +312,12 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
     return 0;
   }
 
-  if (group === undefined || group === 'help' || flagBool(args, 'help')) {
+  // A request for help — `help`, `--help` (whatever token it took as its value) or `-h`, with or without a
+  // command group — is answered, not an error. No command group at all is.
+  const help = group === 'help' || (args.flags['help'] !== undefined && args.flags['help'] !== 'false') || args.positional.includes('-h');
+  if (help || group === undefined) {
     io.out(USAGE);
-    return group === undefined ? 1 : 0;
+    return help ? 0 : 1;
   }
 
   try {
