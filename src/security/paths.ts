@@ -15,8 +15,8 @@
  * junctions on the deepest existing ancestor, so a link inside a worktree that
  * points elsewhere cannot be used to write outside it.
  */
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, realpathSync, type BigIntStats } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export type PathProblem =
   | 'EMPTY'
@@ -131,6 +131,39 @@ export function realpathDeepest(p: string): string {
 }
 
 /**
+ * The one name of the entry a path names: the real path of the directory it
+ * is in (links and junctions resolved on the deepest existing ancestor,
+ * Windows 8.3 names expanded) and its own last component. A link names
+ * itself and is never followed; any other existing entry is named by its real
+ * path, so an 8.3 name or another letter case in the last component is
+ * expanded too. Two spellings of one place get one name: macOS hands out
+ * `/var/...` for `/private/var/...`, GitHub's Windows runners
+ * `C:\Users\RUNNER~1` for `C:\Users\runneradmin`, while git, a child's
+ * working directory and a test runner name the real path.
+ *
+ * Only a name: containment is still decided by {@link isInsideReal}.
+ */
+export function canonicalPath(p: string): string {
+  const abs = resolve(p);
+  const parent = dirname(abs);
+  if (parent === abs) return realpathDeepest(abs);
+  let link = false;
+  try {
+    link = lstatSync(abs).isSymbolicLink();
+  } catch {
+    // not there (yet): named below its real directory
+  }
+  if (!link && existsSync(abs)) {
+    try {
+      return realpathSync.native(abs);
+    } catch {
+      // unreadable: named below its real directory
+    }
+  }
+  return join(realpathDeepest(parent), basename(abs));
+}
+
+/**
  * True when `a` and `b` name the same filesystem location. Path text is not
  * identity: Windows hands out 8.3 short names (`C:\Users\RUNNER~1`) and is
  * case-insensitive, links alias directories, and git records its own
@@ -204,6 +237,67 @@ export function namesOpenedFile(path: string, opened: BigIntStats): boolean {
   }
   if (reached.dev !== opened.dev || reached.ino !== opened.ino) return false;
   return plainFileAt(path, opened) !== null;
+}
+
+/**
+ * A regular file's bytes and mode, read through one descriptor, never a path
+ * looked at and then opened again: opened without following a final link and
+ * without blocking (a FIFO swapped in cannot hang the read); the descriptor
+ * must be a regular file within `max` bytes, and the path, looked up again
+ * without following it, must still name that very file (where the open
+ * follows a final link — Windows has no O_NOFOLLOW — a link swapped in is
+ * caught by its file id). At most `max` bytes are read however the file grows
+ * meanwhile. Null for anything else: absent, a link, a directory, a device or
+ * FIFO, more than `max` bytes, or a file the path no longer names.
+ */
+export function readRegular(path: string, max = Number.MAX_SAFE_INTEGER): { bytes: Buffer; mode: number } | null {
+  const opened = openRegular(path);
+  if (opened === null) return null;
+  try {
+    if (opened.size > max) return null;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const chunk = Buffer.alloc(Math.min(1 << 20, max - total + 1));
+      const n = readSync(opened.fd, chunk, 0, chunk.length, null);
+      if (n === 0) break;
+      total += n;
+      if (total > max) return null;
+      chunks.push(chunk.subarray(0, n));
+    }
+    return { bytes: Buffer.concat(chunks, total), mode: opened.mode };
+  } catch {
+    return null;
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+/**
+ * A descriptor on the regular file at `path`, opened as {@link readRegular}
+ * opens it (no final link followed, no blocking, the path still naming the
+ * very file), with its size and mode from the descriptor; null for anything
+ * else. The caller reads through it and closes it.
+ */
+export function openRegular(path: string): { fd: number; size: number; mode: number } | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    const opened = fstatSync(fd, { bigint: true });
+    const now = lstatSync(path, { bigint: true });
+    // Node 22.12 on Windows leaves a path lookup's `dev` at 0; the file id still tells the file apart.
+    if (opened.isFile() && !now.isSymbolicLink() && now.isFile() && now.ino === opened.ino && (now.dev === opened.dev || now.dev === 0n)) {
+      return { fd, size: Number(opened.size), mode: Number(opened.mode) };
+    }
+  } catch {
+    // unreadable: nothing
+  }
+  closeSync(fd);
+  return null;
 }
 
 /** The lookup of `path` when it is a regular file, not a link, with one name and the opened file's id. */

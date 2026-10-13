@@ -63,7 +63,7 @@ import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
-import { isInsideReal, samePath } from '../security/paths.js';
+import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { changedInputs, runWorktreeSetup, setupInputs, worktreeSetupOf, worktreeSetupSha256 } from '../engine/worktree-setup.js';
 import { modulesOf, verifierFor } from '../engine/modules.js';
 import { regressionDeferral, type DeferralDecision } from '../engine/regression-deferral.js';
@@ -77,6 +77,15 @@ import { RED_RETRY_GUIDANCE } from '../evidence/red-classify.js';
 import { namesDeclared, readGateTests, shownTests, testLine } from '../evidence/gate-tests.js';
 import { sessionHolder } from '../util/process-identity.js';
 import { ACCEPTANCE_FILE, AcceptanceError, buildManifest, extractAcceptanceCriteria, loadAcceptanceManifest, manifestProblems, sidecarPath } from '../engine/acceptance.js';
+
+/** Whether a path is a link (for a message only: nothing is read from this look). */
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
 
 /** The installed package version, from the package.json that ships with it. */
 export function packageVersion(): string {
@@ -1934,10 +1943,14 @@ function tddCheck(args: ParsedArgs, io: CliIo, controlRoot: string, featureId: s
   const head = resolveRef(repoPath, branch);
   const slot = join(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
   let result: NodeResult;
+  // Read through one descriptor: what is checked is what is read.
+  const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
+  if (read === null) {
+    if (existsSync(slot) || isLink(slot)) return refuse('RESULT_UNREADABLE', `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
+    return refuse('RESULT_MISSING', `write your result to ${slot} first (it does not exist)`);
+  }
   try {
-    const st = lstatSync(slot);
-    if (!st.isFile() || st.size > MAX_WORKER_RESULT_BYTES) return refuse('RESULT_UNREADABLE', `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
-    result = JSON.parse(readFileSync(slot, 'utf8')) as NodeResult;
+    result = JSON.parse(read.bytes.toString('utf8')) as NodeResult;
   } catch (err) {
     return refuse('RESULT_MISSING', `write your result to ${slot} first (${(err as Error).message.split('\n')[0]})`);
   }
@@ -2995,14 +3008,15 @@ function hostResultCopy(spec: string, controlRoot: string, io: CliIo): { ok: tru
   }
   const file = resolve(spec);
   try {
-    const st = lstatSync(file);
-    if (!st.isFile()) return { ok: false, detail: `${spec} is not a regular file (a link is never followed)` };
-    if (st.size > MAX_RESULT_BYTES) return { ok: false, detail: `${spec} is ${st.size} bytes, over ${MAX_RESULT_BYTES}` };
     if (!isInsideReal(realpathSync.native(controlRoot), realpathSync.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
-    return { ok: true, text: readFileSync(file, 'utf8') };
   } catch {
     return { ok: false, detail: `${spec} cannot be read` };
   }
+  // Read through one descriptor, never following a link: what is checked is what is read.
+  const read = readRegular(file, MAX_RESULT_BYTES);
+  if (read !== null) return { ok: true, text: read.bytes.toString('utf8') };
+  if (isLink(file)) return { ok: false, detail: `${spec} is not a regular file (a link is never followed)` };
+  return { ok: false, detail: `${spec} is not a regular file of at most ${MAX_RESULT_BYTES} bytes` };
 }
 
 /** Standard input, read at most `max` bytes. */

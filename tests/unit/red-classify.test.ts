@@ -22,6 +22,10 @@ import {
   MAVEN_TEXT_COMPILE,
   MAVEN_TEXT_DOMAIN_EXCEPTION,
   MAVEN_TEXT_MISSING_CLASS,
+  NODE22_TAP_ASSERTION,
+  NODE22_TAP_DOMAIN_EXCEPTION,
+  NODE22_TAP_FILE_EXIT,
+  NODE22_TAP_NOT_A_CONSTRUCTOR,
   NODE_JUNIT_LINK,
   SUREFIRE_VISITS,
   VITEST_R1,
@@ -115,6 +119,11 @@ describe('classifyRedOutput (no structured report: conservative patterns)', () =
     ['AssertionError: expected publish() to emit', 'assertion'],
     ['1 failing\n  expected 2 to equal 3', 'assertion'],
     ['the process exited with code 1', 'crash'],
+    // Node 22's runner prints TAP into a pipe: the same verdicts as its spec output on Node 24.
+    [NODE22_TAP_NOT_A_CONSTRUCTOR, 'missing-symbol'],
+    [NODE22_TAP_ASSERTION, 'assertion'],
+    [NODE22_TAP_DOMAIN_EXCEPTION, 'exception'],
+    [NODE22_TAP_FILE_EXIT, 'crash'],
   ])('%#: -> %s', (output, category) => {
     expect(classifyRedOutput(output, 1).category).toBe(category);
   });

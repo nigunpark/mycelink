@@ -137,7 +137,7 @@ import { CYCLE_CORRECTIONS, MAX_EVIDENCE_CORRECTIONS, capsulePathDetail, criteri
 import { criteriaFingerprint, criteriaForm, evidenceReuse, scalarCriteria, type CriteriaForm, type EvidenceUse } from './criterion-outcomes.js';
 import { AcceptanceDriftError } from './acceptance.js';
 import { appendEvent } from '../state/event-log.js';
-import { isInsideReal } from '../security/paths.js';
+import { isInsideReal, readRegular } from '../security/paths.js';
 import { declaredTests } from './test-declarations.js';
 import {
   CAPSULE_LIMITS,
@@ -5205,7 +5205,9 @@ export class Orchestrator {
     } catch {
       return null;
     }
-    if (!st.isFile() || st.size > MAX_WORKER_RESULT_BYTES) {
+    // Read through one descriptor: what was looked at is what is read, or nothing is.
+    const read = st.isFile() && st.size <= MAX_WORKER_RESULT_BYTES ? readRegular(slot, MAX_WORKER_RESULT_BYTES) : null;
+    if (read === null) {
       try {
         if (st.isSymbolicLink() || st.isFile()) unlinkSync(slot);
       } catch {
@@ -5213,7 +5215,7 @@ export class Orchestrator {
       }
       return null;
     }
-    let text = readFileSync(slot, 'utf8');
+    let text = read.bytes.toString('utf8');
     if (capability !== undefined && capability !== '') text = text.split(capability).join('[REDACTED]');
     const sha = createHash('sha256').update(text).digest('hex');
     const dir = join(this.sessionDir(nodeId), 'stale');
@@ -7755,7 +7757,10 @@ export class Orchestrator {
     if (st !== null) {
       if (!st.isFile()) return { status: 'unsafe', detail: `${open.slot} is not a regular file` };
       if (st.size > MAX_VERDICT_BYTES) return { status: 'oversize', size: st.size };
-      const content = readFileSync(slot, 'utf8');
+      // Read through one descriptor: a verdict swapped for a link or another file since the look is no verdict.
+      const read = readRegular(slot, MAX_VERDICT_BYTES);
+      if (read === null) return { status: 'unsafe', detail: `${open.slot} changed while it was read` };
+      const content = read.bytes.toString('utf8');
       const attest = ((): Attestation | null => {
         try {
           const parsed = JSON.parse(readFileSync(join(safe.dir, ATTESTATION_FILE), 'utf8')) as unknown;
@@ -11109,9 +11114,9 @@ function safeNodeDir(nodeId: string): string {
 function slotEpoch(slot: string): number | null {
   if (!realDirectory(dirname(slot))) return null;
   try {
-    const st = lstatSync(slot);
-    if (!st.isFile() || st.size > MAX_WORKER_RESULT_BYTES) return null;
-    const value = (JSON.parse(readFileSync(slot, 'utf8')) as { orchestration_epoch?: unknown }).orchestration_epoch;
+    const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
+    if (read === null) return null;
+    const value = (JSON.parse(read.bytes.toString('utf8')) as { orchestration_epoch?: unknown }).orchestration_epoch;
     return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
   } catch {
     return null;

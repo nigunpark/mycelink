@@ -6,12 +6,15 @@
  * path inside the place it is allowed to name.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  canonicalPath,
   classifyLocationPath,
   classifyRelativePath,
   isInsideReal,
+  readRegular,
   resolveInside,
   samePath,
   UnsafePathError,
@@ -163,6 +166,84 @@ describe('path identity', () => {
     if (short === null) return ctx.skip();
     expect(samePath(short, dir)).toBe(true);
     expect(samePath(join(short, 'not-yet'), join(dir, 'not-yet'))).toBe(true);
+  });
+});
+
+describe('reading a regular file through one descriptor (no path looked at, then read again)', () => {
+  it('reads a regular file, within its bound, with its mode', () => {
+    const base = makeTmpDir('paths-read-');
+    writeFileSync(join(base, 'a.json'), '{"x":1}');
+    expect(readRegular(join(base, 'a.json'), 64)).toMatchObject({ bytes: Buffer.from('{"x":1}') });
+    expect(typeof readRegular(join(base, 'a.json'), 64)!.mode).toBe('number');
+  });
+
+  it('reads nothing that is absent, a directory, larger than its bound, or reached through a link', () => {
+    const base = makeTmpDir('paths-read-');
+    mkdirSync(join(base, 'dir'));
+    writeFileSync(join(base, 'big'), 'x'.repeat(65));
+    writeFileSync(join(base, 'target'), 'secret');
+    linkDir(join(base, 'dir'), join(base, 'dir-link'));
+    expect(readRegular(join(base, 'missing'), 64)).toBeNull();
+    expect(readRegular(join(base, 'dir'), 64)).toBeNull();
+    expect(readRegular(join(base, 'big'), 64)).toBeNull();
+    expect(readRegular(join(base, 'dir-link'), 64)).toBeNull();
+    // A file link (POSIX; creating one needs a privilege on Windows).
+    if (process.platform !== 'win32') {
+      symlinkSync(join(base, 'target'), join(base, 'file-link'));
+      expect(readRegular(join(base, 'file-link'), 64)).toBeNull();
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('never blocks on a FIFO put where a file was expected', () => {
+    const base = makeTmpDir('paths-read-');
+    execFileSync('mkfifo', [join(base, 'fifo')]);
+    expect(readRegular(join(base, 'fifo'), 64)).toBeNull();
+  });
+});
+
+describe('canonical names (one spelling per place: macOS /var is /private/var, C:\\Users\\RUNNER~1 is C:\\Users\\runneradmin)', () => {
+  it('names a file, a directory and a path not made yet by their real place, whichever link reached them', () => {
+    const base = makeTmpDir('paths-canon-');
+    mkdirSync(join(base, 'real', 'dir'), { recursive: true });
+    writeFileSync(join(base, 'real', 'file.txt'), 'x');
+    linkDir(join(base, 'real'), join(base, 'alias'));
+    const real = realpathSync.native(join(base, 'real'));
+    expect(canonicalPath(join(base, 'real'))).toBe(real);
+    for (const rel of ['dir', 'file.txt', join('not', 'yet.txt')]) {
+      expect(canonicalPath(join(base, 'alias', rel)), rel).toBe(join(real, rel));
+      expect(canonicalPath(join(base, 'real', rel)), rel).toBe(join(real, rel));
+    }
+  });
+
+  it('names a link by itself, in its real directory, never by what it points to', () => {
+    const base = makeTmpDir('paths-canon-');
+    mkdirSync(join(base, 'real', 'target'), { recursive: true });
+    linkDir(join(base, 'real', 'target'), join(base, 'real', 'link'));
+    linkDir(join(base, 'real'), join(base, 'alias'));
+    const real = realpathSync.native(join(base, 'real'));
+    expect(canonicalPath(join(base, 'alias'))).toBe(join(realpathSync.native(base), 'alias'));
+    expect(canonicalPath(join(base, 'alias', 'link'))).toBe(join(real, 'link'));
+    // Below the link, its target is the place.
+    expect(canonicalPath(join(base, 'alias', 'link', 'x'))).toBe(join(real, 'target', 'x'));
+  });
+
+  it('expands a Windows 8.3 short name, the last component included', (ctx) => {
+    const dir = makeTmpDir('paths-long-directory-name-');
+    mkdirSync(join(dir, 'a long child name'));
+    const short = windowsShortPathAlias(join(dir, 'a long child name'));
+    if (short === null) return ctx.skip();
+    const long = realpathSync.native(join(dir, 'a long child name'));
+    expect(canonicalPath(short)).toBe(long);
+    expect(canonicalPath(join(short, 'new.json'))).toBe(join(long, 'new.json'));
+  });
+
+  it('keeps containment as strict as before: a canonical name is only a name, a link out of the root still escapes', () => {
+    const base = makeTmpDir('paths-canon-');
+    mkdirSync(join(base, 'root'), { recursive: true });
+    mkdirSync(join(base, 'outside'), { recursive: true });
+    linkDir(join(base, 'outside'), join(base, 'root', 'escape'));
+    expect(canonicalPath(join(base, 'root', 'escape', 'x'))).toBe(join(realpathSync.native(join(base, 'outside')), 'x'));
+    expect(isInsideReal(join(base, 'root'), join(base, 'root', 'escape', 'x'))).toBe(false);
   });
 });
 

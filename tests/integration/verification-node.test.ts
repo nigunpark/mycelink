@@ -24,6 +24,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { samePath } from '../../src/security/paths.js';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
@@ -55,21 +56,20 @@ import {
   type Ver,
 } from '../helpers/version-fixture.js';
 import { fulfil, type CriterionItem, type ShopTicket } from '../helpers/shop-worker.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
 const BIN = join(process.cwd(), 'bin', 'mycelink.mjs');
 const sha256 = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
 
-/** The repository's worktrees other than its own checkout and the feature's integration worktree. */
-const extraWorktrees = (s: Ver): string[] => {
-  const norm = (p: string): string => p.replace(/\\/g, '/').toLowerCase();
-  return git(s.repo, ['worktree', 'list', '--porcelain'])
+/** The repository's worktrees other than its own checkout (git names it by its real path) and the feature's integration worktree. */
+const extraWorktrees = (s: Ver): string[] =>
+  git(s.repo, ['worktree', 'list', '--porcelain'])
     .split('\n')
     .filter((l) => l.startsWith('worktree '))
     .map((l) => l.slice('worktree '.length))
-    .filter((p) => !/integration__changesets__/.test(p) && norm(p) !== norm(s.repo));
-};
+    .filter((p) => !/integration__changesets__/.test(p) && !samePath(p, s.repo));
 
 /** The cli in one cycle: AC-3 and AC-4 proved by the same RED. */
 const WORK: Record<string, { tests: Record<string, string>; impl: Record<string, string> }> = {
@@ -143,7 +143,7 @@ describe('dispatch runs a verification node itself', () => {
     expect(Object.keys(rt.evidence)).toEqual(['regression']);
     const record = rt.evidence.regression;
     expect(record).toMatchObject({ kind: 'regression', exit_code: 0, commit_sha: head, repository: 'changesets', failure_fingerprint: null });
-    expect(record.output_path).toMatch(new RegExp(`^features/${VER_FEATURE}/evidence/${COMPAT.replace(/\./g, '\\.')}/`));
+    expect(record.output_path).toMatch(new RegExp(`^features/${VER_FEATURE}/evidence/${escapeRegExp(COMPAT)}/`));
     expect(sha256(join(s.control, record.output_path))).toBe(record.output_sha256);
 
     // The setup of its fresh checkout, bound like a worker's: on record, complete, the repository's config.

@@ -16,7 +16,7 @@
  * transcript, a completion of any status, a dead host, the wall-clock past —
  * is no running worker, and the settle is judged as it always was.
  */
-import { lstatSync, readFileSync } from 'node:fs';
+import { readRegular } from '../security/paths.js';
 import { basename, isAbsolute } from 'node:path';
 import { agentCallStanding } from './review-transport.js';
 import { launchFiles } from './provider-interrupt.js';
@@ -60,10 +60,10 @@ const wellFormedHolder = (h: unknown): h is ProcessIdentity => {
 };
 
 function readRecord(file: string): Record<string, unknown> | null {
+  const read = readRegular(file, MAX_RECORD_BYTES);
+  if (read === null) return null;
   try {
-    const st = lstatSync(file);
-    if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
-    const v = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    const v = JSON.parse(read.bytes.toString('utf8')) as unknown;
     return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
   } catch {
     return null;

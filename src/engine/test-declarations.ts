@@ -165,6 +165,27 @@ function declaredJsTests(src: string): { name: string; start: number }[] {
   return found;
 }
 
+/**
+ * Suites a JS/TS source declares with a static name (`describe(...)`,
+ * `suite(...)`, with modifiers), in source order; names built by
+ * interpolation or `.each` tables are not read.
+ */
+export function declaredJsSuites(src: string): string[] {
+  const { masked, literals } = scanJs(src);
+  const found: string[] = [];
+  const re = /(?<![\w$.])(?:describe|suite)((?:\s*\.\s*[A-Za-z]+)*)\s*\(/g;
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    const modifiers = (m[1] ?? '').replace(/\s/g, '').split('.').filter(Boolean);
+    if (modifiers.some((x) => x === 'each' || x === 'for')) continue;
+    let at = m.index + m[0].length;
+    while (at < src.length && /\s/.test(src[at] as string)) at++;
+    const literal = literals.get(at);
+    if (!literal || !literal.static) continue;
+    found.push(literal.value);
+  }
+  return found;
+}
+
 /** C-like source with comments and string/char literals blanked out (offsets kept). */
 export function maskCLike(src: string, options: { rawBackticks?: boolean; textBlocks?: boolean } = {}): string {
   const masked = src.split('');

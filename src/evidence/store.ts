@@ -56,16 +56,18 @@ export function contentName(stem: string, sha: string, ext: string, n = 0): stri
  * without following a final link, so nothing swapped in is ever hashed.
  */
 export function artifactAt(file: string, sha: string): 'missing' | 'same' | 'other' {
-  try {
-    lstatSync(file);
-  } catch {
-    return 'missing';
-  }
   let fd: number;
   try {
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-  } catch {
-    return 'other';
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return 'other';
+    // Nothing there, or a dangling link (which fails the open the same way): told apart without following it.
+    try {
+      lstatSync(file);
+      return 'other';
+    } catch {
+      return 'missing';
+    }
   }
   try {
     const st = fstatSync(fd, { bigint: true });

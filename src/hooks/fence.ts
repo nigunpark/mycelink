@@ -61,6 +61,7 @@ import { mycelinkArgs, shellWrites, type ShellWrites } from '../security/shell-w
 import { madeOnBranch, stashEntries, type StashEntry } from '../git/stash.js';
 import { redBoundRefusal } from './red-bound.js';
 import { workerBinding } from './worker-binding.js';
+import { readRegular } from '../security/paths.js';
 
 export interface FenceInput {
   tool_name?: string;
@@ -365,12 +366,8 @@ function decide(input: FenceInput, env: NodeJS.ProcessEnv): FenceDecision {
         }
       },
       readFile: (p) => {
-        try {
-          const st = lstatSync(p);
-          return st.isFile() && st.size <= 256 * 1024 ? readFileSync(p, 'utf8') : null;
-        } catch {
-          return null;
-        }
+        // Through one descriptor, never through a link: what is checked is what is read.
+        return readRegular(p, 256 * 1024)?.bytes.toString('utf8') ?? null;
       },
     });
     writes.push(...found.writes);

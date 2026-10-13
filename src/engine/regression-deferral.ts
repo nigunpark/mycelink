@@ -18,8 +18,10 @@
  * completely — is the producer's own regression.
  */
 import type { FeatureState_, GraphNode, PortfolioGraph } from '../model/types.js';
+import { isAbsolute, resolve } from 'node:path';
 import { matchGlob } from '../git/worktree.js';
 import { runGit } from '../git/git.js';
+import { nodeTapFailures, repoRelative } from '../evidence/red-classify.js';
 
 export interface FailingTests {
   /** True only when the runner's own counts agree with what was read. */
@@ -33,8 +35,12 @@ export interface FailingTests {
 const slash = (p: string): string => p.replace(/\\/g, '/').replace(/^\.\//, '');
 const uniq = (xs: string[]): string[] => [...new Set(xs)].sort();
 
-/** The test files (or classes) a full-suite run failed in, from the runner's own output. */
-export function failingTestFiles(output: string, exitCode: number): FailingTests {
+/**
+ * The test files (or classes) a full-suite run failed in, from the runner's own output. Node 22's TAP names each
+ * failing test's file absolute: `root` (the checkout the suite ran in) makes it repository-relative, and without it
+ * nothing is read from TAP.
+ */
+export function failingTestFiles(output: string, exitCode: number, root?: string): FailingTests {
   const none: FailingTests = { complete: false, files: [], classes: [] };
   if (exitCode === 0 || exitCode === 124 || /\[mycelink\] (command|step) timed out/.test(output)) return none;
   if (/\bCOMPILATION ERROR\b|\bCompilation failure\b|\bTransform failed\b/.test(output)) return none;
@@ -44,6 +50,23 @@ export function failingTestFiles(output: string, exitCode: number): FailingTests
   const vitestCount = /^\s*Test Files\s+(\d+) failed\b/m.exec(output);
   if (vitestCount !== null) {
     return vitestFiles.length > 0 && Number(vitestCount[1]) === vitestFiles.length ? { complete: true, files: vitestFiles, classes: [] } : none;
+  }
+
+  // Node's TAP (Node 22's default into a pipe): each failing test's `location:`, checked against "# fail N"; a suite
+  // that failed through a subtest is no failure of its own, and `# fail` does not count it.
+  const tapFail = /^# fail (\d+)\s*$/m.exec(output);
+  const tap = nodeTapFailures(output).filter((f) => f.failureType !== null);
+  if (tapFail !== null && tap.length > 0) {
+    const failures = tap.filter((f) => !f.suite);
+    if (root === undefined || failures.length === 0 || failures.length !== Number(tapFail[1])) return none;
+    const files: string[] = [];
+    for (const f of failures) {
+      const at = f.location === null ? null : (/^(.*):\d+:\d+$/.exec(f.location)?.[1] ?? null);
+      const rel = at === null ? null : repoRelative(root, isAbsolute(at) || /^[A-Za-z]:[\\/]/.test(at) ? at : resolve(root, at));
+      if (rel === null || rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return none;
+      files.push(slash(rel));
+    }
+    return { complete: true, files: uniq(files), classes: [] };
   }
 
   // Node's runner: "test at <file>:<line>:<col>" per failing test, checked against "ℹ fail N".
@@ -96,7 +119,7 @@ export type DeferralDecision = { deferred: true; to: string[]; failing: string[]
 export function regressionDeferral(args: DeferralArgs): DeferralDecision {
   const node = args.graph.nodes.find((n) => n.id === args.nodeId);
   if (node === undefined || node.repository === null) return { deferred: false, reason: 'the node has no repository' };
-  const failing = failingTestFiles(args.output, args.exitCode);
+  const failing = failingTestFiles(args.output, args.exitCode, args.checkout);
   if (!failing.complete) return { deferred: false, reason: 'the run did not show which test files failed (a crash, a compile error, a timeout, or counts that do not agree)' };
   let files = failing.files;
   if (failing.classes.length > 0) {
