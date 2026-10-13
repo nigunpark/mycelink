@@ -12,12 +12,13 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { cleanupTmpRoots, linkedAlias, makeTmpDir, windowsShortPathAlias } from '../helpers/tmp.js';
 import { installProvenance, readLedger, uninstallProvenance } from '../../src/state/provenance.js';
 import { writeDocAtomic } from '../../src/state/atomic-json.js';
 import { runGit } from '../../src/git/git.js';
+import { canonicalPath } from '../../src/security/paths.js';
 
 afterAll(() => cleanupTmpRoots());
 afterEach(() => uninstallProvenance());
@@ -34,8 +35,20 @@ function dirs() {
   return { base, ledger, work };
 }
 
-/** The done states the ledger records for a path, in order. */
-const statesOf = (records: any[], path: string) => records.filter((r) => r.kind === 'done').flatMap((r) => r.states.filter((s: any) => s.path === resolve(path)).map((s: any) => s.state));
+/** The done states the ledger records for a path (by its canonical name: macOS's temp directory is reached through a link), in order. */
+const statesOf = (records: any[], path: string) => records.filter((r) => r.kind === 'done').flatMap((r) => r.states.filter((s: any) => s.path === canonicalPath(path)).map((s: any) => s.state));
+
+/** Every path a ledger names: its changes, their states, its reads, and its git commands' places and files. */
+const ledgerPaths = (records: any[]): string[] =>
+  records.flatMap((r) => [
+    ...(r.paths ?? []).map((p: string | [string, string]) => (Array.isArray(p) ? p[0] : p)),
+    ...(r.states ?? []).map((s: any) => s.path),
+    ...(r.git ?? []).map((g: any) => g.cwd),
+    r.cwd,
+    r.common_dir,
+    ...Object.keys(r.changed?.files ?? {}),
+    ...Object.keys(r.changed?.indexes ?? {}),
+  ]).filter((p): p is string => typeof p === 'string');
 
 describe('the provenance ledger, in process', () => {
   it('is off unless the variable names an absolute directory', () => {
@@ -76,7 +89,7 @@ describe('the provenance ledger, in process', () => {
     expect(final).toMatchObject({ t: 'f', sha256: sha(bytes), size: bytes.length, kept: true });
     expect(readFileSync(join(d.ledger, 'objects', final.sha256.slice(0, 2), final.sha256))).toEqual(bytes);
     // The temporary file of the atomic write: created, then renamed away.
-    const tmp = records.filter((r: any) => r.kind === 'done' && r.op === 'renameSync').flatMap((r: any) => r.states).find((s: any) => s.path !== resolve(state) && s.path.includes('STATE.json'));
+    const tmp = records.filter((r: any) => r.kind === 'done' && r.op === 'renameSync').flatMap((r: any) => r.states).find((s: any) => s.path !== canonicalPath(state) && s.path.includes('STATE.json'));
     expect(tmp?.state).toEqual({ t: 'absent' });
     expect(statesOf(records, join(d.work, 'gone.txt')).map((s: any) => s.t)).toEqual(['f', 'absent']);
     expect(statesOf(records, join(d.work, 'tree')).at(-1)).toEqual({ t: 'absent', recursive: true });
@@ -85,6 +98,68 @@ describe('the provenance ledger, in process', () => {
     expect(statesOf(records, join(d.work, 'tree'))[0]).toMatchObject({ t: 'd' });
     expect(statesOf(records, join(d.work, 'features', 'F-1', 'link2')).at(-1)).toEqual({ t: 'l', target: 'STATE.json' });
     if (process.platform !== 'win32') expect(statesOf(records, state).at(-1).mode).toBe(0o600);
+  });
+
+  it('one call is one change: a node:fs function that reaches another exported one (appendFileSync through writeFileSync; on Node 22, rmSync through its own unlinkSync and rmdirSync) records one intent and one done, and reads nothing for the process', () => {
+    const d = dirs();
+    installProvenance(['feature', 'init', 'F-1'], { MYCELINK_PROVENANCE: d.ledger });
+    appendFileSync(join(d.work, 'log.txt'), 'a\n');
+    mkdirSync(join(d.work, 'tree', 'deep'), { recursive: true });
+    writeFileSync(join(d.work, 'tree', 'deep', 'x'), 'x');
+    rmSync(join(d.work, 'tree'), { recursive: true, force: true });
+    writeFileSync(join(d.work, 'after.txt'), 'after');
+    uninstallProvenance();
+    const { records, problems } = readLedger(d.ledger);
+    expect(problems).toEqual([]);
+    const intents = records.filter((r: any) => r.kind === 'intent');
+    expect(intents.map((r: any) => r.op)).toEqual(['appendFileSync', 'mkdirSync', 'writeFileSync', 'rmSync', 'writeFileSync']);
+    expect(records.filter((r: any) => r.kind === 'done').map((r: any) => r.seq)).toEqual(intents.map((r: any) => r.seq));
+    // What a call read for itself (Node 22's rimraf: lstat, readdir) is no input the next change rests on.
+    expect(records.filter((r: any) => r.kind === 'reads')).toEqual([]);
+    expect(statesOf(records, join(d.work, 'log.txt')).at(-1)).toMatchObject({ t: 'f', sha256: sha('a\n') });
+    expect(statesOf(records, join(d.work, 'tree')).at(-1)).toEqual({ t: 'absent', recursive: true });
+  });
+
+  it('names every path by its real place, however the process spelled it: the file system’s records and git’s agree (macOS reaches /private/var through /var; Windows through junctions)', () => {
+    const d = dirs();
+    const alias = linkedAlias(d.work, 'work-alias');
+    const real = realpathSync.native(d.work);
+    const repo = join(alias, 'repo');
+    mkdirSync(repo);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, env: gitEnv });
+    writeFileSync(join(repo, 'a'), 'a');
+    execFileSync('git', ['add', 'a'], { cwd: repo, env: gitEnv });
+    execFileSync('git', ['commit', '-q', '-m', 'a'], { cwd: repo, env: gitEnv });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    installProvenance(['dispatch', 'F-1'], { MYCELINK_PROVENANCE: d.ledger });
+    readFileSync(join(alias, 'repo', 'a'));
+    writeFileSync(join(alias, 'notes.txt'), 'n');
+    runGit(repo, ['update-ref', 'refs/heads/claim', head]);
+    uninstallProvenance();
+    const { records } = readLedger(d.ledger);
+    const paths = ledgerPaths(records);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) expect(p === real || p.startsWith(`${real}${sep}`), p).toBe(true);
+    expect(records.find((r: any) => r.kind === 'reads').paths.map((p: [string, string]) => p[0])).toEqual([join(real, 'repo', 'a')]);
+    expect(records.find((r: any) => r.kind === 'intent')).toMatchObject({ op: 'writeFileSync', paths: [join(real, 'notes.txt')] });
+    expect(records.find((r: any) => r.kind === 'git-intent')).toMatchObject({ cwd: join(real, 'repo'), common_dir: join(real, 'repo', '.git') });
+    expect(records.find((r: any) => r.kind === 'git-done')).toMatchObject({ common_dir: join(real, 'repo', '.git'), changed: { refs: { 'refs/heads/claim': [null, head] } } });
+  });
+
+  it('names a path reached through a Windows 8.3 short name by its long one, as git does (GitHub runners’ C:\\Users\\RUNNER~1)', (ctx) => {
+    const d = dirs();
+    const long = join(d.work, 'a long directory name');
+    mkdirSync(long);
+    const short = windowsShortPathAlias(long);
+    if (short === null) return ctx.skip();
+    const real = realpathSync.native(long);
+    installProvenance(['feature', 'init', 'F-1'], { MYCELINK_PROVENANCE: d.ledger });
+    writeFileSync(join(short, 'state.json'), '{}');
+    mkdirSync(join(short, 'made'));
+    uninstallProvenance();
+    const { records } = readLedger(d.ledger);
+    expect(records.filter((r: any) => r.kind === 'intent').map((r: any) => r.paths)).toEqual([[join(real, 'state.json')], [join(real, 'made')]]);
+    for (const p of ledgerPaths(records)) expect(p.startsWith(`${real}${sep}`), p).toBe(true);
   });
 
   it('records nothing it only read, and nothing inside its own ledger', () => {
@@ -119,7 +194,7 @@ describe('the provenance ledger, in process', () => {
     // Recorded before the change that may rest on it, by the process that read.
     expect(records.indexOf(reads[0])).toBe(first - 1);
     expect(reads[0]).toMatchObject({ pid: process.pid });
-    expect(reads[0].paths.map((p: [string, string]) => p[0]).sort()).toEqual([join(d.work, 'features'), join(d.work, 'input.json'), join(d.work, 'missing.txt')].map((p) => resolve(p)).sort());
+    expect(reads[0].paths.map((p: [string, string]) => p[0]).sort()).toEqual([join(d.work, 'features'), join(d.work, 'input.json'), join(d.work, 'missing.txt')].map((p) => canonicalPath(p)).sort());
     // Each path with when it was last read, never after the change it precedes.
     for (const [, at] of reads[0].paths) expect(BigInt(at) <= BigInt(records[first].t)).toBe(true);
     expect(JSON.stringify(records)).not.toContain('never-recorded');
@@ -144,10 +219,10 @@ describe('the provenance ledger, in process', () => {
     const reads = records.filter((r: any) => r.kind === 'reads');
     expect(reads).toHaveLength(1);
     expect(reads[0].git.map((g: any) => [g.sub, g.cwd, g.all_refs, g.stash])).toEqual([
-      ['rev-parse', resolve(repo), false, false],
-      ['for-each-ref', resolve(repo), true, false],
-      ['log', resolve(repo), true, false],
-      ['stash', resolve(repo), false, true],
+      ['rev-parse', canonicalPath(repo), false, false],
+      ['for-each-ref', canonicalPath(repo), true, false],
+      ['log', canonicalPath(repo), true, false],
+      ['stash', canonicalPath(repo), false, true],
     ]);
     for (const g of reads[0].git) expect(g.t).toMatch(/^\d+$/);
     expect(JSON.stringify(records)).not.toContain('secret-message');
@@ -171,8 +246,8 @@ describe('the provenance ledger, in process', () => {
     const ops = records.filter((r: any) => r.kind === 'git-done');
     expect(ops.map((r: any) => r.sub)).toEqual(['update-ref', 'config']);
     expect(records.filter((r: any) => r.kind === 'git-intent').map((r: any) => r.sub)).toEqual(['update-ref', 'config']);
-    expect(ops[0]).toMatchObject({ exit: 0, common_dir: resolve(repo, '.git'), changed: { refs: { 'refs/heads/claim': [null, head] }, files: {}, indexes: {} } });
-    const config = ops[1].changed.files[resolve(repo, '.git', 'config')];
+    expect(ops[0]).toMatchObject({ exit: 0, common_dir: canonicalPath(join(repo, '.git')), changed: { refs: { 'refs/heads/claim': [null, head] }, files: {}, indexes: {} } });
+    const config = ops[1].changed.files[canonicalPath(join(repo, '.git', 'config'))];
     expect(config[1]).toMatchObject({ t: 'f', sha256: sha(readFileSync(join(repo, '.git', 'config'))), kept: true });
     expect(config[0].sha256).not.toBe(config[1].sha256);
   });

@@ -17,7 +17,8 @@
  * attempt; a review generation's kind), four per phase. Past either, the
  * feature stops PROVIDER_UNAVAILABLE until a person clears it.
  */
-import { closeSync, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, readdirSync, readFileSync, readSync } from 'node:fs';
+import { openRegular } from '../security/paths.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { classifyProviderFailure, parseJsonLines, type ProviderFailure } from '../sessions/provider-failure.js';
 import type { DispatchLease, HostSessionBinding, ProviderLedger, ProviderMark } from '../model/types.js';
@@ -36,15 +37,11 @@ export function emptyProviderLedger(): ProviderLedger {
 
 /** The last `max` bytes of a regular file (never through a link), from its first whole line. */
 function tail(file: string, max = TAIL_BYTES): string | null {
-  let fd: number;
+  // One descriptor, opened without following a link: what is checked is what is read.
+  const opened = openRegular(file);
+  if (opened === null) return null;
+  const { fd, size } = opened;
   try {
-    if (!lstatSync(file).isFile()) return null;
-    fd = openSync(file, 'r');
-  } catch {
-    return null;
-  }
-  try {
-    const size = fstatSync(fd).size;
     const start = Math.max(0, size - max);
     const buf = Buffer.alloc(size - start);
     readSync(fd, buf, 0, buf.length, start);

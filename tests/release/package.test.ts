@@ -3,7 +3,7 @@
  *
  * `npm run package` must produce the same bytes every time from the same
  * commit, ship only runtime and public files, carry a checksum and an SPDX
- * SBOM, and install and run from the ZIP alone — no npm install, no build.
+ * SBOM, and install and run from the ZIP alone ??no npm install, no build.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -14,6 +14,7 @@ import YAML from 'yaml';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { extractZip, readZip } from '../helpers/zip.js';
 import { makeGitRepo } from '../helpers/git-fixture.js';
+import { samePath } from '../../src/security/paths.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -242,9 +243,11 @@ describe('install and run from the release ZIP alone', () => {
     const settings = JSON.parse(readFileSync(join(control, '.claude', 'settings.json'), 'utf8')) as {
       hooks: Record<string, { hooks: { command: string }[] }[]>;
     };
-    expect(settings.hooks['PreToolUse']?.[0]?.hooks[0]?.command.replace(/\\/g, '/')).toContain(
-      join(plugin, 'bin', 'mycelink.mjs').replace(/\\/g, '/'),
-    );
+    // The hook names this plugin's launcher where Node runs it from: the same file, however spelled (macOS reports
+    // /private/var for /var, Windows may keep an 8.3 name).
+    const command = settings.hooks['PreToolUse']?.[0]?.hooks[0]?.command ?? '';
+    expect(command).toMatch(/^node "[^"]+" hook pre-tool-use$/);
+    expect(samePath(/"([^"]+)"/.exec(command)![1]!, join(plugin, 'bin', 'mycelink.mjs'))).toBe(true);
     writeFileSync(join(control, 'touched'), '');
   });
 });

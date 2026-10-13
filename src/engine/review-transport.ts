@@ -54,7 +54,8 @@
  * taken for a forgery.
  */
 import { createHash } from 'node:crypto';
-import { closeSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { closeSync, lstatSync, readSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { openRegular, readRegular as readRegularFile } from '../security/paths.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { ATTESTATION_FILE, MAX_VERDICT_BYTES, REVIEWER_AGENT, VERDICT_FILE } from './acceptance-review.js';
 import { transcriptFailure } from './provider-interrupt.js';
@@ -298,16 +299,9 @@ export function generationDir(controlRoot: string, open: Pick<OpenGeneration, 's
   return join(controlRoot, ...dirname(open.slot).split('/'));
 }
 
-/** A small file read only when it is a regular file (never through a link), within its bound. */
+/** A small file read only when it is a regular file (never through a link), within its bound, through one descriptor. */
 function readRegular(file: string, max: number): Buffer | null {
-  try {
-    const st = lstatSync(file);
-    if (!st.isFile() || st.size > max) return null;
-    const bytes = readFileSync(file);
-    return bytes.length > max ? null : bytes;
-  } catch {
-    return null;
-  }
+  return readRegularFile(file, max)?.bytes ?? null;
 }
 
 const isDirectoryNoLink = (dir: string): boolean => {
@@ -321,14 +315,13 @@ const isDirectoryNoLink = (dir: string): boolean => {
 
 /** Lines of a file holding any of `needles`, read in chunks within `max` bytes: `[lineNumber, text]`. */
 function linesWith(file: string, needles: readonly string[], max: number): { lines: [number, string][]; tooLarge: boolean } | null {
-  let fd: number;
-  try {
-    const st = lstatSync(file);
-    if (!st.isFile()) return null;
-    if (st.size > max) return { lines: [], tooLarge: true };
-    fd = openSync(file, 'r');
-  } catch {
-    return null;
+  // One descriptor, opened without following a link: what is checked is what is read.
+  const opened = openRegular(file);
+  if (opened === null) return null;
+  const { fd } = opened;
+  if (opened.size > max) {
+    closeSync(fd);
+    return { lines: [], tooLarge: true };
   }
   const out: [number, string][] = [];
   try {

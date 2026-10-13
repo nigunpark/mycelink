@@ -187,3 +187,112 @@ org.example.visits.web.ResourceNotFoundException: Vet 42 not found
 \tat org.example.visits.web.VisitResource.create(VisitResource.java:61)
 [INFO] BUILD FAILURE
 `;
+
+/*
+ * What `node --test` printed on Node 22.12.0 with stdout not a terminal (a gate's pipe): TAP, its default there, where
+ * Node 24 prints spec everywhere. A failure's class and message are YAML fields of their own (`name:`, `error:`;
+ * no `name:` for a plain Error), its place an absolute `location:`; a suite that failed through a subtest is a
+ * `not ok` of `type: 'suite'`, which `# fail` does not count. Recorded at /ws/tree.
+ */
+const tap = (body: string, fail: number, tests = fail, suites = 0): string =>
+  `TAP version 13\n${body}1..${tests}\n# tests ${tests}\n# suites ${suites}\n# pass ${tests - fail}\n# fail ${fail}\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 41.98\n`;
+
+/** The r1 errors RED, on Node 22: its declared test calls a constructor that does not exist yet. */
+export const NODE22_TAP_NOT_A_CONSTRUCTOR = tap(
+  `# Subtest: ChangesetValidationError sorts the issues and lists one per line
+not ok 1 - ChangesetValidationError sorts the issues and lists one per line
+  ---
+  duration_ms: 0.507416
+  location: '/ws/tree/packages/errors/test/errors.test.mjs:3:1'
+  failureType: 'testCodeFailure'
+  error: 'm.ChangesetValidationError is not a constructor'
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    TestContext.<anonymous> (file:///ws/tree/packages/errors/test/errors.test.mjs:4:3)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:934:25)
+  ...
+`,
+  1,
+);
+
+/** An assertion failing inside a suite, on Node 22: the test, then its suite. */
+export const NODE22_TAP_ASSERTION = tap(
+  `# Subtest: git
+    # Subtest: reads git
+    not ok 1 - reads git
+      ---
+      duration_ms: 1.123184
+      location: '/ws/tree/packages/read/test/git.test.mjs:5:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        1 !== 2
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 2
+      actual: 1
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///ws/tree/packages/read/test/git.test.mjs:5:36)
+        Test.runInAsyncScope (node:async_hooks:211:14)
+      ...
+    # Subtest: passes
+    ok 2 - passes
+      ---
+      duration_ms: 0.102512
+      ...
+    1..2
+not ok 1 - git
+  ---
+  duration_ms: 2.029674
+  type: 'suite'
+  location: '/ws/tree/packages/read/test/git.test.mjs:4:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+`,
+  1,
+  2,
+  1,
+);
+
+/** The code under test throwing its own Error, on Node 22 (no `name:` field for a plain Error). */
+export const NODE22_TAP_DOMAIN_EXCEPTION = tap(
+  `# Subtest: reserves
+not ok 1 - reserves
+  ---
+  duration_ms: 0.127839
+  location: '/ws/tree/packages/read/test/git.test.mjs:8:1'
+  failureType: 'testCodeFailure'
+  error: 'stock is short'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    reserve (file:///ws/tree/packages/errors/src/index.mjs:2:47)
+    TestContext.<anonymous> (file:///ws/tree/packages/read/test/git.test.mjs:8:26)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+  ...
+`,
+  1,
+);
+
+/** A test file that exits 1 before any test runs, on Node 22: the file fails, with no error of a test. */
+export const NODE22_TAP_FILE_EXIT = tap(
+  `# Subtest: packages/cli/test/report.test.mjs
+not ok 1 - packages/cli/test/report.test.mjs
+  ---
+  duration_ms: 38.088485
+  location: '/ws/tree/packages/cli/test/report.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+`,
+  1,
+);

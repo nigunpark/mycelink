@@ -33,6 +33,14 @@ describe('failureFingerprint', () => {
     expect(failureFingerprint(a, 1)).not.toBe(failureFingerprint(c, 1));
   });
 
+  it('names the same failure alike in any directory, POSIX ones without an extension included (a fresh worktree per attempt)', () => {
+    // A verifier that exits non-zero printing nothing: its log is the command and where it ran.
+    const at = (dir: string) => `$ node -e process.exit(3)\n(cwd: ${dir})\n\n`;
+    expect(failureFingerprint(at('/tmp/mycelink-tests/ver-AbC123/control/.mycelink/worktrees/repo__node'), 3)).toBe(failureFingerprint(at('/tmp/mycelink-tests/ver-XyZ789/control/.mycelink/worktrees/repo__node'), 3));
+    expect(failureFingerprint(at('/private/var/folders/x/T/run-1'), 3)).toBe(failureFingerprint(at('C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\run-2'), 3));
+    expect(failureFingerprint(at('/tmp/a'), 3)).not.toBe(failureFingerprint('$ node -e process.exit(4)\n(cwd: /tmp/a)\n\n', 3));
+  });
+
   it('normalises absolute paths, durations and hex ids', () => {
     const a = 'FAIL C:\\work\\a\\tests\\x.test.js (231 ms) id=0x7ffab123\n  expected true\n';
     const b = 'FAIL D:\\other\\b\\tests\\x.test.js (4 ms) id=0x00112233\n  expected true\n';

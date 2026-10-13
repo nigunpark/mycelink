@@ -14,6 +14,7 @@
  * anything: its strings are data.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createExclusive } from '../state/atomic-json.js';
 import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import type { CriterionKind, FeatureState_, GraphNode, PortfolioGraph, ReviewInputs, ReviewProblem } from '../model/types.js';
@@ -284,10 +285,11 @@ export function buildReviewPacket(args: PacketArgs): { packet: ReviewPacket; pat
     checkout(repoPath, at, r.head_sha);
     const base = featureBase(controlRoot, featureId, workspace, r.name, r.head_sha);
     const diffFile = join(dir, `${r.name}.diff`);
-    if (!existsSync(diffFile)) {
+    {
       let diff = runGit(repoPath, ['diff', '--no-color', '--no-ext-diff', `${base}..${r.head_sha}`], { allowFail: true }).stdout;
       if (Buffer.byteLength(diff, 'utf8') > MAX_DIFF_BYTES) diff = `${Buffer.from(diff, 'utf8').subarray(0, MAX_DIFF_BYTES).toString('utf8')}\n[diff cut at ${MAX_DIFF_BYTES} bytes: read the checkout for the rest]\n`;
-      writeFileSync(diffFile, diff);
+      // Created once, exclusively (a packet rebuilt on resume keeps the diff it had): never written through anything there.
+      createExclusive(diffFile, diff);
     }
     const policy = tddPolicyFor(workspace.repositories.repositories.find((d) => d.name === r.name));
     const changed = runGit(repoPath, ['diff', '--name-status', '--no-renames', `${base}..${r.head_sha}`], { allowFail: true })

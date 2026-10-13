@@ -26,6 +26,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isAbsolute, relative } from 'node:path';
+import { canonicalPath, realpathDeepest } from '../security/paths.js';
 
 export type FailureCategory = 'assertion' | 'exception' | 'syntax' | 'import' | 'missing-symbol' | 'setup' | 'timeout' | 'crash';
 
@@ -236,28 +237,65 @@ interface PartialResult {
 
 function finish(r: PartialResult): TestResult {
   return {
-    id: `${r.file}::${r.suite ? `${r.suite} > ` : ''}${r.name}`,
+    id: idOf(r),
     ...r,
     fingerprint: r.status === 'failed' ? testFailureFingerprint(r) : null,
   };
 }
 
-function repoRelative(root: string, file: string | undefined | null): string | null {
+const escapes = (rel: string): boolean => rel === '..' || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel);
+
+/**
+ * A reported file, relative to the root the run was in. A runner names files
+ * from the real path of its working directory (macOS reaches its temp
+ * directory through `/var`, a link to `/private/var`): a file that is outside
+ * the root as spelled, but inside the root's real place by its canonical
+ * name, is that file.
+ * One that is outside either way stays outside, and matches nothing declared.
+ */
+export function repoRelative(root: string, file: string | undefined | null): string | null {
   if (!file) return null;
-  const rel = isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file) ? relative(root, file) : file;
+  if (!(isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file))) return file.split('\\').join('/');
+  let rel = relative(root, file);
+  if (escapes(rel)) {
+    const real = relative(realpathDeepest(root), canonicalPath(file));
+    if (!escapes(real)) rel = real;
+  }
   return rel.split('\\').join('/');
 }
+
+/** A test a Node JUnit report names no file for (Node 22's reporter names none): what is known of it. */
+export interface FilelessTest {
+  /** The suites it is nested in, outermost first. */
+  suites: readonly string[];
+  name: string;
+  /** Its failure's full text (stack included), when it failed. */
+  failure: string | null;
+}
+
+/** The repository-relative file each file-less test is from, or null when that cannot be told (evidence/junit-attribution.ts). */
+export type JUnitFileAttribution = (tests: readonly FilelessTest[]) => (string | null)[];
+
+const idOf = (r: { file: string | null; suite: string; name: string }): string => `${r.file}::${r.suite ? `${r.suite} > ` : ''}${r.name}`;
 
 // ---- reports -------------------------------------------------------------------
 
 /**
  * A JUnit XML report (Node's reporter or Surefire). With `moduleDir`
  * (Surefire), a test class maps to `<moduleDir>/src/test/java/<class>.java`
- * and the id is `<moduleDir>/<class>#<method>`.
+ * and the id is `<moduleDir>/<class>#<method>`. Node's reporter names each
+ * test's file from Node 24.11 on; for a test it names none for (Node 22),
+ * `attribute` tells the file where it can (evidence/junit-attribution.ts),
+ * and without it the test names no file.
  */
-export function parseJUnit(xml: string, { root = '', moduleDir = null }: { root?: string; moduleDir?: string | null } = {}): TestResult[] {
+export function parseJUnit(
+  xml: string,
+  { root = '', moduleDir = null, attribute = null }: { root?: string; moduleDir?: string | null; attribute?: JUnitFileAttribution | null } = {},
+): TestResult[] {
   const doc = parseXml(xml);
   const results: TestResult[] = [];
+  // Node's reporter names no file before Node 24.11: what is known of each such test, for `attribute`.
+  const fileless: { at: number; test: FilelessTest }[] = [];
   const visit = (node: XmlNode, suites: string[]): void => {
     if (node.name === 'testsuites') {
       for (const c of node.children) visit(c, suites);
@@ -294,10 +332,22 @@ export function parseJUnit(xml: string, { root = '', moduleDir = null }: { root?
     if (moduleDir !== null) {
       result.id = `${moduleDir}/${node.attrs['classname']}#${r.name}`;
       result.classname = node.attrs['classname'] ?? '';
+    } else if (r.file === null) {
+      fileless.push({ at: results.length, test: { suites: [...suites], name: r.name, failure: failure ? failure.text : null } });
     }
     results.push(result);
   };
   visit(doc, []);
+  if (attribute !== null && fileless.length > 0) {
+    const files = attribute(fileless.map((f) => f.test));
+    fileless.forEach(({ at }, i) => {
+      const file = files[i] ?? null;
+      const result = results[at] as TestResult;
+      if (file === null) return;
+      result.file = file;
+      result.id = idOf(result);
+    });
+  }
   return results;
 }
 
@@ -374,6 +424,9 @@ const PATTERNS: { category: RedCategory; patterns: RegExp[] }[] = [
   { category: 'environment', patterns: [/\bECONNREFUSED\b/, /\bENOTFOUND\b/, /\bETIMEDOUT\b/, /\bEHOSTUNREACH\b/, /\bEADDRINUSE\b/, /\baddress already in use\b/i, /\bconnection refused\b/i, /\bEACCES\b/, /\bEPERM\b/, /\bno space left\b/i] },
 ];
 
+/** TAP's failing test: an assertion for most TAP producers; not for Node's, whose diagnostics name each failure. */
+const NOT_OK = /\bnot ok \d+/;
+
 const ASSERTION = [
   /\bAssertionError\b/,
   /\bAssertionFailedError\b/,
@@ -384,35 +437,112 @@ const ASSERTION = [
   /\bexpected\b[^\n]*\bto\b/i,
   /\bexpected:\s*<[^\n]*>\s*but was:\s*</i,
   /^\s*Expected[:\s][\s\S]*^\s*Received[:\s]/m,
-  /\bnot ok \d+/,
+  NOT_OK,
   /\b\d+ failing\b/,
   /\bassert(ion)? failed\b/i,
 ];
+
+/** One failure Node's TAP reporter wrote, from its YAML diagnostics. */
+export interface NodeTapFailure {
+  /** A suite that failed through a subtest (`type: 'suite'`): the subtest is the failure. */
+  suite: boolean;
+  /** Node's own `failureType` (`testCodeFailure`, `subtestsFailed`, ...); null for another TAP producer. */
+  failureType: string | null;
+  /** `location:` as written: `<file>:<line>:<col>`, the file absolute. */
+  location: string | null;
+  /** The thrown error's class (`name:`; Node writes none for a plain Error) and the first line of its message (`error:`). */
+  name: string | null;
+  error: string | null;
+  /** It carries a stack: an error was thrown, the file did not just exit. */
+  stack: boolean;
+}
+
+const unquote = (v: string): string | null => {
+  const t = v.trim();
+  if (t === '~' || t === 'null') return null;
+  if (t.length >= 2 && t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1).replace(/''/g, "'");
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    try {
+      return String(JSON.parse(t));
+    } catch {
+      return t.slice(1, -1);
+    }
+  }
+  return t;
+};
+
+/**
+ * The failures in Node's TAP output: what `node --test` prints on Node 22
+ * when its stdout is not a terminal (a gate's pipe), where Node 24 prints its
+ * spec output everywhere. A failure's class and message are YAML fields of
+ * their own there (`name:`, `error:`), where spec prints `<Class>: <message>`.
+ */
+export function nodeTapFailures(output: string): NodeTapFailure[] {
+  const lines = output.split(/\r?\n/);
+  const out: NodeTapFailure[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const head = /^(\s*)not ok \d+\b/.exec(lines[i] as string);
+    if (head === null) continue;
+    const indent = (head[1] as string).length;
+    const fields = new Map<string, string | null>();
+    if (/^\s*---\s*$/.test(lines[i + 1] ?? '')) {
+      let j = i + 2;
+      for (; j < lines.length && !/^\s*\.\.\.\s*$/.test(lines[j] as string); j++) {
+        const f = /^(\s*)([A-Za-z_]\w*):(?:\s(.*))?$/.exec(lines[j] as string);
+        if (f === null || (f[1] as string).length !== indent + 2) continue;
+        const raw = (f[3] ?? '').trim();
+        if (raw === '|-' || raw === '|' || raw === '>-' || raw === '>') {
+          // A block scalar: its first line that says anything, if the block has one.
+          let k = j + 1;
+          while (k < lines.length && (lines[k] as string).trim() === '') k++;
+          const first = lines[k] ?? '';
+          fields.set(f[2] as string, first.length - first.trimStart().length > indent + 2 ? first.trim() : '');
+        } else fields.set(f[2] as string, unquote(raw));
+      }
+      i = j;
+    }
+    out.push({
+      suite: fields.get('type') === 'suite',
+      failureType: fields.get('failureType') ?? null,
+      location: fields.get('location') ?? null,
+      name: fields.get('name') ?? null,
+      error: fields.get('error') ?? null,
+      stack: fields.has('stack'),
+    });
+  }
+  return out;
+}
 
 /**
  * The category of a RED's output when no structured report exists:
  * conservative patterns, invalid ones first (a run that shows any of them
  * proves nothing), then an assertion, then an exception thrown inside a
  * test the runner reports as failing. Anything else is a crash: invalid.
+ * Node's TAP is read as its spec output reads: each thrown failure as its
+ * `<Class>: <message>` line, and a `not ok` alone is no assertion there.
  */
 export function classifyRedOutput(output: string, exitCode: number, options: { timedOut?: boolean } = {}): { category: RedCategory; evidence: string | null } {
   if (options.timedOut === true) return { category: 'timeout', evidence: null };
   if (exitCode === 0) return { category: 'passed', evidence: null };
-  const lines = output.split(/\r?\n/);
+  const tap = nodeTapFailures(output);
+  const nodeTap = tap.some((f) => f.failureType !== null);
+  const thrown = nodeTap ? tap.filter((f) => !f.suite && f.error !== null && (f.name !== null || f.stack)).map((f) => `${f.name ?? 'Error'}: ${f.error}`) : [];
+  const text = thrown.length > 0 ? `${output}\n${thrown.join('\n')}` : output;
+  const lines = text.split(/\r?\n/);
   const lineOf = (rx: RegExp): string | null => {
-    const at = output.search(rx);
+    const at = text.search(rx);
     if (at < 0) return null;
-    const start = output.lastIndexOf('\n', at) + 1;
-    const end = output.indexOf('\n', at);
-    return output.slice(start, end < 0 ? output.length : end).trim().slice(0, 300);
+    const start = text.lastIndexOf('\n', at) + 1;
+    const end = text.indexOf('\n', at);
+    return text.slice(start, end < 0 ? text.length : end).trim().slice(0, 300);
   };
   for (const { category, patterns } of PATTERNS) {
-    const hit = patterns.find((rx) => rx.test(output));
+    const hit = patterns.find((rx) => rx.test(text));
     if (hit) return { category, evidence: lineOf(hit) };
   }
-  const assertion = ASSERTION.find((rx) => rx.test(output));
+  const assertion = (nodeTap ? ASSERTION.filter((rx) => rx !== NOT_OK) : ASSERTION).find((rx) => rx.test(text));
   if (assertion) return { category: 'assertion', evidence: lineOf(assertion) };
-  const failing = FAILING_TEST.find((rx) => rx.test(output));
+  const failing = FAILING_TEST.find((rx) => rx.test(text));
   if (failing) {
     const thrown = lines.find((l) => /^\s*(?:[A-Za-z_$][\w$]*\.)*(?:[A-Za-z_$][\w$]*)?(?:Error|Exception)\b(?::|\s|$)/.test(l));
     if (thrown !== undefined) return { category: 'exception', evidence: thrown.trim().slice(0, 300) };

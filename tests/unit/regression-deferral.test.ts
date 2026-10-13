@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { failingTestFiles } from '../../src/engine/regression-deferral.js';
+import { NODE22_TAP_ASSERTION, NODE22_TAP_FILE_EXIT, NODE22_TAP_NOT_A_CONSTRUCTOR } from '../helpers/red-corpus.js';
 
 describe('failingTestFiles', () => {
   it("reads Vitest's failures, test and suite level, and checks them against its file count", () => {
@@ -38,6 +39,16 @@ test at packages\\cli\\test\\git.test.mjs:5:1
 `;
     expect(failingTestFiles(out, 1)).toEqual({ complete: true, files: ['packages/cli/test/git.test.mjs'], classes: [] });
     expect(failingTestFiles(out.replace('ℹ fail 1', 'ℹ fail 2'), 1).complete).toBe(false);
+  });
+
+  it("reads Node 22's TAP (its default into a pipe): every failing test's location, relative to the checkout; a suite failing through it is not counted", () => {
+    expect(failingTestFiles(NODE22_TAP_ASSERTION, 1, '/ws/tree')).toEqual({ complete: true, files: ['packages/read/test/git.test.mjs'], classes: [] });
+    expect(failingTestFiles(NODE22_TAP_NOT_A_CONSTRUCTOR, 1, '/ws/tree')).toEqual({ complete: true, files: ['packages/errors/test/errors.test.mjs'], classes: [] });
+    expect(failingTestFiles(NODE22_TAP_FILE_EXIT, 1, '/ws/tree')).toEqual({ complete: true, files: ['packages/cli/test/report.test.mjs'], classes: [] });
+    // Counts that do not agree, a location outside the checkout, or no checkout to read it from: nothing is attributed.
+    expect(failingTestFiles(NODE22_TAP_ASSERTION.replace('# fail 1', '# fail 2'), 1, '/ws/tree').complete).toBe(false);
+    expect(failingTestFiles(NODE22_TAP_ASSERTION, 1, '/ws/other').complete).toBe(false);
+    expect(failingTestFiles(NODE22_TAP_ASSERTION, 1).complete).toBe(false);
   });
 
   it('reads Surefire classes, and refuses a compile failure', () => {

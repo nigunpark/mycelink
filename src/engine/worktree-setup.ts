@@ -59,7 +59,7 @@ import { runGit } from '../git/git.js';
 import { relativeInside } from '../evidence/paths.js';
 import { matchGlob } from '../git/worktree.js';
 import { CommandPolicyError, runCommandSync, validateArgv } from '../security/exec.js';
-import { classifyRelativePath, isInsideReal, realpathDeepest, samePath } from '../security/paths.js';
+import { classifyRelativePath, isInsideReal, readRegular, realpathDeepest, samePath } from '../security/paths.js';
 import { redactText } from '../security/redact.js';
 
 export const DEFAULT_WORKTREE_SETUP_TIMEOUT_SECONDS = 900;
@@ -434,14 +434,9 @@ function layoutOf(worktree: string): GitLayout | null {
   return gitDir !== null && commonDir !== null ? { gitDir, commonDir } : null;
 }
 
-/** File bytes, or null when absent or not a regular file. */
+/** File bytes, or null when absent or not a regular file (read through one descriptor, never through a link). */
 function bytes(path: string): Buffer | null {
-  try {
-    const st = lstatSync(path);
-    return st.isFile() ? readFileSync(path) : null;
-  } catch {
-    return null;
-  }
+  return readRegular(path)?.bytes ?? null;
 }
 
 interface Snapshot {
@@ -460,7 +455,11 @@ function fileDigest(path: string): string {
   try {
     const st = lstatSync(path);
     if (st.isSymbolicLink()) return `link:${readlinkSync(path)}`;
-    if (st.isFile()) return `file:${sha256(readFileSync(path))}:${st.mode & 0o111 ? 'x' : '-'}`;
+    if (st.isFile()) {
+      // Read through one descriptor: a file swapped since the look is digested as what it is now, or not at all.
+      const read = readRegular(path);
+      return read === null ? 'other' : `file:${sha256(read.bytes)}:${read.mode & 0o111 ? 'x' : '-'}`;
+    }
     return st.isDirectory() ? 'dir' : 'other';
   } catch {
     return 'absent';

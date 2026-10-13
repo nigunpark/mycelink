@@ -101,15 +101,15 @@ export function reapStaleTemps(file: string, now = Date.now()): number {
   return reaped;
 }
 
-/** Atomically replace `file` with `text`. Creates parent directories. */
-export function writeTextAtomic(file: string, text: string): void {
+/** Atomically replace `file` with `text` (or bytes): a link at it is replaced, never written through. Creates parent directories. */
+export function writeTextAtomic(file: string, text: string | Uint8Array): void {
   const dir = dirname(file);
   mkdirSync(dir, { recursive: true });
   const tmp = file + tempSuffix();
   retrySync(() => {
     const fd = openSync(tmp, 'wx');
     try {
-      writeSync(fd, text);
+      writeAll(fd, typeof text === 'string' ? Buffer.from(text, 'utf8') : text);
       fsyncSync(fd);
     } finally {
       closeSync(fd);

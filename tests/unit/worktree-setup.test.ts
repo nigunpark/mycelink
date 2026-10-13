@@ -6,7 +6,8 @@
  * legitimate GREEN (`pnpm build`) exited 127.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { samePath } from '../../src/security/paths.js';
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   DEFAULT_WORKTREE_SETUP_TIMEOUT_SECONDS,
@@ -251,7 +252,8 @@ describe('runWorktreeSetup', () => {
     expect(existsSync(join(f.worktree, 'node_modules', 'fixture-tool', 'index.mjs'))).toBe(true);
     expect(existsSync(join(f.worktree, 'pwned'))).toBe(false);
     const seen = runs(f)[0] as { cwd: string; argv: string[]; env: Record<string, string> };
-    expect(resolve(seen.cwd).toLowerCase()).toBe(resolve(f.worktree).toLowerCase());
+    // The child runs in the worktree, whose working directory the OS reports by its real path (macOS: /private/var).
+    expect(samePath(seen.cwd, f.worktree)).toBe(true);
     expect(seen.argv).toEqual(['$(touch pwned); echo `id`']);
     expect(seen.env['WHERE']).toBe(f.worktree);
     expect(seen.env['HTTPS_PROXY']).toBeUndefined();
