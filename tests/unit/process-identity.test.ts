@@ -15,7 +15,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { ancestry, isProcessAlive, processIdentity, processStartedAt, sessionHolder } from '../../src/util/process-identity.js';
 
@@ -85,6 +85,37 @@ describe('the session a CLI call runs in', () => {
       "import { spawnSync } from 'node:child_process';\nconst r = spawnSync(process.execPath, [__CHILD__], { env: { ...process.env, CLAUDE_PID: String(process.pid) }, encoding: 'utf8' });\nprocess.stdout.write(JSON.stringify({ parent: process.pid, holder: JSON.parse(r.stdout) }));\n",
     ) as { parent: number; holder: { pid: number } | null };
     expect(holder.holder).toMatchObject({ pid: holder.parent });
+  });
+
+  // CI 38443874383: every with-arm run on the Windows legs took ten times as long as on Linux. A CLI call or hook in a
+  // session runs with the session's bare environment (evals lib/arms.mjs sessionEnv: no LOCALAPPDATA, its own home);
+  // there `Get-CimInstance` had PowerShell analyse every module on its path to find the cmdlet, seconds a call on a
+  // hosted runner's module path. The snapshot asks WMI itself and names no command PowerShell must discover.
+  it.runIf(process.platform === 'win32')("costs a session's call the same whatever modules PowerShell's path holds", () => {
+    const dir = makeTmpDir('holder-modules-');
+    const modules = join(dir, 'Modules');
+    for (let i = 0; i < 600; i++) {
+      mkdirSync(join(modules, `M${i}`), { recursive: true });
+      writeFileSync(join(modules, `M${i}`, `M${i}.psm1`), Array.from({ length: 20 }, (_, j) => `function Get-M${i}F${j} { $true }`).join('\n'));
+      writeFileSync(join(modules, `M${i}`, `M${i}.psd1`), `@{ RootModule = 'M${i}.psm1'; ModuleVersion = '1.0'; GUID = '0d6c1a3e-1111-4222-8333-${String(i).padStart(12, '0')}'; FunctionsToExport = '*' }\n`);
+    }
+    const home = join(dir, 'home');
+    mkdirSync(home);
+    const pick = (keys: string[]) => Object.fromEntries(keys.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]!]));
+    const system = process.env['SystemRoot'] ?? 'C:\\Windows';
+    const env = { ...pick(['PATH', 'Path', 'SystemRoot', 'ComSpec', 'PATHEXT', 'WINDIR']), HOME: home, USERPROFILE: home, PSModulePath: `${modules};${system}\\System32\\WindowsPowerShell\\v1.0\\Modules` };
+    const child = join(dir, 'child.mjs');
+    const moduleUrl = new URL('../../build/util/process-identity.js', import.meta.url).href;
+    writeFileSync(child, `import { sessionHolder } from ${JSON.stringify(moduleUrl)};\nconst t = Date.now();\nconst holder = sessionHolder();\nprocess.stdout.write(JSON.stringify({ holder, ms: Date.now() - t }));\n`);
+    const parent = join(dir, 'parent.mjs');
+    writeFileSync(parent, `import { spawnSync } from 'node:child_process';\nconst calls = [0, 1].map(() => JSON.parse(spawnSync(process.execPath, [${JSON.stringify(child)}], { env: { ...process.env, CLAUDE_PID: String(process.pid) }, encoding: 'utf8' }).stdout));\nprocess.stdout.write(JSON.stringify({ parent: process.pid, calls }));\n`);
+    const r = spawnSync(process.execPath, [parent], { env, encoding: 'utf8' });
+    const out = JSON.parse(r.stdout) as { parent: number; calls: { holder: { pid: number } | null; ms: number }[] };
+    for (const call of out.calls) {
+      expect(call.holder).toMatchObject({ pid: out.parent });
+      // One process snapshot: a quarter of a second here; discovering the cmdlet on this path took seconds.
+      expect(call.ms).toBeLessThan(3000);
+    }
   });
 
   it('is nobody without CLAUDE_PID, or when CLAUDE_PID names a process that is not an ancestor', () => {
