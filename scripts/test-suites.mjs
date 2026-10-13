@@ -11,12 +11,12 @@
  * shards balanced by measured duration (scripts/test-weights.json, seconds;
  * a file it does not list weighs DEFAULT_WEIGHT). Every test file Vitest
  * collects belongs to exactly one suite and one shard, whatever the weights
- * say (tests/release/ci-workflow.test.ts).
+ * say (tests/release/ci-suites.test.ts).
  *
  *   node scripts/test-suites.mjs all                  every suite in turn (npm test)
  *   node scripts/test-suites.mjs run <suite>[:i/n]... those suites (or one shard of one)
  *   node scripts/test-suites.mjs ci <group>           one CI matrix group, as the workflows run it
- *   node scripts/test-suites.mjs list [--json]        the plan: suites, shards, files, groups
+ *   node scripts/test-suites.mjs list [--files|--json] the plan: suites, shards, files, groups
  *
  * The real-model pilot is never here (vitest.pilot.config.ts, opt-in); the
  * benchmark's recorded fixture projects are data, never suites.
@@ -43,7 +43,10 @@ export const SUITES = {
   release: { dir: 'tests/release', maxWorkers: 2, shards: 1 },
   'plugin-e2e': { dir: 'tests/plugin-e2e', maxWorkers: 1, shards: 1 },
   // The model-free tests of the public-project benchmark (evals-public-projects); real pilots are opt-in elsewhere.
-  benchmark: { dir: 'tests/benchmark', exclude: ['tests/benchmark/fixtures/'], maxWorkers: 2, shards: 3, timeoutMs: 300_000 },
+  // Three shards ran into the 60-minute job bound on the Windows legs of CI 38443874383: arms and controller-rollback,
+  // each one file whose tests run one after another, did not finish within it. Both are now cut into files (none weighs
+  // more than an even share), and six shards, each two files at once, leave every job well inside the bound.
+  benchmark: { dir: 'tests/benchmark', exclude: ['tests/benchmark/fixtures/'], maxWorkers: 2, shards: 6, timeoutMs: 300_000 },
 };
 
 /** Directories under tests/ that hold no suite: helpers, the fake Claude, the opt-in pilot. */
@@ -175,14 +178,18 @@ function main(argv) {
   if (cmd === 'list') {
     if (rest.includes('--json')) process.stdout.write(`${JSON.stringify(plan(), null, 2)}\n`);
     else {
+      const w = weights();
       for (const [name, s] of Object.entries(plan().suites)) {
-        s.shards.forEach((x, i) => process.stdout.write(`${name}${s.shards.length > 1 ? ` ${i + 1}/${s.shards.length}` : ''}: ${x.files.length} files, ~${Math.round(x.weight)} s, ${s.maxWorkers} at once\n`));
+        s.shards.forEach((x, i) => {
+          process.stdout.write(`${name}${s.shards.length > 1 ? ` ${i + 1}/${s.shards.length}` : ''}: ${x.files.length} files, ~${Math.round(x.weight)} s, ${s.maxWorkers} at once\n`);
+          if (rest.includes('--files')) for (const f of x.files) process.stdout.write(`  ${f} ~${w[f] ?? DEFAULT_WEIGHT} s\n`);
+        });
       }
       for (const g of CI_GROUPS) process.stdout.write(`ci ${g.id}: ${g.runs.join(', ')}\n`);
     }
     return 0;
   }
-  process.stderr.write('usage: test-suites.mjs all | run <suite>[:i/n]... | ci <group> | list [--json]\n');
+  process.stderr.write('usage: test-suites.mjs all | run <suite>[:i/n]... | ci <group> | list [--files|--json]\n');
   return 2;
 }
 
