@@ -212,7 +212,8 @@ describe('who changed what in a controller session', () => {
   it('a helper process the controller left writing is caught by what it wrote, not by what the transcript says', async () => {
     const w = workspace();
     const txn = begin(w);
-    const helper = spawn(process.execPath, ['-e', `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(join(w.platform, 'features-STATE.json'))}, '{}'), 150)`], { stdio: 'ignore' });
+    // The path is the helper's argument, never part of its code.
+    const helper = spawn(process.execPath, ['-e', "setTimeout(() => require('fs').writeFileSync(process.argv[1], '{}'), 150)", join(w.platform, 'features-STATE.json')], { stdio: 'ignore' });
     await new Promise((r) => helper.on('exit', r));
     const r = settleTransaction({ txn });
     expect(kinds(r)).toEqual([['platform/features-STATE.json', 'created', 'scratch']]);

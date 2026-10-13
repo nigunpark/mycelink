@@ -12,7 +12,8 @@
  * 'missing-symbol', 'setup', 'timeout', 'crash' and 'not-run' prove nothing
  * about the behaviour and make a RED invalid.
  */
-import { relative, isAbsolute } from 'node:path';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { sha256Hex, canonicalJson } from './hash.mjs';
 
 export const RED_VALID_CATEGORIES = new Set(['assertion', 'exception']);
@@ -157,9 +158,55 @@ function finish(result) {
   return result;
 }
 
-function repoRelative(root, file) {
+/** The real place of a directory: links resolved on its deepest existing ancestor, the rest appended. */
+function realPlace(p) {
+  let current = resolve(p);
+  const tail = [];
+  for (;;) {
+    if (existsSync(current)) {
+      let real = current;
+      try {
+        real = realpathSync.native(current);
+      } catch {
+        // unreadable: as spelled
+      }
+      return tail.length === 0 ? real : join(real, ...tail.reverse());
+    }
+    const parent = dirname(current);
+    if (parent === current) return resolve(p);
+    tail.push(basename(current));
+    current = parent;
+  }
+}
+
+/** A file's canonical name: its real path, or (a link, or nothing there) its real directory and its own name. */
+function canonicalFile(p) {
+  const abs = resolve(p);
+  try {
+    if (!lstatSync(abs).isSymbolicLink()) return realpathSync.native(abs);
+  } catch {
+    // not there: named below its real directory
+  }
+  return join(realPlace(dirname(abs)), basename(abs));
+}
+
+const escapes = (rel) => rel === '..' || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel);
+
+/**
+ * A reported file, relative to the root the run was in. A runner names files
+ * from the real path of its working directory (macOS reaches its temp
+ * directory through `/var`, a link to `/private/var`): a file outside the root
+ * as spelled, but inside the root's real place by its canonical name, is that
+ * file. One outside either way stays outside, and matches nothing expected.
+ */
+export function repoRelative(root, file) {
   if (!file) return null;
-  const rel = isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file) ? relative(root, file) : file;
+  if (!(isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file))) return file.split('\\').join('/');
+  let rel = relative(root, file);
+  if (escapes(rel)) {
+    const real = relative(realPlace(root), canonicalFile(file));
+    if (!escapes(real)) rel = real;
+  }
   return rel.split('\\').join('/');
 }
 
@@ -168,11 +215,15 @@ function repoRelative(root, file) {
 /**
  * Parse a JUnit XML report (Node's reporter or Surefire). With `moduleDir`
  * (Surefire), a test class maps to `<moduleDir>/src/test/java/<class>.java`
- * and the id is `<moduleDir>/<class>#<method>`.
+ * and the id is `<moduleDir>/<class>#<method>`. Node's reporter names each
+ * test's file from Node 24.11 on; for a test it names none for (Node 22),
+ * `attribute` (`[{ suites, name, failure }]` -> files, lib/junit-files.mjs)
+ * tells the file where it can; without it the test names no file.
  */
-export function parseJUnit(xml, { root = '', moduleDir = null } = {}) {
+export function parseJUnit(xml, { root = '', moduleDir = null, attribute = null } = {}) {
   const doc = parseXml(xml);
   const results = [];
+  const fileless = [];
   const visit = (node, suites) => {
     if (node.name === 'testsuites') {
       for (const c of node.children) visit(c, suites);
@@ -206,9 +257,20 @@ export function parseJUnit(xml, { root = '', moduleDir = null } = {}) {
     }
     const result = finish(r);
     if (moduleDir !== null) result.id = `${moduleDir}/${node.attrs.classname}#${r.name}`;
+    else if (r.file === null) fileless.push({ at: results.length, test: { suites: [...suites], name: r.name, failure: failure ? failure.text : null } });
     results.push(result);
   };
   visit(doc, []);
+  if (attribute !== null && fileless.length > 0) {
+    const files = attribute(fileless.map((f) => f.test));
+    fileless.forEach(({ at }, i) => {
+      const file = files[i] ?? null;
+      if (file === null) return;
+      const result = results[at];
+      result.file = file;
+      result.id = `${result.file}::${result.suite ? `${result.suite} > ` : ''}${result.name}`;
+    });
+  }
   return results;
 }
 

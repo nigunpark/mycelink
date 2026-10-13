@@ -34,6 +34,7 @@ import { gitBlobSha } from './hash.mjs';
 import { catFileBatch, lsTree, revParse } from './git.mjs';
 import { judgeGit, makeSection } from './hygiene.mjs';
 import { declaredTests } from './testids.mjs';
+import { readRegular } from './fsread.mjs';
 
 const MAX_SCAN_BYTES = 8 << 20;
 
@@ -71,7 +72,10 @@ function walk(root, fingerprints) {
       if (st.size > MAX_SCAN_BYTES) continue;
       if (fingerprints.sizes && !fingerprints.sizes.has(st.size)) continue;
       try {
-        const blob = gitBlobSha(readFileSync(full));
+        // Through one descriptor, never through a link: a file swapped since the look is not scanned.
+        const bytes = readRegular(full, MAX_SCAN_BYTES)?.bytes;
+        if (bytes === undefined) continue;
+        const blob = gitBlobSha(bytes);
         if (fingerprints.blobs.has(blob)) files.push({ path: full, blob });
       } catch {
         // unreadable files cannot leak through this scan

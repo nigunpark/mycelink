@@ -10,11 +10,11 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { cleanupTmpRoots, linkedAlias, makeTmpDir } from '../helpers/tmp.js';
 // @ts-expect-error -- plain ESM module without type declarations
-import { captureSnapshot, diffSnapshots, indexSemantics, keyBytes, relKey, showKey } from '../../evals-public-projects/lib/snapshot.mjs';
+import { captureSnapshot, diffSnapshots, indexSemantics, keyBytes, relKey, showKey, workspaceKey } from '../../evals-public-projects/lib/snapshot.mjs';
 // @ts-expect-error -- plain ESM module without type declarations
 import { RollbackConflict, applyRollback, loadPlan, planRollback, verifyRollback } from '../../evals-public-projects/lib/rollback.mjs';
 
@@ -437,5 +437,20 @@ describe("Git state, read without running git", () => {
     writeFileSync(join(f.r, '.git', 'logs', 'refs', 'stash'), 'changed again\n');
     expect(() => applyRollback({ root: f.root, store: f.store, plan, txnDir: f.txn })).toThrow(RollbackConflict);
     expect(readFileSync(join(f.r, '.git', 'logs', 'refs', 'stash'), 'utf8')).toBe('changed again\n');
+  });
+});
+
+describe('workspace keys, however a path is spelled', () => {
+  it('keys a path under the real place of a workspace handed over through a link (macOS /var, a junction) as the same path; outside both, nothing', () => {
+    const base = makeTmpDir('ws-key-');
+    const real = join(base, 'workspace');
+    mkdirSync(join(real, 'repos', 'x', '.git'), { recursive: true });
+    const handed = linkedAlias(real, 'workspace');
+    const canonical = realpathSync.native(real);
+    expect(workspaceKey(handed, join(handed, 'repos', 'x', '.git'))).toBe('repos/x/.git');
+    expect(workspaceKey(handed, join(canonical, 'repos', 'x', '.git'))).toBe('repos/x/.git');
+    expect(workspaceKey(handed, canonical)).toBe('');
+    expect(workspaceKey(handed, join(base, 'elsewhere'))).toBeNull();
+    expect(workspaceKey(handed, join(canonical, '..', 'elsewhere'))).toBeNull();
   });
 });

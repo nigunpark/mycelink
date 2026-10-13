@@ -10,13 +10,21 @@
  * (evals-public-projects/lib/results.mjs), and so is the verdict on every
  * declared test.
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 // @ts-expect-error -- plain ESM module without type declarations
 import * as bench from '../../evals-public-projects/lib/results.mjs';
+// @ts-expect-error -- plain ESM module without type declarations
+import { attributeAmong } from '../../evals-public-projects/lib/junit-files.mjs';
+import { attributeByDeclaration } from '../../src/evidence/junit-attribution.js';
+import { cleanupTmpRoots, linkedAlias, makeTmpDir } from '../helpers/tmp.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { summarizeExpected } from '../../evals-public-projects/lib/tdd.mjs';
 import * as core from '../../src/evidence/red-classify.js';
 import { NODE_JUNIT_LINK, SUREFIRE_VISITS, VITEST_R1 } from '../helpers/red-corpus.js';
+
+afterAll(() => cleanupTmpRoots());
 
 const shape = (rs: Record<string, unknown>[]) => rs.map((r) => ({ id: r['id'], file: r['file'], suite: r['suite'], name: r['name'], status: r['status'], category: r['category'], type: r['type'], fingerprint: r['fingerprint'] }));
 
@@ -62,5 +70,48 @@ describe('RED classification parity with the authoritative replay', () => {
     { details: 'Error: Hook timed out in 10000ms.' },
   ])('classifyFailure(%j) is the same in both', (failure) => {
     expect(core.classifyFailure(failure)).toBe(bench.classifyFailure(failure));
+  });
+});
+
+describe("a report's files, as the run wrote them, read alike", () => {
+  const sources = {
+    'packages/errors/test/errors.test.mjs':
+      "import { test, describe } from 'node:test';\ntest('a git error carries its exit code', () => {});\ndescribe('ChangesetValidationError', () => {\n  test('sorts the issues and lists one per line', () => {});\n});\ntest('works', () => {});\n",
+    'packages/cli/test/report.test.mjs': "import { missing } from '../src/nope.mjs';\nimport { test } from 'node:test';\ntest('works', () => {});\n",
+  };
+  const node22 = `<testsuites>
+<testcase name="packages/cli/test/report.test.mjs" classname="test" failure="test failed"><failure type="testCodeFailure" message="test failed">[Error: test failed]</failure></testcase>
+<testcase name="a git error carries its exit code" classname="test"/>
+<testsuite name="ChangesetValidationError"><testcase name="sorts the issues and lists one per line" classname="test"/></testsuite>
+<testcase name="works" classname="test"/>
+<testcase name="works" classname="test"/>
+</testsuites>`;
+
+  it("Node 22's JUnit, which names no file: the same file for every test, or none", () => {
+    const root = makeTmpDir('parity-files-');
+    for (const [rel, text] of Object.entries(sources)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    }
+    const benchResults = bench.parseJUnit(node22, { root, attribute: attributeAmong({ root, files: Object.keys(sources) }) });
+    const coreResults = core.parseJUnit(node22, { root, attribute: attributeByDeclaration({ root, scope: root }) });
+    expect(shape(coreResults as unknown as Record<string, unknown>[])).toEqual(shape(benchResults));
+    expect(benchResults.map((r: { file: string | null }) => r.file)).toEqual([
+      'packages/cli/test/report.test.mjs',
+      'packages/errors/test/errors.test.mjs',
+      'packages/errors/test/errors.test.mjs',
+      null,
+      null,
+    ]);
+  });
+
+  it('a file under the real path of a linked root (macOS: /private/var for /var): the same relative file', () => {
+    const root = makeTmpDir('parity-files-');
+    mkdirSync(join(root, 'mod-a', 'test'), { recursive: true });
+    writeFileSync(join(root, 'mod-a', 'test', 'a.test.mjs'), "test('works', () => {});\n");
+    const alias = linkedAlias(root, 'tree');
+    const xml = `<testsuites><testcase name="works" classname="test" file="${join(realpathSync.native(root), 'mod-a', 'test', 'a.test.mjs')}"/></testsuites>`;
+    expect(bench.parseJUnit(xml, { root: alias })[0].file).toBe('mod-a/test/a.test.mjs');
+    expect(core.parseJUnit(xml, { root: alias })[0]!.file).toBe('mod-a/test/a.test.mjs');
   });
 });

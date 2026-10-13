@@ -36,10 +36,11 @@
  * Glob over a parent) are reported as probes. A flag's slash-free glob
  * value (`grep --include=*`) is a name pattern, not a path.
  */
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import { commandIndex, directoryAfter, evaluate, expandBraces, patternLiteral, readShell, wordText } from './shell.mjs';
 import { lineWrites } from './writes.mjs';
+import { readRegular } from './fsread.mjs';
 
 /** Every transcript file of a run: the given stream files, and `*.jsonl` anywhere under the given directories. */
 export function transcriptFiles({ streams = [], dirs = [] }) {
@@ -95,35 +96,72 @@ const caseless = (p) => /^[a-z]:\//i.test(p) || wslForm.test(p);
 const same = (a, b) => (caseless(a) || caseless(b) ? a.toLowerCase() === b.toLowerCase() : a === b);
 const inside = (path, root) => same(path, root) || (path.length > root.length && same(path.slice(0, root.length), root) && path[root.length] === '/') || root === '/';
 
-/** Does a glob segment match a path segment? (`*`, `?`, `[...]`, `{a,b}`, `\x` literal; case per `caseInsensitive`) */
-function segmentMatches(glob, name, caseInsensitive) {
-  let re = '';
+/**
+ * A glob segment as tokens: a literal character, `?`, `*`, a class `[...]`
+ * (`!` or `^` negates; ranges; every character literal), or `{a,b}` (its
+ * alternatives literal). `\x` is a literal x; an unclosed `[` or `{` is
+ * literal too.
+ */
+function globTokens(glob) {
+  const tokens = [];
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
-    if (c === '\\') re += (glob[++i] ?? '\\').replace(/[.+^${}()|[\]\\*?]/g, '\\$&');
-    else if (c === '*') re += '.*';
-    else if (c === '?') re += '.';
-    else if (c === '[') {
+    if (c === '\\') tokens.push({ k: 'char', c: glob[++i] ?? '\\' });
+    else if (c === '*') tokens.push({ k: 'star' });
+    else if (c === '?') tokens.push({ k: 'any' });
+    else if (c === '[' && glob.indexOf(']', i + 2) >= 0) {
       const end = glob.indexOf(']', i + 2);
-      if (end < 0) re += '\\[';
-      else {
-        re += `[${glob.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`;
-        i = end;
+      let body = glob.slice(i + 1, end);
+      const negated = body.startsWith('!') || body.startsWith('^');
+      if (negated) body = body.slice(1);
+      const ranges = [];
+      for (let j = 0; j < body.length; j++) {
+        if (body[j + 1] === '-' && j + 2 < body.length) {
+          ranges.push([body[j], body[j + 2]]);
+          j += 2;
+        } else ranges.push([body[j], body[j]]);
       }
-    } else if (c === '{') {
+      tokens.push({ k: 'class', negated, ranges });
+      i = end;
+    } else if (c === '{' && glob.indexOf('}', i + 1) >= 0) {
       const end = glob.indexOf('}', i + 1);
-      if (end < 0) re += '\\{';
-      else {
-        re += `(?:${glob.slice(i + 1, end).split(',').map((x) => x.replace(/[.+^${}()|[\]\\*?]/g, '\\$&')).join('|')})`;
-        i = end;
-      }
-    } else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+      tokens.push({ k: 'alt', options: glob.slice(i + 1, end).split(',') });
+      i = end;
+    } else tokens.push({ k: 'char', c });
   }
-  try {
-    return new RegExp(`^${re}$`, caseInsensitive ? 'i' : '').test(name);
-  } catch {
-    return true; // a pattern we cannot read could match anything
-  }
+  return tokens;
+}
+
+/**
+ * Does a glob segment match a path segment? (`*`, `?`, `[...]`, `{a,b}`, `\x` literal; case per `caseInsensitive`)
+ * Matched directly, never through a regular expression made of the pattern: a transcript's globs are the session's,
+ * and a pattern is no program (each token at each position is decided once).
+ */
+function segmentMatches(glob, name, caseInsensitive) {
+  const fold = (s) => (caseInsensitive ? s.toLowerCase() : s);
+  const text = fold(name);
+  const tokens = globTokens(glob);
+  const memo = new Map();
+  const inClass = (t, ch) => {
+    const inRange = (x) => t.ranges.some(([lo, hi]) => lo <= x && x <= hi);
+    return (caseInsensitive ? [ch, ch.toLowerCase(), ch.toUpperCase()].some(inRange) : inRange(ch)) !== t.negated;
+  };
+  const match = (ti, ni) => {
+    if (ti === tokens.length) return ni === text.length;
+    const key = ti * (text.length + 1) + ni;
+    if (memo.has(key)) return memo.get(key);
+    const t = tokens[ti];
+    let ok = false;
+    if (t.k === 'star') ok = match(ti + 1, ni) || (ni < text.length && match(ti, ni + 1));
+    else if (t.k === 'alt') ok = t.options.some((o) => text.startsWith(fold(o), ni) && match(ti + 1, ni + o.length));
+    else if (ni < text.length) {
+      const ch = text[ni];
+      ok = (t.k === 'any' || (t.k === 'char' ? fold(t.c) === ch : inClass(t, name[ni]))) && match(ti + 1, ni + 1);
+    }
+    memo.set(key, ok);
+    return ok;
+  };
+  return match(0, 0);
 }
 
 /** Can a glob path (absolute, '/'-separated, escapes kept) match the root itself or anything inside it? */
@@ -353,13 +391,10 @@ export function forbiddenAccess({ files, roots, cwd = null, home = null }) {
   const hits = [];
   const probes = [];
   for (const file of files) {
-    let text;
-    try {
-      if (!statSync(file).isFile()) continue;
-      text = readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
+    // Read through one descriptor, never through a link: what is checked is what is scanned.
+    const read = readRegular(file);
+    if (read === null) continue;
+    const text = read.bytes.toString('utf8');
     // The session's stream: where it started, and where its own shell is now.
     const entries = [];
     let project = null;
@@ -402,7 +437,7 @@ export function forbiddenAccess({ files, roots, cwd = null, home = null }) {
                 continue;
               }
               // A directory to anchor a glob at: '/'-separated, a drive lower-cased, its own glob characters escaped.
-              const anchor = (d) => d.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (x, c) => `${c.toLowerCase()}:`).replace(/[*?[\]{}]/g, '\\$&');
+              const anchor = (d) => d.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (x, c) => `${c.toLowerCase()}:`).replace(/[\\*?[\]{}]/g, '\\$&');
               let p = alternative;
               if (home && (p === '~' || p.startsWith('~/'))) p = anchor(home) + p.slice(1);
               if (!p.startsWith('/') && !driveForm.test(p)) {

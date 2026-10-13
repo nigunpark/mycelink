@@ -75,6 +75,26 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, unlin
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 
+/** A file's text, or null when nothing (readable) is there. */
+function readOrNull(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** Create `marker` exclusively: true the first time, false when it is already there. */
+function createdOnce(marker, text) {
+  try {
+    writeFileSync(marker, text, { flag: 'wx' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
 // ---- the stand-in acceptance-reviewer subagent (as evals-public-projects/lib/review-standin.mjs) ----
 // Inlined: the sandbox binds this host file alone, so it imports no sibling module.
 const REVIEWER = 'mycelink:acceptance-reviewer';
@@ -516,8 +536,13 @@ function unhooked(command, effect) {
  */
 async function r9Forgery() {
   const marker = `${plan.log}.r9-forged`;
-  if (!plan.r9 || existsSync(marker)) return;
-  writeFileSync(marker, 'forged\n');
+  if (!plan.r9) return;
+  // Once: the marker is created exclusively, or this forgery already ran.
+  try {
+    writeFileSync(marker, 'forged\n', { flag: 'wx' });
+  } catch {
+    return;
+  }
   // A model's next call comes seconds after the core's last write, not within the file system's clock tick: forged
   // sooner, a file's ctime can fall before the core's ledger record, and the settlement rightly cannot tell which came
   // first — it rolls the whole session back (CSET-203 r10: 8 of 15 such writes on WSL, none 50 ms later).
@@ -692,7 +717,8 @@ function worker(ticket) {
     const changed = [];
     for (const [path, body] of Object.entries(files)) {
       const file = join(wt, ...path.split('/'));
-      if (existsSync(file) && readFileSync(file, 'utf8') === body) continue;
+      // What is there, read once (nothing there reads as null): no look first, then a read.
+      if (readOrNull(file) === body) continue;
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, body);
       changed.push(path);
@@ -848,8 +874,8 @@ async function settleAndDeliver(key) {
       commitControl(`${FEATURE}: ${d.ticket.node_id} challenged its review gap`);
       // As r4's corrective did: the session exits 0 here, the feature incomplete; the continuation goes on (once).
       const marker = `${plan.log}.exited-after-challenge`;
-      if (plan.exitAfterChallenge && !existsSync(marker)) {
-        writeFileSync(marker, 'exited\n');
+      // Once: the marker is created exclusively, or this exit already happened.
+      if (plan.exitAfterChallenge && createdOnce(marker, 'exited\n')) {
         const status = JSON.parse(mycelink(['feature', 'status', FEATURE, '--control-root', control, '--json']).stdout);
         log({ exit: { after: 'challenge', next_action: status.next_action?.kind ?? null, resumable: status.resumable ?? null } });
         done(`${d.ticket.node_id} challenged its review gap; stopping here.`);

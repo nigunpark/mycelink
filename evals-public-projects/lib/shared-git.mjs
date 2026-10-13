@@ -55,23 +55,17 @@
  */
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { sha256Hex } from './hash.mjs';
 import { safeGit } from './git.mjs';
 import { AGENT_TOOLS, MODULE_WORKERS, aliveAt, insidePath, shellEffects } from './causal.mjs';
-import { keyBytes, putObject, readObject, relKey } from './snapshot.mjs';
+import { keyBytes, putObject, readObject, workspaceKey } from './snapshot.mjs';
 
 export const CALLS_FILE = 'calls.jsonl';
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
-const slashed = (p) => p.split('\\').join('/');
 
-/** A workspace key for an absolute path inside the workspace; null outside it. */
-function keyOf(workspace, abs) {
-  const rel = relative(workspace, abs);
-  if (rel === '') return '';
-  if (rel.startsWith('..') || isAbsolute(rel)) return null;
-  return relKey(Buffer.from(slashed(rel), 'utf8'));
-}
+/** A workspace key for an absolute path inside the workspace, however it is spelled; null outside it. */
+const keyOf = workspaceKey;
 
 // ---- the call ledger --------------------------------------------------------------
 
@@ -409,16 +403,17 @@ export function attributeStash({ workspace, store, git, pre, post, ledger, index
     const bytes = sha === null ? Buffer.alloc(0) : v.stash_log.kept ? readKept(ledger.dir, sha) : null;
     events.push({ type: 'obs', t: o.t, pos: o.pos, lines: bytes === null ? null : linesOf(bytes), ref: v.refs?.['refs/stash'] ?? null, branchAt: v.refs ?? {} });
   }
-  const logPath = resolve(gitAbs, 'logs', 'refs', 'stash');
+  // Compared by key: the ledger names the real place, the workspace may be spelled through a link.
+  const logKey = keyOf(workspace, resolve(gitAbs, 'logs', 'refs', 'stash'));
   for (const r of ledger.records) {
     const t = BigInt(r.t ?? '0');
     if (r.kind === 'done') {
       for (const s of r.states ?? []) {
-        if (resolve(s.path) !== logPath) continue;
+        if (logKey === null || keyOf(workspace, resolve(s.path)) !== logKey) continue;
         const bytes = s.state?.t === 'absent' ? Buffer.alloc(0) : s.state?.t === 'f' && s.state.kept ? readKept(ledger.dir, s.state.sha256) : null;
         events.push({ type: 'core', t, lines: bytes === null ? undefined : linesOf(bytes) });
       }
-    } else if (r.kind === 'git-done' && r.common_dir && resolve(r.common_dir) === gitAbs && r.changed?.refs && 'refs/stash' in r.changed.refs) {
+    } else if (r.kind === 'git-done' && r.common_dir && keyOf(workspace, resolve(r.common_dir)) === git && r.changed?.refs && 'refs/stash' in r.changed.refs) {
       // A ref git deletes takes its reflog with it.
       const to = r.changed.refs['refs/stash'][1] ?? null;
       events.push({ type: 'core', t, ref: to, ...(to === null ? { lines: [] } : {}) });

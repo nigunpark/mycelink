@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { crc32 } from '../../scripts/lib/zip.mjs';
 import { assertSafeTreePath, canonicalSha256, sha256Hex } from './hash.mjs';
 import { hardenedGitEnv } from './git.mjs';
+import { readRegular } from './fsread.mjs';
 
 /** The checkout the plugin is packaged from. */
 export const PLUGIN_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -60,7 +61,12 @@ export function artifactDigest(dir) {
       const rel = relative(dir, full).split('\\').join('/');
       if (st.isDirectory()) walk(full);
       else if (st.isFile() && st.nlink === 1) {
-        const body = readFileSync(full);
+        // Read through one descriptor: a file swapped since the look is a problem, never sealed.
+        const body = readRegular(full)?.bytes;
+        if (body === undefined) {
+          problems.push(`${rel} changed while it was read`);
+          continue;
+        }
         files.push({ path: rel, sha256: sha256Hex(body), size: body.length });
       } else problems.push(`${rel} is not a regular, singly linked file`);
     }
