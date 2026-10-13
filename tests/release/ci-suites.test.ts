@@ -49,7 +49,10 @@ describe('the suites', () => {
       for (const x of shards) expect(x.files.length, s).toBeGreaterThan(0);
       expect(SUITES[s].maxWorkers, s).toBeGreaterThanOrEqual(1);
       expect(SUITES[s].maxWorkers, s).toBeLessThanOrEqual(3);
+      // A bound on every test: the config's 120 s, or at most 300 s for the workflow suites.
+      expect(SUITES[s].timeoutMs ?? 120_000, s).toBeLessThanOrEqual(300_000);
     }
+    expect(Object.keys(SUITES).filter((s) => SUITES[s].timeoutMs !== undefined).sort()).toEqual(['benchmark', 'fixtures', 'integration']);
   });
 
   it('weigh only files that exist', () => {

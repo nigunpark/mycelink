@@ -33,6 +33,10 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync,
 import net from 'node:net';
 import { dirname, join } from 'node:path';
 
+// Pipes are asynchronous on macOS and Windows (synchronous on Linux): a stand-in that exits right after its last
+// line would drop what was still buffered, cutting its own stream mid-line. Write through, as a real CLI does.
+for (const stream of [process.stdout, process.stderr]) stream._handle?.setBlocking?.(true);
+
 // The plan comes from the environment (library tests) or as the first argument (CLI tests,
 // whose sessions inherit no test variables).
 const planFile = process.env.FAKE_CLAUDE_PLAN ?? process.argv[2];

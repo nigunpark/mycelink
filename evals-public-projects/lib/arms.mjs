@@ -1935,7 +1935,9 @@ export async function runArm({
     } catch {
       return { discarded: false, detail: 'no feature state' };
     }
-    const norm = (p) => resolve(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    // By real place: the harness names the worktree from the workspace as handed over, Mycelink's claim may name the real
+    // path (macOS reaches a temp workspace through /var, git names /private/var).
+    const norm = (p) => (existsSync(p) ? realpathSync.native(p) : resolve(p)).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
     const held = Object.entries(state.nodes ?? {}).find(([, rt]) => rt.claim?.worktree && norm(rt.claim.worktree) === norm(worktree));
     if (!held) return { discarded: false, detail: 'no claim holds this worktree' };
     const [id, rt] = held;

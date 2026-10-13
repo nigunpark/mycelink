@@ -75,6 +75,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, unlin
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 
+// Pipes are asynchronous on macOS and Windows (synchronous on Linux): a stand-in that exits right after its last
+// line would drop what was still buffered, cutting its own stream mid-line. Write through, as a real CLI does.
+for (const stream of [process.stdout, process.stderr]) stream._handle?.setBlocking?.(true);
+
 /** A file's text, or null when nothing (readable) is there. */
 function readOrNull(file) {
   try {
