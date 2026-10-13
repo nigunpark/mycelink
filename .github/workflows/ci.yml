@@ -20,10 +20,10 @@ env:
   CLAUDE_CODE_VERSION: 2.1.288
 
 jobs:
-  test:
-    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+  checks:
+    name: checks (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -66,6 +66,9 @@ jobs:
       - name: Check the generated public-project eval cases are current
         run: npm run bench:cases:check
 
+      - name: Check the constraint audit is current
+        run: npm run audit:constraints:check
+
       - name: Build and check the committed bundle is current
         run: |
           npm run build
@@ -73,11 +76,6 @@ jobs:
 
       - name: Install Claude Code CLI (validation only, no model usage)
         run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-
-      - name: Test (unit, integration, security, fixture, release, plugin-e2e)
-        run: npm test
-        env:
-          ANTHROPIC_API_KEY: ''
 
       - name: Validate plugin (strict)
         run: claude plugin validate --strict .
@@ -100,3 +98,62 @@ jobs:
           path: artifacts/a/
           if-no-files-found: error
           retention-days: 14
+
+  # Every suite, bounded (scripts/test-suites.mjs): each group is one runner's
+  # suites or one duration-balanced shard, with its own worker limit.
+  # `node scripts/test-suites.mjs list` prints the plan; `npm run test:ci -- <group>`
+  # runs a group locally exactly as here.
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }}, ${{ matrix.group }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.12.0', '24']
+        group:
+          - core
+          - integration-1
+          - integration-2
+          - integration-3
+          - integration-4
+          - integration-5
+          - fixtures-1
+          - fixtures-2
+          - benchmark-1
+          - benchmark-2
+          - benchmark-3
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Configure git identity for test fixtures
+        run: |
+          git config --global user.name "Mycelink CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+          git config --global core.autocrlf false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Claude Code CLI (plugin-e2e only, no model usage)
+        if: matrix.group == 'core'
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Test ${{ matrix.group }}
+        run: node scripts/test-suites.mjs ci ${{ matrix.group }}
+        env:
+          ANTHROPIC_API_KEY: ''
