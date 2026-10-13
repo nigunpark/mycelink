@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { validateGraph } from '../../src/graph/validate.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 const R3 = join(process.cwd(), 'tests', 'benchmark', 'fixtures', 'cset203-r3', 'PORTFOLIO-GRAPH.json');
 const CLI = 'CSET-203.cli.recovery-failure.impl';
@@ -38,7 +39,7 @@ describe("CSET-203 r3's graph: AC-5 owned by a verification node alone", () => {
     expect(missing?.detail).toContain(VERIFY);
     expect(missing?.detail).toMatch(/implementation/);
     const unowned = result.problems.find((p) => p.code === 'VERIFICATION_CRITERION_UNOWNED');
-    expect(unowned?.detail).toMatch(new RegExp(`${VERIFY.replace(/\./g, '\\.')}" carries AC-5 \\(compatibility\\)`));
+    expect(unowned?.detail).toMatch(new RegExp(`${escapeRegExp(VERIFY)}" carries AC-5 \\(compatibility\\)`));
   });
 
   it('is accepted once the cli implementation produces AC-5 and the verification node proves it as well', () => {

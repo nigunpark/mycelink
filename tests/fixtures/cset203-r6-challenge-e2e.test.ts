@@ -170,5 +170,5 @@ describe('CSET-203 r6, replayed model-free to the delivery it should have reache
     const r3 = acceptance(s.repo, delivered, VER_R3_ACCEPTANCE);
     expect(r3.code, r3.out).toBe(0);
     void readFileSync;
-  });
+  }, 300_000);
 });

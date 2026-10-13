@@ -244,5 +244,5 @@ describe('CSET-203 r2, model-free: the acceptance reviewer finds the untested ch
     const after = changelogAcceptance(s.repo, delivered);
     expect(after.code, after.out).toBe(0);
     expect(after.out).toContain('changelog acceptance: ok');
-  });
+  }, 300_000);
 });

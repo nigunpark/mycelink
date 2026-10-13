@@ -30,6 +30,7 @@ import { CORE, WORK, cli, cliRaw, dispatch, hostGraph, hostPortfolio, settle, te
 import { loadState } from '../../src/state/feature-state.js';
 import { workerBranchName } from '../../src/git/worktree.js';
 import { branchExists } from '../../src/git/git.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -69,8 +70,8 @@ describe('settle verifies the node history test-first', () => {
     writeFileSync(file, readFileSync(file, 'utf8').replace('"ok": true', '"ok": false'));
     // The node's history, and the completion record that names it, both refuse the changed bytes.
     expect(await problems()).toEqual([
-      expect.stringMatching(new RegExp(`^OUTPUT_HASH_MISMATCH: ${CORE.replace(/\./g, '\\.')} tdd-history `)),
-      expect.stringMatching(new RegExp(`^COMPLETION_LEDGER_INVALID: ${CORE.replace(/\./g, '\\.')} COMPLETION_HISTORY_INVALID: `)),
+      expect.stringMatching(new RegExp(`^OUTPUT_HASH_MISMATCH: ${escapeRegExp(CORE)} tdd-history `)),
+      expect.stringMatching(new RegExp(`^COMPLETION_LEDGER_INVALID: ${escapeRegExp(CORE)} COMPLETION_HISTORY_INVALID: `)),
     ]);
   });
 

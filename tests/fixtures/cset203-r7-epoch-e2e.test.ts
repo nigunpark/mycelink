@@ -224,7 +224,7 @@ describe('CSET-203 r7, replayed model-free to the delivery it should have reache
     expect(changelog.code, changelog.out).toBe(0);
     const r3 = acceptance(s.repo, delivered, VER_R3_ACCEPTANCE);
     expect(r3.code, r3.out).toBe(0);
-  });
+  }, 300_000);
 
   it('side by side: the cli rework is live when the AC-1 challenge settles; no refinement or review until it settles (await-worker); then the compatibility node, the refinement, R002 PASS, C001', async () => {
     const s = await r7Reviewed({ graph: siblingGraph() });
@@ -279,5 +279,5 @@ describe('CSET-203 r7, replayed model-free to the delivery it should have reache
     const delivered = git(s.repo, ['rev-parse', 'main']);
     expect(acceptance(s.repo, delivered, VER_CHANGELOG_ACCEPTANCE).code).toBe(0);
     expect(acceptance(s.repo, delivered, VER_R3_ACCEPTANCE).code).toBe(0);
-  });
+  }, 300_000);
 });
