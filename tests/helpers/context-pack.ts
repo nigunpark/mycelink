@@ -2,9 +2,15 @@
  * A minimal, schema-valid context pack for adapter-level tests that do not
  * build a whole portfolio graph.
  */
+import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import type { ContextPack } from '../../src/sessions/context-pack.js';
 import { WORKER_RULES } from '../../src/sessions/context-pack.js';
+
+/** A criterion as a pack carries it: its exact text, its kind and the text's hash. */
+export function packCriterion(id: string, text: string, kind: 'new-behavior' | 'compatibility' | 'declaration' = 'new-behavior'): ContextPack['acceptance_criteria'][number] {
+  return { id, kind, text, sha256: createHash('sha256').update(text).digest('hex') };
+}
 
 export function minimalPack(overrides: Partial<ContextPack> = {}): ContextPack {
   return {
@@ -17,7 +23,7 @@ export function minimalPack(overrides: Partial<ContextPack> = {}): ContextPack {
     worktree: null,
     branch: 'wip/FEAT-101/core.publish.impl',
     node_contract: { node_type: 'implementation', goal: 'implementation for "Publish".', capability: null },
-    acceptance_criteria: [{ id: 'AC-1', text: 'Publishing emits JOB_RESULT_V2.' }],
+    acceptance_criteria: [packCriterion('AC-1', 'Publishing emits JOB_RESULT_V2.')],
     allowed_paths: ['src/**', 'tests/**'],
     forbidden_paths: [],
     contracts: [],

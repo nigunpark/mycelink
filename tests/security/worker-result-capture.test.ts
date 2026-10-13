@@ -23,6 +23,8 @@ const fake = vi.hoisted(() => ({
   node22PathDev: false,
   /** Renames out of this directory fail as if it were on another volume. */
   crossVolumeFrom: null as null | string,
+  /** Simulated volume roots: a rename between two of them fails with EXDEV. */
+  volumes: [] as string[],
   copies: 0,
 }));
 
@@ -41,6 +43,12 @@ vi.mock('node:fs', async (importOriginal) => {
       return out;
     };
   const renameSync = (from: realFs.PathLike, to: realFs.PathLike): void => {
+    const volumeOf = (p: string): string | undefined => fake.volumes.find((v) => resolve(p).startsWith(v + sep));
+    if (fake.volumes.length > 0 && volumeOf(String(from)) !== volumeOf(String(to))) {
+      throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${String(from)}'`), {
+        code: 'EXDEV',
+      });
+    }
     if (fake.crossVolumeFrom !== null && resolve(String(from)).startsWith(fake.crossVolumeFrom + sep)) {
       throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${String(from)}'`), {
         code: 'EXDEV',
@@ -70,6 +78,7 @@ const { collectWorkerResult, prepareResultSlot } = await import('../../src/sessi
 afterEach(() => {
   fake.node22PathDev = false;
   fake.crossVolumeFrom = null;
+  fake.volumes = [];
   fake.copies = 0;
 });
 afterAll(() => cleanupTmpRoots());
@@ -137,8 +146,70 @@ describe('worker result capture under Node 22 Windows file identity', () => {
   });
 });
 
+/** A worktree on one simulated volume and the controller copy on another. */
+function twoVolumes(): { root: string; cwd: string; file: string; controller: string } {
+  const root = makeTmpDir('capture-xv-');
+  const a = join(root, 'vol-a');
+  const b = join(root, 'vol-b');
+  const cwd = join(a, 'worktrees', 'wt');
+  realFs.mkdirSync(cwd, { recursive: true });
+  realFs.mkdirSync(b, { recursive: true });
+  fake.volumes = [resolve(a), resolve(b)];
+  const file = prepareResultSlot(cwd);
+  return { root, cwd, file, controller: join(b, 'controller', 'result.json') };
+}
+
+describe('worker result capture across volumes', () => {
+  it('captures through a quarantine on the worktree volume when the controller is on another, without copying', () => {
+    const { cwd, file, controller } = twoVolumes();
+    realFs.writeFileSync(file, validResult(), 'utf8');
+    const collected = collectWorkerResult(cwd, IDENTITY, controller, {});
+    expect(collected.failure).toBeNull();
+    expect(collected.result?.claim_id).toBe('claim-1');
+    expect(JSON.parse(realFs.readFileSync(controller, 'utf8'))).toMatchObject({ claim_id: 'claim-1' });
+    expect(fake.copies).toBe(0);
+    expect(realFs.existsSync(file)).toBe(false);
+    // Nothing staged is left beside the worktree or the controller copy.
+    expect(realFs.readdirSync(dirname(cwd))).toEqual(['wt']);
+    expect(leftovers(controller)).toEqual([]);
+  });
+
+  it('keeps refusing a hard link to an outside file on the fallback path', () => {
+    const { root, cwd, file, controller } = twoVolumes();
+    const outside = join(root, 'vol-a', 'outside-secret.txt');
+    realFs.writeFileSync(outside, SECRET, 'utf8');
+    realFs.linkSync(outside, file);
+    const collected = collectWorkerResult(cwd, IDENTITY, controller, {});
+    expect(collected.result).toBeNull();
+    expect(collected.failure).toMatch(/^RESULT_PATH_ESCAPE/);
+    expect(realFs.readFileSync(outside, 'utf8')).toBe(SECRET);
+    expect(realFs.existsSync(controller)).toBe(false);
+    expect(realFs.readdirSync(dirname(cwd))).toEqual(['wt']);
+  });
+
+  it('keeps moving a slot directory link itself on the fallback path, never what it points at', (ctx) => {
+    const { root, cwd, controller } = twoVolumes();
+    const outsideDir = join(root, 'vol-a', 'outside');
+    realFs.mkdirSync(outsideDir);
+    const outsideResult = join(outsideDir, 'result.json');
+    realFs.writeFileSync(outsideResult, SECRET, 'utf8');
+    const dir = join(cwd, '.mycelink-worker');
+    realFs.rmSync(dir, { recursive: true, force: true });
+    try {
+      realFs.symlinkSync(outsideDir, dir, 'junction');
+    } catch {
+      return ctx.skip();
+    }
+    const collected = collectWorkerResult(cwd, IDENTITY, controller, {});
+    expect(collected.result).toBeNull();
+    expect(collected.failure).toMatch(/^RESULT_PATH_ESCAPE/);
+    expect(realFs.readFileSync(outsideResult, 'utf8')).toBe(SECRET);
+    expect(realFs.existsSync(controller)).toBe(false);
+  });
+});
+
 describe('worker result capture requires one same-volume atomic rename', () => {
-  it('fails closed, without copying, when the slot cannot be renamed into quarantine', () => {
+  it('fails closed, without copying, when the slot cannot be renamed into any quarantine', () => {
     const { cwd, file, controller } = slot();
     realFs.writeFileSync(file, validResult(), 'utf8');
     fake.crossVolumeFrom = resolve(cwd);

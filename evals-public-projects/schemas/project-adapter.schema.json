@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelink.invalid/bench/project-adapter.schema.json",
+  "title": "Project adapter manifest",
+  "description": "Declares a frozen project's topology, toolchain, pinned environment, trusted commands and known upstream quirks. The verifier talks to a project only through the adapter implementation named here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "implementation", "source_lock", "workspace", "modules", "shared_paths", "test_paths", "toolchain", "env", "commands", "tolerated_build_mutations", "baseline_exclusions", "harness"],
+  "properties": {
+    "schema": { "const": "mycelink-bench/project-adapter@1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "name": { "type": "string", "minLength": 1 },
+    "implementation": { "enum": ["maven-junit", "pnpm-vitest", "node-test"] },
+    "source_lock": { "type": "string", "pattern": "^[A-Za-z0-9._-]+\\.json$" },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo_dir", "branch"],
+      "properties": {
+        "repo_dir": { "type": "string", "pattern": "^repos/[a-z0-9][a-z0-9-]*$" },
+        "branch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+          "path": { "type": "string", "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" },
+          "description": { "type": "string", "minLength": 1 },
+          "runtime_tests": {
+            "description": "false for a module with no runtime behaviour to test (declarations only, documentation): a PRD can require production changes in it, but no new tests, and the TDD replay asks no RED of it. Default true.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "shared_paths": {
+      "description": "Repository paths outside every module (globs, '/'-separated).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "test_paths": {
+      "description": "Globs that identify test files; everything else under a module is production code.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "versions", "cache"],
+      "properties": {
+        "runtime": { "enum": ["java", "node"] },
+        "versions": { "type": "object", "additionalProperties": { "type": "string" } },
+        "cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "dir"],
+          "properties": {
+            "kind": { "enum": ["maven-repository", "pnpm-store", "none"] },
+            "dir": { "type": "string", "pattern": "^[A-Za-z0-9._/-]*$" },
+            "wrapper_dir": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+            "corepack_dir": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" }
+          }
+        }
+      }
+    },
+    "env": {
+      "description": "Pinned environment for every trusted command.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeout_seconds"],
+      "properties": {
+        "timeout_seconds": { "type": "integer", "minimum": 10, "maximum": 7200 },
+        "maven_args": { "type": "array", "items": { "type": "string" } },
+        "install": { "type": "array", "items": { "type": "string" } },
+        "build": { "type": "array", "items": { "type": "string" } },
+        "test": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "tolerated_build_mutations": {
+      "description": "Working-tree changes the upstream build itself makes to tracked files. Tolerated only when the file holds exactly the recorded bytes.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "baseline_blob", "built_blob", "evidence"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "baseline_blob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "built_blob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "evidence": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "baseline_exclusions": {
+      "description": "Upstream tests that are not part of the deterministic baseline, with the reason and the evidence.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scope", "reason", "evidence"],
+        "properties": {
+          "scope": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "harness": {
+      "description": "The trusted test harness (lib/harness.mjs). Acceptance and regression run with every test path and every frozen path exactly as at the frozen commit; a delivery is rejected for changing frozen paths, adding forbidden harness files, production lines that reference a framework module or detect the test run, or (pnpm) manifest changes beyond dependencies on workspace packages.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frozen", "forbidden_new", "framework_modules", "manifests"],
+      "properties": {
+        "frozen": { "description": "Build and test-runner configuration a delivery may not change (globs).", "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "forbidden_new": { "description": "Harness hook files a delivery may not add anywhere (globs): test-runner config, service loaders, framework registrations, automocks.", "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "framework_modules": { "description": "Test-framework modules production code may not reference: JS module specifiers (@scope/* for a whole scope), or JVM package prefixes (anything with a dot).", "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "manifests": { "description": "pnpm: package.json and pnpm-lock.yaml changes are checked structurally; none: no manifest rules.", "enum": ["none", "pnpm"] }
+      }
+    },
+    "workspace_notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

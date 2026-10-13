@@ -68,6 +68,20 @@ export function redactText(text: string, env: Env = process.env): string {
   return out;
 }
 
+/**
+ * The kinds of secret `text` carries, by name only (never the value): the
+ * credential shapes redactText removes, and SECRET_ENV for the value of a
+ * secret-looking environment variable. Empty when redactText would leave it.
+ */
+export function credentialKinds(text: string, env: Env = process.env): string[] {
+  const kinds = new Set<string>();
+  if (secretEnvValues(env).some(([, value]) => text.includes(value))) kinds.add('SECRET_ENV');
+  for (const { name, rx } of SHAPES) {
+    if (new RegExp(rx.source, rx.flags.replace('g', '')).test(text)) kinds.add(name);
+  }
+  return [...kinds];
+}
+
 /** Deep-redact every string inside a JSON-like value; keys are left intact. */
 export function redactValue<T>(value: T, env: Env = process.env): T {
   const secrets = secretEnvValues(env);

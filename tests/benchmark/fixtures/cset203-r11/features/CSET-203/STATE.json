@@ -1,0 +1,3110 @@
+{
+  "revision": 181,
+  "data": {
+    "schema_version": 1,
+    "feature_id": "CSET-203",
+    "feature_state": "BLOCKED",
+    "graph_hash": "5f7550748e8460a7c0e3d7b95b079df74d40af61dc6a65325c4ff2db26a4bdd4",
+    "created_at": "2026-10-10T00:37:19.854Z",
+    "updated_at": "2026-10-10T01:09:29.251Z",
+    "nodes": {
+      "CSET-203.apply.journal-rollback.impl": {
+        "state": "DONE",
+        "attempts": 1,
+        "claim": null,
+        "evidence": {
+          "red": {
+            "kind": "red",
+            "node_id": "CSET-203.apply.journal-rollback.impl",
+            "command": [
+              "pnpm",
+              "vitest",
+              "run",
+              "--reporter=default",
+              "--reporter=json",
+              "--outputFile.json=${REPORT}",
+              "packages/apply-release-plan/"
+            ],
+            "exit_code": 1,
+            "started_at": "2026-10-10T00:39:10.585Z",
+            "finished_at": "2026-10-10T00:39:19.122Z",
+            "cwd": ".mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+            "repository": "changesets",
+            "commit_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+            "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.red.log",
+            "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+            "failure_fingerprint": "88b3482f1173efff",
+            "module": "apply-release-plan",
+            "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+            "plan_sha256": "80aea09dcb986923175b658ec90553cd2198da1deb022eb15b1fa9dbc7f51043",
+            "steps": [
+              {
+                "argv": [
+                  "pnpm",
+                  "build"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 6972
+              },
+              {
+                "argv": [
+                  "git",
+                  "checkout",
+                  "--",
+                  "packages/config/package.json"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 4
+              }
+            ],
+            "results": {
+              "format": "vitest-json",
+              "path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.red.results.json",
+              "sha256": "d61dc2b517b66947881bc22d6dcd03f1d98a8a8cb1b51410cec32b6cc96ef377",
+              "total": 70,
+              "passed": 66,
+              "failed": 3,
+              "skipped": 1
+            },
+            "red_reason": "behaviour-missing",
+            "red_category": "assertion",
+            "red_fingerprint": "fda7a575dca09a08",
+            "red_detail": "restores files and rejects with the original error as cause, removes directories it created and restores deleted files, journals into a dot file in .changeset before the first change and removes it after rollback failed for a missing behaviour (assertion)",
+            "red_tests": [
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "restores files and rejects with the original error as cause",
+                "status": "failed",
+                "category": "assertion",
+                "type": "AssertionError",
+                "fingerprint": "274589bfcb469e84"
+              },
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "removes directories it created and restores deleted files",
+                "status": "failed",
+                "category": "assertion",
+                "type": "AssertionError",
+                "fingerprint": "96e8170d2ebdc53b"
+              },
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "journals into a dot file in .changeset before the first change and removes it after rollback",
+                "status": "failed",
+                "category": "assertion",
+                "type": "AssertionError",
+                "fingerprint": "ce43d930288cf31a"
+              },
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "removes the journal after success",
+                "status": "passed",
+                "category": "passed",
+                "type": null,
+                "fingerprint": null
+              }
+            ],
+            "red_declared": [
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "restores files and rejects with the original error as cause"
+              },
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "removes directories it created and restores deleted files"
+              },
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "journals into a dot file in .changeset before the first change and removes it after rollback"
+              },
+              {
+                "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "name": "removes the journal after success"
+              }
+            ],
+            "worktree_setup_sha256": "6f1f5e261ef752f59c3c37a9219cf73ef845e83c0bb2fe2324a185c3974ea714",
+            "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+          },
+          "green": {
+            "kind": "green",
+            "node_id": "CSET-203.apply.journal-rollback.impl",
+            "command": [
+              "pnpm",
+              "vitest",
+              "run",
+              "--reporter=default",
+              "--reporter=json",
+              "--outputFile.json=${REPORT}",
+              "packages/apply-release-plan/"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-10T00:40:41.388Z",
+            "finished_at": "2026-10-10T00:40:50.251Z",
+            "cwd": ".mycelink/verify/changesets__CSET-203.apply.journal-rollback.impl__e28bc070",
+            "repository": "changesets",
+            "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+            "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.log",
+            "output_sha256": "443397b6c9713bfaac12e2baf63df6acaf03bc5ad981f202ee262eeb0b905111",
+            "failure_fingerprint": null,
+            "module": "apply-release-plan",
+            "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+            "plan_sha256": "80aea09dcb986923175b658ec90553cd2198da1deb022eb15b1fa9dbc7f51043",
+            "steps": [
+              {
+                "argv": [
+                  "pnpm",
+                  "build"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 7002
+              },
+              {
+                "argv": [
+                  "git",
+                  "checkout",
+                  "--",
+                  "packages/config/package.json"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 5
+              }
+            ],
+            "results": {
+              "format": "vitest-json",
+              "path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.results.json",
+              "sha256": "74b59bda0c5aed5ee70394c370ac743ba89ef82aa38827a9dbd79511f4d07b43",
+              "total": 70,
+              "passed": 69,
+              "failed": 0,
+              "skipped": 1
+            },
+            "worktree_setup_sha256": "4da93a743685ec4482f344862459769f5266a67cf16c790d1a1b558aeb68ecba"
+          },
+          "regression": {
+            "kind": "regression",
+            "node_id": "CSET-203.apply.journal-rollback.impl",
+            "command": [
+              "sh",
+              "-c",
+              "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-10T00:40:50.260Z",
+            "finished_at": "2026-10-10T00:41:02.524Z",
+            "cwd": ".mycelink/verify/changesets__CSET-203.apply.journal-rollback.impl__e28bc070",
+            "repository": "changesets",
+            "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+            "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-regression.log",
+            "output_sha256": "c3b1874475891ab698b23b56a9e97aeac977ef00c3aca1caf109b5003c00e36b",
+            "failure_fingerprint": null,
+            "worktree_setup_sha256": "4da93a743685ec4482f344862459769f5266a67cf16c790d1a1b558aeb68ecba"
+          }
+        },
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 644518,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 3
+        },
+        "updated_at": "2026-10-10T01:02:33.118Z",
+        "branch_base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+        "tdd_red_bindings": [
+          {
+            "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+            "tests": [
+              {
+                "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "blob": "d2a241e1ebc16b5fa2b7f5c52c5317401d34af07"
+              }
+            ],
+            "tests_sha256": "943ce1fbac20335298ade09c1dcb0455bcd77abb8bc1922f91a11a5af138aef7",
+            "evidence_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+            "recorded_at": "2026-10-10T00:39:19.153Z",
+            "red_tests": [
+              {
+                "id": "04a3cab213c2873b",
+                "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "full_name": "journal and rollback > restores files and rejects with the original error as cause",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "a1a8087ce2607d86",
+                "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "full_name": "journal and rollback > removes directories it created and restores deleted files",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "a6abe52e85f0429b",
+                "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "full_name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "07e6af964f110bed",
+                "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                "full_name": "journal and rollback > removes the journal after success",
+                "status": "passed",
+                "category": "passed"
+              }
+            ]
+          }
+        ],
+        "worktree_setup": {
+          "status": "complete",
+          "code": null,
+          "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+          "receipt_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.worktree-setup-76a93bd7.json",
+          "receipt_sha256": "6f1f5e261ef752f59c3c37a9219cf73ef845e83c0bb2fe2324a185c3974ea714",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+          "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+          "at": "2026-10-10T00:37:26.236Z"
+        },
+        "last_settlement": {
+          "capability_sha256": "9f62ab5bb873f74d97f459d84313ea18f7e7967795f1f640a1617b758285e8e2",
+          "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+          "outcome": "DONE",
+          "state": "DONE",
+          "detail": "fresh verification passed",
+          "settled_at": "2026-10-10T00:41:03.468Z",
+          "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+          "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+          "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127"
+        },
+        "tdd_history": {
+          "ok": true,
+          "base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+          "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+          "cycles": 1,
+          "compatibility_units": 0,
+          "code": null,
+          "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+          "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.tdd-history.json",
+          "output_sha256": "22ec100ce9e3f09a580f8ce263b1bfbe90ebc52f7b90434f6d10f966987eb428",
+          "verified_at": "2026-10-10T00:40:39.238Z"
+        },
+        "criteria": [
+          {
+            "criterion": "AC-1",
+            "test_id": "04a3cab213c2873b",
+            "test": {
+              "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+              "name": "journal and rollback > restores files and rejects with the original error as cause"
+            },
+            "gate": "red",
+            "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+          },
+          {
+            "criterion": "AC-2",
+            "test_id": "a6abe52e85f0429b",
+            "test": {
+              "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+              "name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback"
+            },
+            "gate": "red",
+            "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+          },
+          {
+            "criterion": "AC-5",
+            "test_id": "07e6af964f110bed",
+            "test": {
+              "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+              "name": "journal and rollback > removes the journal after success"
+            },
+            "gate": "green",
+            "output_sha256": "7a2d668b8a12cd952dff43e83ad59d42a9cdc711f731f9461e2a31781757e5bb"
+          }
+        ],
+        "rework_history": [
+          {
+            "at": "2026-10-10T00:47:38.314Z",
+            "reason": "Acceptance review CSET-203-R001 (review 1, rework round 1 of 2) found AC-1 (new-behavior) not proved: Every rollback test uses changelog:false and a fixture where pre.json already exists. The restore branch that deletes a file the run created (previous content null) is never exercised. A failure after a CHANGELOG write is not exercised either.. Reproduce: Use a fixture with no CHANGELOG.md for pkg-a and pkg-b and a config whose changelog is '@changesets/cli/changelog'. Inject a failure after the changelogs are written, for example make fs.rm of the changeset file throw. Assert the whole-tree snapshot equals the original, so the new CHANGELOG.md files are absent again. Repeat with preState set and no .changes.... AC-5 (compatibility) not proved: Nothing exercises `changeset status` or `changeset add` with a journal present in .changeset. 'Unaffected by a journal' is untested. The journal is not read as a changeset, status does not report on it, and add does not trip over it or recover it.. Reproduce: Create a project with a valid changeset and write .changeset/.apply-release-plan-journal.json (a real or well-formed journal). Run status and assert the output and exit code equal those of the same project without the journal, with the journal file untouched and no 'interrupted' warning. Run add (for example --empty) and assert it succeeds, creates one new .... AC-1: a focused failing test for exactly this first, proved by the red gate on the current code, then the production fix. AC-5: a regression test that passes on the current code, committed alone (test files only, trailer \"Mycelink-Compatibility: AC-5\") as a compatibility-regression unit, then green and regression; a test that fails there is a RED: the red gate, then the fix.",
+            "decision_id": null,
+            "attempts": 1,
+            "failure_counts": {},
+            "integrated_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+            "branch_head": "85123902450f28565360dea1d0f3123c2b439aca",
+            "archived_ref": "refs/mycelink/archive/CSET-203/apply.journal-rollback.impl/85123902450f28565360dea1d0f3123c2b439aca",
+            "candidate_id": null,
+            "evidence": {
+              "red": {
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.red.log",
+                "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                "exit_code": 1,
+                "commit_sha": "c73949ba7b3160a4aa5729223335c190de1528f8"
+              },
+              "green": {
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.log",
+                "output_sha256": "443397b6c9713bfaac12e2baf63df6acaf03bc5ad981f202ee262eeb0b905111",
+                "exit_code": 0,
+                "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca"
+              },
+              "regression": {
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-regression.log",
+                "output_sha256": "c3b1874475891ab698b23b56a9e97aeac977ef00c3aca1caf109b5003c00e36b",
+                "exit_code": 0,
+                "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca"
+              }
+            },
+            "generation": 0,
+            "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+            "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+            "criteria": [
+              {
+                "criterion": "AC-1",
+                "test_id": "04a3cab213c2873b",
+                "test": {
+                  "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                  "name": "journal and rollback > restores files and rejects with the original error as cause"
+                },
+                "gate": "red",
+                "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+              },
+              {
+                "criterion": "AC-2",
+                "test_id": "a6abe52e85f0429b",
+                "test": {
+                  "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                  "name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback"
+                },
+                "gate": "red",
+                "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+              },
+              {
+                "criterion": "AC-5",
+                "test_id": "07e6af964f110bed",
+                "test": {
+                  "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                  "name": "journal and rollback > removes the journal after success"
+                },
+                "gate": "green",
+                "output_sha256": "7a2d668b8a12cd952dff43e83ad59d42a9cdc711f731f9461e2a31781757e5bb"
+              }
+            ],
+            "tdd_history": {
+              "ok": true,
+              "base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+              "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+              "cycles": 1,
+              "compatibility_units": 0,
+              "code": null,
+              "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+              "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.tdd-history.json",
+              "output_sha256": "22ec100ce9e3f09a580f8ce263b1bfbe90ebc52f7b90434f6d10f966987eb428",
+              "verified_at": "2026-10-10T00:40:39.238Z"
+            },
+            "red_bindings": [
+              {
+                "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                "tests": [
+                  {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "blob": "d2a241e1ebc16b5fa2b7f5c52c5317401d34af07"
+                  }
+                ],
+                "tests_sha256": "943ce1fbac20335298ade09c1dcb0455bcd77abb8bc1922f91a11a5af138aef7",
+                "evidence_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                "recorded_at": "2026-10-10T00:39:19.153Z",
+                "red_tests": [
+                  {
+                    "id": "04a3cab213c2873b",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > restores files and rejects with the original error as cause",
+                    "status": "failed",
+                    "category": "assertion"
+                  },
+                  {
+                    "id": "a1a8087ce2607d86",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > removes directories it created and restores deleted files",
+                    "status": "failed",
+                    "category": "assertion"
+                  },
+                  {
+                    "id": "a6abe52e85f0429b",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback",
+                    "status": "failed",
+                    "category": "assertion"
+                  },
+                  {
+                    "id": "07e6af964f110bed",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > removes the journal after success",
+                    "status": "passed",
+                    "category": "passed"
+                  }
+                ]
+              }
+            ],
+            "settlement": {
+              "capability_sha256": "9f62ab5bb873f74d97f459d84313ea18f7e7967795f1f640a1617b758285e8e2",
+              "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+              "outcome": "DONE",
+              "state": "DONE",
+              "detail": "fresh verification passed",
+              "settled_at": "2026-10-10T00:41:03.468Z",
+              "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+              "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+              "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127"
+            },
+            "restore": {
+              "state": "DONE",
+              "attempts": 1,
+              "failure_counts": {},
+              "last_failure_fingerprint": null,
+              "integrated_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+              "branch_base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+              "evidence": {
+                "red": {
+                  "kind": "red",
+                  "node_id": "CSET-203.apply.journal-rollback.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/apply-release-plan/"
+                  ],
+                  "exit_code": 1,
+                  "started_at": "2026-10-10T00:39:10.585Z",
+                  "finished_at": "2026-10-10T00:39:19.122Z",
+                  "cwd": ".mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+                  "repository": "changesets",
+                  "commit_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                  "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.red.log",
+                  "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                  "failure_fingerprint": "88b3482f1173efff",
+                  "module": "apply-release-plan",
+                  "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+                  "plan_sha256": "80aea09dcb986923175b658ec90553cd2198da1deb022eb15b1fa9dbc7f51043",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 6972
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 4
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.red.results.json",
+                    "sha256": "d61dc2b517b66947881bc22d6dcd03f1d98a8a8cb1b51410cec32b6cc96ef377",
+                    "total": 70,
+                    "passed": 66,
+                    "failed": 3,
+                    "skipped": 1
+                  },
+                  "red_reason": "behaviour-missing",
+                  "red_category": "assertion",
+                  "red_fingerprint": "fda7a575dca09a08",
+                  "red_detail": "restores files and rejects with the original error as cause, removes directories it created and restores deleted files, journals into a dot file in .changeset before the first change and removes it after rollback failed for a missing behaviour (assertion)",
+                  "red_tests": [
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "restores files and rejects with the original error as cause",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "274589bfcb469e84"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes directories it created and restores deleted files",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "96e8170d2ebdc53b"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "journals into a dot file in .changeset before the first change and removes it after rollback",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "ce43d930288cf31a"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes the journal after success",
+                      "status": "passed",
+                      "category": "passed",
+                      "type": null,
+                      "fingerprint": null
+                    }
+                  ],
+                  "red_declared": [
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "restores files and rejects with the original error as cause"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes directories it created and restores deleted files"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "journals into a dot file in .changeset before the first change and removes it after rollback"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes the journal after success"
+                    }
+                  ],
+                  "worktree_setup_sha256": "6f1f5e261ef752f59c3c37a9219cf73ef845e83c0bb2fe2324a185c3974ea714",
+                  "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+                },
+                "green": {
+                  "kind": "green",
+                  "node_id": "CSET-203.apply.journal-rollback.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/apply-release-plan/"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:40:41.388Z",
+                  "finished_at": "2026-10-10T00:40:50.251Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.apply.journal-rollback.impl__e28bc070",
+                  "repository": "changesets",
+                  "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                  "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.log",
+                  "output_sha256": "443397b6c9713bfaac12e2baf63df6acaf03bc5ad981f202ee262eeb0b905111",
+                  "failure_fingerprint": null,
+                  "module": "apply-release-plan",
+                  "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+                  "plan_sha256": "80aea09dcb986923175b658ec90553cd2198da1deb022eb15b1fa9dbc7f51043",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 7002
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 5
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.results.json",
+                    "sha256": "74b59bda0c5aed5ee70394c370ac743ba89ef82aa38827a9dbd79511f4d07b43",
+                    "total": 70,
+                    "passed": 69,
+                    "failed": 0,
+                    "skipped": 1
+                  },
+                  "worktree_setup_sha256": "4da93a743685ec4482f344862459769f5266a67cf16c790d1a1b558aeb68ecba"
+                },
+                "regression": {
+                  "kind": "regression",
+                  "node_id": "CSET-203.apply.journal-rollback.impl",
+                  "command": [
+                    "sh",
+                    "-c",
+                    "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:40:50.260Z",
+                  "finished_at": "2026-10-10T00:41:02.524Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.apply.journal-rollback.impl__e28bc070",
+                  "repository": "changesets",
+                  "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                  "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.fresh-regression.log",
+                  "output_sha256": "c3b1874475891ab698b23b56a9e97aeac977ef00c3aca1caf109b5003c00e36b",
+                  "failure_fingerprint": null,
+                  "worktree_setup_sha256": "4da93a743685ec4482f344862459769f5266a67cf16c790d1a1b558aeb68ecba"
+                }
+              },
+              "criteria": [
+                {
+                  "criterion": "AC-1",
+                  "test_id": "04a3cab213c2873b",
+                  "test": {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "name": "journal and rollback > restores files and rejects with the original error as cause"
+                  },
+                  "gate": "red",
+                  "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+                },
+                {
+                  "criterion": "AC-2",
+                  "test_id": "a6abe52e85f0429b",
+                  "test": {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback"
+                  },
+                  "gate": "red",
+                  "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+                },
+                {
+                  "criterion": "AC-5",
+                  "test_id": "07e6af964f110bed",
+                  "test": {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "name": "journal and rollback > removes the journal after success"
+                  },
+                  "gate": "green",
+                  "output_sha256": "7a2d668b8a12cd952dff43e83ad59d42a9cdc711f731f9461e2a31781757e5bb"
+                }
+              ],
+              "tdd_history": {
+                "ok": true,
+                "base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                "cycles": 1,
+                "compatibility_units": 0,
+                "code": null,
+                "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.tdd-history.json",
+                "output_sha256": "22ec100ce9e3f09a580f8ce263b1bfbe90ebc52f7b90434f6d10f966987eb428",
+                "verified_at": "2026-10-10T00:40:39.238Z"
+              },
+              "tdd_red_bindings": [
+                {
+                  "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                  "tests": [
+                    {
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "blob": "d2a241e1ebc16b5fa2b7f5c52c5317401d34af07"
+                    }
+                  ],
+                  "tests_sha256": "943ce1fbac20335298ade09c1dcb0455bcd77abb8bc1922f91a11a5af138aef7",
+                  "evidence_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                  "recorded_at": "2026-10-10T00:39:19.153Z",
+                  "red_tests": [
+                    {
+                      "id": "04a3cab213c2873b",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > restores files and rejects with the original error as cause",
+                      "status": "failed",
+                      "category": "assertion"
+                    },
+                    {
+                      "id": "a1a8087ce2607d86",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > removes directories it created and restores deleted files",
+                      "status": "failed",
+                      "category": "assertion"
+                    },
+                    {
+                      "id": "a6abe52e85f0429b",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback",
+                      "status": "failed",
+                      "category": "assertion"
+                    },
+                    {
+                      "id": "07e6af964f110bed",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > removes the journal after success",
+                      "status": "passed",
+                      "category": "passed"
+                    }
+                  ]
+                }
+              ],
+              "last_settlement": {
+                "capability_sha256": "9f62ab5bb873f74d97f459d84313ea18f7e7967795f1f640a1617b758285e8e2",
+                "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+                "outcome": "DONE",
+                "state": "DONE",
+                "detail": "fresh verification passed",
+                "settled_at": "2026-10-10T00:41:03.468Z",
+                "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+                "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127"
+              },
+              "carried_criterion_proofs": [],
+              "worktree_setup": {
+                "status": "complete",
+                "code": null,
+                "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "receipt_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.worktree-setup-76a93bd7.json",
+                "receipt_sha256": "6f1f5e261ef752f59c3c37a9219cf73ef845e83c0bb2fe2324a185c3974ea714",
+                "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+                "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                "at": "2026-10-10T00:37:26.236Z"
+              }
+            },
+            "challenged": {
+              "challenge_id": "CSET-203-R001-C1",
+              "at": "2026-10-10T00:52:51.503Z"
+            }
+          },
+          {
+            "at": "2026-10-10T01:00:08.289Z",
+            "reason": "Acceptance review CSET-203-R002 (review 2, rework round 2 of 2) found AC-1 (new-behavior) not proved: No apply-release-plan test enables changelog generation. Rollback of a CHANGELOG.md that did not exist before the run (restored to absence), and of an existing CHANGELOG.md that was rewritten, is never exercised.. Reproduce: In packages/apply-release-plan, use a real changelog generator (changelog not false). Start with pkg-a having no CHANGELOG.md and pkg-b with one. Make a later step fail (the changeset rm, or the pkg-b CHANGELOG write). Assert the tree snapshot equals the pre-run one: pkg-a/CHANGELOG.md absent, pkg-b/CHANGELOG.md in its previous bytes, and err.cause is the original error.. AC-1: a focused failing test for exactly this first, proved by the red gate on the current code, then the production fix.",
+            "decision_id": null,
+            "attempts": 1,
+            "failure_counts": {},
+            "integrated_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+            "branch_head": "85123902450f28565360dea1d0f3123c2b439aca",
+            "archived_ref": "refs/mycelink/archive/CSET-203/apply.journal-rollback.impl/85123902450f28565360dea1d0f3123c2b439aca",
+            "candidate_id": null,
+            "evidence": {
+              "red": {
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.red.log",
+                "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                "exit_code": 1,
+                "commit_sha": "c73949ba7b3160a4aa5729223335c190de1528f8"
+              },
+              "green": {
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.log",
+                "output_sha256": "443397b6c9713bfaac12e2baf63df6acaf03bc5ad981f202ee262eeb0b905111",
+                "exit_code": 0,
+                "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca"
+              },
+              "regression": {
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-regression.log",
+                "output_sha256": "c3b1874475891ab698b23b56a9e97aeac977ef00c3aca1caf109b5003c00e36b",
+                "exit_code": 0,
+                "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca"
+              }
+            },
+            "generation": 0,
+            "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+            "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+            "criteria": [
+              {
+                "criterion": "AC-1",
+                "test_id": "04a3cab213c2873b",
+                "test": {
+                  "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                  "name": "journal and rollback > restores files and rejects with the original error as cause"
+                },
+                "gate": "red",
+                "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+              },
+              {
+                "criterion": "AC-2",
+                "test_id": "a6abe52e85f0429b",
+                "test": {
+                  "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                  "name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback"
+                },
+                "gate": "red",
+                "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+              },
+              {
+                "criterion": "AC-5",
+                "test_id": "07e6af964f110bed",
+                "test": {
+                  "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                  "name": "journal and rollback > removes the journal after success"
+                },
+                "gate": "green",
+                "output_sha256": "7a2d668b8a12cd952dff43e83ad59d42a9cdc711f731f9461e2a31781757e5bb"
+              }
+            ],
+            "tdd_history": {
+              "ok": true,
+              "base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+              "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+              "cycles": 1,
+              "compatibility_units": 0,
+              "code": null,
+              "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+              "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.tdd-history.json",
+              "output_sha256": "22ec100ce9e3f09a580f8ce263b1bfbe90ebc52f7b90434f6d10f966987eb428",
+              "verified_at": "2026-10-10T00:40:39.238Z"
+            },
+            "red_bindings": [
+              {
+                "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                "tests": [
+                  {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "blob": "d2a241e1ebc16b5fa2b7f5c52c5317401d34af07"
+                  }
+                ],
+                "tests_sha256": "943ce1fbac20335298ade09c1dcb0455bcd77abb8bc1922f91a11a5af138aef7",
+                "evidence_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                "recorded_at": "2026-10-10T00:39:19.153Z",
+                "red_tests": [
+                  {
+                    "id": "04a3cab213c2873b",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > restores files and rejects with the original error as cause",
+                    "status": "failed",
+                    "category": "assertion"
+                  },
+                  {
+                    "id": "a1a8087ce2607d86",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > removes directories it created and restores deleted files",
+                    "status": "failed",
+                    "category": "assertion"
+                  },
+                  {
+                    "id": "a6abe52e85f0429b",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback",
+                    "status": "failed",
+                    "category": "assertion"
+                  },
+                  {
+                    "id": "07e6af964f110bed",
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "full_name": "journal and rollback > removes the journal after success",
+                    "status": "passed",
+                    "category": "passed"
+                  }
+                ]
+              }
+            ],
+            "settlement": {
+              "capability_sha256": "9f62ab5bb873f74d97f459d84313ea18f7e7967795f1f640a1617b758285e8e2",
+              "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+              "outcome": "DONE",
+              "state": "DONE",
+              "detail": "fresh verification passed",
+              "settled_at": "2026-10-10T00:41:03.468Z",
+              "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+              "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+              "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127"
+            },
+            "restore": {
+              "state": "DONE",
+              "attempts": 1,
+              "failure_counts": {},
+              "last_failure_fingerprint": null,
+              "integrated_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+              "branch_base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+              "evidence": {
+                "red": {
+                  "kind": "red",
+                  "node_id": "CSET-203.apply.journal-rollback.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/apply-release-plan/"
+                  ],
+                  "exit_code": 1,
+                  "started_at": "2026-10-10T00:39:10.585Z",
+                  "finished_at": "2026-10-10T00:39:19.122Z",
+                  "cwd": ".mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+                  "repository": "changesets",
+                  "commit_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                  "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.red.log",
+                  "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                  "failure_fingerprint": "88b3482f1173efff",
+                  "module": "apply-release-plan",
+                  "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+                  "plan_sha256": "80aea09dcb986923175b658ec90553cd2198da1deb022eb15b1fa9dbc7f51043",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 6972
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 4
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.red.results.json",
+                    "sha256": "d61dc2b517b66947881bc22d6dcd03f1d98a8a8cb1b51410cec32b6cc96ef377",
+                    "total": 70,
+                    "passed": 66,
+                    "failed": 3,
+                    "skipped": 1
+                  },
+                  "red_reason": "behaviour-missing",
+                  "red_category": "assertion",
+                  "red_fingerprint": "fda7a575dca09a08",
+                  "red_detail": "restores files and rejects with the original error as cause, removes directories it created and restores deleted files, journals into a dot file in .changeset before the first change and removes it after rollback failed for a missing behaviour (assertion)",
+                  "red_tests": [
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "restores files and rejects with the original error as cause",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "274589bfcb469e84"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes directories it created and restores deleted files",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "96e8170d2ebdc53b"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "journals into a dot file in .changeset before the first change and removes it after rollback",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "ce43d930288cf31a"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes the journal after success",
+                      "status": "passed",
+                      "category": "passed",
+                      "type": null,
+                      "fingerprint": null
+                    }
+                  ],
+                  "red_declared": [
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "restores files and rejects with the original error as cause"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes directories it created and restores deleted files"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "journals into a dot file in .changeset before the first change and removes it after rollback"
+                    },
+                    {
+                      "file": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "name": "removes the journal after success"
+                    }
+                  ],
+                  "worktree_setup_sha256": "6f1f5e261ef752f59c3c37a9219cf73ef845e83c0bb2fe2324a185c3974ea714",
+                  "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+                },
+                "green": {
+                  "kind": "green",
+                  "node_id": "CSET-203.apply.journal-rollback.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/apply-release-plan/"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:40:41.388Z",
+                  "finished_at": "2026-10-10T00:40:50.251Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.apply.journal-rollback.impl__e28bc070",
+                  "repository": "changesets",
+                  "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                  "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.log",
+                  "output_sha256": "443397b6c9713bfaac12e2baf63df6acaf03bc5ad981f202ee262eeb0b905111",
+                  "failure_fingerprint": null,
+                  "module": "apply-release-plan",
+                  "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+                  "plan_sha256": "80aea09dcb986923175b658ec90553cd2198da1deb022eb15b1fa9dbc7f51043",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 7002
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 5
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-module-apply-release-plan.results.json",
+                    "sha256": "74b59bda0c5aed5ee70394c370ac743ba89ef82aa38827a9dbd79511f4d07b43",
+                    "total": 70,
+                    "passed": 69,
+                    "failed": 0,
+                    "skipped": 1
+                  },
+                  "worktree_setup_sha256": "4da93a743685ec4482f344862459769f5266a67cf16c790d1a1b558aeb68ecba"
+                },
+                "regression": {
+                  "kind": "regression",
+                  "node_id": "CSET-203.apply.journal-rollback.impl",
+                  "command": [
+                    "sh",
+                    "-c",
+                    "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:40:50.260Z",
+                  "finished_at": "2026-10-10T00:41:02.524Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.apply.journal-rollback.impl__e28bc070",
+                  "repository": "changesets",
+                  "commit_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                  "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.fresh-regression.log",
+                  "output_sha256": "c3b1874475891ab698b23b56a9e97aeac977ef00c3aca1caf109b5003c00e36b",
+                  "failure_fingerprint": null,
+                  "worktree_setup_sha256": "4da93a743685ec4482f344862459769f5266a67cf16c790d1a1b558aeb68ecba"
+                }
+              },
+              "criteria": [
+                {
+                  "criterion": "AC-1",
+                  "test_id": "04a3cab213c2873b",
+                  "test": {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "name": "journal and rollback > restores files and rejects with the original error as cause"
+                  },
+                  "gate": "red",
+                  "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+                },
+                {
+                  "criterion": "AC-2",
+                  "test_id": "a6abe52e85f0429b",
+                  "test": {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback"
+                  },
+                  "gate": "red",
+                  "output_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef"
+                },
+                {
+                  "criterion": "AC-5",
+                  "test_id": "07e6af964f110bed",
+                  "test": {
+                    "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                    "name": "journal and rollback > removes the journal after success"
+                  },
+                  "gate": "green",
+                  "output_sha256": "7a2d668b8a12cd952dff43e83ad59d42a9cdc711f731f9461e2a31781757e5bb"
+                }
+              ],
+              "tdd_history": {
+                "ok": true,
+                "base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                "cycles": 1,
+                "compatibility_units": 0,
+                "code": null,
+                "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+                "output_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/replaced/g1/CSET-203.apply.journal-rollback.impl.tdd-history.json",
+                "output_sha256": "22ec100ce9e3f09a580f8ce263b1bfbe90ebc52f7b90434f6d10f966987eb428",
+                "verified_at": "2026-10-10T00:40:39.238Z"
+              },
+              "tdd_red_bindings": [
+                {
+                  "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                  "tests": [
+                    {
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "blob": "d2a241e1ebc16b5fa2b7f5c52c5317401d34af07"
+                    }
+                  ],
+                  "tests_sha256": "943ce1fbac20335298ade09c1dcb0455bcd77abb8bc1922f91a11a5af138aef7",
+                  "evidence_sha256": "b22c25d9508027c9626d73b760b62b668d32eae7a4c57a63134d89f19ff5e6ef",
+                  "recorded_at": "2026-10-10T00:39:19.153Z",
+                  "red_tests": [
+                    {
+                      "id": "04a3cab213c2873b",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > restores files and rejects with the original error as cause",
+                      "status": "failed",
+                      "category": "assertion"
+                    },
+                    {
+                      "id": "a1a8087ce2607d86",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > removes directories it created and restores deleted files",
+                      "status": "failed",
+                      "category": "assertion"
+                    },
+                    {
+                      "id": "a6abe52e85f0429b",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > journals into a dot file in .changeset before the first change and removes it after rollback",
+                      "status": "failed",
+                      "category": "assertion"
+                    },
+                    {
+                      "id": "07e6af964f110bed",
+                      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+                      "full_name": "journal and rollback > removes the journal after success",
+                      "status": "passed",
+                      "category": "passed"
+                    }
+                  ]
+                }
+              ],
+              "last_settlement": {
+                "capability_sha256": "9f62ab5bb873f74d97f459d84313ea18f7e7967795f1f640a1617b758285e8e2",
+                "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+                "outcome": "DONE",
+                "state": "DONE",
+                "detail": "fresh verification passed",
+                "settled_at": "2026-10-10T00:41:03.468Z",
+                "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+                "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127"
+              },
+              "carried_criterion_proofs": [],
+              "worktree_setup": {
+                "status": "complete",
+                "code": null,
+                "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "receipt_path": "features/CSET-203/evidence/CSET-203.apply.journal-rollback.impl/CSET-203.apply.journal-rollback.impl.worktree-setup-76a93bd7.json",
+                "receipt_sha256": "6f1f5e261ef752f59c3c37a9219cf73ef845e83c0bb2fe2324a185c3974ea714",
+                "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+                "head_sha": "c73949ba7b3160a4aa5729223335c190de1528f8",
+                "at": "2026-10-10T00:37:26.236Z"
+              }
+            },
+            "challenged": {
+              "challenge_id": "CSET-203-R002-C1",
+              "at": "2026-10-10T01:02:33.118Z"
+            }
+          }
+        ],
+        "rework_brief": null,
+        "carried_criterion_proofs": [],
+        "lineage": 12,
+        "tdd_rejection": null
+      },
+      "CSET-203.cli.recover-fail.impl": {
+        "state": "DONE",
+        "attempts": 3,
+        "claim": null,
+        "evidence": {
+          "red": {
+            "kind": "red",
+            "node_id": "CSET-203.cli.recover-fail.impl",
+            "command": [
+              "pnpm",
+              "vitest",
+              "run",
+              "--reporter=default",
+              "--reporter=json",
+              "--outputFile.json=${REPORT}",
+              "packages/cli/"
+            ],
+            "exit_code": 1,
+            "started_at": "2026-10-10T01:05:36.070Z",
+            "finished_at": "2026-10-10T01:05:46.389Z",
+            "cwd": ".mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+            "repository": "changesets",
+            "commit_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+            "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.red.log",
+            "output_sha256": "bc20cf093d6bcd39b75ccc3d59c9bcf12d4db85627ee057591b043a7db317ebd",
+            "failure_fingerprint": "27d4d0b8698724a8",
+            "module": "cli",
+            "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+            "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+            "steps": [
+              {
+                "argv": [
+                  "pnpm",
+                  "build"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 6881
+              },
+              {
+                "argv": [
+                  "git",
+                  "checkout",
+                  "--",
+                  "packages/config/package.json"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 4
+              }
+            ],
+            "results": {
+              "format": "vitest-json",
+              "path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.red.results.json",
+              "sha256": "e53c172389c37dac95bc7c86ff14885aeea4d3b420b0aeb6f44d17118e08d0f2",
+              "total": 256,
+              "passed": 254,
+              "failed": 1,
+              "skipped": 1
+            },
+            "red_reason": "behaviour-missing",
+            "red_category": "assertion",
+            "red_fingerprint": "291c9f11272611ca",
+            "red_detail": "recovers before reading packages, even when a package.json is truncated failed for a missing behaviour (assertion)",
+            "red_tests": [
+              {
+                "file": "packages/cli/src/commands/version/version-recovery-order.test.ts",
+                "name": "recovers before reading packages, even when a package.json is truncated",
+                "status": "failed",
+                "category": "assertion",
+                "type": "AssertionError",
+                "fingerprint": "8d686624dc69f53c"
+              }
+            ],
+            "red_declared": [
+              {
+                "file": "packages/cli/src/commands/version/version-recovery-order.test.ts",
+                "name": "recovers before reading packages, even when a package.json is truncated"
+              }
+            ],
+            "worktree_setup_sha256": "e9fedad600576ac06f41c6bdcb6a6a4953c6a58efd32af65610d7501f480ebe0",
+            "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+          },
+          "green": {
+            "kind": "green",
+            "node_id": "CSET-203.cli.recover-fail.impl",
+            "command": [
+              "pnpm",
+              "vitest",
+              "run",
+              "--reporter=default",
+              "--reporter=json",
+              "--outputFile.json=${REPORT}",
+              "packages/cli/"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-10T01:06:55.890Z",
+            "finished_at": "2026-10-10T01:07:06.459Z",
+            "cwd": ".mycelink/verify/changesets__CSET-203.cli.recover-fail.impl__cd9be957",
+            "repository": "changesets",
+            "commit_sha": "afea9da0a2ba8f545c88458758cec69ee4948e4d",
+            "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-module-cli.log",
+            "output_sha256": "e708182690bee9d02baaf814b265b279b58eac8f2b3266cf92d54125b182b8d3",
+            "failure_fingerprint": null,
+            "module": "cli",
+            "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+            "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+            "steps": [
+              {
+                "argv": [
+                  "pnpm",
+                  "build"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 7054
+              },
+              {
+                "argv": [
+                  "git",
+                  "checkout",
+                  "--",
+                  "packages/config/package.json"
+                ],
+                "exit_code": 0,
+                "timed_out": false,
+                "duration_ms": 3
+              }
+            ],
+            "results": {
+              "format": "vitest-json",
+              "path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-module-cli.results.json",
+              "sha256": "7e98ee6965882b36c984cc1e268ab85923c19123e13b863e6ad393437316bdd3",
+              "total": 256,
+              "passed": 255,
+              "failed": 0,
+              "skipped": 1
+            },
+            "worktree_setup_sha256": "f216d5f8381d540f95a25cc3cdca3af01dde25f814ce16c327c832a2a5c2424e"
+          },
+          "regression": {
+            "kind": "regression",
+            "node_id": "CSET-203.cli.recover-fail.impl",
+            "command": [
+              "sh",
+              "-c",
+              "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-10T01:07:06.469Z",
+            "finished_at": "2026-10-10T01:07:18.863Z",
+            "cwd": ".mycelink/verify/changesets__CSET-203.cli.recover-fail.impl__cd9be957",
+            "repository": "changesets",
+            "commit_sha": "afea9da0a2ba8f545c88458758cec69ee4948e4d",
+            "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-regression.log",
+            "output_sha256": "6f27f2f9af16ebc1ac647c0f963fdecd6397107dd3c12115a52b9e8b7ac756ab",
+            "failure_fingerprint": null,
+            "worktree_setup_sha256": "f216d5f8381d540f95a25cc3cdca3af01dde25f814ce16c327c832a2a5c2424e"
+          }
+        },
+        "failure_counts": {
+          "27d4d0b8698724a8": 1
+        },
+        "last_failure_fingerprint": "27d4d0b8698724a8",
+        "integrated_sha": "afea9da0a2ba8f545c88458758cec69ee4948e4d",
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 565418,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 3
+        },
+        "updated_at": "2026-10-10T01:07:19.371Z",
+        "branch_base_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+        "tdd_red_bindings": [
+          {
+            "head_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+            "tests": [
+              {
+                "path": "packages/cli/src/commands/version/version-recovery-order.test.ts",
+                "blob": "2ba15a61e692a6d96b022de4f53745faa13f8fa1"
+              }
+            ],
+            "tests_sha256": "8396ac5fec0599123734448cc55373dfc39a2ba247836e3f4fd5f4948e531789",
+            "evidence_sha256": "bc20cf093d6bcd39b75ccc3d59c9bcf12d4db85627ee057591b043a7db317ebd",
+            "recorded_at": "2026-10-10T01:05:46.428Z",
+            "red_tests": [
+              {
+                "id": "80663b1116b38cc2",
+                "path": "packages/cli/src/commands/version/version-recovery-order.test.ts",
+                "full_name": "version recovery order > recovers before reading packages, even when a package.json is truncated",
+                "status": "failed",
+                "category": "assertion"
+              }
+            ]
+          }
+        ],
+        "worktree_setup": {
+          "status": "complete",
+          "code": null,
+          "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+          "receipt_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.worktree-setup-c9ceff2b.json",
+          "receipt_sha256": "e9fedad600576ac06f41c6bdcb6a6a4953c6a58efd32af65610d7501f480ebe0",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+          "head_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+          "at": "2026-10-10T01:03:53.399Z"
+        },
+        "last_settlement": {
+          "capability_sha256": "11e29b05f28558b71d21c926d8c943c683d8d93c4503cc4a22fa21a655de9d73",
+          "claim_id": "0b00d944-f512-4a50-9d9a-73dd56ef749f",
+          "outcome": "DONE",
+          "state": "DONE",
+          "detail": "fresh verification passed",
+          "settled_at": "2026-10-10T01:07:19.731Z",
+          "dispatch_id": "bf07871d-5c7a-4bd7-b2bb-cbf9abcc5c13",
+          "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+          "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7"
+        },
+        "tdd_history": {
+          "ok": true,
+          "base_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+          "head_sha": "afea9da0a2ba8f545c88458758cec69ee4948e4d",
+          "cycles": 1,
+          "compatibility_units": 0,
+          "code": null,
+          "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+          "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.tdd-history.json",
+          "output_sha256": "07467ed92d57e9fb7769f20c516126bdb2281a9d6b28dccd20df1074a4947df6",
+          "verified_at": "2026-10-10T01:06:53.695Z"
+        },
+        "criteria": [
+          {
+            "criterion": "AC-3",
+            "test_id": "80663b1116b38cc2",
+            "test": {
+              "path": "packages/cli/src/commands/version/version-recovery-order.test.ts",
+              "name": "version recovery order > recovers before reading packages, even when a package.json is truncated"
+            },
+            "gate": "red",
+            "output_sha256": "bc20cf093d6bcd39b75ccc3d59c9bcf12d4db85627ee057591b043a7db317ebd"
+          },
+          {
+            "criterion": "AC-4",
+            "test_id": "fcd9b3d1ea4f0f01",
+            "test": {
+              "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+              "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+            },
+            "gate": "green",
+            "output_sha256": "e708182690bee9d02baaf814b265b279b58eac8f2b3266cf92d54125b182b8d3",
+            "carried": true,
+            "carried_from": {
+              "generation": 1,
+              "gate": "green",
+              "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+              "claim_id": "24a4bfa1-8dec-4faf-bbd8-36654976076c",
+              "dispatch_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+              "repo_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a"
+            }
+          },
+          {
+            "criterion": "AC-5",
+            "test_id": "fa385bfe00239d8f",
+            "test": {
+              "path": "packages/cli/src/commands/version/version-no-journal.test.ts",
+              "name": "version on success > bumps the package and leaves no journal behind"
+            },
+            "gate": "green",
+            "output_sha256": "dc7e53ff16e20bc09823a0bcb5478de7cc4b53c6bb42decf149753ec5a503b1f"
+          }
+        ],
+        "rework_history": [
+          {
+            "at": "2026-10-10T00:47:38.302Z",
+            "reason": "Acceptance review CSET-203-R001 (review 1, rework round 1 of 2) found AC-5 (compatibility) not proved: Nothing exercises `changeset status` or `changeset add` with a journal present in .changeset. 'Unaffected by a journal' is untested. The journal is not read as a changeset, status does not report on it, and add does not trip over it or recover it.. Reproduce: Create a project with a valid changeset and write .changeset/.apply-release-plan-journal.json (a real or well-formed journal). Run status and assert the output and exit code equal those of the same project without the journal, with the journal file untouched and no 'interrupted' warning. Run add (for example --empty) and assert it succeeds, creates one new changeset, and leaves the journal file byte-identical.. AC-5: a regression test that passes on the current code, committed alone (test files only, trailer \"Mycelink-Compatibility: AC-5\") as a compatibility-regression unit, then green and regression; a test that fails there is a RED: the red gate, then the fix.",
+            "decision_id": null,
+            "attempts": 1,
+            "failure_counts": {},
+            "integrated_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+            "branch_head": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+            "archived_ref": "refs/mycelink/archive/CSET-203/cli.recover-fail.impl/aaf1974ffc6bb8268a9734e0013a845b8f489006",
+            "candidate_id": null,
+            "evidence": {
+              "red": {
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.red.log",
+                "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                "exit_code": 1,
+                "commit_sha": "9f02eb2b3d74cf008475c2edcce55899e98ecd43"
+              },
+              "green": {
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.fresh-module-cli.log",
+                "output_sha256": "7e2e8fba6e306020e75492dde59adb0b4b51721e333faa277c64633c2762e2a8",
+                "exit_code": 0,
+                "commit_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006"
+              },
+              "regression": {
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.fresh-regression.log",
+                "output_sha256": "a4836959d326eafbf6871c72a1625242995f50836145e9d657d6f57ba64337f3",
+                "exit_code": 0,
+                "commit_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006"
+              }
+            },
+            "generation": 0,
+            "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+            "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+            "criteria": [
+              {
+                "criterion": "AC-3",
+                "test_id": "df980dfb2c3d4c5f",
+                "test": {
+                  "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                  "name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once"
+                },
+                "gate": "red",
+                "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9"
+              },
+              {
+                "criterion": "AC-4",
+                "test_id": "fcd9b3d1ea4f0f01",
+                "test": {
+                  "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                  "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+                },
+                "gate": "red",
+                "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9"
+              },
+              {
+                "criterion": "AC-5",
+                "test_id": "fa385bfe00239d8f",
+                "test": {
+                  "path": "packages/cli/src/commands/version/version-no-journal.test.ts",
+                  "name": "version on success > bumps the package and leaves no journal behind"
+                },
+                "gate": "green",
+                "output_sha256": "f54b44fd776f28140f007257134fba5331211ba9913506211ea727d44bda1141"
+              }
+            ],
+            "tdd_history": {
+              "ok": true,
+              "base_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+              "head_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+              "cycles": 1,
+              "compatibility_units": 1,
+              "code": null,
+              "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+              "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.tdd-history.json",
+              "output_sha256": "b77fc9956972d2507a3e95a247daabe9c709f1af54bcbb3a0fa6c3e17bc89914",
+              "verified_at": "2026-10-10T00:45:02.055Z"
+            },
+            "red_bindings": [
+              {
+                "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                "tests": [
+                  {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "blob": "8e97d0effb65f805ebb3fddd161fe72d5da199cc"
+                  }
+                ],
+                "tests_sha256": "767bd67686fed08a652af85061504f1489af55351ea28168375a8a3544e1d248",
+                "evidence_sha256": "a710f523bbc07cb431818fd9f83af62b46c990533f58b4a4988e062caa230344",
+                "recorded_at": "2026-10-10T00:42:38.997Z",
+                "red_tests": [
+                  {
+                    "id": "df980dfb2c3d4c5f",
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "full_name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once",
+                    "status": "failed",
+                    "category": "exception"
+                  },
+                  {
+                    "id": "fcd9b3d1ea4f0f01",
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "full_name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails",
+                    "status": "failed",
+                    "category": "assertion"
+                  }
+                ]
+              },
+              {
+                "head_sha": "9f02eb2b3d74cf008475c2edcce55899e98ecd43",
+                "tests": [
+                  {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "blob": "1187ca4049d35dbbfab32f18bfc0e9981e045a39"
+                  }
+                ],
+                "tests_sha256": "a1f6e5b4db3564b4870a7d59d3c27e56ca8b96fed92306b315999abb0068aa82",
+                "evidence_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                "recorded_at": "2026-10-10T00:43:20.350Z",
+                "red_tests": [
+                  {
+                    "id": "df980dfb2c3d4c5f",
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "full_name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once",
+                    "status": "failed",
+                    "category": "exception"
+                  },
+                  {
+                    "id": "fcd9b3d1ea4f0f01",
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "full_name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails",
+                    "status": "failed",
+                    "category": "assertion"
+                  }
+                ]
+              }
+            ],
+            "settlement": {
+              "capability_sha256": "afe68c84927bbe9ac3d644dc6d15b084976af9fb00e6f9e7a70d66b7b302c32a",
+              "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+              "outcome": "DONE",
+              "state": "DONE",
+              "detail": "fresh verification passed",
+              "settled_at": "2026-10-10T00:45:28.289Z",
+              "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+              "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+              "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7"
+            },
+            "restore": {
+              "state": "DONE",
+              "attempts": 1,
+              "failure_counts": {},
+              "last_failure_fingerprint": null,
+              "integrated_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+              "branch_base_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+              "evidence": {
+                "red": {
+                  "kind": "red",
+                  "node_id": "CSET-203.cli.recover-fail.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/cli/"
+                  ],
+                  "exit_code": 1,
+                  "started_at": "2026-10-10T00:43:10.022Z",
+                  "finished_at": "2026-10-10T00:43:20.313Z",
+                  "cwd": ".mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+                  "repository": "changesets",
+                  "commit_sha": "9f02eb2b3d74cf008475c2edcce55899e98ecd43",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.red.log",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                  "failure_fingerprint": "27d4d0b8698724a8",
+                  "module": "cli",
+                  "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+                  "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 6874
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 4
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.red.results.json",
+                    "sha256": "eaccfaed4d93430f2243afdec6dfeb9a2fa3db85fe5631fe32234e602e82a3c4",
+                    "total": 252,
+                    "passed": 249,
+                    "failed": 2,
+                    "skipped": 1
+                  },
+                  "red_reason": "behaviour-missing",
+                  "red_category": "assertion",
+                  "red_fingerprint": "484ec1a66309648f",
+                  "red_detail": "restores an interrupted run's journal, warns, and versions once, prints the failure, exits 1 and does not git add/commit when applying fails failed for a missing behaviour (assertion)",
+                  "red_tests": [
+                    {
+                      "file": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "name": "restores an interrupted run's journal, warns, and versions once",
+                      "status": "failed",
+                      "category": "exception",
+                      "type": null,
+                      "fingerprint": "45c73473c381ca07"
+                    },
+                    {
+                      "file": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "name": "prints the failure, exits 1 and does not git add/commit when applying fails",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "AssertionError",
+                      "fingerprint": "fbf6bbb749775d6e"
+                    }
+                  ],
+                  "red_declared": [
+                    {
+                      "file": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "name": "restores an interrupted run's journal, warns, and versions once"
+                    },
+                    {
+                      "file": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "name": "prints the failure, exits 1 and does not git add/commit when applying fails"
+                    }
+                  ],
+                  "worktree_setup_sha256": "6b2edc7bbecd4968f6a5554a777ec2d9774af584840c02f10220bd8d151ddd2d",
+                  "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+                },
+                "green": {
+                  "kind": "green",
+                  "node_id": "CSET-203.cli.recover-fail.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/cli/"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:45:04.216Z",
+                  "finished_at": "2026-10-10T00:45:14.898Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.cli.recover-fail.impl__7eede2ee",
+                  "repository": "changesets",
+                  "commit_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-module-cli.log",
+                  "output_sha256": "7e2e8fba6e306020e75492dde59adb0b4b51721e333faa277c64633c2762e2a8",
+                  "failure_fingerprint": null,
+                  "module": "cli",
+                  "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+                  "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 7048
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 4
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-module-cli.results.json",
+                    "sha256": "d64917c01c226175393c40437dfd4ed5414d4ed57e1f53fcb9362d3c4a4b5c0f",
+                    "total": 253,
+                    "passed": 252,
+                    "failed": 0,
+                    "skipped": 1
+                  },
+                  "worktree_setup_sha256": "69bba2ecba49cdd4d0e18cbc8c2d86357bed4af539c826272b7bd0e9e788360b"
+                },
+                "regression": {
+                  "kind": "regression",
+                  "node_id": "CSET-203.cli.recover-fail.impl",
+                  "command": [
+                    "sh",
+                    "-c",
+                    "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:45:14.907Z",
+                  "finished_at": "2026-10-10T00:45:27.445Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.cli.recover-fail.impl__7eede2ee",
+                  "repository": "changesets",
+                  "commit_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-regression.log",
+                  "output_sha256": "a4836959d326eafbf6871c72a1625242995f50836145e9d657d6f57ba64337f3",
+                  "failure_fingerprint": null,
+                  "worktree_setup_sha256": "69bba2ecba49cdd4d0e18cbc8c2d86357bed4af539c826272b7bd0e9e788360b"
+                }
+              },
+              "criteria": [
+                {
+                  "criterion": "AC-3",
+                  "test_id": "df980dfb2c3d4c5f",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once"
+                  },
+                  "gate": "red",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9"
+                },
+                {
+                  "criterion": "AC-4",
+                  "test_id": "fcd9b3d1ea4f0f01",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+                  },
+                  "gate": "red",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9"
+                },
+                {
+                  "criterion": "AC-5",
+                  "test_id": "fa385bfe00239d8f",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-no-journal.test.ts",
+                    "name": "version on success > bumps the package and leaves no journal behind"
+                  },
+                  "gate": "green",
+                  "output_sha256": "f54b44fd776f28140f007257134fba5331211ba9913506211ea727d44bda1141"
+                }
+              ],
+              "tdd_history": {
+                "ok": true,
+                "base_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                "head_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                "cycles": 1,
+                "compatibility_units": 1,
+                "code": null,
+                "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.tdd-history.json",
+                "output_sha256": "b77fc9956972d2507a3e95a247daabe9c709f1af54bcbb3a0fa6c3e17bc89914",
+                "verified_at": "2026-10-10T00:45:02.055Z"
+              },
+              "tdd_red_bindings": [
+                {
+                  "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                  "tests": [
+                    {
+                      "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "blob": "8e97d0effb65f805ebb3fddd161fe72d5da199cc"
+                    }
+                  ],
+                  "tests_sha256": "767bd67686fed08a652af85061504f1489af55351ea28168375a8a3544e1d248",
+                  "evidence_sha256": "a710f523bbc07cb431818fd9f83af62b46c990533f58b4a4988e062caa230344",
+                  "recorded_at": "2026-10-10T00:42:38.997Z",
+                  "red_tests": [
+                    {
+                      "id": "df980dfb2c3d4c5f",
+                      "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "full_name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once",
+                      "status": "failed",
+                      "category": "exception"
+                    },
+                    {
+                      "id": "fcd9b3d1ea4f0f01",
+                      "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "full_name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails",
+                      "status": "failed",
+                      "category": "assertion"
+                    }
+                  ]
+                },
+                {
+                  "head_sha": "9f02eb2b3d74cf008475c2edcce55899e98ecd43",
+                  "tests": [
+                    {
+                      "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "blob": "1187ca4049d35dbbfab32f18bfc0e9981e045a39"
+                    }
+                  ],
+                  "tests_sha256": "a1f6e5b4db3564b4870a7d59d3c27e56ca8b96fed92306b315999abb0068aa82",
+                  "evidence_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                  "recorded_at": "2026-10-10T00:43:20.350Z",
+                  "red_tests": [
+                    {
+                      "id": "df980dfb2c3d4c5f",
+                      "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "full_name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once",
+                      "status": "failed",
+                      "category": "exception"
+                    },
+                    {
+                      "id": "fcd9b3d1ea4f0f01",
+                      "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                      "full_name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails",
+                      "status": "failed",
+                      "category": "assertion"
+                    }
+                  ]
+                }
+              ],
+              "last_settlement": {
+                "capability_sha256": "afe68c84927bbe9ac3d644dc6d15b084976af9fb00e6f9e7a70d66b7b302c32a",
+                "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                "outcome": "DONE",
+                "state": "DONE",
+                "detail": "fresh verification passed",
+                "settled_at": "2026-10-10T00:45:28.289Z",
+                "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7"
+              },
+              "carried_criterion_proofs": [],
+              "worktree_setup": {
+                "status": "complete",
+                "code": null,
+                "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "receipt_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.worktree-setup-30ce9006.json",
+                "receipt_sha256": "6b2edc7bbecd4968f6a5554a777ec2d9774af584840c02f10220bd8d151ddd2d",
+                "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+                "head_sha": "85123902450f28565360dea1d0f3123c2b439aca",
+                "at": "2026-10-10T00:41:13.399Z"
+              }
+            }
+          },
+          {
+            "at": "2026-10-10T01:00:08.279Z",
+            "reason": "Acceptance review CSET-203-R002 (review 2, rework round 2 of 2) found AC-3 (new-behavior) not proved: recoverInterruptedRun runs after getPackages(cwd), so the CLI reads package files before looking for the journal. A run killed mid-write that leaves a package.json truncated or invalid makes version fail before recovery. No test covers this order.. Reproduce: Create a project with a valid journal whose files entry holds the original pkg-a package.json bytes. Overwrite packages/pkg-a/package.json with invalid JSON, such as '{ \"name\": \"pkg-a\", \"ver'. Run version({cwd}). Expect it to restore the file, warn 'interrupted', remove the journal, and finish with pkg-a at 1.1.0 and the changeset consumed. Today getPackages throws first.. AC-3: a focused failing test for exactly this first, proved by the red gate on the current code, then the production fix.",
+            "decision_id": null,
+            "attempts": 2,
+            "failure_counts": {},
+            "integrated_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+            "branch_head": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+            "archived_ref": "refs/mycelink/archive/CSET-203/cli.recover-fail.impl/5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+            "candidate_id": null,
+            "evidence": {
+              "green": {
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g2/CSET-203.cli.recover-fail.impl.fresh-module-cli.log",
+                "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+                "exit_code": 0,
+                "commit_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a"
+              },
+              "regression": {
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g2/CSET-203.cli.recover-fail.impl.fresh-regression.log",
+                "output_sha256": "0c7657123e902bee8c196425c2b4e8912f9112919d553748fc9b16c1d4f8bbc1",
+                "exit_code": 0,
+                "commit_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a"
+              }
+            },
+            "generation": 1,
+            "claim_id": "24a4bfa1-8dec-4faf-bbd8-36654976076c",
+            "dispatch_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+            "criteria": [
+              {
+                "criterion": "AC-3",
+                "test_id": "df980dfb2c3d4c5f",
+                "test": {
+                  "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                  "name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once"
+                },
+                "gate": "green",
+                "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+                "carried": true,
+                "carried_from": {
+                  "generation": 0,
+                  "gate": "red",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                  "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                  "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                  "repo_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006"
+                }
+              },
+              {
+                "criterion": "AC-4",
+                "test_id": "fcd9b3d1ea4f0f01",
+                "test": {
+                  "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                  "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+                },
+                "gate": "green",
+                "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+                "carried": true,
+                "carried_from": {
+                  "generation": 0,
+                  "gate": "red",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                  "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                  "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                  "repo_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006"
+                }
+              },
+              {
+                "criterion": "AC-5",
+                "test_id": "237aae09f5b82ead",
+                "test": {
+                  "path": "packages/cli/src/commands/journal-unaffected.test.ts",
+                  "name": "a journal in .changeset > does not change `changeset status`"
+                },
+                "gate": "green",
+                "output_sha256": "c24c5e132c87e67df7f218be43492f5719bed3184850fc2ef0e9f78173c29af8"
+              },
+              {
+                "criterion": "AC-5",
+                "test_id": "33eef3a4e8bca98e",
+                "test": {
+                  "path": "packages/cli/src/commands/journal-unaffected.test.ts",
+                  "name": "a journal in .changeset > does not change `changeset add --empty`"
+                },
+                "gate": "green",
+                "output_sha256": "c24c5e132c87e67df7f218be43492f5719bed3184850fc2ef0e9f78173c29af8"
+              }
+            ],
+            "tdd_history": {
+              "ok": true,
+              "base_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+              "head_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+              "cycles": 0,
+              "compatibility_units": 1,
+              "code": null,
+              "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+              "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g2/CSET-203.cli.recover-fail.impl.tdd-history.json",
+              "output_sha256": "2b12090267237015554418b5ace7df0b8c8139eb5757bc938743f5180c6724c7",
+              "verified_at": "2026-10-10T00:57:44.766Z"
+            },
+            "red_bindings": [],
+            "settlement": {
+              "capability_sha256": "aa2c5c2cf800e344a5d446e707cab34dad0cfd5943d35cbd0cc0ea59f4833641",
+              "claim_id": "24a4bfa1-8dec-4faf-bbd8-36654976076c",
+              "outcome": "DONE",
+              "state": "DONE",
+              "detail": "fresh verification passed",
+              "settled_at": "2026-10-10T00:58:10.731Z",
+              "dispatch_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+              "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+              "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7"
+            },
+            "restore": {
+              "state": "DONE",
+              "attempts": 2,
+              "failure_counts": {},
+              "last_failure_fingerprint": null,
+              "integrated_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+              "branch_base_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+              "evidence": {
+                "green": {
+                  "kind": "green",
+                  "node_id": "CSET-203.cli.recover-fail.impl",
+                  "command": [
+                    "pnpm",
+                    "vitest",
+                    "run",
+                    "--reporter=default",
+                    "--reporter=json",
+                    "--outputFile.json=${REPORT}",
+                    "packages/cli/"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:57:46.908Z",
+                  "finished_at": "2026-10-10T00:57:57.420Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.cli.recover-fail.impl__1eea6044",
+                  "repository": "changesets",
+                  "commit_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-module-cli.log",
+                  "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+                  "failure_fingerprint": null,
+                  "module": "cli",
+                  "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+                  "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+                  "steps": [
+                    {
+                      "argv": [
+                        "pnpm",
+                        "build"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 7055
+                    },
+                    {
+                      "argv": [
+                        "git",
+                        "checkout",
+                        "--",
+                        "packages/config/package.json"
+                      ],
+                      "exit_code": 0,
+                      "timed_out": false,
+                      "duration_ms": 4
+                    }
+                  ],
+                  "results": {
+                    "format": "vitest-json",
+                    "path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-module-cli.results.json",
+                    "sha256": "35d422842e5cea8d06eae8d04d23c07bf3f880a423a4bd850e67ceed4425ab94",
+                    "total": 255,
+                    "passed": 254,
+                    "failed": 0,
+                    "skipped": 1
+                  },
+                  "worktree_setup_sha256": "ae1ad33763f1fd72b3e1645f49852be9b0641ae7eeca30865b3ead01e9eed6a0"
+                },
+                "regression": {
+                  "kind": "regression",
+                  "node_id": "CSET-203.cli.recover-fail.impl",
+                  "command": [
+                    "sh",
+                    "-c",
+                    "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-10T00:57:57.429Z",
+                  "finished_at": "2026-10-10T00:58:09.859Z",
+                  "cwd": ".mycelink/verify/changesets__CSET-203.cli.recover-fail.impl__1eea6044",
+                  "repository": "changesets",
+                  "commit_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.fresh-regression.log",
+                  "output_sha256": "0c7657123e902bee8c196425c2b4e8912f9112919d553748fc9b16c1d4f8bbc1",
+                  "failure_fingerprint": null,
+                  "worktree_setup_sha256": "ae1ad33763f1fd72b3e1645f49852be9b0641ae7eeca30865b3ead01e9eed6a0"
+                }
+              },
+              "criteria": [
+                {
+                  "criterion": "AC-3",
+                  "test_id": "df980dfb2c3d4c5f",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once"
+                  },
+                  "gate": "green",
+                  "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+                  "carried": true,
+                  "carried_from": {
+                    "generation": 0,
+                    "gate": "red",
+                    "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                    "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                    "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                    "repo_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006"
+                  }
+                },
+                {
+                  "criterion": "AC-4",
+                  "test_id": "fcd9b3d1ea4f0f01",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+                  },
+                  "gate": "green",
+                  "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+                  "carried": true,
+                  "carried_from": {
+                    "generation": 0,
+                    "gate": "red",
+                    "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                    "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                    "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                    "repo_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006"
+                  }
+                },
+                {
+                  "criterion": "AC-5",
+                  "test_id": "237aae09f5b82ead",
+                  "test": {
+                    "path": "packages/cli/src/commands/journal-unaffected.test.ts",
+                    "name": "a journal in .changeset > does not change `changeset status`"
+                  },
+                  "gate": "green",
+                  "output_sha256": "c24c5e132c87e67df7f218be43492f5719bed3184850fc2ef0e9f78173c29af8"
+                },
+                {
+                  "criterion": "AC-5",
+                  "test_id": "33eef3a4e8bca98e",
+                  "test": {
+                    "path": "packages/cli/src/commands/journal-unaffected.test.ts",
+                    "name": "a journal in .changeset > does not change `changeset add --empty`"
+                  },
+                  "gate": "green",
+                  "output_sha256": "c24c5e132c87e67df7f218be43492f5719bed3184850fc2ef0e9f78173c29af8"
+                }
+              ],
+              "tdd_history": {
+                "ok": true,
+                "base_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                "head_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+                "cycles": 0,
+                "compatibility_units": 1,
+                "code": null,
+                "policy_sha256": "8934cad9e1a3cac29abdf8bb20c04436336a0d97e3b745249f46e329f0c43e61",
+                "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g2/CSET-203.cli.recover-fail.impl.tdd-history.json",
+                "output_sha256": "2b12090267237015554418b5ace7df0b8c8139eb5757bc938743f5180c6724c7",
+                "verified_at": "2026-10-10T00:57:44.766Z"
+              },
+              "tdd_red_bindings": [],
+              "last_settlement": {
+                "capability_sha256": "aa2c5c2cf800e344a5d446e707cab34dad0cfd5943d35cbd0cc0ea59f4833641",
+                "claim_id": "24a4bfa1-8dec-4faf-bbd8-36654976076c",
+                "outcome": "DONE",
+                "state": "DONE",
+                "detail": "fresh verification passed",
+                "settled_at": "2026-10-10T00:58:10.731Z",
+                "dispatch_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+                "worktree_setup_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7"
+              },
+              "carried_criterion_proofs": [
+                {
+                  "criterion": "AC-3",
+                  "test_id": "df980dfb2c3d4c5f",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "name": "version recovery and failure > restores an interrupted run's journal, warns, and versions once"
+                  },
+                  "source_generation": 0,
+                  "source_claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                  "source_dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                  "repo_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                  "gate": "red",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.red.log"
+                },
+                {
+                  "criterion": "AC-4",
+                  "test_id": "fcd9b3d1ea4f0f01",
+                  "test": {
+                    "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+                    "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+                  },
+                  "source_generation": 0,
+                  "source_claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+                  "source_dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+                  "repo_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                  "gate": "red",
+                  "output_sha256": "df857beaf16256bc8324e74c1348d7f81cb8eda3e5fa7e181cfb237261ec02a9",
+                  "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g1/CSET-203.cli.recover-fail.impl.red.log"
+                }
+              ],
+              "worktree_setup": {
+                "status": "complete",
+                "code": null,
+                "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+                "receipt_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/CSET-203.cli.recover-fail.impl.worktree-setup-b91a3585.json",
+                "receipt_sha256": "16f62ed0b2dbac971dd4731124f0c64685f4398b619589fb445098be8e959dd5",
+                "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+                "head_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+                "at": "2026-10-10T00:55:14.513Z"
+              }
+            }
+          }
+        ],
+        "rework_brief": null,
+        "carried_criterion_proofs": [
+          {
+            "criterion": "AC-4",
+            "test_id": "fcd9b3d1ea4f0f01",
+            "test": {
+              "path": "packages/cli/src/commands/version/version-recovery.test.ts",
+              "name": "version recovery and failure > prints the failure, exits 1 and does not git add/commit when applying fails"
+            },
+            "source_generation": 1,
+            "source_claim_id": "24a4bfa1-8dec-4faf-bbd8-36654976076c",
+            "source_dispatch_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+            "repo_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+            "gate": "green",
+            "output_sha256": "6c953fb39111eb68e97ea1f524d684166b5885b81507965c558894eb26685381",
+            "output_path": "features/CSET-203/evidence/CSET-203.cli.recover-fail.impl/replaced/g2/CSET-203.cli.recover-fail.impl.fresh-module-cli.log"
+          }
+        ],
+        "lineage": 9
+      },
+      "CSET-203.changesets.compat.verify": {
+        "state": "DONE",
+        "attempts": 1,
+        "claim": null,
+        "evidence": {
+          "regression": {
+            "kind": "regression",
+            "node_id": "CSET-203.changesets.compat.verify",
+            "command": [
+              "mycelink",
+              "verification",
+              "CSET-203",
+              "CSET-203.changesets.compat.verify"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-10T01:07:22.190Z",
+            "finished_at": "2026-10-10T01:07:54.083Z",
+            "cwd": ".",
+            "repository": "changesets",
+            "commit_sha": "afea9da0a2ba8f545c88458758cec69ee4948e4d",
+            "output_path": "features/CSET-203/evidence/CSET-203.changesets.compat.verify/CSET-203.changesets.compat.verify.verification-e0815de7.json",
+            "output_sha256": "0c6bf1b55e49557ab38cdf666f3cef7986eb1e7d61ee01b6597725c5399f1666",
+            "failure_fingerprint": null,
+            "worktree_setup_sha256": "e99ae924f648ab3cf22e9e1cbebed7dacfa5c072765e1febd8d10514f7451ba3"
+          }
+        },
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 0
+        },
+        "updated_at": "2026-10-10T01:07:54.148Z",
+        "worktree_setup": {
+          "status": "complete",
+          "code": null,
+          "config_sha256": "f2b74edcd2de20e862f2e71a4a3f1e9de97401a262bc93bdf3deac1e0145893d",
+          "receipt_path": "features/CSET-203/evidence/CSET-203.changesets.compat.verify/CSET-203.changesets.compat.verify.verification-setup-04900009.json",
+          "receipt_sha256": "e99ae924f648ab3cf22e9e1cbebed7dacfa5c072765e1febd8d10514f7451ba3",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/verify/changesets__CSET-203.changesets.compat.verify__2864ace7",
+          "head_sha": "afea9da0a2ba8f545c88458758cec69ee4948e4d",
+          "at": "2026-10-10T01:07:22.176Z"
+        },
+        "criteria": [
+          {
+            "criterion": "AC-5",
+            "test_id": null,
+            "test": null,
+            "gate": "regression",
+            "output_sha256": "0c6bf1b55e49557ab38cdf666f3cef7986eb1e7d61ee01b6597725c5399f1666"
+          }
+        ],
+        "lineage": 9
+      },
+      "CSET-203.release.candidate.build": {
+        "state": "PLANNED",
+        "attempts": 0,
+        "claim": null,
+        "evidence": {},
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 0
+        },
+        "updated_at": "2026-10-10T00:37:19.854Z"
+      }
+    },
+    "usage": {
+      "model_turns": 0,
+      "wall_clock_ms": 1685847,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "sessions": 12
+    },
+    "budget": {
+      "max_total_model_turns": 400,
+      "max_total_wall_clock_ms": 21600000,
+      "max_total_sessions": 40,
+      "max_writer_concurrency": 2,
+      "max_same_failure": 2
+    },
+    "blocked_reason": "REVIEW_GAPS: CSET-203-R003 found AC-1 (reproduce: Fixture with changelog enabled (or no .changeset/pre.json in pre mode) and no pkg CHANGELOG.md. Inject a failure (e.g. fs.rm of the changeset md throws) after the CHANGELOG.md or pre.json write. Asser); AC-3 (reproduce: Journal with changelog enabled lists pkg-a/CHANGELOG.md as null. Before running version, simulate the kill: bump package.json, write a CHANGELOG.md entry, delete the changeset. Run version and assert ) not proved after 2 review-rework round(s), the limit (max_rounds 2); no candidate is cut",
+    "pending_decisions": [],
+    "candidates": [],
+    "current_candidate": null,
+    "orchestration": {
+      "epoch": 15,
+      "bumps": [
+        {
+          "epoch": 1,
+          "reason": "integrate CSET-203.apply.journal-rollback.impl into changesets at 85123902450f",
+          "at": "2026-10-10T00:41:03.085Z"
+        },
+        {
+          "epoch": 2,
+          "reason": "integrate CSET-203.cli.recover-fail.impl into changesets at aaf1974ffc6b",
+          "at": "2026-10-10T00:45:27.903Z"
+        },
+        {
+          "epoch": 3,
+          "reason": "rework CSET-203.cli.recover-fail.impl (CSET-203-R001)",
+          "at": "2026-10-10T00:47:38.330Z",
+          "nodes": [
+            "CSET-203.cli.recover-fail.impl",
+            "CSET-203.changesets.compat.verify"
+          ]
+        },
+        {
+          "epoch": 4,
+          "reason": "rework CSET-203.apply.journal-rollback.impl (CSET-203-R001)",
+          "at": "2026-10-10T00:47:38.330Z",
+          "nodes": [
+            "CSET-203.apply.journal-rollback.impl"
+          ]
+        },
+        {
+          "epoch": 5,
+          "reason": "review CSET-203-R001 settled GAPS",
+          "at": "2026-10-10T00:47:38.323Z"
+        },
+        {
+          "epoch": 6,
+          "reason": "challenge CSET-203-R001-C1 of CSET-203-R001",
+          "at": "2026-10-10T00:52:51.503Z",
+          "nodes": [
+            "CSET-203.apply.journal-rollback.impl"
+          ]
+        },
+        {
+          "epoch": 7,
+          "reason": "refinement of CSET-203-R001 settled GAPS",
+          "at": "2026-10-10T00:55:06.883Z"
+        },
+        {
+          "epoch": 8,
+          "reason": "integrate CSET-203.cli.recover-fail.impl into changesets at 5702566dee1e",
+          "at": "2026-10-10T00:58:10.343Z"
+        },
+        {
+          "epoch": 9,
+          "reason": "rework CSET-203.cli.recover-fail.impl (CSET-203-R002)",
+          "at": "2026-10-10T01:00:08.304Z",
+          "nodes": [
+            "CSET-203.cli.recover-fail.impl",
+            "CSET-203.changesets.compat.verify"
+          ]
+        },
+        {
+          "epoch": 10,
+          "reason": "rework CSET-203.apply.journal-rollback.impl (CSET-203-R002)",
+          "at": "2026-10-10T01:00:08.305Z",
+          "nodes": [
+            "CSET-203.apply.journal-rollback.impl"
+          ]
+        },
+        {
+          "epoch": 11,
+          "reason": "review CSET-203-R002 settled GAPS",
+          "at": "2026-10-10T01:00:08.296Z"
+        },
+        {
+          "epoch": 12,
+          "reason": "challenge CSET-203-R002-C1 of CSET-203-R002",
+          "at": "2026-10-10T01:02:33.118Z",
+          "nodes": [
+            "CSET-203.apply.journal-rollback.impl"
+          ]
+        },
+        {
+          "epoch": 13,
+          "reason": "refinement of CSET-203-R002 settled GAPS",
+          "at": "2026-10-10T01:03:50.796Z"
+        },
+        {
+          "epoch": 14,
+          "reason": "integrate CSET-203.cli.recover-fail.impl into changesets at afea9da0a2ba",
+          "at": "2026-10-10T01:07:19.335Z"
+        },
+        {
+          "epoch": 15,
+          "reason": "review CSET-203-R003 settled REVIEW_GAPS",
+          "at": "2026-10-10T01:09:29.244Z"
+        }
+      ],
+      "leases": [
+        {
+          "lease_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+          "kind": "worker",
+          "node_id": "CSET-203.apply.journal-rollback.impl",
+          "review_id": null,
+          "claim_id": "8e8fddbc-7fe0-4adf-9575-1edb24d3c30c",
+          "dispatch_id": "95377d12-565a-4418-8e9a-d1f59bec5f0b",
+          "capability_sha256": "9f62ab5bb873f74d97f459d84313ea18f7e7967795f1f640a1617b758285e8e2",
+          "epoch": 0,
+          "lineage": 0,
+          "generation": 0,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:37:24.044Z",
+          "closed_at": "2026-10-10T00:41:03.109Z",
+          "closed_reason": "settled DONE",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+          "result_file": "result-95377d12-565a-4418-8e9a-d1f59bec5f0b.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:37:23.713Z"
+          },
+          "outcome": "DONE",
+          "settled_epoch": 1
+        },
+        {
+          "lease_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+          "kind": "worker",
+          "node_id": "CSET-203.cli.recover-fail.impl",
+          "review_id": null,
+          "claim_id": "eefc5eb2-095d-4ae1-8cde-2ad03ab36097",
+          "dispatch_id": "89a79a8f-9e65-4902-9300-4cbccaac270e",
+          "capability_sha256": "afe68c84927bbe9ac3d644dc6d15b084976af9fb00e6f9e7a70d66b7b302c32a",
+          "epoch": 1,
+          "lineage": 0,
+          "generation": 0,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:41:11.314Z",
+          "closed_at": "2026-10-10T00:45:27.929Z",
+          "closed_reason": "settled DONE",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+          "result_file": "result-89a79a8f-9e65-4902-9300-4cbccaac270e.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:41:10.979Z"
+          },
+          "outcome": "DONE",
+          "settled_epoch": 2
+        },
+        {
+          "lease_id": "ae7c7029-096f-4f48-89aa-db8d1d5d53f6",
+          "kind": "verification",
+          "node_id": "CSET-203.changesets.compat.verify",
+          "review_id": null,
+          "claim_id": "ae7c7029-096f-4f48-89aa-db8d1d5d53f6",
+          "dispatch_id": null,
+          "capability_sha256": "ec7dba403973b84f459577cc193513b3b0f2c9546dafe2cfdb9a0e52a8ce5240",
+          "epoch": 2,
+          "lineage": 0,
+          "generation": 0,
+          "status": "released",
+          "issued_at": "2026-10-10T00:45:28.639Z",
+          "closed_at": "2026-10-10T00:46:02.877Z",
+          "closed_reason": "its claim ended without a settlement of this generation",
+          "worktree": null,
+          "result_file": null
+        },
+        {
+          "lease_id": "93a64a9d-078b-4fff-b2d7-e3f9b0357d3c",
+          "kind": "review",
+          "node_id": null,
+          "review_id": "CSET-203-R001",
+          "claim_id": null,
+          "dispatch_id": "93a64a9d-078b-4fff-b2d7-e3f9b0357d3c",
+          "capability_sha256": "30fe4015789bfa4b9bf4a2a0a8af8f678b7b35c2a67d6a6babfe144b3969bf60",
+          "epoch": 2,
+          "lineage": 2,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:46:03.023Z",
+          "closed_at": "2026-10-10T00:47:38.330Z",
+          "closed_reason": "review CSET-203-R001 settled GAPS",
+          "worktree": null,
+          "result_file": null,
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:45:01.610Z"
+          },
+          "outcome": "GAPS",
+          "settled_epoch": 5
+        },
+        {
+          "lease_id": "cbb16c90-bceb-434d-9ba4-b90c9ec1bb32",
+          "kind": "worker",
+          "node_id": "CSET-203.apply.journal-rollback.impl",
+          "review_id": null,
+          "claim_id": "7e64cfb1-da14-4045-a078-16f02cd2f241",
+          "dispatch_id": "cbb16c90-bceb-434d-9ba4-b90c9ec1bb32",
+          "capability_sha256": "e78f25f402e9b0d1e7edb52273985da5e73cdea98fc1a699fd12183c072968ef",
+          "epoch": 5,
+          "lineage": 4,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:47:42.279Z",
+          "closed_at": "2026-10-10T00:52:51.503Z",
+          "closed_reason": "review-gap challenge CSET-203-R001-C1",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+          "result_file": "result-cbb16c90-bceb-434d-9ba4-b90c9ec1bb32.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:47:41.958Z"
+          },
+          "outcome": "REVIEW_CHALLENGED",
+          "settled_epoch": 6
+        },
+        {
+          "lease_id": "1518dd19-6d94-40f2-a1d4-4f1bcf0d026c",
+          "kind": "review",
+          "node_id": null,
+          "review_id": "CSET-203-R001",
+          "refinement": true,
+          "claim_id": null,
+          "dispatch_id": "1518dd19-6d94-40f2-a1d4-4f1bcf0d026c",
+          "capability_sha256": "cc6ff6e961a5f4e72a46bf0fd890186dce1908bc1401fba66e450980cc87d0e6",
+          "epoch": 6,
+          "lineage": 6,
+          "generation": 1,
+          "status": "revoked",
+          "issued_at": "2026-10-10T00:52:56.662Z",
+          "closed_at": "2026-10-10T00:54:00.836Z",
+          "closed_reason": "replaced by CSET-203-R001 generation e82f44d5-d4f6-4e3c-9997-523239044cb9",
+          "worktree": null,
+          "result_file": null,
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:52:56.239Z"
+          }
+        },
+        {
+          "lease_id": "e82f44d5-d4f6-4e3c-9997-523239044cb9",
+          "kind": "review",
+          "node_id": null,
+          "review_id": "CSET-203-R001",
+          "refinement": true,
+          "claim_id": null,
+          "dispatch_id": "e82f44d5-d4f6-4e3c-9997-523239044cb9",
+          "capability_sha256": "7235aa68ce0f383d59879a062571470338380ba27b4daef0addb2a42e8819c46",
+          "epoch": 6,
+          "lineage": 6,
+          "generation": 2,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:54:00.836Z",
+          "closed_at": "2026-10-10T00:55:06.890Z",
+          "closed_reason": "review CSET-203-R001 settled GAPS",
+          "worktree": null,
+          "result_file": null,
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:54:00.494Z"
+          },
+          "outcome": "GAPS",
+          "settled_epoch": 7
+        },
+        {
+          "lease_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+          "kind": "worker",
+          "node_id": "CSET-203.cli.recover-fail.impl",
+          "review_id": null,
+          "claim_id": "24a4bfa1-8dec-4faf-bbd8-36654976076c",
+          "dispatch_id": "30f78f40-70ff-4128-8ff7-0d9e05c94c4f",
+          "capability_sha256": "aa2c5c2cf800e344a5d446e707cab34dad0cfd5943d35cbd0cc0ea59f4833641",
+          "epoch": 7,
+          "lineage": 3,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:55:12.276Z",
+          "closed_at": "2026-10-10T00:58:10.371Z",
+          "closed_reason": "settled DONE",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+          "result_file": "result-30f78f40-70ff-4128-8ff7-0d9e05c94c4f.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:55:11.958Z"
+          },
+          "outcome": "DONE",
+          "settled_epoch": 8
+        },
+        {
+          "lease_id": "55d99b5d-7b76-479b-b797-62e86bc2c1be",
+          "kind": "verification",
+          "node_id": "CSET-203.changesets.compat.verify",
+          "review_id": null,
+          "claim_id": "55d99b5d-7b76-479b-b797-62e86bc2c1be",
+          "dispatch_id": null,
+          "capability_sha256": "9c1edd35623a17d5cd27085f53fef8deb53cdb938486ab9cda45a1414e7302ea",
+          "epoch": 8,
+          "lineage": 3,
+          "generation": 0,
+          "status": "released",
+          "issued_at": "2026-10-10T00:58:11.084Z",
+          "closed_at": "2026-10-10T00:58:45.245Z",
+          "closed_reason": "its claim ended without a settlement of this generation",
+          "worktree": null,
+          "result_file": null
+        },
+        {
+          "lease_id": "9fbf2e05-77eb-4e99-bb26-86327608c4f3",
+          "kind": "review",
+          "node_id": null,
+          "review_id": "CSET-203-R002",
+          "claim_id": null,
+          "dispatch_id": "9fbf2e05-77eb-4e99-bb26-86327608c4f3",
+          "capability_sha256": "58bc8e9e52dfdccf70388934f373b78d330d7c20ac96aa4dfa29524a8b6a5616",
+          "epoch": 8,
+          "lineage": 8,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T00:58:45.395Z",
+          "closed_at": "2026-10-10T01:00:08.305Z",
+          "closed_reason": "review CSET-203-R002 settled GAPS",
+          "worktree": null,
+          "result_file": null,
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T00:57:44.332Z"
+          },
+          "outcome": "GAPS",
+          "settled_epoch": 11
+        },
+        {
+          "lease_id": "e3464931-f28b-4c13-883c-8f52279010a8",
+          "kind": "worker",
+          "node_id": "CSET-203.apply.journal-rollback.impl",
+          "review_id": null,
+          "claim_id": "c8e6a2fc-02b1-49ad-bdf8-9a6260ce4600",
+          "dispatch_id": "e3464931-f28b-4c13-883c-8f52279010a8",
+          "capability_sha256": "15c47cc1c696bb9205bb84e29878e6758f0d3b2fa24a2390fe7873cdb0f622c1",
+          "epoch": 11,
+          "lineage": 10,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T01:00:12.741Z",
+          "closed_at": "2026-10-10T01:02:33.118Z",
+          "closed_reason": "review-gap challenge CSET-203-R002-C1",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.apply.journal-rollback.impl",
+          "result_file": "result-e3464931-f28b-4c13-883c-8f52279010a8.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T01:00:12.421Z"
+          },
+          "outcome": "REVIEW_CHALLENGED",
+          "settled_epoch": 12
+        },
+        {
+          "lease_id": "80e4ea7d-0ac3-41f4-a107-8bf1dc225050",
+          "kind": "review",
+          "node_id": null,
+          "review_id": "CSET-203-R002",
+          "refinement": true,
+          "claim_id": null,
+          "dispatch_id": "80e4ea7d-0ac3-41f4-a107-8bf1dc225050",
+          "capability_sha256": "691133055c39972091e94888aedffc035129a012e661a6596b370885f9650330",
+          "epoch": 12,
+          "lineage": 12,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T01:02:33.950Z",
+          "closed_at": "2026-10-10T01:03:50.803Z",
+          "closed_reason": "review CSET-203-R002 settled GAPS",
+          "worktree": null,
+          "result_file": null,
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T01:02:32.699Z"
+          },
+          "outcome": "GAPS",
+          "settled_epoch": 13
+        },
+        {
+          "lease_id": "bf07871d-5c7a-4bd7-b2bb-cbf9abcc5c13",
+          "kind": "worker",
+          "node_id": "CSET-203.cli.recover-fail.impl",
+          "review_id": null,
+          "claim_id": "0b00d944-f512-4a50-9d9a-73dd56ef749f",
+          "dispatch_id": "bf07871d-5c7a-4bd7-b2bb-cbf9abcc5c13",
+          "capability_sha256": "11e29b05f28558b71d21c926d8c943c683d8d93c4503cc4a22fa21a655de9d73",
+          "epoch": 13,
+          "lineage": 9,
+          "generation": 2,
+          "status": "settled",
+          "issued_at": "2026-10-10T01:03:51.174Z",
+          "closed_at": "2026-10-10T01:07:19.371Z",
+          "closed_reason": "settled DONE",
+          "worktree": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/workspace/platform/.mycelink/worktrees/changesets__CSET-203.cli.recover-fail.impl",
+          "result_file": "result-bf07871d-5c7a-4bd7-b2bb-cbf9abcc5c13.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T01:03:50.201Z"
+          },
+          "outcome": "DONE",
+          "settled_epoch": 14
+        },
+        {
+          "lease_id": "1680c320-f6e2-4838-9fb5-c6e4510bb06a",
+          "kind": "verification",
+          "node_id": "CSET-203.changesets.compat.verify",
+          "review_id": null,
+          "claim_id": "1680c320-f6e2-4838-9fb5-c6e4510bb06a",
+          "dispatch_id": null,
+          "capability_sha256": "34ac7a678e57b76044da41b68eb62b337ce64eb30ad2b4e421aaffb6b3c1a686",
+          "epoch": 14,
+          "lineage": 9,
+          "generation": 0,
+          "status": "released",
+          "issued_at": "2026-10-10T01:07:20.095Z",
+          "closed_at": "2026-10-10T01:07:54.148Z",
+          "closed_reason": "its claim ended without a settlement of this generation",
+          "worktree": null,
+          "result_file": null
+        },
+        {
+          "lease_id": "d9453720-2e19-4bee-8fe7-260aef7cea60",
+          "kind": "review",
+          "node_id": null,
+          "review_id": "CSET-203-R003",
+          "claim_id": null,
+          "dispatch_id": "d9453720-2e19-4bee-8fe7-260aef7cea60",
+          "capability_sha256": "b6290e8d17c84dfb31ebfa07c2a42ece39c863deaf7d393dd8c4c38827e7c8d8",
+          "epoch": 14,
+          "lineage": 14,
+          "generation": 1,
+          "status": "settled",
+          "issued_at": "2026-10-10T01:07:54.304Z",
+          "closed_at": "2026-10-10T01:09:29.251Z",
+          "closed_reason": "review CSET-203-R003 settled REVIEW_GAPS",
+          "worktree": null,
+          "result_file": null,
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005311",
+            "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311.jsonl",
+            "bound_at": "2026-10-10T01:06:53.238Z"
+          },
+          "outcome": "REVIEW_GAPS",
+          "settled_epoch": 15
+        }
+      ]
+    },
+    "acceptance": {
+      "path": "features/CSET-203/ACCEPTANCE.json",
+      "sha256": "b9c13ff043e823a7193cc9a5710e7414a23b6f293d6c925a48c3e4409f2c3faa"
+    },
+    "acceptance_review": {
+      "required": true,
+      "max_rounds": 2,
+      "open": null,
+      "reviews": [
+        {
+          "review_id": "CSET-203-R001",
+          "dispatch_id": "93a64a9d-078b-4fff-b2d7-e3f9b0357d3c",
+          "capability_sha256": "30fe4015789bfa4b9bf4a2a0a8af8f678b7b35c2a67d6a6babfe144b3969bf60",
+          "review": 1,
+          "overall": "GAPS",
+          "inputs_sha256": "8a44be78471481eb34742c19d413a09c05c44282e2ab62ccac2f500c6bd246fa",
+          "receipt_path": "features/CSET-203/reviews/CSET-203-R001.refined-1.json",
+          "receipt_sha256": "9882b02494fbfd4a4efd64e472af151e623841c79fcec21c6a05fedc8d72ecda",
+          "at": "2026-10-10T00:47:38.323Z",
+          "reworks": [
+            "CSET-203.cli.recover-fail.impl",
+            "CSET-203.apply.journal-rollback.impl"
+          ],
+          "reworks_applied": true,
+          "outcome": "GAPS",
+          "epoch": 7,
+          "barrier": null,
+          "original": {
+            "dispatch_id": "93a64a9d-078b-4fff-b2d7-e3f9b0357d3c",
+            "receipt_path": "features/CSET-203/reviews/CSET-203-R001.json",
+            "receipt_sha256": "208609066d998907299645b0a2ca3a24886541632c1bd43188ad7b2f82b05f12",
+            "overall": "GAPS",
+            "inputs_sha256": "8a44be78471481eb34742c19d413a09c05c44282e2ab62ccac2f500c6bd246fa"
+          },
+          "refinements": [
+            {
+              "dispatch_id": "e82f44d5-d4f6-4e3c-9997-523239044cb9",
+              "capability_sha256": "7235aa68ce0f383d59879a062571470338380ba27b4daef0addb2a42e8819c46",
+              "round": 1,
+              "challenges": [
+                "CSET-203-R001-C1"
+              ],
+              "decisions": [
+                {
+                  "challenge_id": "CSET-203-R001-C1",
+                  "criterion": "AC-1",
+                  "decision": "WITHDRAW"
+                }
+              ],
+              "receipt_path": "features/CSET-203/reviews/CSET-203-R001.refined-1.json",
+              "receipt_sha256": "9882b02494fbfd4a4efd64e472af151e623841c79fcec21c6a05fedc8d72ecda",
+              "at": "2026-10-10T00:55:06.883Z"
+            }
+          ]
+        },
+        {
+          "review_id": "CSET-203-R002",
+          "dispatch_id": "9fbf2e05-77eb-4e99-bb26-86327608c4f3",
+          "capability_sha256": "58bc8e9e52dfdccf70388934f373b78d330d7c20ac96aa4dfa29524a8b6a5616",
+          "review": 2,
+          "overall": "GAPS",
+          "inputs_sha256": "87023f040275e4234f260e4680f1d1536a1aaac3a873dd2013fa5cb273e908fa",
+          "receipt_path": "features/CSET-203/reviews/CSET-203-R002.refined-1.json",
+          "receipt_sha256": "38d712ed17790dc3aecefe709d7d8ceccc5c44fba371d80f4aaaf72fa0325b37",
+          "at": "2026-10-10T01:00:08.296Z",
+          "reworks": [
+            "CSET-203.cli.recover-fail.impl"
+          ],
+          "reworks_applied": true,
+          "outcome": "GAPS",
+          "epoch": 13,
+          "barrier": null,
+          "original": {
+            "dispatch_id": "9fbf2e05-77eb-4e99-bb26-86327608c4f3",
+            "receipt_path": "features/CSET-203/reviews/CSET-203-R002.json",
+            "receipt_sha256": "07e56e16b1782b8adaf0844c2e6ea9cdaa2fe1a43f28cf132437b31bd4f39723",
+            "overall": "GAPS",
+            "inputs_sha256": "87023f040275e4234f260e4680f1d1536a1aaac3a873dd2013fa5cb273e908fa"
+          },
+          "refinements": [
+            {
+              "dispatch_id": "80e4ea7d-0ac3-41f4-a107-8bf1dc225050",
+              "capability_sha256": "691133055c39972091e94888aedffc035129a012e661a6596b370885f9650330",
+              "round": 1,
+              "challenges": [
+                "CSET-203-R002-C1"
+              ],
+              "decisions": [
+                {
+                  "challenge_id": "CSET-203-R002-C1",
+                  "criterion": "AC-1",
+                  "decision": "WITHDRAW"
+                }
+              ],
+              "receipt_path": "features/CSET-203/reviews/CSET-203-R002.refined-1.json",
+              "receipt_sha256": "38d712ed17790dc3aecefe709d7d8ceccc5c44fba371d80f4aaaf72fa0325b37",
+              "at": "2026-10-10T01:03:50.796Z"
+            }
+          ]
+        },
+        {
+          "review_id": "CSET-203-R003",
+          "dispatch_id": "d9453720-2e19-4bee-8fe7-260aef7cea60",
+          "capability_sha256": "b6290e8d17c84dfb31ebfa07c2a42ece39c863deaf7d393dd8c4c38827e7c8d8",
+          "review": 3,
+          "overall": "GAPS",
+          "inputs_sha256": "cb09e387c4d7cc825f78d54078cc3d27aa81773b25c92591c705d3dfe2c25bb7",
+          "receipt_path": "features/CSET-203/reviews/CSET-203-R003.json",
+          "receipt_sha256": "6e17eb7b55cfd50426046587b1b42be3987413a35e4cf0c998fa7815bfd73658",
+          "at": "2026-10-10T01:09:29.244Z",
+          "reworks": [],
+          "reworks_applied": false,
+          "outcome": "REVIEW_GAPS",
+          "epoch": 15
+        }
+      ],
+      "blocked": {
+        "code": "REVIEW_GAPS",
+        "review_id": "CSET-203-R003",
+        "detail": "CSET-203-R003 found AC-1 (reproduce: Fixture with changelog enabled (or no .changeset/pre.json in pre mode) and no pkg CHANGELOG.md. Inject a failure (e.g. fs.rm of the changeset md throws) after the CHANGELOG.md or pre.json write. Asser); AC-3 (reproduce: Journal with changelog enabled lists pkg-a/CHANGELOG.md as null. Before running version, simulate the kill: bump package.json, write a CHANGELOG.md entry, delete the changeset. Run version and assert ) not proved after 2 review-rework round(s), the limit (max_rounds 2); no candidate is cut",
+        "at": "2026-10-10T01:09:29.244Z"
+      },
+      "usage": {
+        "model_turns": 0,
+        "wall_clock_ms": 475911,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "sessions": 6
+      },
+      "challenges": [
+        {
+          "challenge_id": "CSET-203-R001-C1",
+          "review_id": "CSET-203-R001",
+          "node_id": "CSET-203.apply.journal-rollback.impl",
+          "status": "withdrawn",
+          "gaps": [
+            {
+              "criterion": "AC-1",
+              "round": 1,
+              "reproduction_sha256": "c681540612674d9c15a05bc7d3f49b0af47c0aba8af3af95a4f6a8a961f777dd",
+              "decision": "WITHDRAW"
+            }
+          ],
+          "challenge_sha256": "85ff62366c6fe3ad1145b6c94fa26774338665b8a98995bd9cb8335ab709e2e9",
+          "receipt_path": "features/CSET-203/reviews/challenges/CSET-203-R001-C1/challenge.json",
+          "receipt_sha256": "e4ab6232b251ae7f1999d7d989a84bf01a564bfd817caa2fd1bedc36b6566166",
+          "claim_id": "7e64cfb1-da14-4045-a078-16f02cd2f241",
+          "dispatch_id": "cbb16c90-bceb-434d-9ba4-b90c9ec1bb32",
+          "capability_sha256": "e78f25f402e9b0d1e7edb52273985da5e73cdea98fc1a699fd12183c072968ef",
+          "generation": 1,
+          "base_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+          "at": "2026-10-10T00:52:51.503Z",
+          "refinement": {
+            "dispatch_id": "e82f44d5-d4f6-4e3c-9997-523239044cb9",
+            "receipt_path": "features/CSET-203/reviews/CSET-203-R001.refined-1.json",
+            "at": "2026-10-10T00:55:06.883Z"
+          },
+          "restored": []
+        },
+        {
+          "challenge_id": "CSET-203-R002-C1",
+          "review_id": "CSET-203-R002",
+          "node_id": "CSET-203.apply.journal-rollback.impl",
+          "status": "withdrawn",
+          "gaps": [
+            {
+              "criterion": "AC-1",
+              "round": 1,
+              "reproduction_sha256": "92c5fba5994b1100980d869ce15894805e0bcd69ce79ed5e9cf36675ab72607f",
+              "decision": "WITHDRAW"
+            }
+          ],
+          "challenge_sha256": "859f6cb5260cef91569499ef25525c43093d1c6228820153a2f5f392a200ccc5",
+          "receipt_path": "features/CSET-203/reviews/challenges/CSET-203-R002-C1/challenge.json",
+          "receipt_sha256": "a0cf4fe6cd3cf3b624b4778c2d21e1cb024777609371d6356187f4cc021c3010",
+          "claim_id": "c8e6a2fc-02b1-49ad-bdf8-9a6260ce4600",
+          "dispatch_id": "e3464931-f28b-4c13-883c-8f52279010a8",
+          "capability_sha256": "15c47cc1c696bb9205bb84e29878e6758f0d3b2fa24a2390fe7873cdb0f622c1",
+          "generation": 1,
+          "base_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+          "at": "2026-10-10T01:02:33.118Z",
+          "refinement": {
+            "dispatch_id": "80e4ea7d-0ac3-41f4-a107-8bf1dc225050",
+            "receipt_path": "features/CSET-203/reviews/CSET-203-R002.refined-1.json",
+            "at": "2026-10-10T01:03:50.796Z"
+          },
+          "restored": []
+        }
+      ]
+    },
+    "integration_heads": {
+      "changesets": "afea9da0a2ba8f545c88458758cec69ee4948e4d"
+    },
+    "reworks": [
+      {
+        "node_id": "CSET-203.cli.recover-fail.impl",
+        "reason": "Acceptance review CSET-203-R001 (review 1, rework round 1 of 2) found AC-5 (compatibility) not proved: Nothing exercises `changeset status` or `changeset add` with a journal present in .changeset. 'Unaffected by a journal' is untested. The journal is not read as a changeset, status does not report on it, and add does not trip over it or recover it.. Reproduce: Create a project with a valid changeset and write .changeset/.apply-release-plan-journal.json (a real or well-formed journal). Run status and assert the output and exit code equal those of the same project without the journal, with the journal file untouched and no 'interrupted' warning. Run add (for example --empty) and assert it succeeds, creates one new changeset, and leaves the journal file byte-identical.. AC-5: a regression test that passes on the current code, committed alone (test files only, trailer \"Mycelink-Compatibility: AC-5\") as a compatibility-regression unit, then green and regression; a test that fails there is a RED: the red gate, then the fix.",
+        "decision_id": null,
+        "at": "2026-10-10T00:47:38.302Z",
+        "reopened": [
+          "CSET-203.cli.recover-fail.impl",
+          "CSET-203.changesets.compat.verify"
+        ],
+        "invalidated_candidate": null,
+        "delivered": false,
+        "origin": {
+          "kind": "acceptance-review",
+          "review_id": "CSET-203-R001",
+          "review": 1
+        }
+      },
+      {
+        "node_id": "CSET-203.apply.journal-rollback.impl",
+        "reason": "Acceptance review CSET-203-R001 (review 1, rework round 1 of 2) found AC-1 (new-behavior) not proved: Every rollback test uses changelog:false and a fixture where pre.json already exists. The restore branch that deletes a file the run created (previous content null) is never exercised. A failure after a CHANGELOG write is not exercised either.. Reproduce: Use a fixture with no CHANGELOG.md for pkg-a and pkg-b and a config whose changelog is '@changesets/cli/changelog'. Inject a failure after the changelogs are written, for example make fs.rm of the changeset file throw. Assert the whole-tree snapshot equals the original, so the new CHANGELOG.md files are absent again. Repeat with preState set and no .changes.... AC-5 (compatibility) not proved: Nothing exercises `changeset status` or `changeset add` with a journal present in .changeset. 'Unaffected by a journal' is untested. The journal is not read as a changeset, status does not report on it, and add does not trip over it or recover it.. Reproduce: Create a project with a valid changeset and write .changeset/.apply-release-plan-journal.json (a real or well-formed journal). Run status and assert the output and exit code equal those of the same project without the journal, with the journal file untouched and no 'interrupted' warning. Run add (for example --empty) and assert it succeeds, creates one new .... AC-1: a focused failing test for exactly this first, proved by the red gate on the current code, then the production fix. AC-5: a regression test that passes on the current code, committed alone (test files only, trailer \"Mycelink-Compatibility: AC-5\") as a compatibility-regression unit, then green and regression; a test that fails there is a RED: the red gate, then the fix.",
+        "decision_id": null,
+        "at": "2026-10-10T00:47:38.314Z",
+        "reopened": [
+          "CSET-203.apply.journal-rollback.impl"
+        ],
+        "invalidated_candidate": null,
+        "delivered": false,
+        "origin": {
+          "kind": "acceptance-review",
+          "review_id": "CSET-203-R001",
+          "review": 1
+        }
+      },
+      {
+        "node_id": "CSET-203.cli.recover-fail.impl",
+        "reason": "Acceptance review CSET-203-R002 (review 2, rework round 2 of 2) found AC-3 (new-behavior) not proved: recoverInterruptedRun runs after getPackages(cwd), so the CLI reads package files before looking for the journal. A run killed mid-write that leaves a package.json truncated or invalid makes version fail before recovery. No test covers this order.. Reproduce: Create a project with a valid journal whose files entry holds the original pkg-a package.json bytes. Overwrite packages/pkg-a/package.json with invalid JSON, such as '{ \"name\": \"pkg-a\", \"ver'. Run version({cwd}). Expect it to restore the file, warn 'interrupted', remove the journal, and finish with pkg-a at 1.1.0 and the changeset consumed. Today getPackages throws first.. AC-3: a focused failing test for exactly this first, proved by the red gate on the current code, then the production fix.",
+        "decision_id": null,
+        "at": "2026-10-10T01:00:08.279Z",
+        "reopened": [
+          "CSET-203.cli.recover-fail.impl",
+          "CSET-203.changesets.compat.verify"
+        ],
+        "invalidated_candidate": null,
+        "delivered": false,
+        "origin": {
+          "kind": "acceptance-review",
+          "review_id": "CSET-203-R002",
+          "review": 2
+        }
+      },
+      {
+        "node_id": "CSET-203.apply.journal-rollback.impl",
+        "reason": "Acceptance review CSET-203-R002 (review 2, rework round 2 of 2) found AC-1 (new-behavior) not proved: No apply-release-plan test enables changelog generation. Rollback of a CHANGELOG.md that did not exist before the run (restored to absence), and of an existing CHANGELOG.md that was rewritten, is never exercised.. Reproduce: In packages/apply-release-plan, use a real changelog generator (changelog not false). Start with pkg-a having no CHANGELOG.md and pkg-b with one. Make a later step fail (the changeset rm, or the pkg-b CHANGELOG write). Assert the tree snapshot equals the pre-run one: pkg-a/CHANGELOG.md absent, pkg-b/CHANGELOG.md in its previous bytes, and err.cause is the original error.. AC-1: a focused failing test for exactly this first, proved by the red gate on the current code, then the production fix.",
+        "decision_id": null,
+        "at": "2026-10-10T01:00:08.289Z",
+        "reopened": [
+          "CSET-203.apply.journal-rollback.impl"
+        ],
+        "invalidated_candidate": null,
+        "delivered": false,
+        "origin": {
+          "kind": "acceptance-review",
+          "review_id": "CSET-203-R002",
+          "review": 2
+        }
+      }
+    ]
+  }
+}

@@ -69,6 +69,14 @@ describe('classifyRedReason', () => {
     );
     expect(classifyRedReason('EACCES: permission denied', 1)).toBe('environment-error');
   });
+
+  it('never calls a test that used a symbol that does not exist yet a missing behaviour (CSET-202 r1)', () => {
+    const r1 = ' FAIL  packages/errors/src/index.test.ts > ChangesetValidationError > sorts issues\nTypeError: ChangesetValidationError is not a constructor\n Test Files  1 failed | 38 passed (39)\n';
+    expect(classifyRedReason(r1, 1)).toBe('setup-error');
+    expect(classifyRedReason("SyntaxError: The requested module '@changesets/errors' does not provide an export named 'ChangesetValidationError'", 1)).toBe('syntax-error');
+    // A nonzero exit with nothing that shows a failing assertion proves nothing either.
+    expect(classifyRedReason(' FAIL  some.test.ts\n', 1)).toBe('setup-error');
+  });
 });
 
 describe('runVerification', () => {
@@ -130,6 +138,24 @@ describe('runVerification', () => {
     expect(record.exit_code).toBe(1);
     expect(record.failure_fingerprint).toMatch(/^[0-9a-f]{16}$/);
     expect(record.red_reason).toBe('behaviour-missing');
+    // The category and its fingerprint are kept with the record.
+    expect(record).toMatchObject({ red_category: 'assertion', red_fingerprint: expect.stringMatching(/^[0-9a-f]{16}$/) });
+    expect(validateAgainstSchema('evidence', record)).toEqual([]);
+  });
+
+  it('records the category of a RED that used a missing symbol, and refuses it as a missing behaviour', () => {
+    const { repo, evidence } = workspace();
+    const record = runVerification({
+      kind: 'red',
+      nodeId: 'FEAT-1.a.b.red',
+      repository: 'core',
+      command: [process.execPath, '-e', 'console.error(" FAIL  a.test.ts > x\\nTypeError: ChangesetValidationError is not a constructor"); process.exit(1)'],
+      cwd: repo,
+      evidenceDir: evidence,
+    });
+    expect(record).toMatchObject({ exit_code: 1, red_reason: 'setup-error', red_category: 'missing-symbol' });
+    expect(record.red_detail).toMatch(/is not a constructor/);
+    expect(validateAgainstSchema('evidence', record)).toEqual([]);
   });
 
   it('marks a RED that failed to even load the suite as a setup error', () => {

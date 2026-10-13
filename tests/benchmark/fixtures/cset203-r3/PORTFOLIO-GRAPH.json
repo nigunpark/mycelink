@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "feature_id": "CSET-203",
+  "title": "Crash-safe changeset version",
+  "prd": "PRD.md",
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "kind": "new-behavior",
+      "text": "**AC-1 — rollback (apply-release-plan).** If `applyReleasePlan` fails after\nit has started changing files, it restores every file it changed, created or\ndeleted to its exact previous bytes (or absence) and removes directories it\ncreated, and only then rejects. The rejection's `cause` is the original\nerror."
+    },
+    {
+      "id": "AC-2",
+      "kind": "new-behavior",
+      "text": "**AC-2 — journal (apply-release-plan).** Before its first change,\n`applyReleasePlan` durably records what it is about to change in a recovery\njournal stored inside `.changeset/` under a name that starts with `.`, so it\nis never read as a changeset. It removes the journal once the run has\ncompleted, successfully or after a rollback. The journal's format is up to\nyou."
+    },
+    {
+      "id": "AC-3",
+      "kind": "new-behavior",
+      "text": "**AC-3 — recovery (CLI).** Before it reads anything else, `changeset\nversion` looks for a journal left by an interrupted run — for example after\nthe process was killed while applying. If it finds one, it restores the\nstate recorded in it, removes the journal, prints a warning that contains\nthe word `interrupted`, and then versions normally. The final result is the\nsame as one uninterrupted run: every package is bumped once and every\nchangeset is consumed once."
+    },
+    {
+      "id": "AC-4",
+      "kind": "new-behavior",
+      "text": "**AC-4 — failure (CLI).** When applying the release plan fails,\n`changeset version` prints the failure without a stack trace and exits with\ncode `1`. It does not run `git add` or `git commit` for that run, even when\n`commit` is enabled in the config."
+    },
+    {
+      "id": "AC-5",
+      "kind": "compatibility",
+      "text": "**AC-5 — compatibility.** A run that succeeds produces exactly the same files\nas today and leaves no journal behind. `changeset status` and\n`changeset add` are unaffected by a journal."
+    }
+  ],
+  "resources": {
+    "full-runtime": {
+      "capacity": 1
+    },
+    "deploy-slot": {
+      "capacity": 1
+    },
+    "browser-worker": {
+      "capacity": 2
+    },
+    "fixture-global-reset": {
+      "capacity": 1
+    }
+  },
+  "repositories": [
+    "changesets"
+  ],
+  "capabilities": [
+    {
+      "id": "CAP-ARP-ROLLBACK-JOURNAL",
+      "repository": "changesets",
+      "title": "applyReleasePlan rollback and recovery journal",
+      "acceptance_criteria": [
+        "AC-1",
+        "AC-2"
+      ]
+    },
+    {
+      "id": "CAP-CLI-RECOVERY",
+      "repository": "changesets",
+      "title": "changeset version recovery and failure handling",
+      "acceptance_criteria": [
+        "AC-3",
+        "AC-4"
+      ]
+    },
+    {
+      "id": "CAP-COMPAT",
+      "repository": "changesets",
+      "title": "Unchanged successful behaviour",
+      "acceptance_criteria": [
+        "AC-5"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "level": "executable-node",
+      "forbidden_paths": [
+        "packages/cli/**"
+      ],
+      "contract_inputs": [],
+      "contract_outputs": [
+        "contracts/CSET-203-recovery-journal.md"
+      ],
+      "required_resources": [],
+      "invalidation_rules": [],
+      "id": "CSET-203.arp.rollback-journal.impl",
+      "repository": "changesets",
+      "capability": "CAP-ARP-ROLLBACK-JOURNAL",
+      "node_type": "implementation",
+      "depends_on": [],
+      "allowed_paths": [
+        "packages/apply-release-plan/**"
+      ],
+      "required_evidence": [
+        "red",
+        "green",
+        "regression"
+      ],
+      "verification_commands": [
+        {
+          "id": "module-apply-release-plan",
+          "module": "apply-release-plan",
+          "module_sha256": "69492d6646460870942336c345bc26634b23a893f82f82577e1377ea5e0fc127",
+          "command": [
+            "pnpm",
+            "vitest",
+            "run",
+            "--reporter=default",
+            "--reporter=json",
+            "--outputFile.json=${REPORT}",
+            "packages/apply-release-plan/"
+          ]
+        }
+      ],
+      "worker": {
+        "model": "sonnet",
+        "effort": "high",
+        "max_turns": 40,
+        "max_wall_clock_minutes": 45,
+        "max_attempts": 2,
+        "nested_delegation": false
+      },
+      "acceptance_criteria": [
+        "AC-1",
+        "AC-2"
+      ]
+    },
+    {
+      "level": "executable-node",
+      "forbidden_paths": [
+        "packages/apply-release-plan/**"
+      ],
+      "contract_inputs": [
+        "contracts/CSET-203-recovery-journal.md"
+      ],
+      "contract_outputs": [],
+      "required_resources": [],
+      "invalidation_rules": [],
+      "id": "CSET-203.cli.recovery-failure.impl",
+      "repository": "changesets",
+      "capability": "CAP-CLI-RECOVERY",
+      "node_type": "implementation",
+      "depends_on": [
+        "CSET-203.arp.rollback-journal.impl"
+      ],
+      "allowed_paths": [
+        "packages/cli/**"
+      ],
+      "required_evidence": [
+        "red",
+        "green",
+        "regression"
+      ],
+      "verification_commands": [
+        {
+          "id": "module-cli",
+          "module": "cli",
+          "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+          "command": [
+            "pnpm",
+            "vitest",
+            "run",
+            "--reporter=default",
+            "--reporter=json",
+            "--outputFile.json=${REPORT}",
+            "packages/cli/"
+          ]
+        }
+      ],
+      "worker": {
+        "model": "sonnet",
+        "effort": "high",
+        "max_turns": 40,
+        "max_wall_clock_minutes": 45,
+        "max_attempts": 2,
+        "nested_delegation": false
+      },
+      "acceptance_criteria": [
+        "AC-3",
+        "AC-4"
+      ]
+    },
+    {
+      "level": "executable-node",
+      "forbidden_paths": [],
+      "contract_inputs": [],
+      "contract_outputs": [],
+      "required_resources": [],
+      "invalidation_rules": [],
+      "id": "CSET-203.changesets.compat.verify",
+      "repository": "changesets",
+      "capability": "CAP-COMPAT",
+      "node_type": "verification",
+      "depends_on": [
+        "CSET-203.arp.rollback-journal.impl",
+        "CSET-203.cli.recovery-failure.impl"
+      ],
+      "allowed_paths": [],
+      "required_evidence": [
+        "regression"
+      ],
+      "verification_commands": [
+        {
+          "id": "full-suite",
+          "command": [
+            "sh",
+            "-c",
+            "pnpm build && git checkout -- packages/config/package.json && pnpm vitest run"
+          ]
+        }
+      ],
+      "worker": {
+        "model": "sonnet",
+        "effort": "low",
+        "max_turns": 1,
+        "max_wall_clock_minutes": 30,
+        "max_attempts": 2,
+        "nested_delegation": false
+      },
+      "acceptance_criteria": [
+        "AC-5"
+      ]
+    },
+    {
+      "level": "executable-node",
+      "forbidden_paths": [],
+      "contract_inputs": [],
+      "contract_outputs": [],
+      "required_resources": [],
+      "invalidation_rules": [],
+      "id": "CSET-203.release.candidate.build",
+      "repository": null,
+      "capability": null,
+      "node_type": "candidate-build",
+      "depends_on": [
+        "CSET-203.arp.rollback-journal.impl",
+        "CSET-203.cli.recovery-failure.impl",
+        "CSET-203.changesets.compat.verify"
+      ],
+      "allowed_paths": [],
+      "required_evidence": [
+        "candidate"
+      ],
+      "verification_commands": [
+        {
+          "id": "candidate",
+          "command": [
+            "mycelink",
+            "candidate",
+            "verify",
+            "CSET-203"
+          ]
+        }
+      ],
+      "worker": {
+        "model": "sonnet",
+        "effort": "low",
+        "max_turns": 1,
+        "max_wall_clock_minutes": 10,
+        "max_attempts": 2,
+        "nested_delegation": false
+      },
+      "acceptance_criteria": []
+    }
+  ]
+}

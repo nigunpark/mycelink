@@ -22,6 +22,18 @@
     "feature_id": { "type": "string" },
     "created_at": { "type": "string" },
     "control_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "control_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
     "repositories": {
       "type": "object",
       "minProperties": 1,

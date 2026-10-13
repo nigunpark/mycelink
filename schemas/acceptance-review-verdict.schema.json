@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycelink:schema:acceptance-review-verdict",
+  "title": "Mycelink acceptance-review verdict",
+  "description": "The one JSON object an acceptance reviewer writes. Generated from VERDICT_LIMITS (src/engine/acceptance-review.ts); lengths are Unicode code points.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "feature_id",
+    "review_id",
+    "dispatch_id",
+    "inputs_sha256",
+    "reviewer",
+    "criteria",
+    "overall"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mycelink-acceptance-review/1"
+    },
+    "feature_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "review_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "dispatch_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "inputs_sha256": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "model"
+      ],
+      "properties": {
+        "agent": {
+          "const": "mycelink:acceptance-reviewer"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "criterion",
+          "verdict",
+          "confidence",
+          "clauses",
+          "boundaries",
+          "gap",
+          "producer"
+        ],
+        "properties": {
+          "criterion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "verdict": {
+            "enum": [
+              "PASS",
+              "GAP"
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "clauses": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "clause",
+                "evidence",
+                "trace"
+              ],
+              "properties": {
+                "clause": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "evidence": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400,
+                    "description": "test:<16 hex>, gate:<node>:<red|green|regression>, receipt:<node> from the packet, or file:<repository>:<path>[#L<a>-L<b>]"
+                  }
+                },
+                "trace": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 600,
+                  "description": "Human prose; over the bound the controller cuts it at a word or code-point boundary and appends \"…[truncated]\"."
+                }
+              }
+            }
+          },
+          "boundaries": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "boundary",
+                "covered",
+                "evidence"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "state",
+                    "failure",
+                    "concurrency",
+                    "order",
+                    "partial-write",
+                    "input",
+                    "other"
+                  ]
+                },
+                "boundary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300,
+                  "description": "Human prose; over the bound the controller cuts it at a word or code-point boundary and appends \"…[truncated]\"."
+                },
+                "covered": {
+                  "type": "boolean"
+                },
+                "evidence": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400,
+                    "description": "test:<16 hex>, gate:<node>:<red|green|regression>, receipt:<node> from the packet, or file:<repository>:<path>[#L<a>-L<b>]"
+                  }
+                }
+              }
+            }
+          },
+          "gap": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "missing",
+              "reproduction"
+            ],
+            "properties": {
+              "missing": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "description": "Human prose; over the bound the controller cuts it at a word or code-point boundary and appends \"…[truncated]\"."
+              },
+              "reproduction": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "description": "Human prose; over the bound the controller cuts it at a word or code-point boundary and appends \"…[truncated]\"."
+              }
+            }
+          },
+          "producer": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "node_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "module": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          }
+        }
+      }
+    },
+    "overall": {
+      "enum": [
+        "PASS",
+        "GAPS"
+      ]
+    }
+  }
+}

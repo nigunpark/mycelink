@@ -31,7 +31,7 @@ body:
     id: version
     attributes:
       label: Mycelink version
-      placeholder: "0.2.0-beta.1 (from `mycelink --version`)"
+      placeholder: "0.3.0-beta.1 (from `mycelink --version`)"
     validations:
       required: true
   - type: dropdown

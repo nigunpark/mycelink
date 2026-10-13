@@ -135,6 +135,31 @@ describe('node transitions', () => {
     expect(s.nodes[IMPL]!.state).toBe('GREEN_VERIFIED');
   });
 
+  it('lets a node whose graph requires no RED reach GREEN_VERIFIED and REGRESSION_VERIFIED on green and regression alone', () => {
+    // A declaration-only node (CSET-201's types): build/typecheck GREEN, then regression, no RED to run.
+    const graph = clone(VALID_GRAPH) as unknown as PortfolioGraph;
+    const decl = graph.nodes.find((n) => n.id === IMPL) as PortfolioGraph['nodes'][number];
+    decl.node_type = 'contract-lock';
+    decl.required_evidence = ['green', 'regression'];
+    const step = (state: FeatureState_, to: Parameters<typeof applyNodeTransition>[3]): FeatureState_ => applyNodeTransition(graph, state, IMPL, to, { actor: 'test' });
+    let s = initialState(graph, 'a'.repeat(64));
+    s = step(s, 'READY');
+    s = step(s, 'CLAIMED');
+    s = step(s, 'GREEN_PENDING');
+    s.nodes[IMPL]!.evidence.green = evidence();
+    s = step(s, 'GREEN_VERIFIED');
+    s.nodes[IMPL]!.evidence.regression = evidence({ kind: 'regression', command: ['node', '--test'] });
+    s = step(s, 'REGRESSION_VERIFIED');
+    expect(s.nodes[IMPL]!.state).toBe('REGRESSION_VERIFIED');
+    // The graph's own IMPL, which requires RED, still cannot skip it.
+    let r = freshState();
+    r = at(r, IMPL, 'READY');
+    r = at(r, IMPL, 'CLAIMED');
+    r = at(r, IMPL, 'GREEN_PENDING');
+    r.nodes[IMPL]!.evidence.green = evidence();
+    expect(() => at(r, IMPL, 'GREEN_VERIFIED')).toThrow(/MISSING_EVIDENCE: GREEN requires a prior RED/);
+  });
+
   it('refuses DONE until every required evidence kind is present', () => {
     let s = freshState();
     s = at(s, IMPL, 'READY');
@@ -147,6 +172,59 @@ describe('node transitions', () => {
     s = at(s, IMPL, 'GREEN_VERIFIED');
     // regression evidence is required but absent
     expect(() => at(s, IMPL, 'REGRESSION_VERIFIED')).toThrow(/MISSING_EVIDENCE/);
+  });
+
+  it('a verified state may start a new RED cycle (or re-run RED after a test changed), never skipping RED', () => {
+    let s = freshState();
+    s = at(s, IMPL, 'READY');
+    s = at(s, IMPL, 'CLAIMED');
+    s = at(s, IMPL, 'RED_PENDING');
+    s.nodes[IMPL]!.evidence.red = evidence({ kind: 'red', exit_code: 1, red_reason: 'behaviour-missing' });
+    s = at(s, IMPL, 'RED_VERIFIED');
+    // A RED run again after its tests changed.
+    s = at(s, IMPL, 'RED_PENDING');
+    s = at(s, IMPL, 'RED_VERIFIED');
+    s = at(s, IMPL, 'GREEN_PENDING');
+    s.nodes[IMPL]!.evidence.green = evidence();
+    s = at(s, IMPL, 'GREEN_VERIFIED');
+    // The RED of the next cycle.
+    s = at(s, IMPL, 'RED_PENDING');
+    s = at(s, IMPL, 'RED_VERIFIED');
+    s = at(s, IMPL, 'GREEN_PENDING');
+    s = at(s, IMPL, 'GREEN_VERIFIED');
+    s.nodes[IMPL]!.evidence.regression = evidence({ kind: 'regression' });
+    s = at(s, IMPL, 'REGRESSION_VERIFIED');
+    expect(at(s, IMPL, 'RED_PENDING').nodes[IMPL]!.state).toBe('RED_PENDING');
+    // GREEN may run again at a later head (a compatibility regression test committed after the code), still on the cycle's RED.
+    expect(at(s, IMPL, 'GREEN_PENDING').nodes[IMPL]!.state).toBe('GREEN_PENDING');
+    // A verified state never jumps straight to a terminal gate without the evidence it needs, nor back to a claim.
+    expect(() => at(s, IMPL, 'CLAIMED')).toThrow(/ILLEGAL_TRANSITION/);
+  });
+
+  it('GREEN with no RED on record is refused, however the node got there', () => {
+    let s = freshState();
+    s = at(s, IMPL, 'READY');
+    s = at(s, IMPL, 'CLAIMED');
+    s.nodes[IMPL]!.evidence.green = evidence();
+    expect(() => at(at(s, IMPL, 'GREEN_PENDING'), IMPL, 'GREEN_VERIFIED')).toThrow(/GREEN requires a prior RED/);
+  });
+
+  it('refuses a terminal gate while the recorded RED is not a valid RED (a re-run that passed)', () => {
+    let s = freshState();
+    s = at(s, IMPL, 'READY');
+    s = at(s, IMPL, 'CLAIMED');
+    s = at(s, IMPL, 'RED_PENDING');
+    s.nodes[IMPL]!.evidence.red = evidence({ kind: 'red', exit_code: 1, red_reason: 'behaviour-missing' });
+    s = at(s, IMPL, 'RED_VERIFIED');
+    s = at(s, IMPL, 'GREEN_PENDING');
+    s.nodes[IMPL]!.evidence.green = evidence();
+    s = at(s, IMPL, 'GREEN_VERIFIED');
+    s.nodes[IMPL]!.evidence.regression = evidence({ kind: 'regression' });
+    // A later `tdd red` whose tests passed replaced the record before its gate refused it.
+    s.nodes[IMPL]!.evidence.red = evidence({ kind: 'red', exit_code: 0, red_reason: 'behaviour-missing' });
+    expect(() => at(s, IMPL, 'REGRESSION_VERIFIED')).toThrow(/INVALID_RED_EVIDENCE/);
+    s.nodes[IMPL]!.evidence.red = evidence({ kind: 'red', exit_code: 1, red_reason: 'setup-error' });
+    expect(() => at(s, IMPL, 'REGRESSION_VERIFIED')).toThrow(/INVALID_RED_EVIDENCE/);
   });
 
   it('refuses BLOCKED -> READY without a changed input or approved decision', () => {

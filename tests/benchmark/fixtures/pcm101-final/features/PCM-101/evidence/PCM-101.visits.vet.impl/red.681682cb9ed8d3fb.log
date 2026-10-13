@@ -1,0 +1,472 @@
+$ ./mvnw -B -o -Dspring-boot.build-image.skip=true -pl spring-petclinic-visits-service test
+(cwd: /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl)
+
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] --< org.springframework.samples.petclinic.visits:spring-petclinic-visits-service >--
+[INFO] Building spring-petclinic-visits-service 4.0.1
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.2:enforce (enforce-java) @ spring-petclinic-visits-service ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] --- git-commit-id:9.0.2:revision (default) @ spring-petclinic-visits-service ---
+[INFO] dotGitDirectory '/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/repos/spring-petclinic-microservices/.git'
+[INFO] Collected git.build.user.name with value 
+[INFO] Collected git.build.user.email with value 
+[INFO] Collected git.branch with value main
+[INFO] Collected git.commit.id.describe with value dc9ca15
+[INFO] Collected git.commit.id.describe-short with value dc9ca15
+[INFO] Collected git.commit.id with value dc9ca15a71189bc4be6c02518d7180232c0555b7
+[INFO] Collected git.commit.id.abbrev with value dc9ca15
+[INFO] Collected git.dirty with value false
+[INFO] Collected git.commit.user.name with value Antoine Rey
+[INFO] Collected git.commit.user.email with value author@example.invalid
+[INFO] Collected git.commit.message.full with value Migrate from AngularJS to Vue.js for frontend components (#568)
+
+* Migrate from AngularJS to Vue.js for frontend components
+* refactor(run_all.sh, stop_all.sh): streamline service startup and health checks
+[INFO] Collected git.commit.message.short with value Migrate from AngularJS to Vue.js for frontend components (#568)
+[INFO] Collected git.commit.time with value 2026-10-04T23:28:29+0900
+[INFO] Collected git.commit.author.time with value 2026-10-04T23:28:29+0900
+[INFO] Collected git.commit.committer.time with value 2026-10-04T23:28:29+0900
+[INFO] Collected git.remote.origin.url with value null
+[INFO] Collected git.tags with value 
+[INFO] Collected git.tag with value 
+[INFO] Collected git.closest.tag.name with value 
+[INFO] Collected git.closest.tag.commit.count with value 
+[INFO] Collected git.total.commit.count with value 1
+[INFO] Collected git.local.branch.ahead with value NO_REMOTE
+[INFO] Collected git.local.branch.behind with value NO_REMOTE
+[INFO] Collected git.build.time with value 2026-10-12T12:31:53+0900
+[INFO] Collected git.build.version with value 4.0.1
+[INFO] Collected git.build.host with value evalhost
+[INFO] including property 'git.tags' in results
+[INFO] including property 'git.build.version' in results
+[INFO] including property 'git.branch' in results
+[INFO] including property 'git.build.host' in results
+[INFO] including property 'git.commit.id' in results
+[INFO] including property 'git.commit.user.email' in results
+[INFO] including property 'git.local.branch.behind' in results
+[INFO] including property 'git.commit.author.time' in results
+[INFO] including property 'git.build.user.name' in results
+[INFO] including property 'git.dirty' in results
+[INFO] including property 'git.closest.tag.commit.count' in results
+[INFO] including property 'git.commit.user.name' in results
+[INFO] including property 'git.commit.id.abbrev' in results
+[INFO] including property 'git.commit.id.describe-short' in results
+[INFO] including property 'git.total.commit.count' in results
+[INFO] including property 'git.commit.id.describe' in results
+[INFO] including property 'git.build.user.email' in results
+[INFO] including property 'git.commit.message.short' in results
+[INFO] including property 'git.commit.committer.time' in results
+[INFO] including property 'git.tag' in results
+[INFO] including property 'git.closest.tag.name' in results
+[INFO] including property 'git.local.branch.ahead' in results
+[INFO] including property 'git.commit.time' in results
+[INFO] including property 'git.build.time' in results
+[INFO] including property 'git.commit.message.full' in results
+[INFO] including property 'git.remote.origin.url' in results
+[INFO] Writing properties file [/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service/target/classes/git.properties] (for project spring-petclinic-visits-service)...
+[INFO] 
+[INFO] --- spring-boot:4.0.1:build-info (default) @ spring-petclinic-visits-service ---
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ spring-petclinic-visits-service ---
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] Copying 5 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ spring-petclinic-visits-service ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 5 source files with javac [debug parameters release 17] to target/classes
+[INFO] Annotation processing is enabled because one or more processors were found
+  on the class path. A future release of javac may disable annotation processing
+  unless at least one processor is specified by name (-processor), or a search
+  path is specified (--processor-path, --processor-module-path), or annotation
+  processing is enabled explicitly (-proc:only, -proc:full).
+  Use -Xlint:-options to suppress this message.
+  Use -proc:none to disable annotation processing.
+[INFO] /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/model/Visit.java: /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/model/Visit.java uses or overrides a deprecated API.
+[INFO] /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/model/Visit.java: Recompile with -Xlint:deprecation for details.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ spring-petclinic-visits-service ---
+[INFO] Copying 1 resource from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ spring-petclinic-visits-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 2 source files with javac [debug parameters release 17] to target/test-classes
+[INFO] Annotation processing is enabled because one or more processors were found
+  on the class path. A future release of javac may disable annotation processing
+  unless at least one processor is specified by name (-processor), or a search
+  path is specified (--processor-path, --processor-module-path), or annotation
+  processing is enabled explicitly (-proc:only, -proc:full).
+  Use -Xlint:-options to suppress this message.
+  Use -proc:none to disable annotation processing.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ spring-petclinic-visits-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running org.springframework.samples.petclinic.visits.web.VisitVetTest
+12:31:55.988 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [org.springframework.samples.petclinic.visits.web.VisitVetTest]: VisitVetTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+12:31:56.081 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration org.springframework.samples.petclinic.visits.VisitsServiceApplication for test class org.springframework.samples.petclinic.visits.web.VisitVetTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.1)
+
+2026-10-12T12:31:56.880+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.s.petclinic.visits.web.VisitVetTest  : Starting VisitVetTest using Java 21.0.12.1 with PID 716 (started by alice in /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service)
+2026-10-12T12:31:56.881+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.s.petclinic.visits.web.VisitVetTest  : The following 1 profile is active: "test"
+2026-10-12T12:31:56.892+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:31:56.892+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:31:56.892+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@3cad68df uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused
+2026-10-12T12:31:56.892+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:31:56.893+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/visits-service/test": Connection refused. Will be trying the next url if available
+2026-10-12T12:31:56.893+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@4b5a078a uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'test']): I/O error on GET request for "http://localhost:8888/visits-service/test": Connection refused
+2026-10-12T12:31:56.893+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:31:56.893+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:31:56.893+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@4c361f63 uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused
+2026-10-12T12:31:57.492+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-10-12T12:31:57.588+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 87 ms. Found 1 JPA repository interface.
+2026-10-12T12:31:57.821+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.cloud.context.scope.GenericScope     : BeanFactory id=20389f28-7038-30bf-aec1-c3ac9c568917
+2026-10-12T12:31:58.108+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-10-12T12:31:58.267+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Driver does not support get/set network timeout for connections. (feature not supported)
+2026-10-12T12:31:58.267+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.hsqldb.jdbc.JDBCConnection@25c4f621
+2026-10-12T12:31:58.268+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-10-12T12:31:58.658+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-10-12T12:31:58.706+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.0.Final
+2026-10-12T12:31:58.962+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-10-12T12:31:59.006+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [jdbc:hsqldb:mem:2bb8e951-472f-4ada-b69f-40cb81f5741a]
+	Database driver: HSQL Database Engine Driver
+	Database dialect: HSQLDialect
+	Database version: 2.7.3
+	Default catalog/schema: PUBLIC/PUBLIC
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-10-12T12:31:59.071+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] org.hibernate.orm.deprecation            : HHH90000033: Encountered use of deprecated annotation [interface jakarta.persistence.Temporal] at org.springframework.samples.petclinic.visits.model.Visit.date.
+2026-10-12T12:31:59.441+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-10-12T12:31:59.446+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-10-12T12:31:59.519+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.d.j.r.query.QueryEnhancerFactories   : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-10-12T12:31:59.733+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-10-12T12:32:00.269+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-10-12T12:32:00.270+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-10-12T12:32:00.276+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 1 endpoint beneath base path '/actuator'
+2026-10-12T12:32:00.284+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 14 ms
+2026-10-12T12:32:00.307+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] DiscoveryClientOptionalArgsConfiguration : Eureka HTTP Client uses RestClient.
+2026-10-12T12:32:00.345+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] iguration$LoadBalancerCaffeineWarnLogger : Spring Cloud LoadBalancer is currently working with the default cache. While this cache implementation is useful for development and tests, it's recommended to use Caffeine cache in production.You can switch to using Caffeine cache, by adding it and org.springframework.cache.caffeine.CaffeineCacheManager to the classpath.
+2026-10-12T12:32:00.390+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.s.petclinic.visits.web.VisitVetTest  : Started VisitVetTest in 4.087 seconds (process running for 5.085)
+2026-10-12T12:32:00.837+09:00  INFO 716 --- [visits-service] [           main] [6acc54b0e8f03c3a670c704e0f060aec-670c704e0f060aec] o.s.s.p.visits.web.VisitResource         : Saving visit org.springframework.samples.petclinic.visits.model.Visit@188f6f98
+
+MockHttpServletRequest:
+      HTTP Method = POST
+      Request URI = /owners/1/pets/23/visits
+       Parameters = {}
+          Headers = [Content-Type:"application/json;charset=UTF-8", Content-Length:"29"]
+             Body = {"description":"x","vetId":0}
+    Session Attrs = {}
+
+Handler:
+             Type = org.springframework.samples.petclinic.visits.web.VisitResource
+           Method = org.springframework.samples.petclinic.visits.web.VisitResource#create(Visit, int)
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = null
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 201
+    Error message = null
+          Headers = [Content-Type:"application/json"]
+     Content type = application/json
+             Body = {"date":"2026-10-12","description":"x","id":5,"petId":23}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+2026-10-12T12:32:00.979+09:00  INFO 716 --- [visits-service] [           main] [6acc54b07dcd98018a31bb3762bf8c3f-8a31bb3762bf8c3f] o.s.s.p.visits.web.VisitResource         : Saving visit org.springframework.samples.petclinic.visits.model.Visit@18ae3583
+
+MockHttpServletRequest:
+      HTTP Method = POST
+      Request URI = /owners/1/pets/21/visits
+       Parameters = {}
+          Headers = [Content-Type:"application/json;charset=UTF-8", Content-Length:"29"]
+             Body = {"description":"x","vetId":3}
+    Session Attrs = {}
+
+Handler:
+             Type = org.springframework.samples.petclinic.visits.web.VisitResource
+           Method = org.springframework.samples.petclinic.visits.web.VisitResource#create(Visit, int)
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = null
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 201
+    Error message = null
+          Headers = [Content-Type:"application/json"]
+     Content type = application/json
+             Body = {"date":"2026-10-12","description":"x","id":6,"petId":21}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /vets/9999/visits
+       Parameters = {}
+          Headers = []
+             Body = null
+    Session Attrs = {}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 404
+    Error message = No static resource vets/9999/visits.
+          Headers = []
+     Content type = null
+             Body = 
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+2026-10-12T12:32:01.030+09:00  INFO 716 --- [visits-service] [           main] [6acc54b10a77c47bf0c76864ec5d0bed-f0c76864ec5d0bed] o.s.s.p.visits.web.VisitResource         : Saving visit org.springframework.samples.petclinic.visits.model.Visit@3565ee15
+
+MockHttpServletRequest:
+      HTTP Method = POST
+      Request URI = /owners/1/pets/22/visits
+       Parameters = {}
+          Headers = [Content-Type:"application/json;charset=UTF-8", Content-Length:"19"]
+             Body = {"description":"x"}
+    Session Attrs = {}
+
+Handler:
+             Type = org.springframework.samples.petclinic.visits.web.VisitResource
+           Method = org.springframework.samples.petclinic.visits.web.VisitResource#create(Visit, int)
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = null
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 201
+    Error message = null
+          Headers = [Content-Type:"application/json"]
+     Content type = application/json
+             Body = {"date":"2026-10-12","description":"x","id":7,"petId":22}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+[ERROR] Tests run: 6, Failures: 5, Errors: 1, Skipped: 0, Time elapsed: 5.149 s <<< FAILURE! -- in org.springframework.samples.petclinic.visits.web.VisitVetTest
+[ERROR] org.springframework.samples.petclinic.visits.web.VisitVetTest.createWithNonPositiveVetIsRejectedAndNotStored -- Time elapsed: 0.484 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<400> but was:<201>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:62)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:129)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$0(StatusResultMatchers.java:600)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:212)
+	at org.springframework.samples.petclinic.visits.web.VisitVetTest.createWithNonPositiveVetIsRejectedAndNotStored(VisitVetTest.java:73)
+
+[ERROR] org.springframework.samples.petclinic.visits.web.VisitVetTest.visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet -- Time elapsed: 0.025 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <1> but was: <0>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:158)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:139)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:201)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:184)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:179)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:565)
+	at org.springframework.samples.petclinic.visits.web.VisitVetTest.visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet(VisitVetTest.java:35)
+
+[ERROR] org.springframework.samples.petclinic.visits.web.VisitVetTest.createWithVetStoresAndReturnsIt -- Time elapsed: 0.027 s <<< FAILURE!
+java.lang.AssertionError: No value at JSON path "$.vetId"
+	at org.springframework.test.util.JsonPathExpectationsHelper.evaluateJsonPath(JsonPathExpectationsHelper.java:350)
+	at org.springframework.test.util.JsonPathExpectationsHelper.assertValue(JsonPathExpectationsHelper.java:148)
+	at org.springframework.test.web.servlet.result.JsonPathResultMatchers.lambda$value$2(JsonPathResultMatchers.java:111)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:212)
+	at org.springframework.samples.petclinic.visits.web.VisitVetTest.createWithVetStoresAndReturnsIt(VisitVetTest.java:44)
+Caused by: com.jayway.jsonpath.PathNotFoundException: No results for path: $['vetId']
+
+[ERROR] org.springframework.samples.petclinic.visits.web.VisitVetTest.vetWithoutVisitsGetsEmptyArray -- Time elapsed: 0.010 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<200> but was:<404>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:62)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:129)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$0(StatusResultMatchers.java:600)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:212)
+	at org.springframework.samples.petclinic.visits.web.VisitVetTest.vetWithoutVisitsGetsEmptyArray(VisitVetTest.java:96)
+
+[ERROR] org.springframework.samples.petclinic.visits.web.VisitVetTest.vetVisitsOrderedByDateThenId -- Time elapsed: 0.008 s <<< ERROR!
+org.springframework.jdbc.BadSqlGrammarException: StatementCallback; bad SQL grammar [INSERT INTO visits (pet_id, visit_date, description, vet_id) VALUES (31, '2020-02-02', 'b', 77)]
+	at org.springframework.jdbc.support.SQLExceptionSubclassTranslator.doTranslate(SQLExceptionSubclassTranslator.java:112)
+	at org.springframework.jdbc.support.AbstractFallbackSQLExceptionTranslator.translate(AbstractFallbackSQLExceptionTranslator.java:102)
+	at org.springframework.jdbc.core.JdbcTemplate.translateException(JdbcTemplate.java:1548)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:428)
+	at org.springframework.jdbc.core.JdbcTemplate.update(JdbcTemplate.java:581)
+	at org.springframework.samples.petclinic.visits.web.VisitVetTest.vetVisitsOrderedByDateThenId(VisitVetTest.java:80)
+Caused by: java.sql.SQLSyntaxErrorException: user lacks privilege or object not found: VET_ID
+	at org.hsqldb.jdbc.JDBCUtil.sqlException(Unknown Source)
+	at org.hsqldb.jdbc.JDBCUtil.sqlException(Unknown Source)
+	at org.hsqldb.jdbc.JDBCStatement.fetchResult(Unknown Source)
+	at org.hsqldb.jdbc.JDBCStatement.executeUpdate(Unknown Source)
+	at com.zaxxer.hikari.pool.ProxyStatement.executeUpdate(ProxyStatement.java:120)
+	at com.zaxxer.hikari.pool.HikariProxyStatement.executeUpdate(HikariProxyStatement.java)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at net.ttddyy.dsproxy.proxy.StatementProxyLogic.performProxyLogic(StatementProxyLogic.java:287)
+	at net.ttddyy.dsproxy.proxy.ProxyLogicSupport.proceedMethodExecution(ProxyLogicSupport.java:103)
+	at net.ttddyy.dsproxy.proxy.StatementProxyLogic.invoke(StatementProxyLogic.java:119)
+	at net.ttddyy.dsproxy.proxy.jdk.StatementInvocationHandler.invoke(StatementInvocationHandler.java:34)
+	at jdk.proxy2/jdk.proxy2.$Proxy134.executeUpdate(Unknown Source)
+	at org.springframework.jdbc.core.JdbcTemplate$1UpdateStatementCallback.doInStatement(JdbcTemplate.java:569)
+	at org.springframework.jdbc.core.JdbcTemplate$1UpdateStatementCallback.doInStatement(JdbcTemplate.java:566)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:413)
+	... 2 more
+Caused by: org.hsqldb.HsqlException: user lacks privilege or object not found: VET_ID
+	at org.hsqldb.error.Error.error(Unknown Source)
+	at org.hsqldb.error.Error.error(Unknown Source)
+	at org.hsqldb.ParserDQL.readSimpleColumnName(Unknown Source)
+	at org.hsqldb.ParserDQL.readSimpleColumnNames(Unknown Source)
+	at org.hsqldb.ParserDML.compileInsertStatement(Unknown Source)
+	at org.hsqldb.ParserCommand.compilePart(Unknown Source)
+	at org.hsqldb.ParserCommand.compileStatements(Unknown Source)
+	at org.hsqldb.Session.executeDirectStatement(Unknown Source)
+	at org.hsqldb.Session.execute(Unknown Source)
+	... 16 more
+
+[ERROR] org.springframework.samples.petclinic.visits.web.VisitVetTest.createWithoutVetHasNullVet -- Time elapsed: 0.013 s <<< FAILURE!
+java.lang.AssertionError: No value at JSON path "$.vetId"
+	at org.springframework.test.util.JsonPathExpectationsHelper.evaluateJsonPath(JsonPathExpectationsHelper.java:350)
+	at org.springframework.test.util.JsonPathExpectationsHelper.assertValue(JsonPathExpectationsHelper.java:106)
+	at org.springframework.test.web.servlet.result.JsonPathResultMatchers.lambda$value$0(JsonPathResultMatchers.java:87)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:212)
+	at org.springframework.samples.petclinic.visits.web.VisitVetTest.createWithoutVetHasNullVet(VisitVetTest.java:58)
+Caused by: com.jayway.jsonpath.PathNotFoundException: No results for path: $['vetId']
+
+[INFO] Running org.springframework.samples.petclinic.visits.web.VisitResourceTest
+2026-10-12T12:32:01.052+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.springframework.samples.petclinic.visits.web.VisitResourceTest]: VisitResourceTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-10-12T12:32:01.063+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.springframework.samples.petclinic.visits.VisitsServiceApplication for test class org.springframework.samples.petclinic.visits.web.VisitResourceTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.1)
+
+2026-10-12T12:32:01.128+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.s.p.visits.web.VisitResourceTest     : Starting VisitResourceTest using Java 21.0.12.1 with PID 716 (started by alice in /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service)
+2026-10-12T12:32:01.128+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.s.p.visits.web.VisitResourceTest     : The following 1 profile is active: "test"
+2026-10-12T12:32:01.129+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:32:01.129+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:32:01.129+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@27688fc6 uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused
+2026-10-12T12:32:01.130+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:32:01.130+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/visits-service/test": Connection refused. Will be trying the next url if available
+2026-10-12T12:32:01.130+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@226715da uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'test']): I/O error on GET request for "http://localhost:8888/visits-service/test": Connection refused
+2026-10-12T12:32:01.130+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:32:01.130+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:32:01.130+09:00  WARN 716 --- [visits-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@3460165f uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/visits-service/default": Connection refused
+2026-10-12T12:32:01.690+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-10-12T12:32:01.691+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-10-12T12:32:01.693+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-10-12T12:32:01.710+09:00  INFO 716 --- [visits-service] [           main] [                                                 ] o.s.s.p.visits.web.VisitResourceTest     : Started VisitResourceTest in 0.643 seconds (process running for 6.406)
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.737 s -- in org.springframework.samples.petclinic.visits.web.VisitResourceTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   VisitVetTest.createWithNonPositiveVetIsRejectedAndNotStored:73 Status expected:<400> but was:<201>
+[ERROR]   VisitVetTest.createWithVetStoresAndReturnsIt:44 No value at JSON path "$.vetId"
+[ERROR]   VisitVetTest.createWithoutVetHasNullVet:58 No value at JSON path "$.vetId"
+[ERROR]   VisitVetTest.vetWithoutVisitsGetsEmptyArray:96 Status expected:<200> but was:<404>
+[ERROR]   VisitVetTest.visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet:35 expected: <1> but was: <0>
+[ERROR] Errors: 
+[ERROR]   VisitVetTest.vetVisitsOrderedByDateThenId:80 » BadSqlGrammar StatementCallback; bad SQL grammar [INSERT INTO visits (pet_id, visit_date, description, vet_id) VALUES (31, '2020-02-02', 'b', 77)]
+[INFO] 
+[ERROR] Tests run: 7, Failures: 5, Errors: 1, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  10.970 s
+[INFO] Finished at: 2026-10-12T12:32:03+09:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.4:test (default-test) on project spring-petclinic-visits-service: There are test failures.
+[ERROR] 
+[ERROR] See /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl/spring-petclinic-visits-service/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home
+12:31:56,798 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [jmxConfigurator] in [ch.qos.logback.classic.LoggerContext]
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+12:32:01,117 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [jmxConfigurator] in [ch.qos.logback.classic.LoggerContext]

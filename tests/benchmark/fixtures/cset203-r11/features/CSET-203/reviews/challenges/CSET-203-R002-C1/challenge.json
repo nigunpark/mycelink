@@ -1,0 +1,78 @@
+{
+  "schema": "mycelink-review-challenge/1",
+  "feature_id": "CSET-203",
+  "challenge_id": "CSET-203-R002-C1",
+  "review_id": "CSET-203-R002",
+  "node_id": "CSET-203.apply.journal-rollback.impl",
+  "claim_id": "c8e6a2fc-02b1-49ad-bdf8-9a6260ce4600",
+  "dispatch_id": "e3464931-f28b-4c13-883c-8f52279010a8",
+  "generation": 1,
+  "review_receipt": {
+    "path": "features/CSET-203/reviews/CSET-203-R002.json",
+    "sha256": "07e56e16b1782b8adaf0844c2e6ea9cdaa2fe1a43f28cf132437b31bd4f39723"
+  },
+  "reason_sha256": "fec2beb7a07628731be92be2af9fe3e9e1fd59e56f4339d370795b002abddf56",
+  "base_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+  "head_sha": "29d8c1ea1965feab7ee325dc857a6a3e308272c7",
+  "gate": {
+    "kind": "red",
+    "output_path": "features/CSET-203/reviews/challenges/CSET-203-R002-C1/gate/red.log",
+    "output_sha256": "e7b96245f03436e90e6c509e8e8d13752b31350f18c6ec0622141f4cb159760e",
+    "results_path": "features/CSET-203/reviews/challenges/CSET-203-R002-C1/gate/red.results.json",
+    "results_sha256": "edf308c8878b001a91b9e4ba8f21faf14b6ac431b8485166cf55c6c258eca7d3",
+    "exit_code": 0,
+    "commit_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a",
+    "recorded_output_sha256": "e7b96245f03436e90e6c509e8e8d13752b31350f18c6ec0622141f4cb159760e"
+  },
+  "tests": [
+    {
+      "test_id": "dc150389c7eb9a5b",
+      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+      "full_name": "journal and rollback > restores changelogs (absent and rewritten) when a later step fails with changelog generation on",
+      "status": "passed"
+    }
+  ],
+  "files": [
+    {
+      "path": "packages/apply-release-plan/src/journal-rollback.test.ts",
+      "blob": "b1ab7eacb5e7e25b44603cde720c32c9eb5340a5",
+      "sha256": "3d7ced2e39f4256c280054bdca82d7a5932559ecba1526b1d7827a392925f0c2",
+      "archived": "features/CSET-203/reviews/challenges/CSET-203-R002-C1/files/packages/apply-release-plan/src/journal-rollback.test.ts"
+    }
+  ],
+  "gaps": [
+    {
+      "criterion": "AC-1",
+      "round": 1,
+      "missing": "No apply-release-plan test enables changelog generation. Rollback of a CHANGELOG.md that did not exist before the run (restored to absence), and of an existing CHANGELOG.md that was rewritten, is never exercised.",
+      "reproduction": "In packages/apply-release-plan, use a real changelog generator (changelog not false). Start with pkg-a having no CHANGELOG.md and pkg-b with one. Make a later step fail (the changeset rm, or the pkg-b CHANGELOG write). Assert the tree snapshot equals the pre-run one: pkg-a/CHANGELOG.md absent, pkg-b/CHANGELOG.md in its previous bytes, and err.cause is the original error.",
+      "reproduction_sha256": "92c5fba5994b1100980d869ce15894805e0bcd69ce79ed5e9cf36675ab72607f",
+      "tests": [
+        "dc150389c7eb9a5b"
+      ],
+      "clauses": [
+        {
+          "clause": "AC-1.1",
+          "test_id": "dc150389c7eb9a5b",
+          "assertions": [
+            "file:changesets:packages/apply-release-plan/src/journal-rollback.test.ts#L164-L165"
+          ],
+          "trace": "With a real changelog generator, pkg-a has no CHANGELOG.md and pkg-b has one; after the changeset rm fails, the tree snapshot equals the pre-run one (L164) and pkg-a/CHANGELOG.md is absent (L165)."
+        },
+        {
+          "clause": "AC-1.2",
+          "test_id": "dc150389c7eb9a5b",
+          "assertions": [
+            "file:changesets:packages/apply-release-plan/src/journal-rollback.test.ts#L163-L163"
+          ],
+          "trace": "The rejection's cause is the injected original error (L163)."
+        }
+      ],
+      "explanation": "The exact reproduction (real changelog generator, absent and existing CHANGELOG.md, later changeset rm failure) passes on the unchanged base, so the gap does not reproduce; rollback already covers CHANGELOG.md candidates."
+    }
+  ],
+  "challenge_sha256": "859f6cb5260cef91569499ef25525c43093d1c6228820153a2f5f392a200ccc5",
+  "normalization": {
+    "changed": []
+  }
+}

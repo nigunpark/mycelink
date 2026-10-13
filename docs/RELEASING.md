@@ -10,12 +10,16 @@ same ZIP bytes, checksum and SBOM.
   `package-lock.json` (root entry), `.claude-plugin/plugin.json`, and the
   plugin entry plus `metadata.version` in `.claude-plugin/marketplace.json`.
   `npm test` checks they agree (`tests/release/metadata.test.ts`).
-- The Git tag is `v<version>`, e.g. `v0.2.0-beta.1`.
+- The Git tag is `v<version>`, e.g. `v0.3.0-beta.1`.
 
 ## Checklist
 
 1. Update the version in the four places above and move **Unreleased**
-   entries in `CHANGELOG.md` under the new version heading.
+   entries in `CHANGELOG.md` under the new version heading. Also update the
+   places a user reads the version, which `npm test` checks too: the
+   README's status line and release-ZIP example, the version placeholders in
+   the bug and compatibility issue templates, and the supported line in
+   `SECURITY.md`.
 2. Run the full verification locally:
 
    ```bash
@@ -70,9 +74,13 @@ commit time when unset.
 ## What goes in the archive
 
 Exactly the allowlist in `scripts/package.mjs`: plugin manifests, commands,
-skills, agents, templates, schemas, public docs, the launcher, the runtime
-bundle, a runtime-only `package.json`, and the license/notice/changelog/
-security/support/governance files. Sources, tests, scripts, CI configuration
-and development metadata are never included; `tests/release/package.test.ts`
-enforces this and scans the archive for personal paths, e-mail addresses and
-secret-like values.
+skills, agents, hooks, templates, schemas, the user documentation (the threat
+model, permission model, data handling, adapters and this file), the
+launcher, the runtime bundle, a runtime-only `package.json`, and the
+license/notice/changelog/security/support/contributing/conduct/governance
+files. Sources, tests, scripts, CI configuration, the benchmark suites
+(`evals-*/`), the eval reports under `docs/evals/` and the benchmark's
+constraint audit are never included; they stay in the repository.
+`tests/release/package.test.ts` enforces this, checks that every relative
+link in a shipped Markdown file resolves inside the archive, and scans the
+archive for personal paths, e-mail addresses and secret-like values.

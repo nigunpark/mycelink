@@ -1,0 +1,458 @@
+{
+  "note": "The review packet of CSET-203 r5 R001 (both generations: they differ only in dispatch_id), reduced to what a verdict is judged against: the criteria verbatim, the evidence ids both verdicts and the criterion evidence cite, and the files of the reviewed head they cite. packet_sha256 is each original packet's.",
+  "packet_sha256": {
+    "g1": "87d4b8d8523b5628a1f57563fab2b4584bc86e978a0dd78530aa39333b1090da",
+    "g2": "ae55d38e42b6ecc00614ea5350806147ceeca6de5035c3fbcc4d7fb3050621ae"
+  },
+  "dispatch_id": {
+    "g1": "49660e69-f42a-4908-a359-2c7f2443fcce",
+    "g2": "cde63478-94ae-4ce2-9e20-d60c81270a0b"
+  },
+  "catalogued_evidence": 326,
+  "schema": "mycelink-review-packet/1",
+  "feature_id": "CSET-203",
+  "review_id": "CSET-203-R001",
+  "review": 1,
+  "rework_rounds": {
+    "used": 0,
+    "max": 2
+  },
+  "inputs": {
+    "feature_id": "CSET-203",
+    "graph_sha256": "8ddb62d6473f45ed2eed22b30308a9f8974ec1a0cb7c4819b4764b2391348049",
+    "criteria_sha256": "9601a5ec51400ff205dc850ed1a67c1e39400d6033a2141cbd027f8c1ce76389",
+    "manifest_sha256": "b9c13ff043e823a7193cc9a5710e7414a23b6f293d6c925a48c3e4409f2c3faa",
+    "repositories": [
+      {
+        "name": "changesets",
+        "head_sha": "9cffb6115589b339663341962b1cd84871a84f7a"
+      }
+    ]
+  },
+  "inputs_sha256": "79e1c1029bad4e2aab62ca10382c7c871d71d0e03e0c2d3dffba51ca6746bc43",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "kind": "new-behavior",
+      "text": "**AC-1 — rollback (apply-release-plan).** If `applyReleasePlan` fails after\nit has started changing files, it restores every file it changed, created or\ndeleted to its exact previous bytes (or absence) and removes directories it\ncreated, and only then rejects. The rejection's `cause` is the original\nerror.",
+      "sha256": "2bac8c23f94a2b969871b74a9022186f795a1217f9af38f1adfaa11a83982da2",
+      "clauses": [
+        {
+          "id": "AC-1.1",
+          "text": "If `applyReleasePlan` fails after it has started changing files, it restores every file it changed, created or deleted to its exact previous bytes (or absence) and removes directories it created, and only then rejects."
+        },
+        {
+          "id": "AC-1.2",
+          "text": "The rejection's `cause` is the original error."
+        }
+      ],
+      "producers": [
+        "CSET-203.changesets.apply-release-plan.impl"
+      ],
+      "verifiers": []
+    },
+    {
+      "id": "AC-2",
+      "kind": "new-behavior",
+      "text": "**AC-2 — journal (apply-release-plan).** Before its first change,\n`applyReleasePlan` durably records what it is about to change in a recovery\njournal stored inside `.changeset/` under a name that starts with `.`, so it\nis never read as a changeset. It removes the journal once the run has\ncompleted, successfully or after a rollback. The journal's format is up to\nyou.",
+      "sha256": "93944296ecc8cf35bb256b49d02df8babf94bf2960e08127fb82fbdf2a4c9041",
+      "clauses": [
+        {
+          "id": "AC-2.1",
+          "text": "Before its first change, `applyReleasePlan` durably records what it is about to change in a recovery journal stored inside `.changeset/` under a name that starts with `.`, so it is never read as a changeset."
+        },
+        {
+          "id": "AC-2.2",
+          "text": "It removes the journal once the run has completed, successfully or after a rollback."
+        },
+        {
+          "id": "AC-2.3",
+          "text": "The journal's format is up to you."
+        }
+      ],
+      "producers": [
+        "CSET-203.changesets.apply-release-plan.impl"
+      ],
+      "verifiers": []
+    },
+    {
+      "id": "AC-3",
+      "kind": "new-behavior",
+      "text": "**AC-3 — recovery (CLI).** Before it reads anything else, `changeset\nversion` looks for a journal left by an interrupted run — for example after\nthe process was killed while applying. If it finds one, it restores the\nstate recorded in it, removes the journal, prints a warning that contains\nthe word `interrupted`, and then versions normally. The final result is the\nsame as one uninterrupted run: every package is bumped once and every\nchangeset is consumed once.",
+      "sha256": "2125e3a930cf11d4dd9f590c3fde303c3cf3db3be81010698fbf8fac4ff1a8cb",
+      "clauses": [
+        {
+          "id": "AC-3.1",
+          "text": "Before it reads anything else, `changeset version` looks for a journal left by an interrupted run — for example after the process was killed while applying."
+        },
+        {
+          "id": "AC-3.2",
+          "text": "If it finds one, it restores the state recorded in it, removes the journal, prints a warning that contains the word `interrupted`, and then versions normally."
+        },
+        {
+          "id": "AC-3.3",
+          "text": "The final result is the same as one uninterrupted run: every package is bumped once and every changeset is consumed once."
+        }
+      ],
+      "producers": [
+        "CSET-203.changesets.cli.impl"
+      ],
+      "verifiers": []
+    },
+    {
+      "id": "AC-4",
+      "kind": "new-behavior",
+      "text": "**AC-4 — failure (CLI).** When applying the release plan fails,\n`changeset version` prints the failure without a stack trace and exits with\ncode `1`. It does not run `git add` or `git commit` for that run, even when\n`commit` is enabled in the config.",
+      "sha256": "394243464190315bae3c17bbfcc1dd3b27e605b3cada6c64e7b52b3aaaa3569b",
+      "clauses": [
+        {
+          "id": "AC-4.1",
+          "text": "When applying the release plan fails, `changeset version` prints the failure without a stack trace and exits with code `1`."
+        },
+        {
+          "id": "AC-4.2",
+          "text": "It does not run `git add` or `git commit` for that run, even when `commit` is enabled in the config."
+        }
+      ],
+      "producers": [
+        "CSET-203.changesets.cli.impl"
+      ],
+      "verifiers": []
+    },
+    {
+      "id": "AC-5",
+      "kind": "compatibility",
+      "text": "**AC-5 — compatibility.** A run that succeeds produces exactly the same files\nas today and leaves no journal behind. `changeset status` and\n`changeset add` are unaffected by a journal.",
+      "sha256": "c8ef763e5e1583bcfa8ea2e7814f5ba9d552790537dcf72a17ca206ee732a5e6",
+      "clauses": [
+        {
+          "id": "AC-5.1",
+          "text": "A run that succeeds produces exactly the same files as today and leaves no journal behind."
+        },
+        {
+          "id": "AC-5.2",
+          "text": "`changeset status` and `changeset add` are unaffected by a journal."
+        }
+      ],
+      "producers": [
+        "CSET-203.changesets.apply-release-plan.impl",
+        "CSET-203.changesets.cli.impl"
+      ],
+      "verifiers": [
+        "CSET-203.changesets.compat.verify"
+      ]
+    }
+  ],
+  "repositories": [
+    {
+      "name": "changesets",
+      "head_sha": "9cffb6115589b339663341962b1cd84871a84f7a",
+      "base_sha": "c73949ba7b3160a4aa5729223335c190de1528f8"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "gate:CSET-203.changesets.apply-release-plan.impl:red",
+      "kind": "gate",
+      "node": "CSET-203.changesets.apply-release-plan.impl",
+      "gate": "red"
+    },
+    {
+      "id": "gate:CSET-203.changesets.apply-release-plan.impl:green",
+      "kind": "gate",
+      "node": "CSET-203.changesets.apply-release-plan.impl",
+      "gate": "green"
+    },
+    {
+      "id": "gate:CSET-203.changesets.apply-release-plan.impl:regression",
+      "kind": "gate",
+      "node": "CSET-203.changesets.apply-release-plan.impl",
+      "gate": "regression"
+    },
+    {
+      "id": "gate:CSET-203.changesets.cli.impl:red",
+      "kind": "gate",
+      "node": "CSET-203.changesets.cli.impl",
+      "gate": "red"
+    },
+    {
+      "id": "gate:CSET-203.changesets.cli.impl:green",
+      "kind": "gate",
+      "node": "CSET-203.changesets.cli.impl",
+      "gate": "green"
+    },
+    {
+      "id": "gate:CSET-203.changesets.cli.impl:regression",
+      "kind": "gate",
+      "node": "CSET-203.changesets.cli.impl",
+      "gate": "regression"
+    },
+    {
+      "id": "gate:CSET-203.changesets.compat.verify:regression",
+      "kind": "gate",
+      "node": "CSET-203.changesets.compat.verify",
+      "gate": "regression"
+    },
+    {
+      "id": "receipt:CSET-203.changesets.compat.verify",
+      "kind": "receipt",
+      "node": "CSET-203.changesets.compat.verify",
+      "criteria": [
+        "AC-5"
+      ]
+    },
+    {
+      "id": "test:2b5e70414edb357f",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "red",
+          "status": "passed"
+        },
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:3d4d10a93a6b9509",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "red",
+          "status": "passed"
+        },
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:07f3cff01f63e1fa",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "red",
+          "status": "failed"
+        },
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:e5aa663063318fcb",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "red",
+          "status": "failed"
+        },
+        {
+          "node": "CSET-203.changesets.apply-release-plan.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:bb90f8296a0473f5",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "red",
+          "status": "passed"
+        },
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:e079391790461ee5",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "red",
+          "status": "passed"
+        },
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:a19fbf17aee52280",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "red",
+          "status": "failed"
+        },
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "test:6dbf70cde35d2423",
+      "kind": "test",
+      "runs": [
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "red",
+          "status": "failed"
+        },
+        {
+          "node": "CSET-203.changesets.cli.impl",
+          "gate": "green",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "criterion_evidence": [
+    {
+      "node": "CSET-203.changesets.apply-release-plan.impl",
+      "repository": "changesets",
+      "criterion": "AC-1",
+      "test_id": "07f3cff01f63e1fa",
+      "test": {
+        "path": "packages/apply-release-plan/src/journal.test.ts",
+        "name": "applyReleasePlan journal and rollback > restores files and rejects with the original error as cause"
+      },
+      "gate": "red",
+      "output_sha256": "430432ae284ea9c3ce8e136206acde82e606d98e4c4293be15434b6c8c4b1ca3",
+      "carried": false,
+      "evidence_ids": [
+        "test:07f3cff01f63e1fa",
+        "gate:CSET-203.changesets.apply-release-plan.impl:red"
+      ]
+    },
+    {
+      "node": "CSET-203.changesets.apply-release-plan.impl",
+      "repository": "changesets",
+      "criterion": "AC-2",
+      "test_id": "e5aa663063318fcb",
+      "test": {
+        "path": "packages/apply-release-plan/src/journal.test.ts",
+        "name": "applyReleasePlan journal and rollback > writes a dot-named journal in .changeset before the first change and removes it after"
+      },
+      "gate": "red",
+      "output_sha256": "430432ae284ea9c3ce8e136206acde82e606d98e4c4293be15434b6c8c4b1ca3",
+      "carried": false,
+      "evidence_ids": [
+        "test:e5aa663063318fcb",
+        "gate:CSET-203.changesets.apply-release-plan.impl:red"
+      ]
+    },
+    {
+      "node": "CSET-203.changesets.apply-release-plan.impl",
+      "repository": "changesets",
+      "criterion": "AC-5",
+      "test_id": "2b5e70414edb357f",
+      "test": {
+        "path": "packages/apply-release-plan/src/index.test.ts",
+        "name": "apply release plan > versioning > should update a version for one package"
+      },
+      "gate": "green",
+      "output_sha256": "7642e7ca2927070e0d64f0d4b908ad01590656a49f7f0d8d72fac32f4d05cd00",
+      "carried": false,
+      "evidence_ids": [
+        "test:2b5e70414edb357f",
+        "gate:CSET-203.changesets.apply-release-plan.impl:green"
+      ]
+    },
+    {
+      "node": "CSET-203.changesets.cli.impl",
+      "repository": "changesets",
+      "criterion": "AC-3",
+      "test_id": "a19fbf17aee52280",
+      "test": {
+        "path": "packages/cli/src/commands/version/version.test.ts",
+        "name": "recovery and failure > should restore an interrupted run's journal, warn and version normally"
+      },
+      "gate": "red",
+      "output_sha256": "e3141940d885a27a48540c25420a83563aa592e90403610db5e4c4063a0d4ebd",
+      "carried": false,
+      "evidence_ids": [
+        "test:a19fbf17aee52280",
+        "gate:CSET-203.changesets.cli.impl:red"
+      ]
+    },
+    {
+      "node": "CSET-203.changesets.cli.impl",
+      "repository": "changesets",
+      "criterion": "AC-4",
+      "test_id": "6dbf70cde35d2423",
+      "test": {
+        "path": "packages/cli/src/commands/version/version.test.ts",
+        "name": "recovery and failure > should print the failure without a stack, exit 1 and not git add or commit"
+      },
+      "gate": "red",
+      "output_sha256": "e3141940d885a27a48540c25420a83563aa592e90403610db5e4c4063a0d4ebd",
+      "carried": false,
+      "evidence_ids": [
+        "test:6dbf70cde35d2423",
+        "gate:CSET-203.changesets.cli.impl:red"
+      ]
+    },
+    {
+      "node": "CSET-203.changesets.cli.impl",
+      "repository": "changesets",
+      "criterion": "AC-5",
+      "test_id": "e079391790461ee5",
+      "test": {
+        "path": "packages/cli/src/commands/version/version.test.ts",
+        "name": "running version in a simple project > should commit the result if commit config is set"
+      },
+      "gate": "green",
+      "output_sha256": "689cf518c7ab5dd87bde5db9b4da0f75898d7919a0936a901c308f730421ed00",
+      "carried": false,
+      "evidence_ids": [
+        "test:e079391790461ee5",
+        "gate:CSET-203.changesets.cli.impl:green"
+      ]
+    },
+    {
+      "node": "CSET-203.changesets.compat.verify",
+      "repository": "changesets",
+      "criterion": "AC-5",
+      "test_id": null,
+      "test": null,
+      "gate": "regression",
+      "output_sha256": "599913c63c577aeceecd15597fe9f5dc8109f53eed742a4335cec6baf47cd2c7",
+      "carried": false,
+      "evidence_ids": [
+        "gate:CSET-203.changesets.compat.verify:regression",
+        "receipt:CSET-203.changesets.compat.verify"
+      ]
+    }
+  ],
+  "prior_gaps": [],
+  "files_at_head": [
+    "changesets:packages/apply-release-plan/src/journal.test.ts",
+    "changesets:packages/apply-release-plan/src/index.ts",
+    "changesets:packages/cli/src/commands/version/index.ts",
+    "changesets:packages/cli/src/commands/version/version.test.ts"
+  ]
+}

@@ -37,6 +37,10 @@
       ]
     },
     "graph_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "accepted_deliveries": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
     "created_at": { "type": "string" },
     "updated_at": { "type": "string" },
     "nodes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/nodeRuntime" } },
@@ -62,9 +66,773 @@
     "blocked_reason": { "type": ["string", "null"] },
     "pending_decisions": { "type": "array", "items": { "type": "string" } },
     "candidates": { "type": "array", "items": { "type": "string" } },
-    "current_candidate": { "type": ["string", "null"] }
+    "current_candidate": { "type": ["string", "null"] },
+    "integration_heads": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
+    },
+    "pending_integrations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["node_id", "verified_sha", "from", "to", "strategy"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": { "type": "string", "minLength": 1 },
+          "verified_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "from": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "to": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+          "strategy": { "enum": ["fast-forward", "merge"] }
+        }
+      }
+    },
+    "superseded_by": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
+    "acceptance": {
+      "type": ["object", "null"],
+      "description": "The approved acceptance manifest the feature was initialised with, by its SHA-256.",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "superseded_reason": { "type": "string", "minLength": 1 },
+    "superseded_at": { "type": "string" },
+    "reworks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "reason", "decision_id", "at", "reopened", "invalidated_candidate", "delivered"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": { "type": "string" },
+          "reason": { "type": "string", "minLength": 1 },
+          "decision_id": { "type": ["string", "null"] },
+          "at": { "type": "string" },
+          "reopened": { "type": "array", "items": { "type": "string" } },
+          "invalidated_candidate": { "type": ["string", "null"] },
+          "delivered": { "type": "boolean" },
+          "adopted_bases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["repository", "base_branch", "from", "to"],
+              "additionalProperties": false,
+              "properties": {
+                "repository": { "type": "string" },
+                "base_branch": { "type": "string" },
+                "from": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+                "to": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
+              }
+            }
+          },
+          "origin": { "$ref": "#/$defs/reworkOrigin" }
+        }
+      }
+    },
+    "acceptance_review": {
+      "type": ["object", "null"],
+      "description": "The independent acceptance review between the last product node and the candidate: its policy, fixed at feature init, the review in flight and every settled one.",
+      "required": ["required", "max_rounds", "open", "reviews", "blocked", "usage"],
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean" },
+        "max_rounds": { "type": "integer", "minimum": 1, "maximum": 5, "description": "The budget per criterion: accepted reworks a materially new gap gets on its newness alone." },
+        "criterion_ceiling": { "type": "integer", "minimum": 1, "maximum": 32, "description": "The emergency ceiling of accepted reworks per criterion: past max_rounds each needs verified producer progress, and here a person decides." },
+        "max_review_sessions": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "review_wall_clock_ms": { "type": ["integer", "null"], "minimum": 60000, "maximum": 604800000 },
+        "reviewer_timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 86400000, "description": "How long a launched reviewer may run, from its launch, before it is interrupted and its generation re-issued." },
+        "open": {
+          "type": ["object", "null"],
+          "required": ["review_id", "dispatch_id", "capability_sha256", "inputs", "inputs_sha256", "packet_path", "packet_sha256", "slot", "review", "attempt", "refused", "issued_at", "expires_at"],
+          "additionalProperties": false,
+          "properties": {
+            "review_id": { "$ref": "#/$defs/reviewId" },
+            "dispatch_id": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+            "capability_sha256": { "$ref": "#/$defs/sha256" },
+            "inputs": { "$ref": "#/$defs/reviewInputs" },
+            "inputs_sha256": { "$ref": "#/$defs/sha256" },
+            "packet_path": { "type": "string", "minLength": 1 },
+            "packet_sha256": { "$ref": "#/$defs/sha256" },
+            "slot": { "type": "string", "minLength": 1 },
+            "review": { "type": "integer", "minimum": 1 },
+            "attempt": { "type": "integer", "minimum": 1 },
+            "refused": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "required": ["dispatch_id", "code", "detail", "at"],
+                "additionalProperties": false,
+                "properties": {
+                  "dispatch_id": { "type": "string" },
+                  "code": { "type": "string" },
+                  "detail": { "type": "string", "maxLength": 2000 },
+                  "at": { "type": "string" },
+                  "kind": { "enum": ["format", "review"] },
+                  "verdict": { "type": "string", "minLength": 1 },
+                  "problems": {
+                    "type": "array",
+                    "maxItems": 24,
+                    "items": {
+                      "type": "object",
+                      "required": ["code", "pointer", "detail"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": { "type": "string" },
+                        "pointer": { "type": "string", "maxLength": 200 },
+                        "detail": { "type": "string", "maxLength": 600 },
+                        "limit": { "type": "integer", "minimum": 0 },
+                        "kind": { "enum": ["control", "unicode", "credential", "authority", "instruction"] },
+                        "candidates": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 400 } }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "issued_at": { "type": "string" },
+            "expires_at": { "type": "string" },
+            "epoch": { "type": "integer", "minimum": 0 },
+            "host_session": { "$ref": "#/$defs/hostSession" },
+            "provider_interrupted": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/providerMark" }] },
+            "agent_interrupted": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/agentInterruptMark" }] },
+            "interruptions": { "type": "integer", "minimum": 0 },
+            "refinement": {
+              "type": ["object", "null"],
+              "description": "A refinement of a settled review a valid challenge asked for: the challenges it decides, its round, the receipt and inputs of the review it refines.",
+              "required": ["round", "challenges", "of_receipt_path", "of_receipt_sha256", "of_inputs_sha256"],
+              "additionalProperties": false,
+              "properties": {
+                "round": { "type": "integer", "minimum": 1 },
+                "challenges": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "items": {
+                    "type": "object",
+                    "required": ["challenge_id", "challenge_sha256", "criteria", "node_id"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "challenge_id": { "$ref": "#/$defs/challengeId" },
+                      "challenge_sha256": { "$ref": "#/$defs/sha256" },
+                      "criteria": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                      "node_id": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                },
+                "of_receipt_path": { "type": "string", "minLength": 1 },
+                "of_receipt_sha256": { "$ref": "#/$defs/sha256" },
+                "of_inputs_sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          }
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["review_id", "dispatch_id", "capability_sha256", "review", "overall", "inputs_sha256", "receipt_path", "receipt_sha256", "at", "reworks", "reworks_applied", "outcome"],
+            "additionalProperties": false,
+            "properties": {
+              "review_id": { "$ref": "#/$defs/reviewId" },
+              "dispatch_id": { "type": "string" },
+              "capability_sha256": { "$ref": "#/$defs/sha256" },
+              "review": { "type": "integer", "minimum": 1 },
+              "overall": { "enum": ["PASS", "GAPS"] },
+              "inputs_sha256": { "$ref": "#/$defs/sha256" },
+              "receipt_path": { "type": "string", "minLength": 1 },
+              "receipt_sha256": { "$ref": "#/$defs/sha256" },
+              "at": { "type": "string" },
+              "reworks": { "type": "array", "items": { "type": "string" } },
+              "reworks_applied": { "type": "boolean" },
+              "outcome": { "enum": ["PASS", "GAPS", "REVIEW_GAPS", "CHALLENGED", "WITHDRAWN", "REPEATED", "REVIEW_NONCONVERGENT", "REGRESSION"] },
+              "coverage_sha256": { "$ref": "#/$defs/sha256", "description": "The coverage manifest its receipt pins: every standing completion at its exact heads." },
+              "epoch": { "type": "integer", "minimum": 0 },
+              "barrier": {
+                "type": ["object", "null"],
+                "description": "A PASS: the orchestration epoch it was settled at, no dispatch lease outstanding, every judged node DONE.",
+                "required": ["epoch", "at", "leases", "nodes_done"],
+                "additionalProperties": false,
+                "properties": {
+                  "epoch": { "type": "integer", "minimum": 0 },
+                  "at": { "type": "string" },
+                  "leases": { "type": "array", "items": { "type": "string" } },
+                  "nodes_done": { "type": "boolean" }
+                }
+              },
+              "refinements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["dispatch_id", "capability_sha256", "round", "challenges", "decisions", "receipt_path", "receipt_sha256", "at"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "dispatch_id": { "type": "string" },
+                    "capability_sha256": { "$ref": "#/$defs/sha256" },
+                    "round": { "type": "integer", "minimum": 1 },
+                    "challenges": { "type": "array", "items": { "$ref": "#/$defs/challengeId" } },
+                    "decisions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["challenge_id", "criterion", "decision"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "challenge_id": { "$ref": "#/$defs/challengeId" },
+                          "criterion": { "type": "string" },
+                          "decision": { "enum": ["WITHDRAW", "REFINE", "UPHOLD"] }
+                        }
+                      }
+                    },
+                    "receipt_path": { "type": "string", "minLength": 1 },
+                    "receipt_sha256": { "$ref": "#/$defs/sha256" },
+                    "at": { "type": "string" },
+                    "revision": { "type": "integer", "minimum": 1, "description": "The revision of the review this refinement made." },
+                    "orders": {
+                      "type": "array",
+                      "description": "What the revision did to each producer order of the review (engine/review-revision.ts).",
+                      "items": {
+                        "type": "object",
+                        "required": ["node_id", "action"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "node_id": { "type": "string" },
+                          "action": { "enum": ["rebase", "amend", "cancel", "reorder", "order", "keep"] }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "revision": { "type": "integer", "minimum": 0, "description": "The review's current revision: 0 its original receipt, n after its n-th refinement." },
+              "original": {
+                "type": ["object", "null"],
+                "required": ["dispatch_id", "receipt_path", "receipt_sha256", "overall", "inputs_sha256"],
+                "additionalProperties": false,
+                "properties": {
+                  "dispatch_id": { "type": "string" },
+                  "receipt_path": { "type": "string", "minLength": 1 },
+                  "receipt_sha256": { "$ref": "#/$defs/sha256" },
+                  "overall": { "enum": ["PASS", "GAPS"] },
+                  "inputs_sha256": { "$ref": "#/$defs/sha256" }
+                }
+              }
+            }
+          }
+        },
+        "blocked": {
+          "type": ["object", "null"],
+          "required": ["code", "review_id", "detail", "at"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "enum": ["REVIEW_GAPS", "REVIEW_INVALID", "REVIEW_DISPUTE", "REVIEW_NONCONVERGENT", "REVIEW_LINEAGE_INVALID"] },
+            "review_id": { "$ref": "#/$defs/reviewId" },
+            "detail": { "type": "string", "maxLength": 4000 },
+            "at": { "type": "string" },
+            "criteria": { "type": "array", "description": "The criteria that exhausted their own accepted-rework budget.", "items": { "type": "string", "minLength": 1, "maxLength": 64 } }
+          }
+        },
+        "usage": { "$ref": "#/$defs/usage" },
+        "lineage": {
+          "type": "object",
+          "description": "The per-criterion gap lineage (engine/review-lineage.ts): an append-only chain of what each criterion's gaps came to, each event bound by its hash to the one before. Budgets are summarized from it, never stored.",
+          "required": ["schema", "max_criterion_reworks", "max_review_sessions", "max_no_progress", "events", "head_sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "schema": { "const": "mycelink-review-lineage/1" },
+            "max_criterion_reworks": { "type": "integer", "minimum": 1, "maximum": 5, "description": "The budget per criterion: accepted reworks a materially new gap gets on its newness alone; past it, each one needs verified producer progress." },
+            "criterion_ceiling": { "type": "integer", "minimum": 1, "maximum": 32, "description": "The emergency ceiling per criterion, where a person decides (absent: the default)." },
+            "max_review_sessions": { "type": "integer", "minimum": 1 },
+            "max_no_progress": { "type": "integer", "minimum": 1 },
+            "max_review_ms": { "type": "integer", "minimum": 60000, "description": "A configured review wall-clock budget, from the first review counted." },
+            "events": {
+              "type": "array",
+              "maxItems": 4000,
+              "items": {
+                "type": "object",
+                "required": ["kind", "seq", "at", "prev_sha256", "sha256"],
+                "properties": {
+                  "kind": { "enum": ["gap", "challenge", "decision", "review", "closure", "blocked", "grant", "regression", "migrated"] },
+                  "seq": { "type": "integer", "minimum": 1 },
+                  "at": { "type": "string" },
+                  "prev_sha256": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+                  "sha256": { "$ref": "#/$defs/sha256" },
+                  "criterion": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "verdict": { "enum": ["accepted", "duplicate", "exhausted", "unreworkable", "regression"] },
+                  "basis": { "enum": ["budget", "progress", "no-progress", "ceiling", "regression"] },
+                  "novelty": { "enum": ["reproduction", "boundary"] },
+                  "decision": { "enum": ["WITHDRAW", "REFINE", "UPHOLD"] },
+                  "terms": { "type": "array", "maxItems": 128, "items": { "type": "string", "maxLength": 64 } }
+                }
+              }
+            },
+            "head_sha256": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] }
+          }
+        },
+        "challenges": {
+          "type": "array",
+          "description": "Review-gap challenges: a GAP whose exact public reproduction passed on the unchanged integrated head, oldest first.",
+          "items": {
+            "type": "object",
+            "required": ["challenge_id", "review_id", "node_id", "status", "gaps", "challenge_sha256", "receipt_path", "receipt_sha256", "claim_id", "dispatch_id", "capability_sha256", "generation", "base_sha", "at", "refinement"],
+            "additionalProperties": false,
+            "properties": {
+              "challenge_id": { "$ref": "#/$defs/challengeId" },
+              "review_id": { "$ref": "#/$defs/reviewId" },
+              "node_id": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["pending", "withdrawn", "refined", "upheld", "disputed"] },
+              "gaps": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["criterion", "round", "reproduction_sha256", "decision"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "criterion": { "type": "string" },
+                    "round": { "type": "integer", "minimum": 1 },
+                    "reproduction_sha256": { "$ref": "#/$defs/sha256" },
+                    "decision": { "enum": ["WITHDRAW", "REFINE", "UPHOLD", null] }
+                  }
+                }
+              },
+              "challenge_sha256": { "$ref": "#/$defs/sha256" },
+              "receipt_path": { "type": "string", "minLength": 1 },
+              "receipt_sha256": { "$ref": "#/$defs/sha256" },
+              "claim_id": { "type": "string" },
+              "dispatch_id": { "type": ["string", "null"] },
+              "capability_sha256": { "$ref": "#/$defs/sha256" },
+              "generation": { "type": "integer", "minimum": 1 },
+              "base_sha": { "$ref": "#/$defs/sha" },
+              "restored": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "partial": {
+                "type": ["object", "null"],
+                "description": "A per-criterion answer's challenge: the order's criteria it proved DONE in the same execution, and those it left unresolved.",
+                "required": ["done", "unresolved"],
+                "additionalProperties": false,
+                "properties": {
+                  "done": { "type": "array", "items": { "type": "string" } },
+                  "unresolved": { "$ref": "#/$defs/unresolvedCriteria" }
+                }
+              },
+              "at": { "type": "string" },
+              "refinement": {
+                "type": ["object", "null"],
+                "required": ["dispatch_id", "receipt_path", "at"],
+                "additionalProperties": false,
+                "properties": {
+                  "dispatch_id": { "type": "string" },
+                  "receipt_path": { "type": "string", "minLength": 1 },
+                  "at": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "evidence_repairs": {
+      "type": "array",
+      "description": "Every stale evidence pointer the controller repaired from an exact archive (engine/evidence-integrity.ts), each bound by its receipt's hash.",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "required": ["repair_id", "node_id", "refs", "from_path", "sha256", "to_path", "source", "receipt_path", "receipt_sha256", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "repair_id": { "type": "string", "pattern": "^ER-[0-9a-f]{16}$" },
+          "node_id": { "type": ["string", "null"] },
+          "refs": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+          "from_path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "to_path": { "type": "string", "minLength": 1 },
+          "source": {
+            "type": "object",
+            "required": ["kind", "path"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "enum": ["replaced-generation", "ledger-archive", "challenge-snapshot"] },
+              "path": { "type": "string", "minLength": 1 }
+            }
+          },
+          "receipt_path": { "type": "string", "minLength": 1 },
+          "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "at": { "type": "string" }
+        }
+      }
+    },
+    "evidence_repair": {
+      "type": ["object", "null"],
+      "description": "A delivery refused for evidence no exact archive restores (engine/evidence-integrity.ts): administrative, never a product rework; delivery fails closed until the controller repairs it.",
+      "required": ["status", "candidate_id", "nodes", "problems", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "const": "REQUIRED" },
+        "candidate_id": { "type": ["string", "null"] },
+        "nodes": { "type": "array", "maxItems": 256, "items": { "type": "string" } },
+        "problems": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 2000 } },
+        "at": { "type": "string" }
+      }
+    },
+    "orchestration": {
+      "type": ["object", "null"],
+      "description": "The orchestration epoch and the dispatch lease registry (state/orchestration.ts): the epoch moves in the same write as each change of what a review or a candidate binds; every claim and review generation is a lease from its issue to its close.",
+      "required": ["epoch", "bumps", "leases"],
+      "additionalProperties": false,
+      "properties": {
+        "epoch": { "type": "integer", "minimum": 0 },
+        "bumps": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["epoch", "reason", "at"],
+            "additionalProperties": false,
+            "properties": {
+              "epoch": { "type": "integer", "minimum": 1 },
+              "reason": { "type": "string", "maxLength": 300 },
+              "at": { "type": "string" },
+              "nodes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "leases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["lease_id", "kind", "node_id", "review_id", "claim_id", "dispatch_id", "capability_sha256", "epoch", "lineage", "generation", "status", "issued_at", "closed_at", "closed_reason"],
+            "additionalProperties": false,
+            "properties": {
+              "lease_id": { "type": "string", "minLength": 1 },
+              "kind": { "enum": ["worker", "verification", "candidate", "e2e", "review"] },
+              "node_id": { "type": ["string", "null"] },
+              "review_id": { "type": ["string", "null"] },
+              "refinement": { "type": "boolean" },
+              "claim_id": { "type": ["string", "null"] },
+              "dispatch_id": { "type": ["string", "null"] },
+              "capability_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+              "epoch": { "type": "integer", "minimum": 0 },
+              "lineage": { "type": "integer", "minimum": 0 },
+              "generation": { "type": "integer", "minimum": 0 },
+              "status": { "enum": ["active", "settled", "revoked", "abandoned", "released", "stale", "interrupted-provider", "interrupted-agent"] },
+              "issued_at": { "type": "string" },
+              "closed_at": { "type": ["string", "null"] },
+              "closed_reason": { "type": ["string", "null"], "maxLength": 300 },
+              "outcome": { "type": "string", "maxLength": 64 },
+              "settled_epoch": { "type": "integer", "minimum": 0 },
+              "worktree": { "type": ["string", "null"] },
+              "result_file": { "type": ["string", "null"] },
+              "host": { "$ref": "#/$defs/hostSession" },
+              "provider": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/providerMark" }] },
+              "agent": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/agentInterruptMark" }] },
+              "stale": {
+                "type": ["object", "null"],
+                "required": ["at", "reason", "archived"],
+                "additionalProperties": false,
+                "properties": {
+                  "at": { "type": "string" },
+                  "reason": { "type": "string", "maxLength": 300 },
+                  "archived": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": { "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/sha256" } } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "provider": {
+          "type": ["object", "null"],
+          "description": "Model-provider failures of lease holders: each interruption, the counts per ticket and per phase that bound them, and the stop past them.",
+          "required": ["interruptions", "tickets", "phases", "unavailable"],
+          "additionalProperties": false,
+          "properties": {
+            "interruptions": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "required": ["class", "request_id", "category", "source", "session_id", "at", "lease_id", "kind", "node_id", "review_id", "ticket", "phase", "action"],
+                "additionalProperties": false,
+                "properties": {
+                  "class": { "enum": ["provider-refusal", "rate-limit", "server-error", "network"] },
+                  "request_id": { "type": ["string", "null"], "pattern": "^req_[A-Za-z0-9_-]{1,120}$" },
+                  "category": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+                  "source": { "enum": ["host-transcript", "agent-transcript"] },
+                  "session_id": { "type": ["string", "null"], "maxLength": 128 },
+                  "at": { "type": "string" },
+                  "lease_id": { "type": "string", "minLength": 1 },
+                  "kind": { "enum": ["worker", "verification", "candidate", "e2e", "review"] },
+                  "node_id": { "type": ["string", "null"] },
+                  "review_id": { "type": ["string", "null"] },
+                  "ticket": { "type": "string", "maxLength": 400 },
+                  "phase": { "type": "string", "maxLength": 64 },
+                  "action": { "enum": ["released", "resumable", "review-reissue"] }
+                }
+              }
+            },
+            "tickets": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "phases": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "unavailable": {
+              "type": ["object", "null"],
+              "required": ["code", "at", "reason"],
+              "additionalProperties": false,
+              "properties": { "code": { "const": "PROVIDER_UNAVAILABLE" }, "at": { "type": "string" }, "reason": { "type": "string", "maxLength": 500 } }
+            }
+          }
+        }
+      }
+    }
   },
   "$defs": {
+    "testIdentity": {
+      "type": "object",
+      "description": "A test's runner-aware canonical identity (evidence/test-identity.ts): its normalised source path and its runner's key (JUnit: the method, package and class stripped; JS and exact runners: the full name).",
+      "required": ["version", "runner", "path", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": "mycelink-test-identity/1" },
+        "runner": { "enum": ["junit", "js", "exact"] },
+        "path": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1 },
+        "classes": { "type": "array", "maxItems": 16, "items": { "type": "string", "minLength": 1 } },
+        "params": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "receiptRef": {
+      "type": ["object", "null"],
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+    },
+    "testIdentityAlias": {
+      "type": ["object", "null"],
+      "description": "A test published before canonical identities, mapped to its identity at a head, with the immutable receipt settle wrote of it.",
+      "required": ["schema", "raw", "canonical", "head_sha", "declaration"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "mycelink-test-identity-alias/1" },
+        "raw": {
+          "type": "object",
+          "required": ["test_id", "path", "full_name", "classname"],
+          "additionalProperties": false,
+          "properties": { "test_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" }, "path": { "type": "string" }, "full_name": { "type": "string" }, "classname": { "type": ["string", "null"] } }
+        },
+        "canonical": { "$ref": "#/$defs/testIdentity" },
+        "head_sha": { "$ref": "#/$defs/sha" },
+        "declaration": {
+          "type": "object",
+          "required": ["path", "method", "classes", "line", "blob"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string" },
+            "method": { "type": "string" },
+            "classes": { "type": "array", "items": { "type": "string" } },
+            "line": { "type": ["integer", "null"], "minimum": 1 },
+            "blob": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }
+          }
+        },
+        "receipt": { "$ref": "#/$defs/receiptRef" }
+      }
+    },
+    "partialOrder": {
+      "type": "object",
+      "description": "The order a per-criterion answer settled, as its brief bound it.",
+      "required": ["review_id", "review", "revision", "receipt_path", "receipt_sha256", "refinement", "review_gaps", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "review_id": { "$ref": "#/$defs/reviewId" },
+        "review": { "type": "integer", "minimum": 1 },
+        "revision": { "type": ["integer", "null"], "minimum": 0 },
+        "receipt_path": { "type": ["string", "null"] },
+        "receipt_sha256": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "refinement": {
+          "type": ["object", "null"],
+          "required": ["challenge_id", "round"],
+          "additionalProperties": false,
+          "properties": { "challenge_id": { "$ref": "#/$defs/challengeId" }, "round": { "type": "integer", "minimum": 1 } }
+        },
+        "review_gaps": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "object", "required": ["criterion", "reproduction_sha256"], "additionalProperties": false, "properties": { "criterion": { "type": "string" }, "reproduction_sha256": { "$ref": "#/$defs/sha256" } } }
+        },
+        "evidence": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 200 } }
+      }
+    },
+    "unresolvedCriteria": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["criterion", "outcome", "reason", "decision_request"],
+        "additionalProperties": false,
+        "properties": {
+          "criterion": { "type": "string" },
+          "outcome": { "enum": ["BLOCKED", "NEEDS_DECISION"] },
+          "reason": { "type": "string", "maxLength": 1000 },
+          "decision_request": {
+            "type": ["object", "null"],
+            "required": ["question", "options"],
+            "additionalProperties": false,
+            "properties": {
+              "question": { "type": "string" },
+              "options": { "type": "array", "items": { "type": "string" } },
+              "category": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hostSession": {
+      "type": ["object", "null"],
+      "description": "The host session a dispatch was handed to, as the plugin's fence saw it run dispatch: what a provider failure of that host is read from.",
+      "required": ["session_id", "transcript_path", "bound_at"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+        "transcript_path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "bound_at": { "type": "string" }
+      }
+    },
+    "providerMark": {
+      "type": "object",
+      "description": "A transient model-provider failure that ended a lease's holder, as Claude Code recorded it: class, sanitized request id and category, where it was read. Never a prompt or a reply.",
+      "required": ["class", "request_id", "category", "source", "session_id", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "enum": ["provider-refusal", "rate-limit", "server-error", "network"] },
+        "request_id": { "type": ["string", "null"], "pattern": "^req_[A-Za-z0-9_-]{1,120}$" },
+        "category": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+        "source": { "enum": ["host-transcript", "agent-transcript"] },
+        "session_id": { "type": ["string", "null"], "maxLength": 128 },
+        "at": { "type": "string" }
+      }
+    },
+    "agentInterruptMark": {
+      "type": "object",
+      "description": "A launched reviewer interrupted before it completed: past its wall-clock, its host session's process gone, its task ended otherwise, or its launch failed. Its Agent call, its agent by hash, when it was launched and how long it ran. Never a prompt or an answer.",
+      "required": ["reason", "status", "tool_use_id", "agent_id_sha256", "launched_at", "elapsed_ms", "timeout_ms", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "enum": ["timeout", "host-ended", "ended", "launch-failed"] },
+        "status": { "type": ["string", "null"], "pattern": "^[a-z_-]{1,32}$" },
+        "tool_use_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+        "agent_id_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "launched_at": { "type": "string" },
+        "elapsed_ms": { "type": "integer", "minimum": 0 },
+        "timeout_ms": { "type": "integer", "minimum": 0 },
+        "at": { "type": "string" }
+      }
+    },
+    "reviewId": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+-R[0-9]{3,}$" },
+    "challengeId": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+-R[0-9]{3,}-C[0-9]+$" },
+    "reviewInputs": {
+      "type": "object",
+      "required": ["feature_id", "graph_sha256", "criteria_sha256", "manifest_sha256", "repositories"],
+      "additionalProperties": false,
+      "properties": {
+        "feature_id": { "type": "string" },
+        "graph_sha256": { "$ref": "#/$defs/sha256" },
+        "criteria_sha256": { "$ref": "#/$defs/sha256" },
+        "manifest_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "head_sha"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
+            }
+          }
+        }
+      }
+    },
+    "reworkOrigin": {
+      "type": "object",
+      "required": ["kind", "review_id", "review"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "acceptance-review" },
+        "review_id": { "$ref": "#/$defs/reviewId" },
+        "review": { "type": "integer", "minimum": 1 },
+        "refinement": {
+          "type": "object",
+          "required": ["challenge_id", "round"],
+          "additionalProperties": false,
+          "properties": {
+            "challenge_id": { "$ref": "#/$defs/challengeId" },
+            "round": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "revision": { "type": "integer", "minimum": 0, "description": "The revision of the review the order is bound to." },
+        "restoration": {
+          "type": "array",
+          "description": "An order restoring completed proofs the reviewed heads lost: never an accepted rework of their criteria.",
+          "maxItems": 64,
+          "items": { "type": "object", "required": ["criterion", "record_id", "code"], "additionalProperties": false, "properties": { "criterion": { "type": "string" }, "record_id": { "type": "string" }, "code": { "type": ["string", "null"] } } }
+        },
+        "receipt_path": { "type": "string", "minLength": 1 },
+        "receipt_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "revisionRef": {
+      "type": "object",
+      "description": "A revision of an acceptance review: 0 its original receipt, n its n-th refinement's, pinned by its SHA-256.",
+      "required": ["revision", "receipt_path", "receipt_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "receipt_path": { "type": "string", "minLength": 1 },
+        "receipt_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "reworkRebase": {
+      "type": "object",
+      "description": "A review rework's order rebased from one revision of its review to a later one, each of its gaps carried unchanged; bound by its own SHA-256.",
+      "required": ["review_id", "from", "to", "criteria", "carry", "by", "claim", "at", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "review_id": { "$ref": "#/$defs/reviewId" },
+        "from": { "$ref": "#/$defs/revisionRef" },
+        "to": { "$ref": "#/$defs/revisionRef" },
+        "criteria": { "type": "array", "items": { "type": "string" } },
+        "carry": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["criterion", "reproduction_sha256", "fingerprint", "from_targets", "to_targets"],
+            "additionalProperties": false,
+            "properties": {
+              "criterion": { "type": "string" },
+              "reproduction_sha256": { "$ref": "#/$defs/sha256" },
+              "fingerprint": { "$ref": "#/$defs/sha256" },
+              "from_targets": { "type": "array", "items": { "type": "string" } },
+              "to_targets": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "by": { "enum": ["refinement", "reconcile"] },
+        "claim": {
+          "type": ["object", "null"],
+          "required": ["claim_id", "from_dispatch_id", "to_dispatch_id"],
+          "additionalProperties": false,
+          "properties": {
+            "claim_id": { "type": "string" },
+            "from_dispatch_id": { "type": ["string", "null"] },
+            "to_dispatch_id": { "type": "string" }
+          }
+        },
+        "at": { "type": "string" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
     "usage": {
       "type": "object",
       "required": ["model_turns", "wall_clock_ms", "input_tokens", "output_tokens", "sessions"],
@@ -114,7 +882,410 @@
             "owner": { "type": "string" },
             "worktree": { "type": ["string", "null"] },
             "branch": { "type": ["string", "null"] },
-            "claimed_at": { "type": "string" }
+            "claimed_at": { "type": "string" },
+            "capability_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "mode": { "enum": ["adapter", "host", "manual", "controller"] },
+            "attempt": { "type": "integer", "minimum": 0 },
+            "expires_at": { "type": "string" },
+            "result_captured_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "dispatch_id": { "type": "string", "pattern": "^[0-9a-f-]{8,64}$" },
+            "result_file": { "type": "string", "pattern": "^result(-[0-9a-f-]{8,64})?\\.json$" },
+            "result_captured_dispatch_id": { "type": "string" },
+            "result_captured_file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
+            "usage_counted_for": { "type": "string" },
+            "dispatched_at": { "type": "string" },
+            "counted_fingerprints": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
+            "epoch": { "type": "integer", "minimum": 0 },
+            "lineage": { "type": "integer", "minimum": 0 },
+            "generation": { "type": "integer", "minimum": 0 },
+            "lease_kind": { "enum": ["worker", "verification", "candidate", "e2e", "review"] },
+            "host_session": { "$ref": "#/$defs/hostSession" },
+            "provider_interrupted": {
+              "type": ["object", "null"],
+              "description": "The generation's holder was ended by a transient model-provider failure after the worker made progress: the claim is kept for the same generation to resume, its old capability rotated away.",
+              "required": ["class", "request_id", "category", "source", "session_id", "at", "from_dispatch_id", "progress"],
+              "additionalProperties": false,
+              "properties": {
+                "class": { "enum": ["provider-refusal", "rate-limit", "server-error", "network"] },
+                "request_id": { "type": ["string", "null"], "pattern": "^req_[A-Za-z0-9_-]{1,120}$" },
+                "category": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+                "source": { "enum": ["host-transcript", "agent-transcript"] },
+                "session_id": { "type": ["string", "null"], "maxLength": 128 },
+                "at": { "type": "string" },
+                "from_dispatch_id": { "type": ["string", "null"] },
+                "progress": {
+                  "type": "object",
+                  "required": ["state", "base_sha", "head_sha", "commits", "dirty"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": { "type": "string" },
+                    "base_sha": { "type": ["string", "null"] },
+                    "head_sha": { "type": ["string", "null"] },
+                    "commits": { "type": "integer", "minimum": 0 },
+                    "dirty": { "type": "array", "maxItems": 200, "items": { "type": "string" } }
+                  }
+                }
+              }
+            },
+            "challenge_conversion": {
+              "type": ["object", "null"],
+              "description": "A review rework's legacy BLOCKED answer whose red gate passed every declared test, converted once into a request for the structured challenge: no attempt charged.",
+              "required": ["fingerprint", "from_dispatch_id", "result_sha256", "gate_output_sha256", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "fingerprint": { "type": "string", "maxLength": 300 },
+                "from_dispatch_id": { "type": ["string", "null"] },
+                "result_sha256": { "type": "string", "maxLength": 128 },
+                "gate_output_sha256": { "$ref": "#/$defs/sha256" },
+                "capsule_id": { "type": ["string", "null"], "pattern": "^CAP-[0-9a-f]{16}$", "description": "The claim's passing reproduction capsule that is the challenge's material, when there is one." },
+                "at": { "type": "string" }
+              }
+            },
+            "capsules": {
+              "type": "array",
+              "description": "The reproduction capsules the claim's capability holder sealed (engine/reproduction-capsule.ts): each one's id, receipt and the receipt's hash. Only a capsule this registry holds is used by the claim.",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "required": ["capsule_id", "capsule_sha256", "receipt_path", "criterion", "result", "revision", "capability_sha256", "registered_at"],
+                "additionalProperties": false,
+                "properties": {
+                  "capsule_id": { "type": "string", "pattern": "^CAP-[0-9a-f]{16}$" },
+                  "capsule_sha256": { "$ref": "#/$defs/sha256" },
+                  "receipt_path": { "type": "string", "maxLength": 512 },
+                  "criterion": { "type": "string", "maxLength": 64 },
+                  "result": { "enum": ["passed", "failed"] },
+                  "revision": { "type": "integer", "minimum": 0 },
+                  "capability_sha256": { "$ref": "#/$defs/sha256" },
+                  "registered_at": { "type": "string" },
+                  "carried_from": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["capsule_id", "capsule_sha256"], "additionalProperties": false, "properties": { "capsule_id": { "type": "string", "pattern": "^CAP-[0-9a-f]{16}$" }, "capsule_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+                }
+              }
+            },
+            "review_rebase": {
+              "type": ["object", "null"],
+              "description": "The claim's order was rebased to a later revision of its review while it was held: its old capability rotated away, dispatch reissues the same generation from where it stands; no attempt charged.",
+              "required": ["review_id", "from_revision", "to_revision", "from_dispatch_id", "rebase_sha256", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "review_id": { "$ref": "#/$defs/reviewId" },
+                "from_revision": { "type": "integer", "minimum": 0 },
+                "to_revision": { "type": "integer", "minimum": 1 },
+                "from_dispatch_id": { "type": ["string", "null"] },
+                "rebase_sha256": { "$ref": "#/$defs/sha256" },
+                "at": { "type": "string" }
+              }
+            },
+            "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+            "acceptance": {
+              "type": "object",
+              "required": ["manifest_sha256", "criteria_sha256"],
+              "additionalProperties": false,
+              "properties": {
+                "manifest_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+                "criteria_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            },
+            "evidence_correction": {
+              "type": ["object", "null"],
+              "required": ["code", "detail", "candidates", "corrections", "result_sha256", "commit_sha", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "code": { "type": "string", "pattern": "^CRITERION_[A-Z_]+$" },
+                "detail": { "type": "string", "maxLength": 2000 },
+                "candidates": {
+                  "type": "array",
+                  "maxItems": 24,
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "path", "full_name", "status", "gate"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+                      "path": { "type": "string" },
+                      "full_name": { "type": "string" },
+                      "status": { "type": "string" },
+                      "gate": { "enum": ["red", "green", "regression"] }
+                    }
+                  }
+                },
+                "corrections": { "type": "integer", "minimum": 0 },
+                "result_sha256": { "type": "string" },
+                "commit_sha": { "$ref": "#/$defs/sha" },
+                "at": { "type": "string" },
+                "criterion": { "type": ["string", "null"] },
+                "kind": { "enum": ["new-behavior", "compatibility", "declaration", null] },
+                "required_gate": { "enum": ["red", "green", "green or regression", null] },
+                "cycle": { "type": "boolean" },
+                "held": {
+                  "type": ["object", "null"],
+                  "required": ["state", "evidence", "bindings"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": { "type": "string" },
+                    "evidence": { "type": "object", "additionalProperties": true },
+                    "bindings": { "type": "integer", "minimum": 0 }
+                  }
+                },
+                "identity_version": { "type": "string", "description": "The canonical test identity version the refusal was judged under; absent before canonical identities." }
+              }
+            },
+            "identity_reconcile": {
+              "type": ["object", "null"],
+              "description": "The claim's answer re-evaluated administratively for an identity-shape refusal: bound to its exact controller copy; nothing charged.",
+              "required": ["cause", "refused", "fingerprint", "result_file", "result_sha256", "from_dispatch_id", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "cause": { "enum": ["evidence-correction", "worker-blocked"] },
+                "refused": { "type": "object", "required": ["code", "detail"], "additionalProperties": false, "properties": { "code": { "type": "string" }, "detail": { "type": "string", "maxLength": 2000 } } },
+                "fingerprint": { "type": ["string", "null"] },
+                "result_file": { "type": "string" },
+                "result_sha256": { "type": "string" },
+                "from_dispatch_id": { "type": ["string", "null"] },
+                "at": { "type": "string" },
+                "receipt": { "$ref": "#/$defs/receiptRef" }
+              }
+            },
+            "capture_pending": {
+              "type": ["object", "null"],
+              "required": ["file", "dispatch_id"],
+              "additionalProperties": false,
+              "properties": {
+                "file": { "type": "string", "pattern": "^result\\.[0-9a-f-]+\\.[0-9a-f]{32}\\.json$" },
+                "dispatch_id": { "type": "string" }
+              }
+            },
+            "cycle_declared": {
+              "type": ["object", "null"],
+              "required": ["head_sha", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "head_sha": { "$ref": "#/$defs/sha" },
+                "at": { "type": "string" }
+              }
+            },
+            "challenge_red": {
+              "type": ["object", "null"],
+              "description": "The last red gate of an acceptance review rework whose declared tests all passed on the unchanged base.",
+              "required": ["evidence_sha256", "head_sha", "tests", "red_tests", "files", "recorded_at"],
+              "additionalProperties": false,
+              "properties": {
+                "evidence_sha256": { "$ref": "#/$defs/sha256" },
+                "head_sha": { "$ref": "#/$defs/sha" },
+                "tests": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "required": ["path", "blob"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": { "type": "string", "minLength": 1 },
+                      "blob": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }
+                    }
+                  }
+                },
+                "red_tests": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "path", "full_name", "status"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+                      "path": { "type": "string" },
+                      "full_name": { "type": "string" },
+                      "status": { "type": "string" }
+                    }
+                  }
+                },
+                "files": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "required": ["path", "blob", "copy", "sha256"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": { "type": "string", "minLength": 1 },
+                      "blob": { "$ref": "#/$defs/sha" },
+                      "copy": { "type": "string", "minLength": 1 },
+                      "sha256": { "$ref": "#/$defs/sha256" }
+                    }
+                  }
+                },
+                "recorded_at": { "type": "string" },
+                "accepted": { "type": "boolean", "description": "The red gate accepted the RED (a declared test failed for a missing behaviour); the passing declared tests are what a per-criterion challenge cites." },
+                "gate": {
+                  "type": "object",
+                  "required": ["output_path", "output_sha256", "results_path", "results_sha256", "exit_code", "commit_sha", "red_category", "module_sha256", "plan_sha256"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "output_path": { "type": "string", "minLength": 1 },
+                    "output_sha256": { "$ref": "#/$defs/sha256" },
+                    "results_path": { "type": ["string", "null"] },
+                    "results_sha256": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+                    "exit_code": { "type": "integer" },
+                    "commit_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+                    "red_category": { "type": ["string", "null"] },
+                    "module_sha256": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+                    "plan_sha256": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+                  }
+                }
+              }
+            },
+            "challenge_reds": {
+              "type": "array",
+              "maxItems": 16,
+              "description": "Every red gate of an acceptance review rework, on this claim, with a declared test that passed (accepted REDs among them): what a per-criterion challenge cites.",
+              "items": { "$ref": "#/$defs/nodeRuntime/properties/claim/properties/challenge_red" }
+            },
+            "criteria_judged": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }], "description": "The sealed head this claim's criterion evidence was judged and accepted at." },
+            "revalidation": {
+              "type": ["object", "null"],
+              "description": "The completed criteria this generation relies on, revalidated on the claim's base before any worker ran.",
+              "required": ["base_sha", "at", "run", "verdicts"],
+              "additionalProperties": false,
+              "properties": {
+                "base_sha": { "$ref": "#/$defs/sha" },
+                "at": { "type": "string" },
+                "run": {
+                  "type": ["object", "null"],
+                  "required": ["output_path", "output_sha256", "exit_code", "results_sha256"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "output_path": { "type": "string" },
+                    "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "exit_code": { "type": "integer" },
+                    "results_sha256": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] }
+                  }
+                },
+                "verdicts": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": { "type": "object", "required": ["criterion", "record_id", "ok", "code"], "additionalProperties": false, "properties": { "criterion": { "type": "string" }, "record_id": { "type": "string" }, "ok": { "type": "boolean" }, "code": { "type": ["string", "null"] } } }
+                }
+              }
+            },
+            "criteria_settlement": {
+              "type": ["object", "null"],
+              "description": "A per-criterion answer judged and on its way to DONE: what each ordered criterion came to.",
+              "required": ["result_sha256", "head_sha", "done", "challenged", "unresolved", "carried", "order", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "result_sha256": { "type": "string" },
+                "head_sha": { "$ref": "#/$defs/sha" },
+                "done": { "type": "array", "items": { "type": "string" } },
+                "challenged": { "type": "array", "items": { "type": "string" } },
+                "unresolved": { "$ref": "#/$defs/unresolvedCriteria" },
+                "carried": { "$ref": "#/$defs/nodeRuntime/properties/criteria" },
+                "order": { "$ref": "#/$defs/partialOrder" },
+                "at": { "type": "string" }
+              }
+            },
+            "settling": {
+              "type": ["object", "null"],
+              "required": ["pid", "host", "started_at"],
+              "additionalProperties": false,
+              "properties": {
+                "pid": { "type": "integer" },
+                "host": { "type": "string" },
+                "started_at": { "type": "string" },
+                "start": { "type": "string" },
+                "boot": { "type": ["string", "null"] }
+              }
+            },
+            "tdd_policy": {
+              "type": "object",
+              "required": ["test_paths", "production_roots", "declaration_paths", "source", "sha256"],
+              "additionalProperties": false,
+              "properties": {
+                "test_paths": { "type": "array", "items": { "type": "string" } },
+                "production_roots": { "type": "array", "items": { "type": "string" } },
+                "declaration_paths": { "type": "array", "items": { "type": "string" } },
+                "source": { "enum": ["repository", "default"] },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            },
+            "reproof_unit": {
+              "type": ["object", "null"],
+              "description": "The re-proof unit settle committed on the sealed head (engine/proof-units.ts), journaled before the node branch moves to it.",
+              "required": ["from", "commit", "criteria", "files", "gate_outputs", "at"],
+              "additionalProperties": false,
+              "properties": {
+                "from": { "$ref": "#/$defs/sha" },
+                "commit": { "$ref": "#/$defs/sha" },
+                "criteria": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+                "files": { "type": "array", "maxItems": 64, "items": { "type": "object", "required": ["path", "blob"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1 }, "blob": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" } } } },
+                "gate_outputs": { "type": "array", "maxItems": 16, "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+                "at": { "type": "string" }
+              }
+            },
+            "seal": {
+              "type": ["object", "null"],
+              "required": ["dispatch_id", "head_sha", "base_sha", "policy_sha256", "sealed_at"],
+              "additionalProperties": false,
+              "properties": {
+                "dispatch_id": { "type": ["string", "null"] },
+                "head_sha": { "$ref": "#/$defs/sha" },
+                "base_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+                "policy_sha256": { "type": ["string", "null"] },
+                "sealed_at": { "type": "string" }
+              }
+            },
+            "worktree_setup": {
+              "type": "object",
+              "required": ["status", "config", "config_sha256", "receipt_path", "receipt_sha256", "head_sha"],
+              "additionalProperties": false,
+              "properties": {
+                "status": { "enum": ["complete", "reused"] },
+                "config": { "$ref": "#/$defs/worktreeSetupConfig" },
+                "config_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "receipt_path": { "type": "string", "minLength": 1 },
+                "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "head_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+                "inputs_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            },
+            "verification": {
+              "type": "object",
+              "required": ["module", "module_sha256", "path", "runtime_tests", "plan", "plan_sha256", "regression"],
+              "additionalProperties": false,
+              "properties": {
+                "module": { "type": "string" },
+                "module_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "path": { "type": "string" },
+                "runtime_tests": { "type": "boolean" },
+                "plan": {
+                  "type": "object",
+                  "required": ["setup", "build", "test", "report", "timeout_seconds"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "setup": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+                    "build": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+                    "test": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                    "report": {
+                      "type": ["object", "null"],
+                      "required": ["format"],
+                      "additionalProperties": false,
+                      "properties": { "format": { "enum": ["vitest-json", "junit-xml"] }, "dir": { "type": "string" } }
+                    },
+                    "timeout_seconds": { "type": "integer", "minimum": 1 }
+                  }
+                },
+                "plan_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "regression": {
+                  "type": "object",
+                  "required": ["command", "sha256"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  }
+                }
+              }
+            }
           }
         },
         "evidence": { "type": "object", "additionalProperties": true },
@@ -123,8 +1294,504 @@
         "integrated_sha": { "type": ["string", "null"] },
         "blocked_reason": { "type": ["string", "null"] },
         "usage": { "$ref": "#/$defs/usage" },
-        "updated_at": { "type": "string" }
+        "updated_at": { "type": "string" },
+        "interruptions": { "type": "integer", "minimum": 0 },
+        "branch_base_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+        "fresh_branch_required": { "type": "boolean" },
+        "lineage": { "type": "integer", "minimum": 0, "description": "The orchestration epoch the node's own generation last changed at (reworked, reopened, restored, invalidated)." },
+        "rework_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["at", "reason", "decision_id", "attempts", "failure_counts", "integrated_sha", "branch_head", "archived_ref", "candidate_id", "evidence"],
+            "additionalProperties": false,
+            "properties": {
+              "at": { "type": "string" },
+              "reason": { "type": "string", "minLength": 1 },
+              "decision_id": { "type": ["string", "null"] },
+              "attempts": { "type": "integer", "minimum": 0 },
+              "failure_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+              "integrated_sha": { "type": ["string", "null"] },
+              "branch_head": { "type": ["string", "null"] },
+              "archived_ref": { "type": ["string", "null"] },
+              "candidate_id": { "type": ["string", "null"] },
+              "evidence": { "type": "object", "additionalProperties": true },
+              "generation": { "type": "integer", "minimum": 0 },
+              "claim_id": { "type": ["string", "null"] },
+              "dispatch_id": { "type": ["string", "null"] },
+              "criteria": { "$ref": "#/$defs/nodeRuntime/properties/criteria" },
+              "tdd_history": { "$ref": "#/$defs/nodeRuntime/properties/tdd_history" },
+              "red_bindings": { "$ref": "#/$defs/nodeRuntime/properties/tdd_red_bindings" },
+              "settlement": { "$ref": "#/$defs/nodeRuntime/properties/last_settlement" },
+              "restore_dependents": {
+                "type": ["object", "null"],
+                "description": "An acceptance review rework: each DONE product dependent it reopened, whole, for a valid challenge of the rework to restore with the node.",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": ["state", "attempts", "failure_counts", "last_failure_fingerprint", "integrated_sha", "branch_base_sha", "evidence", "criteria", "tdd_history", "tdd_red_bindings", "last_settlement", "carried_criterion_proofs", "worktree_setup", "branch_head"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": { "const": "DONE" },
+                    "attempts": { "type": "integer", "minimum": 0 },
+                    "failure_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+                    "last_failure_fingerprint": { "type": ["string", "null"] },
+                    "integrated_sha": { "type": ["string", "null"] },
+                    "branch_base_sha": { "type": ["string", "null"] },
+                    "evidence": { "type": "object", "additionalProperties": true },
+                    "criteria": { "$ref": "#/$defs/nodeRuntime/properties/criteria" },
+                    "tdd_history": { "$ref": "#/$defs/nodeRuntime/properties/tdd_history" },
+                    "tdd_red_bindings": { "$ref": "#/$defs/nodeRuntime/properties/tdd_red_bindings" },
+                    "last_settlement": { "$ref": "#/$defs/nodeRuntime/properties/last_settlement" },
+                    "carried_criterion_proofs": { "$ref": "#/$defs/nodeRuntime/properties/carried_criterion_proofs" },
+                    "worktree_setup": { "$ref": "#/$defs/nodeRuntime/properties/worktree_setup" },
+                    "branch_head": { "type": ["string", "null"] }
+                  }
+                }
+              },
+              "restore": {
+                "type": ["object", "null"],
+                "description": "An acceptance review rework: the DONE generation it replaced, whole, for a valid challenge to restore.",
+                "required": ["state", "attempts", "failure_counts", "last_failure_fingerprint", "integrated_sha", "branch_base_sha", "evidence", "criteria", "tdd_history", "tdd_red_bindings", "last_settlement", "carried_criterion_proofs", "worktree_setup"],
+                "additionalProperties": false,
+                "properties": {
+                  "state": { "const": "DONE" },
+                  "attempts": { "type": "integer", "minimum": 0 },
+                  "failure_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+                  "last_failure_fingerprint": { "type": ["string", "null"] },
+                  "integrated_sha": { "type": ["string", "null"] },
+                  "branch_base_sha": { "type": ["string", "null"] },
+                  "evidence": { "type": "object", "additionalProperties": true },
+                  "criteria": { "$ref": "#/$defs/nodeRuntime/properties/criteria" },
+                  "tdd_history": { "$ref": "#/$defs/nodeRuntime/properties/tdd_history" },
+                  "tdd_red_bindings": { "$ref": "#/$defs/nodeRuntime/properties/tdd_red_bindings" },
+                  "last_settlement": { "$ref": "#/$defs/nodeRuntime/properties/last_settlement" },
+                  "carried_criterion_proofs": { "$ref": "#/$defs/nodeRuntime/properties/carried_criterion_proofs" },
+                  "worktree_setup": { "$ref": "#/$defs/nodeRuntime/properties/worktree_setup" }
+                }
+              },
+              "challenged": {
+                "type": ["object", "null"],
+                "required": ["challenge_id", "at"],
+                "additionalProperties": false,
+                "properties": {
+                  "challenge_id": { "$ref": "#/$defs/challengeId" },
+                  "at": { "type": "string" }
+                }
+              },
+              "rebases": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/reworkRebase" } },
+              "partial": {
+                "type": ["object", "null"],
+                "description": "A per-criterion answer settled this order: what each criterion came to (done, challenged, unresolved) and the unresolved criteria's own order.",
+                "required": ["claim_id", "dispatch_id", "done", "challenged", "unresolved", "challenge_id", "follow_up", "order", "at"],
+                "additionalProperties": false,
+                "properties": {
+                  "claim_id": { "type": "string" },
+                  "dispatch_id": { "type": ["string", "null"] },
+                  "done": { "type": "array", "items": { "type": "string" } },
+                  "challenged": { "type": "array", "items": { "type": "string" } },
+                  "unresolved": { "$ref": "#/$defs/unresolvedCriteria" },
+                  "challenge_id": { "anyOf": [{ "$ref": "#/$defs/challengeId" }, { "type": "null" }] },
+                  "follow_up": { "enum": ["pending", "ordered", null] },
+                  "order": { "$ref": "#/$defs/partialOrder" },
+                  "at": { "type": "string" }
+                }
+              },
+              "superseded": {
+                "type": ["object", "null"],
+                "description": "A later revision of its review changed this order's gaps: replaced by a new order (amend) or withdrawn (cancel); it counts for nothing.",
+                "required": ["review_id", "revision", "action", "at", "reason"],
+                "additionalProperties": false,
+                "properties": {
+                  "review_id": { "$ref": "#/$defs/reviewId" },
+                  "revision": { "type": "integer", "minimum": 1 },
+                  "action": { "enum": ["amend", "cancel"] },
+                  "at": { "type": "string" },
+                  "reason": { "type": "string", "maxLength": 500 }
+                }
+              }
+            }
+          }
+        },
+        "rework_brief": {
+          "type": ["object", "null"],
+          "required": ["generation", "limit", "at", "reason", "reason_sha256", "decision_id", "acceptance_criteria", "evidence", "replaced", "attempt_base"],
+          "additionalProperties": false,
+          "properties": {
+            "generation": { "type": "integer", "minimum": 1 },
+            "limit": { "type": "integer", "minimum": 1 },
+            "at": { "type": "string" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "reason_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "decision_id": { "type": ["string", "null"] },
+            "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+            "evidence": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 200 } },
+            "replaced": {
+              "type": "object",
+              "required": ["integrated_sha", "candidate_id", "archived_ref"],
+              "additionalProperties": false,
+              "properties": {
+                "integrated_sha": { "type": ["string", "null"] },
+                "candidate_id": { "type": ["string", "null"] },
+                "archived_ref": { "type": ["string", "null"] }
+              }
+            },
+            "attempt_base": { "type": "integer", "minimum": 0 },
+            "origin": { "$ref": "#/$defs/reworkOrigin" },
+            "red_required": { "const": false },
+            "review_gaps": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "required": ["criterion", "reproduction_sha256"],
+                "additionalProperties": false,
+                "properties": {
+                  "criterion": { "type": "string" },
+                  "reproduction_sha256": { "$ref": "#/$defs/sha256" }
+                }
+              }
+            },
+            "rebases": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/reworkRebase" } },
+            "reopened": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/reopenedCriterion" } }
+          }
+        },
+        "last_settlement": {
+          "type": ["object", "null"],
+          "required": ["capability_sha256", "claim_id", "outcome", "state", "detail", "settled_at"],
+          "additionalProperties": false,
+          "properties": {
+            "capability_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "claim_id": { "type": "string" },
+            "outcome": { "type": "string" },
+            "state": { "type": "string" },
+            "detail": { "type": "string" },
+            "settled_at": { "type": "string" },
+            "dispatch_id": { "type": ["string", "null"] },
+            "worktree_setup_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "module_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "result_file": { "type": ["string", "null"] },
+            "result_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["criterion", "test", "gate", "output_sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "criterion": { "type": "string" },
+              "test_id": { "type": ["string", "null"], "pattern": "^[0-9a-f]{16}$" },
+              "test": { "type": ["object", "null"], "required": ["path", "name"], "additionalProperties": false, "properties": { "path": { "type": "string" }, "name": { "type": "string" } } },
+              "gate": { "enum": ["red", "green", "regression"] },
+              "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "identity": { "anyOf": [{ "$ref": "#/$defs/testIdentity" }, { "type": "null" }] },
+              "identity_alias": { "$ref": "#/$defs/testIdentityAlias" },
+              "carried": { "type": "boolean" },
+              "challenge_id": { "$ref": "#/$defs/challengeId", "description": "A criterion a per-criterion answer challenged: its prior proof, carried while the challenge waits." },
+              "carried_from": {
+                "type": "object",
+                "required": ["generation", "gate", "output_sha256", "claim_id", "dispatch_id", "repo_sha"],
+                "additionalProperties": false,
+                "properties": {
+                  "generation": { "type": "integer", "minimum": 0 },
+                  "gate": { "enum": ["red", "green", "regression"] },
+                  "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "claim_id": { "type": ["string", "null"] },
+                  "dispatch_id": { "type": ["string", "null"] },
+                  "repo_sha": { "type": ["string", "null"] },
+                  "record_id": { "type": ["string", "null"], "pattern": "^CC-[0-9a-f]{16}$" }
+                }
+              },
+              "capsule": {
+                "type": ["object", "null"],
+                "description": "A RED promoted from a failing reproduction capsule: the capsule whose files were committed test-first and failed again by the red gate.",
+                "required": ["capsule_id", "capsule_sha256", "result"],
+                "additionalProperties": false,
+                "properties": { "capsule_id": { "type": "string", "pattern": "^CAP-[0-9a-f]{16}$" }, "capsule_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "result": { "const": "failed" } }
+              },
+              "reproof": {
+                "type": ["object", "null"],
+                "description": "An ordered criterion completed before: the review's reproduction shown passing on the unchanged base by a red gate of the claim.",
+                "required": ["gate_output_sha256", "tests"],
+                "additionalProperties": false,
+                "properties": {
+                  "gate_output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "tests": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": { "type": "object", "required": ["test_id", "path", "full_name"], "additionalProperties": false, "properties": { "test_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" }, "path": { "type": "string" }, "full_name": { "type": "string" } } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "carried_criterion_proofs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["criterion", "test_id", "test", "source_generation", "source_claim_id", "source_dispatch_id", "repo_sha", "gate", "output_sha256", "output_path"],
+            "additionalProperties": false,
+            "properties": {
+              "criterion": { "type": "string" },
+              "test_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+              "test": { "type": "object", "required": ["path", "name"], "additionalProperties": false, "properties": { "path": { "type": "string" }, "name": { "type": "string" } } },
+              "source_generation": { "type": "integer", "minimum": 0 },
+              "source_claim_id": { "type": ["string", "null"] },
+              "source_dispatch_id": { "type": ["string", "null"] },
+              "repo_sha": { "type": ["string", "null"] },
+              "gate": { "enum": ["red", "green", "regression"] },
+              "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "output_path": { "type": "string" },
+              "record_id": { "type": ["string", "null"], "pattern": "^CC-[0-9a-f]{16}$" },
+              "record_sha256": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] },
+              "ordered": { "type": "boolean", "description": "The order names this completed criterion again: its completed proof, re-provable." }
+            }
+          }
+        },
+        "criterion_ledger": {
+          "type": "array",
+          "description": "Every criterion the node completed by an accepted settlement (engine/criterion-ledger.ts).",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/criterionCompletion" }
+        },
+        "tdd_red_bindings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["head_sha", "tests", "tests_sha256", "evidence_sha256", "recorded_at"],
+            "additionalProperties": false,
+            "properties": {
+              "head_sha": { "$ref": "#/$defs/sha" },
+              "tests": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path", "blob"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": { "type": "string", "minLength": 1 },
+                    "blob": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }
+                  }
+                }
+              },
+              "tests_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "evidence_sha256": { "type": ["string", "null"] },
+              "recorded_at": { "type": "string" },
+              "red_tests": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "required": ["id", "path", "full_name", "status", "category"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+                    "path": { "type": "string" },
+                    "full_name": { "type": "string" },
+                    "status": { "type": "string" },
+                    "category": { "type": "string" },
+                    "identity": { "$ref": "#/$defs/testIdentity" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tdd_history": {
+          "type": ["object", "null"],
+          "required": ["ok", "base_sha", "head_sha", "cycles", "code", "policy_sha256", "output_path", "output_sha256", "verified_at"],
+          "additionalProperties": false,
+          "properties": {
+            "ok": { "type": "boolean" },
+            "base_sha": { "$ref": "#/$defs/sha" },
+            "head_sha": { "$ref": "#/$defs/sha" },
+            "cycles": { "type": "integer", "minimum": 0 },
+            "compatibility_units": { "type": "integer", "minimum": 0, "description": "Compatibility-regression units: tests alone proving existing behaviour, apart from the RED cycles." },
+            "code": { "type": ["string", "null"] },
+            "policy_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "output_path": { "type": "string" },
+            "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "verified_at": { "type": "string" }
+          }
+        },
+        "sibling_progress": {
+          "type": ["object", "null"],
+          "description": "Why settle last refused, uncharged, to integrate work that would lose a sibling's standing proof.",
+          "required": ["code", "cause", "generation", "count", "lost", "conflicts", "head", "from", "detail", "at"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "const": "SIBLING_PROGRESS_LOST" },
+            "cause": { "enum": ["stale-base", "delta", "conflict"] },
+            "generation": { "type": "integer", "minimum": 0 },
+            "count": { "type": "integer", "minimum": 1 },
+            "lost": { "type": "array", "maxItems": 64, "items": { "type": "object", "required": ["node_id", "criterion", "record_id", "code"], "additionalProperties": false, "properties": { "node_id": { "type": "string" }, "criterion": { "type": "string" }, "record_id": { "type": "string" }, "code": { "type": ["string", "null"] } } } },
+            "conflicts": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+            "head": { "type": "string" },
+            "from": { "type": "string" },
+            "detail": { "type": "string", "maxLength": 4000 },
+            "at": { "type": "string" }
+          }
+        },
+        "tdd_rejection": {
+          "type": ["object", "null"],
+          "required": ["code", "commit", "detail", "head_sha", "archived_ref", "evidence_path", "evidence_sha256", "attempt", "at"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "string" },
+            "commit": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+            "detail": { "type": "string", "maxLength": 2000 },
+            "head_sha": { "$ref": "#/$defs/sha" },
+            "archived_ref": { "type": "string" },
+            "evidence_path": { "type": "string" },
+            "evidence_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "attempt": { "type": "integer", "minimum": 0 },
+            "at": { "type": "string" }
+          }
+        },
+        "worktree_setup": {
+          "type": ["object", "null"],
+          "required": ["status", "code", "config_sha256", "receipt_path", "receipt_sha256", "worktree", "head_sha", "at"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "enum": ["complete", "failed"] },
+            "code": { "type": ["string", "null"] },
+            "config_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "receipt_path": { "type": "string", "minLength": 1 },
+            "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "worktree": { "type": "string" },
+            "head_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+            "at": { "type": "string" }
+          }
+        }
       }
-    }
+    },
+    "worktreeSetupConfig": {
+      "type": "object",
+      "required": ["commands", "timeout_seconds", "env", "required_paths"],
+      "additionalProperties": false,
+      "properties": {
+        "commands": { "type": "array", "minItems": 1, "items": { "type": "array", "minItems": 1, "items": { "type": "string" } } },
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "required_paths": { "type": "array", "items": { "type": "string" } },
+        "inputs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reopenedCriterion": {
+      "type": "object",
+      "description": "A completed criterion the claim's base no longer holds as completed: ordered by this generation's own proof now, never charged.",
+      "required": ["criterion", "record_id", "code", "detail", "base_sha", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "criterion": { "type": "string" },
+        "record_id": { "type": "string" },
+        "code": { "type": "string" },
+        "detail": { "type": "string", "maxLength": 2000 },
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "at": { "type": "string" }
+      }
+    },
+    "criterionCompletion": {
+      "type": "object",
+      "description": "A criterion completed by an accepted settlement: immutable, bound by sha256 (engine/criterion-ledger.ts).",
+      "required": ["schema", "record_id", "sha256", "node_id", "criterion", "kind", "generation", "basis", "source", "parent", "claim_id", "dispatch_id", "settled_at", "order", "repo", "production", "proof", "red", "history", "reproof", "archive"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "mycelink-criterion-completion/1" },
+        "record_id": { "type": "string", "pattern": "^CC-[0-9a-f]{16}$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "node_id": { "type": "string" },
+        "criterion": { "type": "string" },
+        "kind": { "enum": ["new-behavior", "compatibility", "declaration"] },
+        "generation": { "type": "integer", "minimum": 0 },
+        "basis": { "enum": ["red", "compatibility", "declaration", "carried", "reproved"] },
+        "source": { "type": ["string", "null"] },
+        "parent": { "type": ["string", "null"] },
+        "claim_id": { "type": ["string", "null"] },
+        "dispatch_id": { "type": ["string", "null"] },
+        "settled_at": { "type": "string" },
+        "order": {
+          "type": ["object", "null"],
+          "required": ["review_id", "revision", "receipt_sha256", "reproduction_sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "review_id": { "type": "string" },
+            "revision": { "type": ["integer", "null"], "minimum": 0 },
+            "receipt_sha256": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] },
+            "reproduction_sha256": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] }
+          }
+        },
+        "repo": {
+          "type": "object",
+          "required": ["repository", "base_sha", "head_sha", "integrated_sha"],
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string" },
+            "base_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+            "head_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+            "integrated_sha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }
+          }
+        },
+        "production": {
+          "type": "object",
+          "required": ["paths", "sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "paths": {
+              "type": "array",
+              "maxItems": 512,
+              "items": { "type": "object", "required": ["path", "before", "after"], "additionalProperties": false, "properties": { "path": { "type": "string" }, "before": { "type": ["string", "null"] }, "after": { "type": ["string", "null"] } } }
+            },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "proof": {
+          "type": "object",
+          "required": ["test_id", "test", "test_blob", "gate", "output_sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "test_id": { "type": ["string", "null"] },
+            "test": { "type": ["object", "null"], "required": ["path", "name"], "additionalProperties": false, "properties": { "path": { "type": "string" }, "name": { "type": "string" } } },
+            "test_blob": { "type": ["string", "null"] },
+            "gate": { "enum": ["red", "green", "regression"] },
+            "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "identity": { "anyOf": [{ "$ref": "#/$defs/testIdentity" }, { "type": "null" }] },
+            "identity_alias": { "$ref": "#/$defs/receiptRef" }
+          }
+        },
+        "red": {
+          "type": ["object", "null"],
+          "required": ["output_sha256", "record"],
+          "additionalProperties": false,
+          "properties": { "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "record": { "type": ["object", "null"], "additionalProperties": true } }
+        },
+        "history": {
+          "type": ["object", "null"],
+          "required": ["output_path", "output_sha256"],
+          "additionalProperties": false,
+          "properties": { "output_path": { "type": "string" }, "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+        },
+        "reproof": {
+          "type": ["object", "null"],
+          "required": ["gate_output_sha256", "tests", "files"],
+          "additionalProperties": false,
+          "properties": {
+            "gate_output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "tests": { "type": "array", "maxItems": 16, "items": { "type": "object", "required": ["test_id", "path", "full_name"], "additionalProperties": false, "properties": { "test_id": { "type": "string" }, "path": { "type": "string" }, "full_name": { "type": "string" } } } },
+            "files": { "type": "array", "maxItems": 32, "items": { "type": "object", "required": ["path", "sha256", "archived"], "additionalProperties": false, "properties": { "path": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "archived": { "type": "string" } } } },
+            "commit": { "$ref": "#/$defs/sha", "description": "The re-proof unit settle committed it in (absent in a record from before re-proof units: never committed)." }
+          }
+        },
+        "archive": { "type": ["string", "null"] },
+        "migrated": { "type": "boolean" }
+      }
+    },
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
   }
 }

@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { extractZip, readZip } from '../helpers/zip.js';
@@ -97,6 +97,8 @@ describe('npm run package', () => {
       'commands/run.md',
       'skills/node-worker/SKILL.md',
       'agents/module-worker.md',
+      'agents/acceptance-reviewer.md',
+      'hooks/hooks.json',
       'templates/control-repo/repositories.example.yaml',
       'package.json',
       'README.md',
@@ -108,8 +110,31 @@ describe('npm run package', () => {
     ]) {
       expect(names, required).toContain(required);
     }
-    const forbidden = /^(tests|src|node_modules|scripts|artifacts|\.git|\.github|\.claude\/)|\.map$|\.ts$|PUBLIC_RELEASE_TASK|DESIGN\.md|implementation\//;
+    const forbidden = /^(tests|src|node_modules|scripts|artifacts|evals-[^/]+|\.git|\.github|\.claude\/)|\.map$|\.ts$|PUBLIC_RELEASE_TASK|PUBLIC-READINESS|DESIGN\.md|implementation\//;
     expect(names.filter((n) => forbidden.test(n))).toEqual([]);
+  });
+
+  it('ships the user documentation, and leaves eval reports and benchmark audits in the repository', () => {
+    const docs = readZip(first.zip)
+      .map((e) => e.name)
+      .filter((n) => n.startsWith('docs/'));
+    expect(docs).toEqual(['docs/ADAPTERS.md', 'docs/DATA_HANDLING.md', 'docs/PERMISSION_MODEL.md', 'docs/RELEASING.md', 'docs/THREAT_MODEL.md']);
+  });
+
+  it('resolves every relative link in a shipped Markdown file inside the archive', () => {
+    const entries = readZip(first.zip);
+    const names = new Set(entries.map((e) => e.name));
+    const broken: string[] = [];
+    for (const entry of entries.filter((e) => e.name.endsWith('.md'))) {
+      const text = entry.data.toString('utf8').replace(/^```[\s\S]*?^```/gm, '');
+      const targets = [...text.matchAll(/\]\(([^)\s]+)\)/g), ...text.matchAll(/^\[[^\]]+\]:\s*(\S+)/gm)].map((m) => m[1] as string);
+      for (const target of targets) {
+        if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(target)) continue;
+        const path = posix.normalize(posix.join(posix.dirname(entry.name), target.replace(/[#?].*$/, '')));
+        if (!names.has(path) && ![...names].some((n) => n.startsWith(`${path.replace(/\/$/, '')}/`))) broken.push(`${entry.name} -> ${target}`);
+      }
+    }
+    expect(broken).toEqual([]);
   });
 
   it('ships a runtime package.json without development metadata', () => {
@@ -204,7 +229,8 @@ describe('install and run from the release ZIP alone', () => {
     const control = join(work, 'control');
     expect(cli(['init', control]).status).toBe(0);
     makeGitRepo(join(work, 'core'), { files: { 'package.json': '{}\n' } });
-    const reg = cli(['repo', 'register', '--control-root', control, '--name', 'core', '--path', '../core', '--base-branch', 'main', '--', 'node', '--test']);
+    const key = (JSON.parse(cli(['controller', 'open', '--control-root', control, '--json']).stdout) as { authority: string }).authority;
+    const reg = cli(['repo', 'register', '--control-root', control, '--authority', key, '--name', 'core', '--path', '../core', '--base-branch', 'main', '--', 'node', '--test']);
     expect(reg.status, reg.stderr).toBe(0);
 
     const graph = YAML.parse(readFileSync(join(plugin, 'templates', 'control-repo', 'features', 'FEATURE-TEMPLATE', 'PORTFOLIO-GRAPH.example.yaml'), 'utf8')) as Record<string, unknown>;

@@ -1,0 +1,850 @@
+{
+  "revision": 34,
+  "data": {
+    "schema_version": 1,
+    "feature_id": "PCM-101",
+    "feature_state": "RUNNING",
+    "graph_hash": "b3108a150800af3beffa056b085afe99ef8ca83c6c5c9170da8dd4e904a7414c",
+    "created_at": "2026-10-12T03:30:25.777Z",
+    "updated_at": "2026-10-12T03:37:21.360Z",
+    "nodes": {
+      "PCM-101.visits.vet.impl": {
+        "state": "BLOCKED",
+        "attempts": 1,
+        "claim": null,
+        "evidence": {
+          "red": {
+            "kind": "red",
+            "node_id": "PCM-101.visits.vet.impl",
+            "command": [
+              "./mvnw",
+              "-B",
+              "-o",
+              "-Dspring-boot.build-image.skip=true",
+              "-pl",
+              "spring-petclinic-visits-service",
+              "test"
+            ],
+            "exit_code": 1,
+            "started_at": "2026-10-12T03:31:51.230Z",
+            "finished_at": "2026-10-12T03:32:03.214Z",
+            "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl",
+            "repository": "spring-petclinic-microservices",
+            "commit_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+            "output_path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/red.681682cb9ed8d3fb.log",
+            "output_sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3",
+            "failure_fingerprint": "ec2ba8381256f2a1",
+            "module": "visits-service",
+            "module_sha256": "3460c51fe64a8cc3a09b3fef8cd795523d9f432b2d4627b98c7bef8658dfd30c",
+            "plan_sha256": "1fd0256a660c35531a6df8818117a3f4490e9ea5fed85467b51776b2f2c35271",
+            "results": {
+              "format": "junit-xml",
+              "path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/red.results.76917774e9033852.json",
+              "sha256": "76917774e90338521f80e18dc0a35166ab7d54e564977eda1f97065f1832378e",
+              "total": 7,
+              "passed": 1,
+              "failed": 6,
+              "skipped": 0
+            },
+            "red_reason": "behaviour-missing",
+            "red_category": "assertion",
+            "red_fingerprint": "1c7234cddd40da02",
+            "red_detail": "visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet, createWithVetStoresAndReturnsIt, createWithoutVetHasNullVet, createWithNonPositiveVetIsRejectedAndNotStored, vetVisitsOrderedByDateThenId, vetWithoutVisitsGetsEmptyArray failed for a missing behaviour (assertion)",
+            "red_tests": [
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet",
+                "status": "failed",
+                "category": "assertion",
+                "type": "org.opentest4j.AssertionFailedError",
+                "fingerprint": "4113024f5c203765"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "createWithVetStoresAndReturnsIt",
+                "status": "failed",
+                "category": "assertion",
+                "type": "java.lang.AssertionError",
+                "fingerprint": "524625694b0a05c7"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "createWithoutVetHasNullVet",
+                "status": "failed",
+                "category": "assertion",
+                "type": "java.lang.AssertionError",
+                "fingerprint": "524625694b0a05c7"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "createWithNonPositiveVetIsRejectedAndNotStored",
+                "status": "failed",
+                "category": "assertion",
+                "type": "java.lang.AssertionError",
+                "fingerprint": "794a2ae0ef7f1ddf"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "vetVisitsOrderedByDateThenId",
+                "status": "failed",
+                "category": "exception",
+                "type": "org.springframework.jdbc.BadSqlGrammarException",
+                "fingerprint": "4214955ebf131277"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "vetWithoutVisitsGetsEmptyArray",
+                "status": "failed",
+                "category": "assertion",
+                "type": "java.lang.AssertionError",
+                "fingerprint": "4ed83f7d08e1c1bc"
+              }
+            ],
+            "red_declared": [
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "createWithVetStoresAndReturnsIt"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "createWithoutVetHasNullVet"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "createWithNonPositiveVetIsRejectedAndNotStored"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "vetVisitsOrderedByDateThenId"
+              },
+              {
+                "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "name": "vetWithoutVisitsGetsEmptyArray"
+              }
+            ]
+          },
+          "green": {
+            "kind": "green",
+            "node_id": "PCM-101.visits.vet.impl",
+            "command": [
+              "./mvnw",
+              "-B",
+              "-o",
+              "-Dspring-boot.build-image.skip=true",
+              "-pl",
+              "spring-petclinic-visits-service",
+              "test"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-12T03:32:27.503Z",
+            "finished_at": "2026-10-12T03:32:38.344Z",
+            "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl",
+            "repository": "spring-petclinic-microservices",
+            "commit_sha": "f53893c75aaceddcbec8d5f2ff0e7b0b73758825",
+            "output_path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/green.aae3c9b8f99d95ea.log",
+            "output_sha256": "aae3c9b8f99d95ea31acf23537796bc90c9a8009acf979bb33d3b404a10fd9dd",
+            "failure_fingerprint": null,
+            "module": "visits-service",
+            "module_sha256": "3460c51fe64a8cc3a09b3fef8cd795523d9f432b2d4627b98c7bef8658dfd30c",
+            "plan_sha256": "1fd0256a660c35531a6df8818117a3f4490e9ea5fed85467b51776b2f2c35271",
+            "results": {
+              "format": "junit-xml",
+              "path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/green.results.b084901187e53a8c.json",
+              "sha256": "b084901187e53a8c93f135b8f00c86ffab8c6589defea87a4b379bdc7e472ffa",
+              "total": 7,
+              "passed": 7,
+              "failed": 0,
+              "skipped": 0
+            }
+          },
+          "regression": {
+            "kind": "regression",
+            "node_id": "PCM-101.visits.vet.impl",
+            "command": [
+              "./mvnw",
+              "-B",
+              "-o",
+              "-Dspring-boot.build-image.skip=true",
+              "test"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-12T03:32:43.519Z",
+            "finished_at": "2026-10-12T03:33:23.108Z",
+            "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl",
+            "repository": "spring-petclinic-microservices",
+            "commit_sha": "2a1debc27684068803c3018b3bfd1dd01d11059f",
+            "output_path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/regression.75d24713b23ef398.log",
+            "output_sha256": "75d24713b23ef398711178df78388590eae4323e34d2892a5971e768d9854e8a",
+            "failure_fingerprint": null
+          }
+        },
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": "CRITERION_TEST_UNKNOWN:java-full_name-class-prefix-never-matches-declaredAt",
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 273627,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 1
+        },
+        "updated_at": "2026-10-12T03:35:03.745Z",
+        "branch_base_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+        "tdd_red_bindings": [
+          {
+            "head_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+            "tests": [
+              {
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "blob": "2f96f149c5fd55f2a58da62ab61362cca045ab4f"
+              }
+            ],
+            "tests_sha256": "59de422833686bbec9d1308149b2544ca2a0d3b01acf8ce367b041802026553e",
+            "evidence_sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3",
+            "recorded_at": "2026-10-12T03:32:03.253Z",
+            "red_tests": [
+              {
+                "id": "fb06cc2d15596817",
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithNonPositiveVetIsRejectedAndNotStored",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "53ad4ca8e8338410",
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "6ab37a4687726b87",
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithVetStoresAndReturnsIt",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "429d656ea857cc89",
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#vetWithoutVisitsGetsEmptyArray",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "6973d51231220890",
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#vetVisitsOrderedByDateThenId",
+                "status": "failed",
+                "category": "exception"
+              },
+              {
+                "id": "5777c3f1ea773642",
+                "path": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+                "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithoutVetHasNullVet",
+                "status": "failed",
+                "category": "assertion"
+              }
+            ]
+          }
+        ],
+        "last_settlement": {
+          "capability_sha256": "5dce461f691c18b7abc6b169e20c202b7b65b7c9b73974ab3f8bc976f4b76bce",
+          "claim_id": "6c039c8f-7ce5-49d6-8e78-51cdd165f634",
+          "outcome": "BLOCKED",
+          "state": "BLOCKED",
+          "detail": "blocked",
+          "settled_at": "2026-10-12T03:35:03.761Z",
+          "dispatch_id": "46b82f93-0b80-4604-ac8b-cc6746291835",
+          "module_sha256": "3460c51fe64a8cc3a09b3fef8cd795523d9f432b2d4627b98c7bef8658dfd30c"
+        }
+      },
+      "PCM-101.gateway.vetname.impl": {
+        "state": "REGRESSION_VERIFIED",
+        "attempts": 1,
+        "claim": {
+          "claim_id": "a38c98b5-458b-4fa1-9009-26a1e67eaed0",
+          "owner": "mycelink",
+          "worktree": "/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+          "branch": "wip/PCM-101/gateway.vetname.impl",
+          "claimed_at": "2026-10-12T03:31:29.158Z",
+          "capability_sha256": "53ae661f6736dad67ab38afa1e6baef2a07b1d6eae2e002cce9c6ae26aee01b7",
+          "mode": "host",
+          "attempt": 1,
+          "expires_at": "2026-10-12T04:46:29.158Z",
+          "settling": null,
+          "dispatch_id": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+          "result_file": "result-4d95ebee-0bf5-408f-8ec1-1001ca50844d.json",
+          "tdd_policy": {
+            "test_paths": [
+              "*/src/test/**"
+            ],
+            "production_roots": [
+              "**/src/main/**"
+            ],
+            "declaration_paths": [],
+            "source": "repository",
+            "sha256": "dded94ab34a3198aa536db3eb9e4abf349eb92e019c6c807650cf0d0f838268d"
+          },
+          "verification": {
+            "module": "api-gateway",
+            "module_sha256": "8030aba17508da8cb8b0978452081e156201f0d1d4befaccf1c46bffbac4bea0",
+            "path": "spring-petclinic-api-gateway",
+            "runtime_tests": true,
+            "plan": {
+              "setup": [],
+              "build": [],
+              "test": [
+                "./mvnw",
+                "-B",
+                "-o",
+                "-Dspring-boot.build-image.skip=true",
+                "-pl",
+                "spring-petclinic-api-gateway",
+                "test"
+              ],
+              "report": {
+                "format": "junit-xml",
+                "dir": "spring-petclinic-api-gateway/target/surefire-reports"
+              },
+              "timeout_seconds": 1800
+            },
+            "plan_sha256": "7fc7ad58bccf2c5ceb2c55277b4c6765e2aeac9dcee7feb6790e0caa8a96dd22",
+            "regression": {
+              "command": [
+                "./mvnw",
+                "-B",
+                "-o",
+                "-Dspring-boot.build-image.skip=true",
+                "test"
+              ],
+              "sha256": "fe0d7443348d53a19864bc3eacd9e1c6e8c1fd319b2c3098c42834387e697bd1"
+            }
+          },
+          "acceptance": {
+            "manifest_sha256": "f788cf1c25d64de71e21ffd27a8aa727e5483e1f26a176ab2b80572e2d3795e2",
+            "criteria_sha256": "290dd908d814b5a7d53f8ad793401231bf3dcc714f4667aaff2a130582401595"
+          },
+          "epoch": 0,
+          "lineage": 0,
+          "generation": 0,
+          "lease_kind": "worker",
+          "host_session": {
+            "session_id": "00000000-0000-4000-8000-000000005101",
+            "transcript_path": "/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-PCM-101-final-with-normal-workspace/00000000-0000-4000-8000-000000005101.jsonl",
+            "bound_at": "2026-10-12T03:31:28.740Z"
+          },
+          "base_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+          "challenge_red": null,
+          "cycle_declared": null,
+          "capture_pending": null,
+          "result_captured_sha256": "ba5f57ef0321328f8c42f17964165da86db8b55c76a0b76319b33a13eb84d8fc",
+          "result_captured_file": "result.4d95ebee-0bf5-408f-8ec1-1001ca50844d.2409f4318b73129888cc7c758ec3c7b6.json",
+          "result_captured_dispatch_id": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+          "usage_counted_for": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+          "seal": {
+            "dispatch_id": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+            "head_sha": "50f221d3c1e24fedb3db20b3fe65c0a0452d82ef",
+            "base_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+            "policy_sha256": "dded94ab34a3198aa536db3eb9e4abf349eb92e019c6c807650cf0d0f838268d",
+            "sealed_at": "2026-10-12T03:37:21.309Z"
+          },
+          "evidence_correction": {
+            "code": "CRITERION_TEST_UNKNOWN",
+            "detail": "CRITERION_EVIDENCE_INVALID:CRITERION_TEST_UNKNOWN: AC-5 (test_id d49388d180525625, red): spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java declares no test \"visitsCarryVetIdAndVetName\" at the submitted head 50f221d3c1e2: a criterion is proved only by a test the head holds (a run of tests never committed proves nothing here)",
+            "criterion": "AC-5",
+            "kind": "new-behavior",
+            "required_gate": "red",
+            "cycle": false,
+            "candidates": [
+              {
+                "id": "db57d3e470a06614",
+                "path": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "full_name": "org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest#vetNameIsNullWhenVetsServiceErrors",
+                "status": "failed",
+                "gate": "red"
+              },
+              {
+                "id": "d49388d180525625",
+                "path": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "full_name": "org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest#visitsCarryVetIdAndVetName",
+                "status": "failed",
+                "gate": "red"
+              }
+            ],
+            "corrections": 0,
+            "result_sha256": "ba5f57ef0321328f8c42f17964165da86db8b55c76a0b76319b33a13eb84d8fc",
+            "commit_sha": "50f221d3c1e24fedb3db20b3fe65c0a0452d82ef",
+            "at": "2026-10-12T03:37:21.348Z",
+            "held": {
+              "state": "REGRESSION_VERIFIED",
+              "evidence": {
+                "red": {
+                  "kind": "red",
+                  "node_id": "PCM-101.gateway.vetname.impl",
+                  "command": [
+                    "./mvnw",
+                    "-B",
+                    "-o",
+                    "-Dspring-boot.build-image.skip=true",
+                    "-pl",
+                    "spring-petclinic-api-gateway",
+                    "test"
+                  ],
+                  "exit_code": 1,
+                  "started_at": "2026-10-12T03:32:45.722Z",
+                  "finished_at": "2026-10-12T03:32:58.739Z",
+                  "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+                  "repository": "spring-petclinic-microservices",
+                  "commit_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+                  "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/red.e99e87e71644a6f5.log",
+                  "output_sha256": "e99e87e71644a6f50db5d73303f999ec299854237d41731164e7a67715789fca",
+                  "failure_fingerprint": "6acd3122b91f7d3c",
+                  "module": "api-gateway",
+                  "module_sha256": "8030aba17508da8cb8b0978452081e156201f0d1d4befaccf1c46bffbac4bea0",
+                  "plan_sha256": "7fc7ad58bccf2c5ceb2c55277b4c6765e2aeac9dcee7feb6790e0caa8a96dd22",
+                  "results": {
+                    "format": "junit-xml",
+                    "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/red.results.eda1f1d31e373fa2.json",
+                    "sha256": "eda1f1d31e373fa2cf7b20d14dd26341af01847e029c08dbcf5b7077f4fd8258",
+                    "total": 11,
+                    "passed": 9,
+                    "failed": 2,
+                    "skipped": 0
+                  },
+                  "red_reason": "behaviour-missing",
+                  "red_category": "assertion",
+                  "red_fingerprint": "5a41a4d43a84891d",
+                  "red_detail": "visitsCarryVetIdAndVetName, vetNameIsNullWhenVetsServiceErrors failed for a missing behaviour (assertion)",
+                  "red_tests": [
+                    {
+                      "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                      "name": "visitsCarryVetIdAndVetName",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "java.lang.AssertionError",
+                      "fingerprint": "bd5c9c19358dc890"
+                    },
+                    {
+                      "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                      "name": "vetNameIsNullWhenVetsServiceErrors",
+                      "status": "failed",
+                      "category": "assertion",
+                      "type": "java.lang.AssertionError",
+                      "fingerprint": "bd5c9c19358dc890"
+                    }
+                  ],
+                  "red_declared": [
+                    {
+                      "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                      "name": "visitsCarryVetIdAndVetName"
+                    },
+                    {
+                      "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                      "name": "vetNameIsNullWhenVetsServiceErrors"
+                    }
+                  ]
+                },
+                "green": {
+                  "kind": "green",
+                  "node_id": "PCM-101.gateway.vetname.impl",
+                  "command": [
+                    "./mvnw",
+                    "-B",
+                    "-o",
+                    "-Dspring-boot.build-image.skip=true",
+                    "-pl",
+                    "spring-petclinic-api-gateway",
+                    "test"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-12T03:33:42.452Z",
+                  "finished_at": "2026-10-12T03:33:52.389Z",
+                  "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+                  "repository": "spring-petclinic-microservices",
+                  "commit_sha": "a57cc312cb0aa508902323efd1580125f0cf6e36",
+                  "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/green.af3ecdc3f6080ada.log",
+                  "output_sha256": "af3ecdc3f6080adaedfb30fe96695671cdbad32256684f5ba76d7b68b0c46912",
+                  "failure_fingerprint": null,
+                  "module": "api-gateway",
+                  "module_sha256": "8030aba17508da8cb8b0978452081e156201f0d1d4befaccf1c46bffbac4bea0",
+                  "plan_sha256": "7fc7ad58bccf2c5ceb2c55277b4c6765e2aeac9dcee7feb6790e0caa8a96dd22",
+                  "results": {
+                    "format": "junit-xml",
+                    "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/green.results.9d62308d2180db7c.json",
+                    "sha256": "9d62308d2180db7c3be5aa782af0fccf6615ade00b1a7feb9fd1b54ab0fe747a",
+                    "total": 11,
+                    "passed": 11,
+                    "failed": 0,
+                    "skipped": 0
+                  }
+                },
+                "regression": {
+                  "kind": "regression",
+                  "node_id": "PCM-101.gateway.vetname.impl",
+                  "command": [
+                    "./mvnw",
+                    "-B",
+                    "-o",
+                    "-Dspring-boot.build-image.skip=true",
+                    "test"
+                  ],
+                  "exit_code": 0,
+                  "started_at": "2026-10-12T03:33:56.688Z",
+                  "finished_at": "2026-10-12T03:34:29.501Z",
+                  "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+                  "repository": "spring-petclinic-microservices",
+                  "commit_sha": "50f221d3c1e24fedb3db20b3fe65c0a0452d82ef",
+                  "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/regression.710deb09b072e217.log",
+                  "output_sha256": "710deb09b072e217be091520a912f6b15adeeba5a27da2a84d097daaede6db7a",
+                  "failure_fingerprint": null
+                }
+              },
+              "bindings": 1
+            }
+          }
+        },
+        "evidence": {
+          "red": {
+            "kind": "red",
+            "node_id": "PCM-101.gateway.vetname.impl",
+            "command": [
+              "./mvnw",
+              "-B",
+              "-o",
+              "-Dspring-boot.build-image.skip=true",
+              "-pl",
+              "spring-petclinic-api-gateway",
+              "test"
+            ],
+            "exit_code": 1,
+            "started_at": "2026-10-12T03:32:45.722Z",
+            "finished_at": "2026-10-12T03:32:58.739Z",
+            "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+            "repository": "spring-petclinic-microservices",
+            "commit_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+            "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/red.e99e87e71644a6f5.log",
+            "output_sha256": "e99e87e71644a6f50db5d73303f999ec299854237d41731164e7a67715789fca",
+            "failure_fingerprint": "6acd3122b91f7d3c",
+            "module": "api-gateway",
+            "module_sha256": "8030aba17508da8cb8b0978452081e156201f0d1d4befaccf1c46bffbac4bea0",
+            "plan_sha256": "7fc7ad58bccf2c5ceb2c55277b4c6765e2aeac9dcee7feb6790e0caa8a96dd22",
+            "results": {
+              "format": "junit-xml",
+              "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/red.results.eda1f1d31e373fa2.json",
+              "sha256": "eda1f1d31e373fa2cf7b20d14dd26341af01847e029c08dbcf5b7077f4fd8258",
+              "total": 11,
+              "passed": 9,
+              "failed": 2,
+              "skipped": 0
+            },
+            "red_reason": "behaviour-missing",
+            "red_category": "assertion",
+            "red_fingerprint": "5a41a4d43a84891d",
+            "red_detail": "visitsCarryVetIdAndVetName, vetNameIsNullWhenVetsServiceErrors failed for a missing behaviour (assertion)",
+            "red_tests": [
+              {
+                "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "name": "visitsCarryVetIdAndVetName",
+                "status": "failed",
+                "category": "assertion",
+                "type": "java.lang.AssertionError",
+                "fingerprint": "bd5c9c19358dc890"
+              },
+              {
+                "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "name": "vetNameIsNullWhenVetsServiceErrors",
+                "status": "failed",
+                "category": "assertion",
+                "type": "java.lang.AssertionError",
+                "fingerprint": "bd5c9c19358dc890"
+              }
+            ],
+            "red_declared": [
+              {
+                "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "name": "visitsCarryVetIdAndVetName"
+              },
+              {
+                "file": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "name": "vetNameIsNullWhenVetsServiceErrors"
+              }
+            ]
+          },
+          "green": {
+            "kind": "green",
+            "node_id": "PCM-101.gateway.vetname.impl",
+            "command": [
+              "./mvnw",
+              "-B",
+              "-o",
+              "-Dspring-boot.build-image.skip=true",
+              "-pl",
+              "spring-petclinic-api-gateway",
+              "test"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-12T03:33:42.452Z",
+            "finished_at": "2026-10-12T03:33:52.389Z",
+            "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+            "repository": "spring-petclinic-microservices",
+            "commit_sha": "a57cc312cb0aa508902323efd1580125f0cf6e36",
+            "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/green.af3ecdc3f6080ada.log",
+            "output_sha256": "af3ecdc3f6080adaedfb30fe96695671cdbad32256684f5ba76d7b68b0c46912",
+            "failure_fingerprint": null,
+            "module": "api-gateway",
+            "module_sha256": "8030aba17508da8cb8b0978452081e156201f0d1d4befaccf1c46bffbac4bea0",
+            "plan_sha256": "7fc7ad58bccf2c5ceb2c55277b4c6765e2aeac9dcee7feb6790e0caa8a96dd22",
+            "results": {
+              "format": "junit-xml",
+              "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/green.results.9d62308d2180db7c.json",
+              "sha256": "9d62308d2180db7c3be5aa782af0fccf6615ade00b1a7feb9fd1b54ab0fe747a",
+              "total": 11,
+              "passed": 11,
+              "failed": 0,
+              "skipped": 0
+            }
+          },
+          "regression": {
+            "kind": "regression",
+            "node_id": "PCM-101.gateway.vetname.impl",
+            "command": [
+              "./mvnw",
+              "-B",
+              "-o",
+              "-Dspring-boot.build-image.skip=true",
+              "test"
+            ],
+            "exit_code": 0,
+            "started_at": "2026-10-12T03:33:56.688Z",
+            "finished_at": "2026-10-12T03:34:29.501Z",
+            "cwd": ".mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+            "repository": "spring-petclinic-microservices",
+            "commit_sha": "50f221d3c1e24fedb3db20b3fe65c0a0452d82ef",
+            "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/regression.710deb09b072e217.log",
+            "output_sha256": "710deb09b072e217be091520a912f6b15adeeba5a27da2a84d097daaede6db7a",
+            "failure_fingerprint": null
+          }
+        },
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 352040,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 1
+        },
+        "updated_at": "2026-10-12T03:34:29.546Z",
+        "branch_base_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+        "tdd_red_bindings": [
+          {
+            "head_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+            "tests": [
+              {
+                "path": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "blob": "b69d2b527e51c6e8e58ad8c580213fe277ae37fb"
+              }
+            ],
+            "tests_sha256": "34f22fbda593cf70eb91dff11fff8fd4cbe278134f3f0325d0b158c5eacc1c89",
+            "evidence_sha256": "e99e87e71644a6f50db5d73303f999ec299854237d41731164e7a67715789fca",
+            "recorded_at": "2026-10-12T03:32:58.783Z",
+            "red_tests": [
+              {
+                "id": "db57d3e470a06614",
+                "path": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "full_name": "org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest#vetNameIsNullWhenVetsServiceErrors",
+                "status": "failed",
+                "category": "assertion"
+              },
+              {
+                "id": "d49388d180525625",
+                "path": "spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+                "full_name": "org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest#visitsCarryVetIdAndVetName",
+                "status": "failed",
+                "category": "assertion"
+              }
+            ]
+          }
+        ],
+        "last_settlement": {
+          "capability_sha256": "53ae661f6736dad67ab38afa1e6baef2a07b1d6eae2e002cce9c6ae26aee01b7",
+          "claim_id": "a38c98b5-458b-4fa1-9009-26a1e67eaed0",
+          "outcome": "EVIDENCE_CORRECTION_REQUIRED",
+          "state": "REGRESSION_VERIFIED",
+          "detail": "CRITERION_EVIDENCE_INVALID:CRITERION_TEST_UNKNOWN: AC-5 (test_id d49388d180525625, red): spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java declares no test \"visitsCarryVetIdAndVetName\" at the submitted head 50f221d3c1e2: a criterion is proved only by a test the head holds (a run of tests never committed proves nothing here)",
+          "settled_at": "2026-10-12T03:37:21.360Z",
+          "dispatch_id": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+          "module_sha256": "8030aba17508da8cb8b0978452081e156201f0d1d4befaccf1c46bffbac4bea0"
+        },
+        "tdd_history": {
+          "ok": true,
+          "base_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+          "head_sha": "50f221d3c1e24fedb3db20b3fe65c0a0452d82ef",
+          "cycles": 1,
+          "compatibility_units": 0,
+          "code": null,
+          "policy_sha256": "dded94ab34a3198aa536db3eb9e4abf349eb92e019c6c807650cf0d0f838268d",
+          "output_path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/tdd-history.c23f3f35d9eaffa6.json",
+          "output_sha256": "c23f3f35d9eaffa6a88618ebe07dad89b2827f66755b6c3b10b8717eaee9528a",
+          "verified_at": "2026-10-12T03:37:21.309Z"
+        }
+      },
+      "PCM-101.visits.compat.verify": {
+        "state": "PLANNED",
+        "attempts": 0,
+        "claim": null,
+        "evidence": {},
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 0
+        },
+        "updated_at": "2026-10-12T03:30:25.777Z"
+      },
+      "PCM-101.gateway.compat.verify": {
+        "state": "PLANNED",
+        "attempts": 0,
+        "claim": null,
+        "evidence": {},
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 0
+        },
+        "updated_at": "2026-10-12T03:30:25.777Z"
+      },
+      "PCM-101.release.candidate.build": {
+        "state": "PLANNED",
+        "attempts": 0,
+        "claim": null,
+        "evidence": {},
+        "failure_counts": {},
+        "last_failure_fingerprint": null,
+        "integrated_sha": null,
+        "blocked_reason": null,
+        "usage": {
+          "model_turns": 0,
+          "wall_clock_ms": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "sessions": 0
+        },
+        "updated_at": "2026-10-12T03:30:25.777Z"
+      }
+    },
+    "usage": {
+      "model_turns": 0,
+      "wall_clock_ms": 625667,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "sessions": 2
+    },
+    "budget": {
+      "max_total_model_turns": 400,
+      "max_total_wall_clock_ms": 21600000,
+      "max_total_sessions": 40,
+      "max_writer_concurrency": 2,
+      "max_same_failure": 2
+    },
+    "blocked_reason": null,
+    "pending_decisions": [],
+    "candidates": [],
+    "current_candidate": null,
+    "orchestration": {
+      "epoch": 0,
+      "bumps": [],
+      "leases": [
+        {
+          "lease_id": "46b82f93-0b80-4604-ac8b-cc6746291835",
+          "kind": "worker",
+          "node_id": "PCM-101.visits.vet.impl",
+          "review_id": null,
+          "claim_id": "6c039c8f-7ce5-49d6-8e78-51cdd165f634",
+          "dispatch_id": "46b82f93-0b80-4604-ac8b-cc6746291835",
+          "capability_sha256": "5dce461f691c18b7abc6b169e20c202b7b65b7c9b73974ab3f8bc976f4b76bce",
+          "epoch": 0,
+          "lineage": 0,
+          "generation": 0,
+          "status": "settled",
+          "issued_at": "2026-10-12T03:30:30.094Z",
+          "closed_at": "2026-10-12T03:35:03.745Z",
+          "closed_reason": "settled BLOCKED",
+          "worktree": "/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.visits.vet.impl",
+          "result_file": "result-46b82f93-0b80-4604-ac8b-cc6746291835.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005101",
+            "transcript_path": "/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-PCM-101-final-with-normal-workspace/00000000-0000-4000-8000-000000005101.jsonl",
+            "bound_at": "2026-10-12T03:30:29.672Z"
+          },
+          "outcome": "BLOCKED",
+          "settled_epoch": 0
+        },
+        {
+          "lease_id": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+          "kind": "worker",
+          "node_id": "PCM-101.gateway.vetname.impl",
+          "review_id": null,
+          "claim_id": "a38c98b5-458b-4fa1-9009-26a1e67eaed0",
+          "dispatch_id": "4d95ebee-0bf5-408f-8ec1-1001ca50844d",
+          "capability_sha256": "53ae661f6736dad67ab38afa1e6baef2a07b1d6eae2e002cce9c6ae26aee01b7",
+          "epoch": 0,
+          "lineage": 0,
+          "generation": 0,
+          "status": "active",
+          "issued_at": "2026-10-12T03:31:29.158Z",
+          "closed_at": null,
+          "closed_reason": null,
+          "worktree": "/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl",
+          "result_file": "result-4d95ebee-0bf5-408f-8ec1-1001ca50844d.json",
+          "host": {
+            "session_id": "00000000-0000-4000-8000-000000005101",
+            "transcript_path": "/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-PCM-101-final-with-normal-workspace/00000000-0000-4000-8000-000000005101.jsonl",
+            "bound_at": "2026-10-12T03:31:28.740Z"
+          }
+        }
+      ]
+    },
+    "acceptance": {
+      "path": "features/PCM-101/ACCEPTANCE.json",
+      "sha256": "f788cf1c25d64de71e21ffd27a8aa727e5483e1f26a176ab2b80572e2d3795e2"
+    },
+    "acceptance_review": {
+      "required": true,
+      "max_rounds": 2,
+      "criterion_ceiling": 6,
+      "max_review_sessions": 8,
+      "review_wall_clock_ms": null,
+      "reviewer_timeout_ms": 1200000,
+      "open": null,
+      "reviews": [],
+      "blocked": null,
+      "usage": {
+        "model_turns": 0,
+        "wall_clock_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "sessions": 0
+      }
+    }
+  }
+}

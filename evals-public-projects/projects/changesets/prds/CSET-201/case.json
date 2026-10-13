@@ -1,0 +1,61 @@
+{
+  "schema": "mycelink-bench/prd-case@1",
+  "id": "CSET-201",
+  "case": "changesets-status-explain",
+  "project": "changesets",
+  "archetype": "additive-vertical-slice",
+  "title": "Explain why each package is in the release plan",
+  "requirement": "requirement.md",
+  "modules": {
+    "required": [
+      "types",
+      "assemble-release-plan",
+      "cli"
+    ],
+    "allowed": [
+      "types",
+      "assemble-release-plan",
+      "cli",
+      "test-utils",
+      "site"
+    ]
+  },
+  "allowed_shared_paths": [
+    ".changeset/*.md",
+    "docs/**",
+    "pnpm-lock.yaml"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "modules": [
+        "types"
+      ],
+      "kind": "declaration"
+    },
+    {
+      "id": "AC-2",
+      "modules": [
+        "assemble-release-plan"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "modules": [
+        "cli"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "modules": [
+        "cli"
+      ],
+      "kind": "compatibility"
+    }
+  ],
+  "budget": {
+    "max_turns": 200,
+    "timeout_seconds": 3600
+  },
+  "evaluator_lock": "evaluator.lock.json"
+}

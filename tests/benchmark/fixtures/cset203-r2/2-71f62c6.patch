@@ -1,0 +1,330 @@
+diff --git a/packages/apply-release-plan/src/index.ts b/packages/apply-release-plan/src/index.ts
+index 4f4c6ff..faea757 100644
+--- a/packages/apply-release-plan/src/index.ts
++++ b/packages/apply-release-plan/src/index.ts
+@@ -111,130 +111,224 @@ export async function applyReleasePlan(
+     contextDir,
+   );
+ 
++  const journalPaths = new Set<string>();
+   if (releasePlan.preState?.mode === "exit" && snapshot == null) {
+-    await fs.rm(path.join(cwd, ".changeset", "pre.json"), {
+-      recursive: true,
+-      force: true,
+-    });
+-    touchedFiles.push(path.join(cwd, ".changeset", "pre.json"));
++    journalPaths.add(path.join(cwd, ".changeset", "pre.json"));
+   }
+-
+-  const versionsToUpdate = releases.map(
+-    (release): ComprehensiveRelease & { dir: string } => ({
+-      ...release,
+-      dir: packagesByName.get(release.name)!.dir,
+-    }),
+-  );
+-
+-  const dependencyUpdateOptions: DependencyUpdateOptions = {
+-    cwd,
+-    updateInternalDependencies: config.updateInternalDependencies,
+-    onlyUpdatePeerDependentsWhenOutOfRange:
+-      config.___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH
+-        .onlyUpdatePeerDependentsWhenOutOfRange,
+-    bumpVersionsWithWorkspaceProtocolOnly:
+-      config.bumpVersionsWithWorkspaceProtocolOnly,
+-    snapshot,
+-  };
+-
+-  const filesToFormat: string[] = [];
+   for (const release of releaseWithChangelogs) {
+-    const { changelog, dir, name, newVersion, packageJson } = release;
+-    const pkgJsonEdits = getDependencyVersionEdits(
+-      packageJson,
+-      versionsToUpdate,
+-      dependencyUpdateOptions,
++    journalPaths.add(path.resolve(release.dir, "package.json"));
++    journalPaths.add(path.resolve(release.dir, "CHANGELOG.md"));
++  }
++  if (packages.rootPackage) {
++    journalPaths.add(path.resolve(packages.rootPackage.dir, "package.json"));
++  }
++  for (const changeset of changesets) {
++    journalPaths.add(path.resolve(cwd, ".changeset", `${changeset.id}.md`));
++    journalPaths.add(
++      path.resolve(cwd, ".changeset", "pre", `${changeset.id}.md`),
+     );
+-    if (newVersion != null) {
+-      pkgJsonEdits.push({ keys: ["version"], value: newVersion });
+-    }
+-    const pkgJsonPath = await updatePackageJson(dir, pkgJsonEdits);
+-    if (pkgJsonPath) {
+-      touchedFiles.push(pkgJsonPath);
+-    }
++  }
++  const preDir = path.resolve(cwd, ".changeset", "pre");
++  const journal = await openJournal(cwd, [...journalPaths], preDir);
+ 
+-    if (changelog && changelog.length > 0) {
+-      const changelogPath = path.resolve(dir, "CHANGELOG.md");
+-      await updateChangelog(changelogPath, changelog, name);
+-      touchedFiles.push(changelogPath);
+-      filesToFormat.push(changelogPath);
++  try {
++    if (releasePlan.preState?.mode === "exit" && snapshot == null) {
++      await fs.rm(path.join(cwd, ".changeset", "pre.json"), {
++        recursive: true,
++        force: true,
++      });
++      touchedFiles.push(path.join(cwd, ".changeset", "pre.json"));
+     }
+-  }
+ 
+-  if (packages.rootPackage) {
+-    const pkgJsonEdits = getDependencyVersionEdits(
+-      packages.rootPackage.packageJson,
+-      versionsToUpdate,
+-      dependencyUpdateOptions,
++    const versionsToUpdate = releases.map(
++      (release): ComprehensiveRelease & { dir: string } => ({
++        ...release,
++        dir: packagesByName.get(release.name)!.dir,
++      }),
+     );
+ 
+-    const pkgJsonPath = await updatePackageJson(
+-      packages.rootPackage.dir,
+-      pkgJsonEdits,
+-    );
+-    if (pkgJsonPath) {
+-      touchedFiles.push(pkgJsonPath);
+-    }
+-  }
++    const dependencyUpdateOptions: DependencyUpdateOptions = {
++      cwd,
++      updateInternalDependencies: config.updateInternalDependencies,
++      onlyUpdatePeerDependentsWhenOutOfRange:
++        config.___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH
++          .onlyUpdatePeerDependentsWhenOutOfRange,
++      bumpVersionsWithWorkspaceProtocolOnly:
++        config.bumpVersionsWithWorkspaceProtocolOnly,
++      snapshot,
++    };
+ 
+-  if (filesToFormat.length > 0) {
+-    const formatter = await getFormatter(config.format, cwd);
+-    await formatter(filesToFormat);
+-  }
++    const filesToFormat: string[] = [];
++    for (const release of releaseWithChangelogs) {
++      const { changelog, dir, name, newVersion, packageJson } = release;
++      const pkgJsonEdits = getDependencyVersionEdits(
++        packageJson,
++        versionsToUpdate,
++        dependencyUpdateOptions,
++      );
++      if (newVersion != null) {
++        pkgJsonEdits.push({ keys: ["version"], value: newVersion });
++      }
++      const pkgJsonPath = await updatePackageJson(dir, pkgJsonEdits);
++      if (pkgJsonPath) {
++        touchedFiles.push(pkgJsonPath);
++      }
+ 
+-  const isPreChangesets = releasePlan.preState?.mode === "pre";
+-  if (isPreChangesets && changesets.length > 0) {
+-    await fs.mkdir(path.resolve(cwd, ".changeset", "pre"), { recursive: true });
+-  }
++      if (changelog && changelog.length > 0) {
++        const changelogPath = path.resolve(dir, "CHANGELOG.md");
++        await updateChangelog(changelogPath, changelog, name);
++        touchedFiles.push(changelogPath);
++        filesToFormat.push(changelogPath);
++      }
++    }
+ 
+-  await Promise.all(
+-    changesets.map(async (changeset) => {
+-      const changesetPath = path.resolve(
+-        cwd,
+-        ".changeset",
+-        `${changeset.id}.md`,
++    if (packages.rootPackage) {
++      const pkgJsonEdits = getDependencyVersionEdits(
++        packages.rootPackage.packageJson,
++        versionsToUpdate,
++        dependencyUpdateOptions,
+       );
+-      if (
+-        await fs.access(changesetPath).then(
+-          () => true,
+-          () => false,
+-        )
+-      ) {
+-        // DO NOT remove changeset for skipped packages
+-        // Mixed changeset that contains both skipped packages and not skipped packages are disallowed
+-        // At this point, we know there is no such changeset, because otherwise the program would've already failed,
+-        // so we just check if any skipped package exists in this changeset, and only remove it if none exists
+-        // options to skip packages were added in v2, so we don't need to do it for v1 changesets
++
++      const pkgJsonPath = await updatePackageJson(
++        packages.rootPackage.dir,
++        pkgJsonEdits,
++      );
++      if (pkgJsonPath) {
++        touchedFiles.push(pkgJsonPath);
++      }
++    }
++
++    if (filesToFormat.length > 0) {
++      const formatter = await getFormatter(config.format, cwd);
++      await formatter(filesToFormat);
++    }
++
++    const isPreChangesets = releasePlan.preState?.mode === "pre";
++    if (isPreChangesets && changesets.length > 0) {
++      await fs.mkdir(path.resolve(cwd, ".changeset", "pre"), { recursive: true });
++    }
++
++    await Promise.all(
++      changesets.map(async (changeset) => {
++        const changesetPath = path.resolve(
++          cwd,
++          ".changeset",
++          `${changeset.id}.md`,
++        );
+         if (
+-          !changeset.releases.some((release) =>
+-            shouldSkipPackage(packagesByName.get(release.name)!, {
+-              ignore: config.ignore,
+-              allowPrivatePackages: config.privatePackages.version,
+-            }),
++          await fs.access(changesetPath).then(
++            () => true,
++            () => false,
+           )
+         ) {
+-          if (isPreChangesets) {
+-            const newChangesetPath = path.resolve(
+-              cwd,
+-              ".changeset",
+-              "pre",
+-              `${changeset.id}.md`,
+-            );
+-            await fs.rename(changesetPath, newChangesetPath);
+-            touchedFiles.push(changesetPath, newChangesetPath);
+-          } else {
+-            await fs.rm(changesetPath, { recursive: true, force: true });
+-            touchedFiles.push(changesetPath);
++          // DO NOT remove changeset for skipped packages
++          // Mixed changeset that contains both skipped packages and not skipped packages are disallowed
++          // At this point, we know there is no such changeset, because otherwise the program would've already failed,
++          // so we just check if any skipped package exists in this changeset, and only remove it if none exists
++          // options to skip packages were added in v2, so we don't need to do it for v1 changesets
++          if (
++            !changeset.releases.some((release) =>
++              shouldSkipPackage(packagesByName.get(release.name)!, {
++                ignore: config.ignore,
++                allowPrivatePackages: config.privatePackages.version,
++              }),
++            )
++          ) {
++            if (isPreChangesets) {
++              const newChangesetPath = path.resolve(
++                cwd,
++                ".changeset",
++                "pre",
++                `${changeset.id}.md`,
++              );
++              await fs.rename(changesetPath, newChangesetPath);
++              touchedFiles.push(changesetPath, newChangesetPath);
++            } else {
++              await fs.rm(changesetPath, { recursive: true, force: true });
++              touchedFiles.push(changesetPath);
++            }
+           }
+         }
+-      }
+-    }),
+-  );
++      }),
++    );
++
++  } catch (error) {
++    try {
++      await journal.rollback();
++    } catch {
++      // keep the journal so that a manual recovery is still possible
++      throw new Error("applyReleasePlan failed and could not be rolled back", {
++        cause: error,
++      });
++    }
++    await journal.remove();
++    throw new Error("applyReleasePlan failed and its changes were rolled back", {
++      cause: error,
++    });
++  }
++  await journal.remove();
+ 
+   // We return the touched files to be committed in the cli
+   return touchedFiles;
+ }
+ 
++type JournalEntry = { path: string; content: string | null };
++
++async function openJournal(cwd: string, paths: string[], createdDir: string) {
++  const journalPath = path.join(cwd, ".changeset", ".apply-release-plan.journal");
++  const entries: JournalEntry[] = [];
++  for (const p of paths) {
++    try {
++      entries.push({
++        path: p,
++        content: (await fs.readFile(p)).toString("base64"),
++      });
++    } catch (err: any) {
++      if (err?.code !== "ENOENT" && err?.code !== "EISDIR") throw err;
++      entries.push({ path: p, content: null });
++    }
++  }
++  const dirExisted = await fs.stat(createdDir).then(
++    () => true,
++    () => false,
++  );
++  const changesetDir = path.dirname(journalPath);
++  const changesetDirExisted = await fs.stat(changesetDir).then(
++    () => true,
++    () => false,
++  );
++  await fs.mkdir(changesetDir, { recursive: true });
++  const handle = await fs.open(journalPath, "w");
++  try {
++    await handle.writeFile(
++      JSON.stringify({ version: 1, entries, createdDir, dirExisted }),
++    );
++    await handle.sync();
++  } finally {
++    await handle.close();
++  }
++  return {
++    async rollback() {
++      for (const entry of entries) {
++        if (entry.content === null) {
++          await fs.rm(entry.path, { recursive: true, force: true });
++        } else {
++          await fs.writeFile(entry.path, Buffer.from(entry.content, "base64"));
++        }
++      }
++      if (!dirExisted) {
++        await fs.rm(createdDir, { recursive: true, force: true });
++      }
++    },
++    async remove() {
++      await fs.rm(journalPath, { force: true });
++      if (!changesetDirExisted) {
++        await fs.rmdir(changesetDir).catch(() => {});
++      }
++    },
++  };
++}
++
+ async function getNewChangelogEntry(
+   releasesWithPackage: ModCompWithPackage[],
+   changesets: NewChangeset[],

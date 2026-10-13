@@ -1,0 +1,65 @@
+{
+  "schema": "mycelink-bench/prd-case@1",
+  "id": "CSET-203",
+  "case": "changesets-crash-safe-version",
+  "project": "changesets",
+  "archetype": "failure-concurrency-recovery",
+  "title": "Crash-safe changeset version",
+  "requirement": "requirement.md",
+  "modules": {
+    "required": [
+      "apply-release-plan",
+      "cli"
+    ],
+    "allowed": [
+      "apply-release-plan",
+      "cli",
+      "test-utils",
+      "site"
+    ]
+  },
+  "allowed_shared_paths": [
+    ".changeset/*.md",
+    "docs/**",
+    "pnpm-lock.yaml"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "modules": [
+        "apply-release-plan"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "modules": [
+        "apply-release-plan"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "modules": [
+        "cli"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "modules": [
+        "cli"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "modules": [
+        "apply-release-plan",
+        "cli"
+      ],
+      "kind": "compatibility"
+    }
+  ],
+  "budget": {
+    "max_turns": 200,
+    "timeout_seconds": 3600
+  },
+  "evaluator_lock": "evaluator.lock.json"
+}

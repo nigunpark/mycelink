@@ -1,0 +1,52 @@
+{
+  "schema": "mycelink-acceptance/1",
+  "feature_id": "PCM-101",
+  "source": {
+    "path": "requirements/PCM-101.md",
+    "sha256": "8450d4f2f10809ed492ed87e568607d9b0c5fe53e36032e7b5f7b2a7f8951660"
+  },
+  "criteria": [
+    {
+      "id": "AC-1",
+      "kind": "new-behavior",
+      "text": "**AC-1 — storage (visits-service).** A visit has an optional veterinarian,\n`vetId`: a positive integer, or `null` when no vet is recorded. It is stored\nin the `visits` table as a nullable `vet_id` integer column, in both the\nHSQLDB and the MySQL schema. The existing seed visits have no vet.",
+      "sha256": "e0bea47957160c84ae3ca358cf891d4cb2d9c305bcc9ae5298f49e97ac05307a"
+    },
+    {
+      "id": "AC-2",
+      "kind": "new-behavior",
+      "text": "**AC-2 — create (visits-service).** `POST /owners/{ownerId}/pets/{petId}/visits`\naccepts an optional `vetId` in its JSON body.\n\n- `vetId` absent or `null`: the visit is created exactly as today, with\n  `vetId: null`.\n- `vetId` ≥ 1: the visit is created with that vet.\n- `vetId` ≤ 0: the service answers `400 Bad Request` and stores nothing.",
+      "sha256": "04ffcdcb2cc02e8452a4c23902c799e1b3d6fe8db8ce61843f62bc6dd1b0035b"
+    },
+    {
+      "id": "AC-3",
+      "kind": "new-behavior",
+      "text": "**AC-3 — read (visits-service).** Every visit representation visits-service\nreturns includes the `vetId` property (an integer or `null`): the `POST`\nresponse, `GET /owners/{ownerId}/pets/{petId}/visits` and\n`GET /pets/visits?petId=…`.",
+      "sha256": "a365a8473d14ed9746186ebe5166ff740b924c7ce1b0916f1fda74ecd0485ac7"
+    },
+    {
+      "id": "AC-4",
+      "kind": "new-behavior",
+      "text": "**AC-4 — a vet's visits (visits-service).** `GET /vets/{vetId}/visits`\nanswers `200` with a JSON array of the visits recorded for that vet,\nordered by visit date ascending, then by visit id ascending. It answers `200`\nwith `[]` when the vet has no visits. (Through the gateway this is\n`GET /api/visit/vets/{vetId}/visits`.)",
+      "sha256": "4fb6617457306e797eeec0c6a13068c8eeb5754adf2c842900ea389640e2b23b"
+    },
+    {
+      "id": "AC-5",
+      "kind": "new-behavior",
+      "text": "**AC-5 — owner details (api-gateway).** In the response of\n`GET /api/gateway/owners/{ownerId}`, every visit of every pet has two more\nproperties:\n\n- `vetId`: as returned by visits-service;\n- `vetName`: `\"<firstName> <lastName>\"` of the vet with that id as returned\n  by vets-service `GET /vets` (service id `vets-service`), or `null` when the\n  visit has no vet or vets-service does not list that id.",
+      "sha256": "aaadb94182b82cb9836d5892f37667a89e5f6d4e7c082c13dfd7af28e84eca2e"
+    },
+    {
+      "id": "AC-6",
+      "kind": "new-behavior",
+      "text": "**AC-6 — resilience (api-gateway).** When vets-service is unavailable or\nanswers with an error, `GET /api/gateway/owners/{ownerId}` still answers\n`200` with the owner, every pet and every visit; `vetId` is kept and\n`vetName` is `null`. The existing behaviour when visits-service is\nunavailable (the owner is returned with empty visit lists) is unchanged.",
+      "sha256": "b221a119e0600295102f5bfa678d4081bb31d1b041cf97b577927738f51aae14"
+    },
+    {
+      "id": "AC-7",
+      "kind": "compatibility",
+      "text": "**AC-7 — compatibility.** Apart from the new properties, every response\nkeeps its current shape, status codes and property values. Existing clients\nthat ignore unknown properties keep working.",
+      "sha256": "8daa97b655c3d5b9ad21435e7833681dd20799ddcdd557bf7736d32a7a4df259"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "schema": "mycelink-acceptance-review/1",
+  "feature_id": "CSET-203",
+  "review_id": "CSET-203-R001",
+  "dispatch_id": "adbe2418-2179-43da-8b4c-563b257d9011",
+  "inputs_sha256": "295fa8cd966db35d0fe6e865392db863819c1a51ed2a72d39f776a4438edba0f",
+  "reviewer": { "agent": "mycelink:acceptance-reviewer", "model": "claude-sonnet-5-5" },
+  "criteria": [
+    {
+      "criterion": "AC-1",
+      "verdict": "GAP",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-1.1",
+          "evidence": ["test:1390abd32d3b4c06", "test:10a78b62fe3bf4ad", "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L47-L101", "file:changesets:packages/apply-release-plan/src/index.ts#L166-L192"],
+          "trace": "Tests inject fs.rm and fs.rename failures. They assert package.json and the changeset md bytes are restored, .changeset/pre is removed, and no dot-file is left. No test asserts that a file the run created (CHANGELOG.md, pre.json) is removed. No test fails the changelog write or a package.json write."
+        },
+        {
+          "clause": "AC-1.2",
+          "evidence": ["test:1390abd32d3b4c06", "test:10a78b62fe3bf4ad", "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L58-L58"],
+          "trace": "expect(err.cause).toBe(original) after an injected failure, in both tests."
+        }
+      ],
+      "boundaries": [
+        { "kind": "state", "boundary": "a file the run created (CHANGELOG.md or pre.json) must be absent again after rollback", "covered": false, "evidence": [] },
+        { "kind": "partial-write", "boundary": "failure after earlier package.json and changelog writes, at the changelog write itself", "covered": false, "evidence": [] },
+        { "kind": "state", "boundary": "restore of modified package.json and deleted/moved changeset, directory created removed", "covered": true, "evidence": ["test:1390abd32d3b4c06", "test:10a78b62fe3bf4ad"] }
+      ],
+      "gap": {
+        "missing": "Rollback of files the run CREATED is never asserted. The tests use changelog:false, so no CHANGELOG.md is written. The pre-mode test does not assert that pre.json is absent. No test fails at the changelog write.",
+        "reproduction": "With the default changelog, no CHANGELOG.md exists for pkg-a. Make the changeset removal (fs.rm) or a later write fail. Call applyReleasePlan and assert it rejects with cause equal to the injected error. Then assert CHANGELOG.md does not exist, package.json bytes equal the originals, the changeset bytes are restored, and no dot-file is left. Repeat in pre mode with no pre.json and assert pre.json is absent."
+      },
+      "producer": { "module": "changesets:packages/apply-release-plan/src/rollback.test.ts" }
+    },
+    {
+      "criterion": "AC-2",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-2.1",
+          "evidence": ["test:8a6e93f5aaf7d14c", "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L103-L128", "file:changesets:packages/apply-release-plan/src/index.ts#L145-L154"],
+          "trace": "On the first writeFile, the test asserts a dot-prefixed file already exists in .changeset. The journal is written and fsynced before the apply step."
+        },
+        {
+          "clause": "AC-2.2",
+          "evidence": ["test:8a6e93f5aaf7d14c", "test:1390abd32d3b4c06", "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L69-L73", "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L119-L123"],
+          "trace": "No dot-file remains after success (L119-L123) and after a rollback (L69-L73)."
+        },
+        {
+          "clause": "AC-2.3",
+          "evidence": ["file:changesets:packages/apply-release-plan/src/index.ts#L76-L76"],
+          "trace": "Latitude: the format is JSON with base64 file contents and a createdDirs list, at .changeset/.apply-release-plan-journal.json."
+        }
+      ],
+      "boundaries": [
+        { "kind": "order", "boundary": "journal exists before the first change", "covered": true, "evidence": ["test:8a6e93f5aaf7d14c"] },
+        { "kind": "state", "boundary": "journal removed after success and after rollback", "covered": true, "evidence": ["test:8a6e93f5aaf7d14c", "test:1390abd32d3b4c06"] }
+      ],
+      "gap": null,
+      "producer": null
+    },
+    {
+      "criterion": "AC-3",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-3.1",
+          "evidence": ["test:d17062055f9dbd1b", "test:1e84dda17be0a0d8", "file:changesets:packages/cli/src/commands/version/index.ts#L31-L35"],
+          "trace": "recoverInterruptedRun is the first call in version. A real child process is SIGKILLed mid-apply, and the next run finds and recovers the journal (L115-L176)."
+        },
+        {
+          "clause": "AC-3.2",
+          "evidence": ["test:1e84dda17be0a0d8", "test:d17062055f9dbd1b", "file:changesets:packages/cli/src/commands/version/recovery.test.ts#L72-L77", "file:changesets:packages/cli/src/commands/version/recovery.test.ts#L153-L158"],
+          "trace": "Asserts the warning contains 'interrupted', the journal is gone, and the state is restored and then versioned. The kill test asserts exit 0 and 'interrupted' in the output."
+        },
+        {
+          "clause": "AC-3.3",
+          "evidence": ["test:1e84dda17be0a0d8", "test:d17062055f9dbd1b", "file:changesets:packages/cli/src/commands/version/recovery.test.ts#L78-L85", "file:changesets:packages/cli/src/commands/version/recovery.test.ts#L159-L175"],
+          "trace": "Version is 1.1.0, the changeset is consumed, and CHANGELOG has exactly one '## 1.1.0'."
+        }
+      ],
+      "boundaries": [
+        { "kind": "concurrency", "boundary": "process killed mid-apply, then a rerun", "covered": true, "evidence": ["test:d17062055f9dbd1b"] },
+        { "kind": "order", "boundary": "recovery before reading packages and changesets", "covered": true, "evidence": ["test:1e84dda17be0a0d8"] }
+      ],
+      "gap": null,
+      "producer": null
+    },
+    {
+      "criterion": "AC-4",
+      "verdict": "PASS",
+      "confidence": "high",
+      "clauses": [
+        {
+          "clause": "AC-4.1",
+          "evidence": ["test:f7ab476e6dcb21ad", "file:changesets:packages/cli/src/commands/version/recovery.test.ts#L102-L110"],
+          "trace": "With a changelog function that throws, version rejects with an ExitError whose code is 1. The error message is logged and no logged string contains a stack ('at ' lines)."
+        },
+        {
+          "clause": "AC-4.2",
+          "evidence": ["test:f7ab476e6dcb21ad", "file:changesets:packages/cli/src/commands/version/recovery.test.ts#L111-L112"],
+          "trace": "With commit enabled in the config, git.add and git.commit are asserted not called."
+        }
+      ],
+      "boundaries": [
+        { "kind": "failure", "boundary": "apply fails with commit enabled: exit 1, no git add or commit", "covered": true, "evidence": ["test:f7ab476e6dcb21ad"] }
+      ],
+      "gap": null,
+      "producer": null
+    },
+    {
+      "criterion": "AC-5",
+      "verdict": "GAP",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-5.1",
+          "evidence": ["test:86ba5354ab9f8ee0", "gate:CSET-203.changesets.compat.verify:regression", "file:changesets:packages/cli/src/commands/version/journal-compat.test.ts#L45-L59"],
+          "trace": "A successful run leaves no journal and gives the usual files. The regression gate covers the existing suite."
+        },
+        {
+          "clause": "AC-5.2",
+          "evidence": ["test:7bf9ce613c531aa2", "file:changesets:packages/cli/src/commands/version/journal-compat.test.ts#L61-L72"],
+          "trace": "Only 'changeset status' is tested with a garbage journal present. No test or regression evidence shows 'changeset add' is unaffected by a journal."
+        }
+      ],
+      "boundaries": [
+        { "kind": "state", "boundary": "changeset add with a journal present", "covered": false, "evidence": [] },
+        { "kind": "state", "boundary": "changeset status with a journal present", "covered": true, "evidence": ["test:7bf9ce613c531aa2"] }
+      ],
+      "gap": {
+        "missing": "The clause that 'changeset add' is unaffected by a journal has no test. The receipt and the regression gate run the existing suite, which has no journal fixture for add.",
+        "reproduction": "Create a project with .changeset/.apply-release-plan-journal.json containing 'not even json'. Run the add command non-interactively, for example with a pkg-a minor bump and a message. Assert it succeeds, writes exactly one new .md changeset with the expected content, and leaves the journal bytes untouched."
+      },
+      "producer": { "module": "changesets:packages/cli/src/commands/version/journal-compat.test.ts" }
+    }
+  ],
+  "overall": "GAPS"
+}

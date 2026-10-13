@@ -1,0 +1,97 @@
+{
+  "schema": "mycelink-test-results/1",
+  "format": "junit-xml",
+  "results": [
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitResourceTest#shouldFetchVisits",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitResourceTest.java",
+      "suite": "",
+      "name": "shouldFetchVisits",
+      "status": "passed",
+      "category": "passed",
+      "type": null,
+      "message": null,
+      "fingerprint": null,
+      "test_id": "574528af1b3fa73b",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitResourceTest#shouldFetchVisits"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithNonPositiveVetIsRejectedAndNotStored",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "suite": "",
+      "name": "createWithNonPositiveVetIsRejectedAndNotStored",
+      "status": "failed",
+      "category": "assertion",
+      "type": "java.lang.AssertionError",
+      "message": "Status expected:<400> but was:<201>",
+      "fingerprint": "794a2ae0ef7f1ddf",
+      "test_id": "fb06cc2d15596817",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithNonPositiveVetIsRejectedAndNotStored"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitVetTest#visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "suite": "",
+      "name": "visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet",
+      "status": "failed",
+      "category": "assertion",
+      "type": "org.opentest4j.AssertionFailedError",
+      "message": "expected: <1> but was: <0>",
+      "fingerprint": "4113024f5c203765",
+      "test_id": "53ad4ca8e8338410",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithVetStoresAndReturnsIt",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "suite": "",
+      "name": "createWithVetStoresAndReturnsIt",
+      "status": "failed",
+      "category": "assertion",
+      "type": "java.lang.AssertionError",
+      "message": "No value at JSON path \"$.vetId\"",
+      "fingerprint": "524625694b0a05c7",
+      "test_id": "6ab37a4687726b87",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithVetStoresAndReturnsIt"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitVetTest#vetWithoutVisitsGetsEmptyArray",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "suite": "",
+      "name": "vetWithoutVisitsGetsEmptyArray",
+      "status": "failed",
+      "category": "assertion",
+      "type": "java.lang.AssertionError",
+      "message": "Status expected:<200> but was:<404>",
+      "fingerprint": "4ed83f7d08e1c1bc",
+      "test_id": "429d656ea857cc89",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#vetWithoutVisitsGetsEmptyArray"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitVetTest#vetVisitsOrderedByDateThenId",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "suite": "",
+      "name": "vetVisitsOrderedByDateThenId",
+      "status": "failed",
+      "category": "exception",
+      "type": "org.springframework.jdbc.BadSqlGrammarException",
+      "message": "StatementCallback; bad SQL grammar [INSERT INTO visits (pet_id, visit_date, description, vet_id) VALUES (31, '2020-02-02', 'b', 77)]",
+      "fingerprint": "4214955ebf131277",
+      "test_id": "6973d51231220890",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#vetVisitsOrderedByDateThenId"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithoutVetHasNullVet",
+      "file": "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "suite": "",
+      "name": "createWithoutVetHasNullVet",
+      "status": "failed",
+      "category": "assertion",
+      "type": "java.lang.AssertionError",
+      "message": "No value at JSON path \"$.vetId\"",
+      "fingerprint": "524625694b0a05c7",
+      "test_id": "5777c3f1ea773642",
+      "full_name": "org.springframework.samples.petclinic.visits.web.VisitVetTest#createWithoutVetHasNullVet"
+    }
+  ]
+}

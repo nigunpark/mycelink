@@ -46,10 +46,15 @@ Invalidation cascades to dependents, because a downstream node's evidence was
 produced against the old upstream. Leaving it DONE would let a stale
 candidate look verified.
 
-Invalidation keeps the node's RED (a test once proved the behaviour was
-missing, and an upstream change does not undo that) and discards everything
-proven against the changed inputs. It also resets the attempt budget: this is
-a different problem now.
+When the E2E attributes a failure it invalidates the suspects itself. For a
+failure found anywhere else after the node was DONE (delivery acceptance,
+the product's own acceptance suite), reopen the attributed node with
+`mycelink node rework <feature> <node> --reason "..."` (controller key
+required): the repair stays in the same feature, never a new feature id.
+A rework keeps the node's attempts and failure fingerprints (the same work
+was found wrong; it buys no fresh budget), drops all its evidence including
+RED, so the repair starts from a failing test for the reported defect, and
+reopens its dependents, whose inputs genuinely change.
 
 ## Then a new candidate
 

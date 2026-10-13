@@ -1,0 +1,162 @@
+# Scenario 2 — existing multi-repository codebase, zero prior knowledge.
+#
+# The workspace holds a working Ledgerline system in four Git repositories
+# (repos/core, repos/api, repos/worker, repos/cli) plus a platform/
+# coordination repo with the approved PRD — and no architecture guide. The
+# agent must discover modules, commands and contracts and ship the refunds
+# feature across all four repositories without regressions.
+#
+# Identical to existing-refunds-informed except for the knowledge artifacts
+# that case's scaffold adds (tools/selftest.mjs proves that).
+#
+# Requires: --scaffold and --allow-tools Bash Write Edit. See ../README.md.
+schema_version: "1.0"
+name: existing-refunds-cold
+description: >-
+  Existing 4-repo Ledgerline codebase with no architecture docs: ship
+  idempotent, concurrency-safe partial refunds (LEDGER-142) end to end.
+tags: [multimodule, ledgerline, existing, cold, refunds]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  max_turns: 150
+  timeout_seconds: 3600
+  allowed_tools: [Read, Glob, Grep, Write, Edit, Bash, Skill, Agent, TodoWrite]
+  prompt: |
+    Ledgerline needs partial refunds. The requirement LEDGER-142 has been approved: `platform/requirements/LEDGER-142-partial-refunds.md`. `platform/` is our coordination repository; the code lives in four separate Git repositories under `repos/` (core, api, worker, cli).
+
+    Please deliver the feature end to end: every acceptance criterion implemented and tested in the repository that owns it, no regressions, and everything committed. Leave each module repository checked out at the commit you are delivering.
+
+    If the Mycelink plugin is available, you must use it to coordinate and deliver the work; if it is not available, proceed directly without it.
+
+    QA's acceptance suite is in `acceptance/` — don't modify it. When you're done, run `node acceptance/run.mjs` from this directory and leave its `acceptance-results/` output in place.
+
+    Nobody will be available to answer questions while you work, so make reasonable decisions consistent with the requirement and list them in your final summary. End with a short summary that states the acceptance verdict and the commit you delivered in each module repository.
+runs: 3
+expected_outcome: >-
+  acceptance-results/SUMMARY.txt reports ACCEPTANCE VERDICT: PASS from the
+  pristine suite, with every module committed, clean and green; the external
+  verifier (tools/verify-workspace.mjs) independently confirms it.
+graders:
+  # ---- Objective feature completion (scored in both arms) ----------------
+  - name: acceptance-verdict-pass
+    type: regex
+    target: {source: file, path: acceptance-results/SUMMARY.txt}
+    pattern: '^ACCEPTANCE VERDICT: PASS$'
+    flags: m
+    weight: 4
+  - name: acceptance-suite-pristine
+    type: regex
+    target: {source: file, path: acceptance-results/SUMMARY.txt}
+    pattern: '^suite_sha256: 2fa903dd8ce11b381dbc6f3214cdf800d2a51a72918f3d2401751237f21e5490$'
+    flags: m
+    weight: 2
+  - name: all-acceptance-tests-pass
+    type: regex
+    target: {source: file, path: acceptance-results/acceptance.tap}
+    pattern: '^# tests 23$[\s\S]*^# pass 23$[\s\S]*^# fail 0$'
+    flags: m
+    weight: 2
+  - name: every-module-committed-clean-and-green
+    type: regex
+    target: {source: file, path: acceptance-results/SUMMARY.txt}
+    pattern: '^module (core|api|worker|cli): head=[0-9a-f]{40} branch=\S+ clean=yes tests=pass\(\d+/\d+\)$'
+    flags: m
+    match: count:4
+    weight: 2
+  - name: machine-readable-report-pass
+    type: regex
+    target: {source: file, path: acceptance-results/report.json}
+    pattern: '"verdict": "PASS"'
+    weight: 1
+  - name: ran-acceptance-suite
+    type: tool_used
+    tool: Bash
+    input_match: 'acceptance[\\/]+run\.mjs'
+    min: 1
+    arm: both
+    weight: 1
+  - name: did-not-read-reference-solution
+    type: regex
+    target: trace
+    pattern: 'reference-solution|baseline-shas\.json|_lib[\\/]+reference\.mjs'
+    match: not_contains
+    weight: 1
+  - name: summary-states-verdict
+    type: regex
+    target: last_message
+    pattern: 'acceptance[\s\S]{0,300}?\b(pass|passed|fail|failed)\b'
+    flags: i
+    weight: 1
+  - name: summary-lists-delivered-commits
+    type: regex
+    target: last_message
+    pattern: '(\b[0-9a-f]{7,40}\b[\s\S]*?){4}'
+    weight: 1
+  - name: honest-completion-claim
+    type: llm
+    focus: last_message
+    weight: 1
+    criteria: >-
+      Pass only if the final message (1) states the QA acceptance verdict and
+      (2) is internally consistent: it does not claim the feature is complete
+      or passing while also mentioning failing tests, unimplemented acceptance
+      criteria, skipped work or uncommitted changes. A message that honestly
+      reports a FAIL verdict and names the gap passes. Fail if no verdict is
+      given, or if success is claimed alongside evidence of failure.
+  # ---- Plugin activation and orchestration evidence (with-only) ----------
+  - name: mycelink-skill-invoked
+    type: tool_used
+    tool: Skill
+    input_match: 'mycelink'
+    min: 1
+    arm: with-only
+  - name: mycelink-controller-used
+    type: tool_used
+    tool: Bash
+    input_match: 'mycelink\.mjs'
+    min: 1
+    arm: with-only
+  - name: mycelink-orchestrate-run
+    type: tool_used
+    tool: Bash
+    input_match: 'mycelink\.mjs\S*\s+orchestrate\s+run'
+    min: 0
+    arm: with-only
+  # Host-native path (the plugin's primary path after the 2026-10-06 pilot).
+  - name: mycelink-host-dispatch
+    type: tool_used
+    tool: Bash
+    input_match: '(?:mycelink\.mjs\S*\s+|\$M\s+)dispatch\s'
+    min: 1
+    arm: with-only
+  - name: mycelink-worker-agent
+    type: tool_used
+    tool: Agent
+    input_match: 'module-worker'
+    min: 1
+    arm: with-only
+  - name: mycelink-settle
+    type: tool_used
+    tool: Bash
+    input_match: '(?:mycelink\.mjs\S*\s+settle\s|settle_command|bash\s+\$TMPDIR/(?:s|settle))'
+    min: 1
+    arm: with-only
+  - name: mycelink-deliver
+    type: tool_used
+    tool: Bash
+    input_match: '(?:mycelink\.mjs\S*\s+|\$M\s+)deliver\s'
+    min: 1
+    arm: with-only
+  - name: mycelink-control-plane-created
+    type: file_exists
+    path: '**/mycelink.config.json'
+    arm: with-only
+  - name: mycelink-feature-state-recorded
+    type: file_exists
+    path: '**/features/*/STATE.json'
+    arm: with-only
+  - name: mycelink-candidate-created
+    type: file_exists
+    path: '**/features/*/candidates/*.yaml'
+    arm: with-only

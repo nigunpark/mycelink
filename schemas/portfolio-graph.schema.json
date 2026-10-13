@@ -30,7 +30,11 @@
         "additionalProperties": false,
         "properties": {
           "id": { "type": "string", "pattern": "^AC-[A-Za-z0-9_.-]+$" },
-          "text": { "type": "string", "minLength": 1 }
+          "text": { "type": "string", "minLength": 1 },
+          "kind": {
+            "enum": ["new-behavior", "behaviour", "behavior", "compatibility", "declaration"],
+            "description": "A new behavior (default; also spelled behaviour, behavior) is evidenced by a test its RED declared and failed; a compatibility criterion by an existing test a green or regression gate passed; a declaration by its GREEN (build, typecheck)."
+          }
         }
       }
     },
@@ -106,7 +110,8 @@
             "candidate-build",
             "runtime-deploy",
             "e2e-scenario",
-            "knowledge"
+            "knowledge",
+            "verification"
           ]
         },
         "depends_on": { "type": "array", "items": { "type": "string" } },
@@ -125,6 +130,7 @@
             "type": "object",
             "required": ["id", "command"],
             "additionalProperties": false,
+            "dependentRequired": { "module": ["module_sha256"], "module_sha256": ["module"] },
             "properties": {
               "id": { "type": "string", "minLength": 1 },
               "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
@@ -133,6 +139,16 @@
               "shell": {
                 "type": "boolean",
                 "description": "Run command[0] as a shell script. Refused unless the control repository sets allow_shell_commands: true."
+              },
+              "module": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]*$",
+                "description": "The repository module this verifier runs (repositories.yaml modules): its setup and build steps, then exactly `command`, its test argv. Copy it from `mycelink repo modules`."
+              },
+              "module_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "The hash of the module descriptor the graph was planned against; a changed module is MODULE_DRIFT."
               }
             }
           }

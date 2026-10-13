@@ -1,0 +1,67 @@
+{
+  "schema": "mycelink-bench/qualification@2",
+  "project": "spring-petclinic-microservices",
+  "prd": "PCM-103",
+  "source_identity_sha256": "92ab8fe8fd6e365586f2a0821fd8a3461093e8d3cc3b1d217b11b32c6cc0f8f7",
+  "evaluator_digest_sha256": "70db5ebb41cb9b0e203a0e5c6b940b2e09467a18e102c280755fb1e98ae267dd",
+  "bindings": {
+    "cache_lock_sha256": "aaa1dcdcf485d67f4eb4bc9e6a6ca73f7c2054870da173896655201cd764b350",
+    "toolchains": {
+      "java": "2ffa7198a574ef6109be06b23706b72e6a0a5436497c622d2b023d6348d2c024"
+    },
+    "commands": {
+      "full_suite_sha256": "8bf546a5aced931896c49150a7493ca864a74109aa178198fc24c3145a8a0772",
+      "hidden_sha256": "d40b833a94d4f6d4a38abc1d18e8f86b5b522daa67773a79c31edf1f421508ca"
+    }
+  },
+  "hidden_tests": {
+    "total": 20,
+    "failing_at_baseline": 13,
+    "passing_at_baseline": 7
+  },
+  "baseline_failure_categories": {
+    "assertion": 13
+  },
+  "superseded_tests": 0,
+  "reference": {
+    "full_suite_tests": 15,
+    "own_tests": 9,
+    "tdd_units": [
+      "valid"
+    ],
+    "new_tests_by_module": {
+      "visits-service": 6,
+      "api-gateway": 3
+    }
+  },
+  "mutants": {
+    "gating": 3,
+    "killed": 3,
+    "stress": [
+      {
+        "runs": 3,
+        "kill_rate": 1
+      }
+    ],
+    "by_module": {
+      "visits-service": 2,
+      "api-gateway": 1
+    }
+  },
+  "runs": 2,
+  "tmp_roots": 1,
+  "filesystems": {
+    "distinct": 2,
+    "roots": [
+      {
+        "role": "work",
+        "type": "ext4"
+      },
+      {
+        "role": "tmp-root-1",
+        "type": "tmpfs"
+      }
+    ]
+  },
+  "duration_ms": 329846
+}

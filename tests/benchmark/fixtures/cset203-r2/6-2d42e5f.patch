@@ -1,0 +1,22 @@
+diff --git a/packages/cli/src/commands/version/index.ts b/packages/cli/src/commands/version/index.ts
+index 7a42831..590d88c 100644
+--- a/packages/cli/src/commands/version/index.ts
++++ b/packages/cli/src/commands/version/index.ts
+@@ -189,10 +189,14 @@ async function recoverInterruptedRun(cwd: string) {
+   try {
+     journal = JSON.parse(raw);
+   } catch {
+-    log.error(
+-      `The journal ${journalPath} of an interrupted run is unreadable. Remove it manually after checking your files.`,
++    // The journal is synced to disk before the first change is made, so a
++    // journal that cannot be parsed was cut short while being written and no
++    // file was touched yet: there is nothing to restore.
++    await fs.rm(journalPath, { force: true });
++    log.warn(
++      "A previous `changeset version` run was interrupted before it changed any file. Its incomplete journal has been removed.",
+     );
+-    throw new ExitError(1);
++    return;
+   }
+   for (const entry of journal.entries) {
+     if (entry.content === null) {

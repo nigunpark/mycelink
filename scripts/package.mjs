@@ -33,13 +33,22 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const zipName = `mycelink-${version}.zip`;
 
-/** Directories shipped whole, and individual files. Nothing else is included. */
-const INCLUDE_DIRS = ['agents', 'commands', 'skills', 'templates', 'schemas', 'docs'];
+/**
+ * Directories shipped whole, and individual files. Nothing else is included.
+ * Documentation is listed file by file: eval reports (docs/evals/) and the
+ * benchmark's constraint audit stay in the repository, outside the plugin.
+ */
+const INCLUDE_DIRS = ['agents', 'commands', 'skills', 'hooks', 'templates', 'schemas'];
 const INCLUDE_FILES = [
   '.claude-plugin/plugin.json',
   '.claude-plugin/marketplace.json',
   'bin/mycelink.mjs',
   'dist/mycelink.mjs',
+  'docs/ADAPTERS.md',
+  'docs/DATA_HANDLING.md',
+  'docs/PERMISSION_MODEL.md',
+  'docs/RELEASING.md',
+  'docs/THREAT_MODEL.md',
   'README.md',
   'LICENSE',
   'NOTICE',

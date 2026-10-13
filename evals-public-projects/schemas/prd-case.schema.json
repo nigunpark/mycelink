@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelink.invalid/bench/prd-case.schema.json",
+  "title": "Benchmark PRD case manifest",
+  "description": "Public description of one benchmark requirement. Only `requirement` reaches the agent; the evaluator lock names hidden artifacts by hash only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "case", "project", "archetype", "title", "requirement", "modules", "allowed_shared_paths", "acceptance_criteria", "budget", "evaluator_lock"],
+  "properties": {
+    "schema": { "const": "mycelink-bench/prd-case@1" },
+    "id": { "type": "string", "pattern": "^[A-Z]{2,6}-[0-9]{3}$" },
+    "case": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,62}$" },
+    "project": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "archetype": { "enum": ["additive-vertical-slice", "backward-compatible-behavioral-change", "failure-concurrency-recovery"] },
+    "title": { "type": "string", "minLength": 1 },
+    "requirement": { "const": "requirement.md" },
+    "modules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "allowed"],
+      "properties": {
+        "required": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string" } },
+        "allowed": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string" } }
+      }
+    },
+    "allowed_shared_paths": {
+      "description": "Globs outside every module the delivery may touch (e.g. a changeset entry).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "modules"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^AC-[0-9]+$" },
+          "modules": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+          "kind": { "enum": ["new-behavior", "compatibility", "declaration"], "description": "How the criterion is evidenced: a new behavior (default) by a failing-first test, a compatibility criterion by an existing test, a declaration by the build." }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_turns", "timeout_seconds"],
+      "properties": {
+        "max_turns": { "description": "claude plugin eval accepts at most 200", "type": "integer", "minimum": 20, "maximum": 200 },
+        "timeout_seconds": { "description": "claude plugin eval accepts at most 3600", "type": "integer", "minimum": 600, "maximum": 3600 }
+      }
+    },
+    "evaluator_lock": { "const": "evaluator.lock.json" }
+  }
+}

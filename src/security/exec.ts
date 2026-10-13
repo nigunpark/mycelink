@@ -213,6 +213,8 @@ export interface RunOptions {
   cwd: string;
   timeoutMs?: number;
   env?: Record<string, string>;
+  /** Run with exactly `env`, inheriting nothing from this process (worktree setup). */
+  cleanEnv?: boolean;
   maxBuffer?: number;
   input?: string;
 }
@@ -258,7 +260,7 @@ function toRunResult(proc: SpawnSyncReturns<string>, plan: CommandPlan): RunResu
  * out, 127 means it could not be started (the conventional shell codes).
  */
 export function runCommandSync(argv: readonly string[], options: RunOptions): RunResult {
-  const env = { ...process.env, ...(options.env ?? {}) };
+  const env = options.cleanEnv === true ? { ...(options.env ?? {}) } : { ...process.env, ...(options.env ?? {}) };
   const plan = planCommand(argv, { env });
   return toRunResult(spawnSync(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
 }

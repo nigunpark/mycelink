@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelink.invalid/bench/evaluator-lock.schema.json",
+  "title": "Evaluator artifact lock",
+  "description": "Committed integrity anchor for evaluator-only artifacts (hidden acceptance tests, reference solution, mutants, expected RED fingerprints). The artifacts themselves live outside the repository and never reach an agent workspace; the lock names none of them: one digest binds every stored file, and only counts per kind are visible.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "prd", "source_identity_sha256", "files", "digest_sha256", "reference", "hidden_tests", "mutants"],
+  "properties": {
+    "schema": { "const": "mycelink-bench/evaluator-lock@2" },
+    "project": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "prd": { "type": "string", "pattern": "^[A-Z]{2,6}-[0-9]{3}$" },
+    "source_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "files": {
+      "description": "How many stored files of each kind the digest covers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fingerprints", "hidden", "mutant", "reference"],
+      "properties": {
+        "expected": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "fingerprints": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "hidden": { "type": "integer", "minimum": 1 },
+        "mutant": { "type": "integer", "minimum": 1 },
+        "reference": { "type": "integer", "minimum": 1, "maximum": 1 }
+      }
+    },
+    "digest_sha256": {
+      "description": "sha256 of the canonical JSON list of every stored file's { path, sha256, size }, sorted by path. The list itself stays beside the store (MANIFEST.local.json).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "commits"],
+      "properties": {
+        "head": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "commits": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "hidden_tests": { "type": "integer", "minimum": 1 },
+    "mutants": { "type": "integer", "minimum": 1 }
+  }
+}

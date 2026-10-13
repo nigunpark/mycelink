@@ -1,0 +1,11 @@
+{
+  "schema": "mycelink-bench/fault-plan@1",
+  "id": "default",
+  "faults": [
+    { "kind": "concurrent-commit", "trigger": { "on": "first-commit" } },
+    { "kind": "interrupt-restart", "trigger": { "on": "elapsed-seconds", "seconds": 600 } },
+    { "kind": "duplicate-result", "trigger": { "on": "session-end" } },
+    { "kind": "stale-result", "trigger": { "on": "session-end" } },
+    { "kind": "late-hidden-defect", "trigger": { "on": "session-end" } }
+  ]
+}

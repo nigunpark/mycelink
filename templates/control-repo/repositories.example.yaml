@@ -15,6 +15,15 @@ repositories:
     commands:
       build: [npm, run, build]
       test: [npm, test]
+    # What every new git worktree needs before anything runs in it: an
+    # untracked node_modules is not carried into a worktree. argv only, never
+    # a shell; env values may use only ${HOME}, ${WORKTREE} and ${TMPDIR}.
+    worktree_setup:
+      commands:
+        - [npm, ci, --offline]
+      timeout_seconds: 900
+      env: { npm_config_cache: '${HOME}/.npm' }
+      required_paths: [node_modules]
 
   - name: api
     path: ../api

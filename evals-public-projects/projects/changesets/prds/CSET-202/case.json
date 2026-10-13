@@ -1,0 +1,71 @@
+{
+  "schema": "mycelink-bench/prd-case@1",
+  "id": "CSET-202",
+  "case": "changesets-aggregated-validation",
+  "project": "changesets",
+  "archetype": "backward-compatible-behavioral-change",
+  "title": "Report every invalid changeset at once",
+  "requirement": "requirement.md",
+  "modules": {
+    "required": [
+      "errors",
+      "read",
+      "assemble-release-plan",
+      "cli"
+    ],
+    "allowed": [
+      "errors",
+      "read",
+      "assemble-release-plan",
+      "cli",
+      "parse",
+      "test-utils",
+      "site"
+    ]
+  },
+  "allowed_shared_paths": [
+    ".changeset/*.md",
+    "docs/**",
+    "pnpm-lock.yaml"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "modules": [
+        "errors"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "modules": [
+        "read"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "modules": [
+        "assemble-release-plan"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "modules": [
+        "cli"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "modules": [
+        "read",
+        "assemble-release-plan",
+        "cli"
+      ],
+      "kind": "compatibility"
+    }
+  ],
+  "budget": {
+    "max_turns": 200,
+    "timeout_seconds": 3600
+  },
+  "evaluator_lock": "evaluator.lock.json"
+}

@@ -1,0 +1,103 @@
+diff --git a/packages/cli/src/commands/version/version.test.ts b/packages/cli/src/commands/version/version.test.ts
+index 831043a..958ba92 100644
+--- a/packages/cli/src/commands/version/version.test.ts
++++ b/packages/cli/src/commands/version/version.test.ts
+@@ -4075,3 +4075,98 @@ Nice simple summary, much wow
+     expect(mockedLogger.error).not.toHaveBeenCalled();
+   });
+ });
++
++describe("recovery and failure", () => {
++  const files = (config: object) => ({
++    "package.json": JSON.stringify({
++      private: true,
++      name: "root-pkg",
++      workspaces: ["packages/*"],
++    }),
++    "package-lock.json": "",
++    "packages/pkg-a/package.json": JSON.stringify({
++      name: "pkg-a",
++      version: "1.0.0",
++    }),
++    ".changeset/config.json": JSON.stringify(config),
++  });
++  const changeset = {
++    summary: "a summary",
++    releases: [{ name: "pkg-a", type: "minor" as const }],
++  };
++
++  it("restores an interrupted run from its journal, warns, and versions once", async () => {
++    const cwd = await testdir(files(modifiedDefaultConfig));
++    await writeChangesets([changeset], cwd);
++    const pkgPath = path.join(cwd, "packages/pkg-a/package.json");
++    const csPath = path.join(cwd, ".changeset/some-id-0.md");
++    const pkgOrig = await fs.readFile(pkgPath);
++    const csOrig = await fs.readFile(csPath);
++    const journalPath = path.join(cwd, ".changeset/.apply-release-plan.journal");
++    await fs.writeFile(
++      journalPath,
++      JSON.stringify({
++        version: 1,
++        entries: [
++          { path: pkgPath, content: pkgOrig.toString("base64") },
++          { path: csPath, content: csOrig.toString("base64") },
++          {
++            path: path.join(cwd, "packages/pkg-a/CHANGELOG.md"),
++            content: null,
++          },
++        ],
++        createdDir: path.join(cwd, ".changeset/pre"),
++        dirExisted: false,
++      }),
++    );
++    // simulate a half-applied run: bumped package, consumed changeset
++    await fs.writeFile(
++      pkgPath,
++      JSON.stringify({ name: "pkg-a", version: "1.1.0" }),
++    );
++    await fs.rm(csPath);
++    await fs.writeFile(
++      path.join(cwd, "packages/pkg-a/CHANGELOG.md"),
++      "# pkg-a\n\n## 1.1.0\n",
++    );
++
++    await version({ cwd });
++
++    expect(mockedLogger.warn).toHaveBeenCalled();
++    expect(mockedLogger.warn.mock.calls.flat().join("\n")).toContain(
++      "interrupted",
++    );
++    await expect(fs.stat(journalPath)).rejects.toThrow();
++    expect((await getPkgJSON("pkg-a", cwd)).version).toBe("1.1.0");
++    await expect(fs.stat(csPath)).rejects.toThrow();
++    const changelog = await getChangelog("pkg-a", cwd);
++    expect(changelog.match(/## 1\.1\.0/g)).toHaveLength(1);
++  });
++
++  it("prints the failure without a stack, exits 1 and does not commit", async () => {
++    const cwd = await testdir({
++      ...files({
++        ...modifiedDefaultConfig,
++        commit: ["@changesets/cli/commit", null],
++      }),
++      "packages/pkg-a/CHANGELOG.md/keep.txt": "x",
++    });
++    await writeChangesets([changeset], cwd);
++    mockedGit.add.mockClear();
++    mockedGit.commit.mockClear();
++    mockedLogger.error.mockClear();
++
++    const err = await version({ cwd }).then(
++      () => undefined,
++      (e) => e,
++    );
++
++    expect(err).toBeInstanceOf(ExitError);
++    expect((err as ExitError).code).toBe(1);
++    expect(mockedLogger.error).toHaveBeenCalled();
++    const printed = mockedLogger.error.mock.calls.flat().join("\n");
++    expect(printed).not.toMatch(/\n\s+at /);
++    expect(mockedGit.add).not.toHaveBeenCalled();
++    expect(mockedGit.commit).not.toHaveBeenCalled();
++  });
++});

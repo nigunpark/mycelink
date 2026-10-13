@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import YAML from 'yaml';
 
 const ROOT = resolve(process.cwd());
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
@@ -33,10 +34,38 @@ describe('identity and version', () => {
   });
 
   it('agrees on one version everywhere', () => {
-    expect(pkg.version).toBe('0.2.0-beta.1');
+    expect(pkg.version).toBe('0.3.0-beta.1');
     for (const v of [lock.version, lock.packages['']?.version, plugin['version'], market.metadata.version, market.plugins[0]?.['version']]) {
       expect(v).toBe(pkg.version);
     }
+  });
+
+  it('names the current version wherever a user reads one', () => {
+    expect(prose('README.md')).toContain(`Status: public beta (\`${pkg.version}\`)`);
+    const zips = [...read('README.md').matchAll(/mycelink-(\d+\.\d+\.\d+[^\s/]*?)\.zip/g)].map((m) => m[1]);
+    expect(zips.length).toBeGreaterThan(0);
+    expect(new Set(zips)).toEqual(new Set([pkg.version]));
+    const placeholder = (file: string, id: string): string => {
+      const form = YAML.parse(read(`.github/ISSUE_TEMPLATE/${file}`)) as { body: { id?: string; attributes?: { placeholder?: string } }[] };
+      return form.body.find((item) => item.id === id)?.attributes?.placeholder ?? '';
+    };
+    expect(placeholder('bug.yml', 'version').startsWith(`${pkg.version} `)).toBe(true);
+    expect(placeholder('compatibility.yml', 'mycelink').startsWith(`${pkg.version} `)).toBe(true);
+  });
+
+  it('supports the current release line in SECURITY.md', () => {
+    const line = pkg.version.replace(/^(\d+\.\d+)\..*$/, '$1');
+    const rows = read('SECURITY.md').match(/^\| [^|]+ \| Yes\b/gm) ?? [];
+    expect(rows).toEqual([`| ${line}.x (beta) | Yes`]);
+  });
+
+  it('records the release in CHANGELOG.md, with nothing left unreleased', () => {
+    const changelog = read('CHANGELOG.md');
+    const versions = [...changelog.matchAll(/^## \[([^\]]+)\]/gm)].map((m) => m[1]);
+    expect(versions.slice(0, 2)).toEqual(['Unreleased', pkg.version]);
+    const unreleased = changelog.slice(changelog.indexOf('## [Unreleased]'), changelog.indexOf(`## [${pkg.version}]`));
+    expect(unreleased).not.toMatch(/^\s*[-*] /m);
+    expect(changelog).toMatch(new RegExp(`^\\[${pkg.version.replace(/\./g, '\\.')}\\]: `, 'm'));
   });
 
   it('is GitHub-distributed, not npm-published, on supported Node versions', () => {

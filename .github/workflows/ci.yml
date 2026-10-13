@@ -63,6 +63,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check the generated public-project eval cases are current
+        run: npm run bench:cases:check
+
       - name: Build and check the committed bundle is current
         run: |
           npm run build
