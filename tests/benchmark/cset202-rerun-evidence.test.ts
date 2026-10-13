@@ -38,6 +38,7 @@ import { reviewGateProblems } from '../../src/engine/acceptance-review.js';
 import { loadCandidate } from '../../src/git/candidate.js';
 import { loadState } from '../../src/state/feature-state.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { readRegular } from '../../src/security/paths.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -75,7 +76,8 @@ function fingerprint(run: string): string {
     const list = lstatSync(at).isDirectory() ? [...files(run, at)] : [at];
     for (const f of list) {
       const st = lstatSync(f);
-      h.update(`${relative(run, f)}\u0000${st.size}\u0000${st.mtimeMs}\u0000${st.isFile() ? sha256(readFileSync(f)) : 'link'}\n`);
+      // A file's bytes through one descriptor (src/security/paths.ts): what was looked at is what is hashed.
+      h.update(`${relative(run, f)}\u0000${st.size}\u0000${st.mtimeMs}\u0000${st.isFile() ? sha256(readRegular(f)?.bytes ?? Buffer.from('changed')) : 'link'}\n`);
     }
   }
   return h.digest('hex');

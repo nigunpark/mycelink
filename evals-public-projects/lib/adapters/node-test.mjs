@@ -2,8 +2,13 @@
  * `node --test` adapter: tiny projects with Node's built-in test runner. It
  * powers the CI-safe tests of the harness itself (no toolchain cache).
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, mkdtempSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import { attributeAmong } from '../junit-files.mjs';
+import { readRegular } from '../fsread.mjs';
+
+/** Ceiling on one JUnit report read. */
+const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 import { parseJUnit } from '../results.mjs';
 import { placeholders, runCommand } from '../run.mjs';
 import { sandboxEnv } from './index.mjs';
@@ -42,9 +47,12 @@ export function nodeTestAdapter(base) {
       const binds = [{ path: tree, rw: true }, { path: scratch, rw: true }, ...(ctx.tmpRoot ? [{ path: tmp, rw: true }] : []), { path: dirname(process.execPath) }];
       const run = await runCommand({ argv, cwd: tree, env, timeoutMs: ctx.timeoutMs ?? base.manifest.commands.timeout_seconds * 1000, outDir: ctx.outDir ?? ctx.workRoot, label, isolation: ctx.isolation, binds });
       let results = [];
-      if (existsSync(report) && statSync(report).size > 0) {
+      // Read through one descriptor, never through a link: what is checked is what is parsed.
+      const xml = readRegular(report, MAX_REPORT_BYTES)?.bytes.toString('utf8') ?? '';
+      if (xml.length > 0) {
         try {
-          results = parseJUnit(readFileSync(report, 'utf8'), { root: tree });
+          // Node 22's reporter names no file: each test is attributed among the files this run named.
+          results = parseJUnit(xml, { root: tree, attribute: attributeAmong({ root: tree, files }) });
         } catch {
           results = [];
         }

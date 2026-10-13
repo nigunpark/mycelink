@@ -35,6 +35,7 @@ import { dirname, join } from 'node:path';
 import { canonicalJson, sha256Hex } from './hash.mjs';
 import { absoluteBytes, captureSnapshot, excludedKey, indexSemantics, isIndexFile, isRefFile, keyBytes, readObject, relKey, showKey } from './snapshot.mjs';
 import { safeGit } from './git.mjs';
+import { readRegular } from './fsread.mjs';
 
 export const PLAN_SCHEMA = 'mycelink-bench/rollback-plan@1';
 
@@ -213,9 +214,10 @@ function stateNow(root, key) {
   const t = st.isFile() ? 'f' : st.isDirectory() ? 'd' : st.isSymbolicLink() ? 'l' : 'o';
   const out = { t, mode: st.mode & 0o7777 };
   if (t === 'f') {
-    try {
-      out.sha256 = sha256Hex(readFileSync(abs));
-    } catch {
+    // Read through one descriptor: a file swapped since the look is unreadable, never what it was swapped for.
+    const bytes = readRegular(abs)?.bytes;
+    if (bytes !== undefined) out.sha256 = sha256Hex(bytes);
+    else {
       out.sha256 = null;
       out.unreadable = true;
     }

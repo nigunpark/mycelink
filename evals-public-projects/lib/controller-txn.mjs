@@ -68,10 +68,11 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 import { canonicalJson, sha256Hex } from './hash.mjs';
 import { safeGit } from './git.mjs';
+import { readRegular } from './fsread.mjs';
 import { RollbackConflict, applyRollback, planRollback, verifyRollback } from './rollback.mjs';
 import { streamTree } from './causal.mjs';
 import { attributeStash, callIndex, callsMark, causalContext, linesOf, sessionCalls, stashTarget } from './shared-git.mjs';
-import { RACY_MS, captureSnapshot, diffSnapshots, indexSemantics, insideExcluded, isIndexFile, isRefFile, keyBytes, loadSnapshot, objectPath, putObject, readObject, relKey, saveSnapshot, semanticEntry, showKey, snapshotDigest } from './snapshot.mjs';
+import { RACY_MS, captureSnapshot, diffSnapshots, indexSemantics, insideExcluded, isIndexFile, isRefFile, keyBytes, loadSnapshot, objectPath, putObject, readObject, relKey, saveSnapshot, semanticEntry, showKey, snapshotDigest, workspaceKey } from './snapshot.mjs';
 
 export const TXN_SCHEMA = 'mycelink-bench/controller-txn@1';
 
@@ -104,13 +105,8 @@ const INPUTS = new Set(['requirements', 'repositories.yaml', 'mycelink.config.js
 
 // ---- paths -----------------------------------------------------------------------
 
-const slashed = (p) => p.split('\\').join('/');
-/** A key (workspace-relative, '/'-separated) for an absolute path inside the workspace; null outside it. */
-function keyOf(workspace, abs) {
-  const rel = relative(workspace, abs);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return rel === '' ? '' : null;
-  return relKey(Buffer.from(slashed(rel), 'utf8'));
-}
+/** A key (workspace-relative, '/'-separated) for an absolute path inside the workspace, however it is spelled; null outside it. */
+const keyOf = workspaceKey;
 const under = (key, root) => root === '' || key === root || key.startsWith(`${root}/`);
 const parts = (key) => keyBytes(key).toString('utf8').split('/');
 
@@ -483,14 +479,19 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
   };
   const harnessEntry = (state) => (state.t === 'absent' ? null : { t: state.t, mode: state.mode, ...(state.t === 'f' ? { sha256: state.sha256 } : {}), ...(state.t === 'l' ? { target: relKey(Buffer.from(state.target, 'utf8')) } : {}) });
   const concurrent = (key) => asOf !== null && (L.touched.get(key) ?? -1n) >= asOf;
+  // By workspace key, never by path text: the ledger names the real place (macOS /private/var, Windows' long form of an
+  // 8.3 name), the harness the workspace as it was handed over.
+  const sameKey = (abs, key) => key !== null && keyOf(workspace, resolve(abs)) === key;
   const coreGitFile = (abs) => {
+    const key = keyOf(workspace, abs);
     let last = null;
-    for (const g of L.git) if (g.changed.files?.[abs]) last = g.changed.files[abs][1];
+    for (const g of L.git) for (const [p, pair] of Object.entries(g.changed.files ?? {})) if (sameKey(p, key)) last = pair[1];
     return last;
   };
   const coreIndex = (abs) => {
+    const key = keyOf(workspace, abs);
     let last;
-    for (const g of L.git) if (g.changed.indexes && abs in g.changed.indexes) last = g.changed.indexes[abs][1];
+    for (const g of L.git) for (const [p, pair] of Object.entries(g.changed.indexes ?? {})) if (sameKey(p, key)) last = pair[1];
     return last;
   };
   const absOf = (key) => resolve(workspace, keyBytes(key).toString('utf8'));
@@ -856,7 +857,10 @@ function harnessState(txn, key) {
   }
   const mode = st.mode & 0o7777;
   if (st.isFile()) {
-    const bytes = readFileSync(abs);
+    // Read through one descriptor: a file swapped since the look is something else, never what it was swapped for.
+    const read = readRegular(abs);
+    if (read === null) return { t: 'o' };
+    const bytes = read.bytes;
     return { t: 'f', sha256: putObject(txn.store, bytes), mode, ...(/(?:^|\/)\.git\/index$/.test(key) ? { staged: indexSemantics(bytes) } : {}) };
   }
   if (st.isDirectory()) return { t: 'd', mode };
@@ -1710,11 +1714,16 @@ function stateNowOf(workspace, key) {
 }
 
 function statLike(abs) {
-  const { lstatSync, readFileSync: read, readlinkSync } = fsSync;
+  const { lstatSync, readlinkSync } = fsSync;
   const st = lstatSync(abs);
   const t = st.isFile() ? 'f' : st.isDirectory() ? 'd' : st.isSymbolicLink() ? 'l' : 'o';
   const out = { t, mode: st.mode & 0o7777 };
-  if (t === 'f') out.sha256 = sha256Hex(read(abs));
+  if (t === 'f') {
+    // Read through one descriptor: a file swapped since the look is no state to compare.
+    const bytes = readRegular(abs)?.bytes;
+    if (bytes === undefined) throw new Error('changed while it was read');
+    out.sha256 = sha256Hex(bytes);
+  }
   if (t === 'l') out.target = relKey(readlinkSync(abs, { encoding: 'buffer' }));
   return { t: out.t, mode: out.mode, ...(out.sha256 ? { sha256: out.sha256 } : {}), ...(out.target ? { target: out.target } : {}) };
 }

@@ -50,6 +50,7 @@ import { loadToolchains, toolchainDigests, verifyCacheLock } from './toolchain.m
 import { declaredTests } from './testids.mjs';
 import { qualificationProblems, runHiddenTests, verifyDelivery } from './verify.mjs';
 import { buildWorkspace } from './workspace.mjs';
+import { readRegular } from './fsread.mjs';
 
 /** The eval harness kills a case's scaffold after 120 s; a scaffold must finish well within it. */
 export const HARNESS_SCAFFOLD_KILL_MS = 120_000;
@@ -120,7 +121,10 @@ export function evaluatorContentIn(roots, fingerprints) {
         } catch {
           continue;
         }
-        if (fingerprints.sizes.has(size) && fingerprints.blobs.has(gitBlobSha(readFileSync(p)))) hits.push(p);
+        if (!fingerprints.sizes.has(size)) continue;
+        // Through one descriptor, never through a link: a file swapped since the look is not scanned.
+        const bytes = readRegular(p)?.bytes;
+        if (bytes !== undefined && fingerprints.blobs.has(gitBlobSha(bytes))) hits.push(p);
       }
     }
   };

@@ -104,11 +104,17 @@ export function readRegistry(root) {
  * directory, or one (or one of its worktrees) whose configuration could
  * make git run a program.
  */
-function registeredRepositoryProblems({ root, workspace }) {
+export function registeredRepositoryProblems({ root, workspace }) {
   const { repos, problems } = readRegistry(root);
+  const real = (p) => (existsSync(p) ? realpathSync.native(p) : resolve(p));
+  const realWorkspace = real(workspace);
+  // A registration inside the workspace as spelled, whose real place (links resolved) is inside the workspace's real
+  // place: macOS reaches a temp workspace through /var and git names everything by /private/var, and a link out of
+  // the workspace still leads outside it (Mycelink's own rule, src/security/paths.ts isInsideReal).
   const inWorkspace = (p) => within(workspace, p) || pathKey(p) === pathKey(workspace);
+  const inRealWorkspace = (p) => within(realWorkspace, p) || pathKey(p) === pathKey(realWorkspace);
   for (const r of repos) {
-    if (!inWorkspace(r.path) || !inWorkspace(existsSync(r.path) ? realpathSync.native(r.path) : r.path)) {
+    if (!inWorkspace(r.path) || !inRealWorkspace(real(r.path))) {
       problems.push(`${r.name} (${r.path}) is outside the workspace`);
       continue;
     }
@@ -126,9 +132,10 @@ function registeredRepositoryProblems({ root, workspace }) {
       problems.push(`${r.name}: cannot list its worktrees`);
       continue;
     }
-    for (const w of [...list.stdout.matchAll(/^worktree (.+)$/gm)].map((m) => m[1]).filter((p) => pathKey(p) !== pathKey(r.path))) {
+    // Git names every worktree, its main checkout included, by its real path: compared by real places.
+    for (const w of [...list.stdout.matchAll(/^worktree (.+)$/gm)].map((m) => m[1]).filter((p) => pathKey(real(p)) !== pathKey(real(r.path)))) {
       if (!existsSync(w)) continue;
-      if (!inWorkspace(w)) problems.push(`${r.name}: worktree ${w} is outside the workspace`);
+      if (!inRealWorkspace(real(w))) problems.push(`${r.name}: worktree ${w} is outside the workspace`);
       else if (unsafeGitConfig(w).length) problems.push(`${r.name}: worktree ${w} (${unsafeGitConfig(w).join(', ')})`);
     }
   }

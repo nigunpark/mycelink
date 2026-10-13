@@ -6,7 +6,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { cleanupTmpRoots, linkedAlias, makeTmpDir } from '../helpers/tmp.js';
 import { commitFiles, toyGit } from './toy-fixture.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { pinRecord, pinSuite, sealSuite } from '../../evals-public-projects/lib/suite-pin.mjs';
@@ -47,5 +47,15 @@ describe('pinSuite / sealSuite', () => {
     writeFileSync(join(suite, 'projects', 'p', 'qualification.json'), '{}\n');
     expect(pinSuite(suite).ok).toBe(false);
     expect(pinSuite(makeTmpDir('bench-pin-nogit-')).problems.join('\n')).toMatch(/not in a Git checkout/);
+  });
+
+  it('pins a suite reached through a link as the same suite: git names the checkout by its real path (macOS /private/var for /var)', () => {
+    const { repo } = checkout();
+    const suite = join(linkedAlias(repo, 'checkout'), 'suite');
+    const r = pinSuite(suite);
+    expect(r.problems).toEqual([]);
+    expect(r.pin).toMatchObject({ commit: toyGit(repo, ['rev-parse', 'HEAD']), path: 'suite', tree: toyGit(repo, ['rev-parse', 'HEAD:suite']), dirty: [] });
+    writeFileSync(join(suite, 'projects', 'p', 'adapter.json'), '{"v":2}\n');
+    expect(pinSuite(suite).problems.join('\n')).toMatch(/uncommitted changes \(suite\/projects\/p\/adapter.json\)/);
   });
 });

@@ -32,8 +32,8 @@
  * is read again.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { canonicalJson, sha256Hex } from './hash.mjs';
 
 export const SNAPSHOT_SCHEMA = 'mycelink-bench/workspace-snapshot@1';
@@ -57,6 +57,34 @@ export function relKey(bytes) {
 /** The bytes of a key. */
 export function keyBytes(key) {
   return key.startsWith(B64) ? Buffer.from(key.slice(B64.length), 'base64') : Buffer.from(key, 'utf8');
+}
+
+/** Each workspace's real place, by the spelling it was handed over in. */
+const realPlaces = new Map();
+
+/**
+ * The key (workspace-relative, '/'-separated) of an absolute path inside the
+ * workspace, however it is spelled; null outside it. Mycelink's ledger and git
+ * name the real place (macOS: /private/var for /var; Windows: the long form of
+ * an 8.3 name), the harness the workspace as it was handed over: a path inside
+ * either is inside, one inside neither is not.
+ */
+export function workspaceKey(workspace, abs) {
+  let real = realPlaces.get(workspace);
+  if (real === undefined) {
+    try {
+      real = realpathSync.native(workspace);
+    } catch {
+      real = workspace;
+    }
+    realPlaces.set(workspace, real);
+  }
+  for (const root of real === workspace ? [workspace] : [workspace, real]) {
+    const rel = relative(root, abs);
+    if (rel === '') return '';
+    if (!rel.startsWith('..') && !isAbsolute(rel)) return relKey(Buffer.from(rel.split('\\').join('/'), 'utf8'));
+  }
+  return null;
 }
 
 /** The absolute path of a key under `root`, as bytes (Linux allows any byte but '/' and NUL in a name). */
@@ -167,7 +195,9 @@ function hashIntoStore(store, path, seen) {
   let out = null;
   try {
     const st = fstatSync(fd, { bigint: true });
-    if (!st.isFile() || (seen && (st.ino !== seen.ino || st.dev !== seen.dev))) return null;
+    // Node 22.12 on Windows leaves a path lookup's `dev` at 0 while fstat on a handle reports the volume serial: the
+    // file id must match, the device where the lookup named one (as Mycelink's namesOpenedFile, src/security/paths.ts).
+    if (!st.isFile() || (seen && (st.ino !== seen.ino || (st.dev !== seen.dev && seen.dev !== 0n)))) return null;
     mkdirSync(tmpDir, { recursive: true });
     tmp = join(tmpDir, `${process.pid}.${randomBytes(6).toString('hex')}`);
     out = openSync(tmp, 'wx');

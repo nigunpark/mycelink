@@ -10,8 +10,9 @@
  * is tools/verify-run.mjs, after the run.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readRegular } from './fsread.mjs';
 
 /** The tools every run may use, in both orchestration arms (plugin eval cases and tools/run-arm.mjs). */
 export const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'Skill', 'Agent', 'TodoWrite'];
@@ -250,9 +251,12 @@ export function writeCases(suite, dir) {
   const cases = generateCases(suite);
   for (const [rel, body] of cases) {
     const file = join(dir, ...rel.split('/'));
-    if (existsSync(file) && readFileSync(file, 'utf8') === body) continue;
+    // What is there is read through one descriptor; a case is replaced whole (rename), never written through a link.
+    if (readRegular(file)?.bytes.toString('utf8') === body) continue;
     mkdirSync(join(file, '..'), { recursive: true });
-    writeFileSync(file, body);
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, body, { flag: 'wx' });
+    renameSync(tmp, file);
     if (rel.endsWith('.sh')) chmodSync(file, 0o755);
   }
   return [...new Set([...cases.keys()].map((k) => k.split('/')[0]))].sort();
