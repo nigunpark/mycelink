@@ -8,14 +8,19 @@
  */
 import { createHash } from 'node:crypto';
 import type {
+  GraphNode,
   PortfolioGraph,
   Problem,
+  RepositoryDecl,
   RepositoryManifest,
   ValidationResult,
 } from '../model/types.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { nodeIdProblem, refNameProblem } from '../security/names.js';
 import { classifyLocationPath, classifyRelativePath } from '../security/paths.js';
+import { worktreeSetupProblems } from '../engine/worktree-setup.js';
+import { moduleProblems, modulesOf, modulesTouched, verifierFor } from '../engine/modules.js';
+import { normalizeCriterionKind } from '../engine/criteria.js';
 
 export interface GraphValidationContext {
   repositories?: unknown;
@@ -35,7 +40,14 @@ const VERIFIED_NODE_TYPES = new Set([
   'candidate-build',
   'runtime-deploy',
   'e2e-scenario',
+  'verification',
 ]);
+
+/** Node types the controller runs itself: no worker, no worktree, nothing written. */
+export const CONTROLLER_RUN_NODE_TYPES: ReadonlySet<string> = new Set(['candidate-build', 'e2e-scenario', 'verification']);
+
+/** The evidence a verification node may record: its commands' passes, never a RED. */
+const VERIFICATION_EVIDENCE: ReadonlySet<string> = new Set(['green', 'regression']);
 
 /** Resources that must never exceed capacity 1 (single integration server). */
 const SINGLETON_RESOURCES = new Set(['full-runtime', 'deploy-slot', 'fixture-global-reset']);
@@ -86,6 +98,8 @@ export function validateRepositories(value: unknown): ValidationResult {
       });
     }
     seen.add(repo.name);
+    if (repo.worktree_setup !== undefined) problems.push(...worktreeSetupProblems(repo.worktree_setup, `/repositories/${i}/worktree_setup`));
+    problems.push(...moduleProblems(repo, `/repositories/${i}`));
   });
   return { ok: problems.length === 0, problems, graphHash: hashGraph(value) };
 }
@@ -143,6 +157,137 @@ export function transitiveDependencies(graph: PortfolioGraph, id: string): Set<s
   return out;
 }
 
+const sameArgv = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** A product producer: a node with a repository that a worker changes, never one the controller runs (engine/acceptance-review.ts gapTargets). */
+export const isProductProducer = (n: GraphNode): boolean => n.repository !== null && !CONTROLLER_RUN_NODE_TYPES.has(n.node_type);
+
+/**
+ * Every criterion some node names is served by a product producer: the node
+ * a gap in it is reworked on. CSET-203 r3's planner gave AC-5 (compatibility)
+ * to a verification node alone; the acceptance review found it untested,
+ * had no product node to rework, and its other gaps went unrepaired too. A
+ * verification node, a candidate build or an E2E scenario may prove a
+ * criterion as well, never instead of a producer.
+ */
+function criterionProducerProblems(graph: PortfolioGraph): Problem[] {
+  const problems: Problem[] = [];
+  for (const ac of graph.acceptance_criteria) {
+    const naming = graph.nodes.filter((n) => (n.acceptance_criteria ?? []).includes(ac.id));
+    if (naming.length === 0 || naming.some(isProductProducer)) continue;
+    problems.push({
+      code: 'CRITERION_NO_PRODUCER',
+      path: '/acceptance_criteria',
+      detail: `Acceptance criterion "${ac.id}" (${normalizeCriterionKind(ac.kind)}) is served by no product node: only ${naming.map((n) => `${n.id} (${n.node_type})`).join(', ')} name${naming.length === 1 ? 's' : ''} it. Give it to the implementation (or declaration) node whose code it is about, as well: a verification node may prove a criterion by existing tests, never as its only owner, because a gap in it is reworked on the product node that serves it.`,
+    });
+  }
+  return problems;
+}
+
+/**
+ * Where verification nodes sit and what they may prove: each runs after
+ * every producer of its repository (it verifies their integrated work), the
+ * candidate build waits for each, and each criterion one carries, whatever
+ * its kind, is one an upstream producer serves too (the producer proves it;
+ * the verification node proves it again on the integrated state).
+ */
+function verificationOrderProblems(graph: PortfolioGraph): Problem[] {
+  const problems: Problem[] = [];
+  const verifications = graph.nodes.filter((n) => n.node_type === 'verification');
+  if (verifications.length === 0) return problems;
+  const index = new Map(graph.nodes.map((n, i) => [n.id, i]));
+  const producer = isProductProducer;
+  for (const v of verifications) {
+    const at = `/nodes/${index.get(v.id) ?? 0}`;
+    const upstream = transitiveDependencies(graph, v.id);
+    const missing = graph.nodes.filter((n) => producer(n) && n.repository === v.repository && !upstream.has(n.id)).map((n) => n.id);
+    if (missing.length > 0) {
+      problems.push({
+        code: 'VERIFICATION_DEPENDENCY_MISSING',
+        path: `${at}/depends_on`,
+        detail: `Verification node "${v.id}" verifies the integrated state of repository "${v.repository}", so it must depend (directly or not) on every producer of it; it does not wait for ${missing.join(', ')}.`,
+      });
+    }
+    for (const ac of v.acceptance_criteria ?? []) {
+      const kind = normalizeCriterionKind(graph.acceptance_criteria.find((a) => a.id === ac)?.kind);
+      const owner = graph.nodes.some((n) => producer(n) && upstream.has(n.id) && (n.acceptance_criteria ?? []).includes(ac));
+      if (!owner) {
+        problems.push({
+          code: 'VERIFICATION_CRITERION_UNOWNED',
+          path: `${at}/acceptance_criteria`,
+          detail: `Verification node "${v.id}" carries ${ac} (${kind}), which no producer it depends on serves. A criterion is produced by the implementation node that owns its code (a new behaviour by its RED, a compatibility criterion by an existing or regression test its green gate passed, a declaration by its GREEN); a verification node may prove it again on the integrated state, after that node, never as its only owner.`,
+        });
+      }
+    }
+  }
+  for (const c of graph.nodes.filter((n) => n.node_type === 'candidate-build')) {
+    const upstream = transitiveDependencies(graph, c.id);
+    const skipped = verifications.filter((v) => !upstream.has(v.id)).map((v) => v.id);
+    if (skipped.length > 0) {
+      problems.push({
+        code: 'VERIFICATION_NOT_BEFORE_CANDIDATE',
+        path: `/nodes/${index.get(c.id) ?? 0}/depends_on`,
+        detail: `Candidate build "${c.id}" must depend (directly or not) on every verification node: a candidate binds only verified work; it does not wait for ${skipped.join(', ')}.`,
+      });
+    }
+  }
+  return problems;
+}
+
+/**
+ * Where a repository declares modules, a node's verifiers come from its
+ * allowlist — each module's command (bound by `module` and its hash) and
+ * the repository's own commands — and a writing node that owns a module
+ * verifies first with that module's command: a whole-repository command
+ * there is unscoped. One node owns at most one runtime module.
+ */
+function nodeModuleProblems(node: GraphNode, decl: RepositoryDecl, at: string): Problem[] {
+  const out: Problem[] = [];
+  const modules = modulesOf(decl);
+  const byId = new Map(modules.map((m) => [m.id, m]));
+  const repoCommands = Object.values(decl.commands).filter((c): c is string[] => Array.isArray(c));
+  const isRepoCommand = (command: readonly string[]): boolean => repoCommands.some((c) => sameArgv(c, command));
+  const touched = modulesTouched(modules, node.allowed_paths);
+  const problem = (code: string, detail: string): void => {
+    out.push({ code, path: at, detail: `Node "${node.id}": ${detail}` });
+  };
+  for (const v of node.verification_commands) {
+    if (v.module === undefined) {
+      if (modules.length > 0 && (v.shell === true || !isRepoCommand(v.command))) {
+        problem('COMMAND_NOT_ALLOWLISTED', `verifier "${v.id}" runs ${JSON.stringify(v.command)}, which is neither a module command nor a command of repository "${decl.name}"; select one from \`mycelink repo modules\``);
+      }
+      continue;
+    }
+    const m = byId.get(v.module);
+    if (m === undefined) {
+      problem('UNKNOWN_MODULE', `verifier "${v.id}" names module "${v.module}", which repository "${decl.name}" does not declare`);
+      continue;
+    }
+    if (v.shell === true || v.cwd !== undefined || !sameArgv(v.command, m.test)) {
+      problem('MODULE_COMMAND_MISMATCH', `verifier "${v.id}" names module "${m.id}" but is not exactly its command; use ${JSON.stringify(verifierFor(m))}`);
+    } else if (v.module_sha256 !== m.sha256) {
+      problem('MODULE_DRIFT', `verifier "${v.id}" was planned against module "${m.id}" ${String(v.module_sha256).slice(0, 12)}, but repository "${decl.name}" now declares it as ${m.sha256.slice(0, 12)}; restore the module, or plan again with ${JSON.stringify(verifierFor(m))}`);
+    }
+    // A verification node owns no module: it runs any module's command, read-only.
+    if (!touched.includes(m) && node.node_type !== 'verification') problem('MODULE_NOT_OWNED', `verifier "${v.id}" runs module "${m.id}", which the node's allowed_paths do not reach`);
+  }
+  if (modules.length === 0 || !WRITING_NODE_TYPES.has(node.node_type)) return out;
+  const runtime = touched.filter((m) => m.runtime_tests);
+  if (runtime.length > 1) {
+    problem('MODULE_SPAN', `allowed_paths reach the runtime modules ${runtime.map((m) => m.id).join(', ')}; one node owns one module, so its gates run that module's tests (split the node)`);
+    return out;
+  }
+  const owned = runtime[0] ?? (touched.length === 1 ? touched[0] : undefined);
+  const first = node.verification_commands[0];
+  if (owned === undefined || first === undefined || first.module !== undefined) return out;
+  if (isRepoCommand(first.command)) {
+    problem('UNSCOPED_VERIFICATION', `owns module "${owned.id}" but verifies with repository "${decl.name}"'s whole-suite command; the gates run the module's own tests (the full suite stays regression's). Use ${JSON.stringify(verifierFor(owned))}`);
+  } else {
+    problem('MODULE_VERIFIER_REQUIRED', `owns module "${owned.id}"; its first verifier must be the module's command: ${JSON.stringify(verifierFor(owned))}`);
+  }
+  return out;
+}
+
 export function validateGraph(
   value: unknown,
   context: GraphValidationContext = {},
@@ -154,6 +299,7 @@ export function validateGraph(
   const graph = value as PortfolioGraph;
 
   let knownRepos: Set<string> | null = null;
+  let repoDecls: Map<string, RepositoryDecl> | null = null;
   if (context.repositories !== undefined) {
     const repoResult = validateRepositories(context.repositories);
     if (!repoResult.ok) {
@@ -166,6 +312,7 @@ export function validateGraph(
       knownRepos = new Set(
         (context.repositories as RepositoryManifest).repositories.map((r) => r.name),
       );
+      repoDecls = new Map((context.repositories as RepositoryManifest).repositories.map((r) => [r.name, r]));
     }
   }
 
@@ -361,6 +508,39 @@ export function validateGraph(
           detail: `Node "${node.id}" writes code and must declare allowed_paths.`,
         });
       }
+    } else if (!CONTROLLER_RUN_NODE_TYPES.has(node.node_type) && node.repository !== null && node.allowed_paths.length === 0) {
+      // CSET-203 r1 with-faults: a worker dispatched to a node it may change nothing in ran its gates,
+      // committed nothing and was refused (NO_DECLARATION_COMMIT) until the node BLOCKED.
+      problems.push({
+        code: 'WORKER_NODE_CHANGES_NOTHING',
+        path: at('/node_type'),
+        detail: `Node "${node.id}" (${node.node_type}) has a repository but no allowed_paths: a worker could only submit nothing. To prove existing behaviour (a compatibility or regression check) without changing product code, make it node_type: verification; the controller runs its commands itself.`,
+      });
+    }
+
+    if (node.node_type === 'verification') {
+      if (node.repository === null) {
+        problems.push({
+          code: 'VERIFICATION_NEEDS_REPOSITORY',
+          path: at('/repository'),
+          detail: `Verification node "${node.id}" must name the repository whose integrated state it checks out and verifies.`,
+        });
+      }
+      if (node.allowed_paths.length > 0) {
+        problems.push({
+          code: 'VERIFICATION_NODE_WRITES',
+          path: at('/allowed_paths'),
+          detail: `Verification node "${node.id}" changes nothing: its allowed_paths must be empty (a change, with its RED, belongs to an implementation node).`,
+        });
+      }
+      const evidence = node.required_evidence;
+      if (evidence.length === 0 || evidence.some((k) => !VERIFICATION_EVIDENCE.has(k))) {
+        problems.push({
+          code: 'VERIFICATION_EVIDENCE',
+          path: at('/required_evidence'),
+          detail: `Verification node "${node.id}" requires ${JSON.stringify(evidence)}; it records what its commands passed, so its evidence is green and/or regression (e.g. [regression]), never a RED.`,
+        });
+      }
     }
 
     for (const p of [...node.allowed_paths, ...(node.forbidden_paths ?? [])]) {
@@ -382,6 +562,10 @@ export function validateGraph(
         });
       }
     }
+
+    // Module-scoped verification: a node runs its own module's command, from the repository's allowlist.
+    const decl = node.repository !== null ? repoDecls?.get(node.repository) : undefined;
+    if (decl !== undefined) problems.push(...nodeModuleProblems(node, decl, at('/verification_commands')));
 
     for (const p of [...(node.contract_inputs ?? []), ...(node.contract_outputs ?? [])]) {
       if (pathEscapes(p)) {
@@ -445,6 +629,9 @@ export function validateGraph(
       });
     }
   }
+
+  problems.push(...criterionProducerProblems(graph));
+  problems.push(...verificationOrderProblems(graph));
 
   const cycle = findCycle(graph.nodes);
   if (cycle) {

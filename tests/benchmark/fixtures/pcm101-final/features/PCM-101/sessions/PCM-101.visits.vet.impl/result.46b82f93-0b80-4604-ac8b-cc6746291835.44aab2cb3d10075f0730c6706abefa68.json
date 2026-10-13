@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "node_id": "PCM-101.visits.vet.impl",
+  "claim_id": "6c039c8f-7ce5-49d6-8e78-51cdd165f634",
+  "dispatch_id": "46b82f93-0b80-4604-ac8b-cc6746291835",
+  "orchestration_epoch": 0,
+  "outcome": "BLOCKED",
+  "commands": [
+    {
+      "command": [
+        "tdd",
+        "red"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "tdd",
+        "green"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "tdd",
+        "regression"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "commit_sha": "2a1debc27684068803c3018b3bfd1dd01d11059f",
+  "changed_paths": [
+    "spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+    "spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/model/Visit.java",
+    "spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/model/VisitRepository.java",
+    "spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/web/VisitResource.java",
+    "spring-petclinic-visits-service/src/main/resources/db/hsqldb/data.sql",
+    "spring-petclinic-visits-service/src/main/resources/db/hsqldb/schema.sql",
+    "spring-petclinic-visits-service/src/main/resources/db/mysql/data.sql",
+    "spring-petclinic-visits-service/src/main/resources/db/mysql/schema.sql"
+  ],
+  "evidence_paths": [],
+  "failure_fingerprint": "CRITERION_TEST_UNKNOWN:java-full_name-class-prefix-never-matches-declaredAt",
+  "decision_request": null,
+  "criterion_evidence": [
+    {
+      "criterion": "AC-1",
+      "test_id": "53ad4ca8e8338410",
+      "gate": "red",
+      "output_sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3"
+    },
+    {
+      "criterion": "AC-2",
+      "test_id": "fb06cc2d15596817",
+      "gate": "red",
+      "output_sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3"
+    },
+    {
+      "criterion": "AC-3",
+      "test_id": "6ab37a4687726b87",
+      "gate": "red",
+      "output_sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3"
+    },
+    {
+      "criterion": "AC-4",
+      "test_id": "6973d51231220890",
+      "gate": "red",
+      "output_sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3"
+    },
+    {
+      "criterion": "AC-7",
+      "test_id": "574528af1b3fa73b",
+      "gate": "green",
+      "output_sha256": "aae3c9b8f99d95ea31acf23537796bc90c9a8009acf979bb33d3b404a10fd9dd"
+    }
+  ],
+  "tdd": {
+    "base_sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+    "head_sha": "2a1debc27684068803c3018b3bfd1dd01d11059f",
+    "cycles": [
+      {
+        "red_commits": [
+          "f53893c75aaceddcbec8d5f2ff0e7b0b73758825"
+        ],
+        "green_commits": [
+          "2a1debc27684068803c3018b3bfd1dd01d11059f"
+        ]
+      }
+    ]
+  }
+}

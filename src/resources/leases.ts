@@ -23,6 +23,13 @@ export interface Lease {
   acquired_at: string;
   ttl_ms: number;
   idempotency_key?: string;
+  /**
+   * Set when the lease belongs to a claim rather than to the process that
+   * took it (a host-dispatched or manual claim outlives the CLI call that
+   * made it). Such a lease ends with its claim or its TTL, never because the
+   * recording process exited.
+   */
+  claim_id?: string;
 }
 
 interface LeaseFile {
@@ -60,6 +67,8 @@ export interface AcquireOptions {
   idempotencyKey?: string;
   pid?: number;
   now?: number;
+  /** Bind the lease to a claim instead of to this process (see Lease.claim_id). */
+  claimId?: string;
 }
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
@@ -90,6 +99,7 @@ function save(featureDir: string, file: LeaseFile, alsoKnown: string[] = []): vo
 /** Leases whose holder is gone or whose TTL expired. */
 function expired(lease: Lease, now: number): boolean {
   if (Date.parse(lease.acquired_at) + lease.ttl_ms <= now) return true;
+  if (lease.claim_id !== undefined) return false;
   if (lease.host === hostname() && !isPidAlive(lease.pid)) return true;
   return false;
 }
@@ -150,6 +160,7 @@ export function acquireResource(
         acquired_at: new Date(now).toISOString(),
         ttl_ms: options.ttlMs ?? DEFAULT_TTL_MS,
         ...(options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {}),
+        ...(options.claimId ? { claim_id: options.claimId } : {}),
       };
       save(featureDir, { ...file, leases: [...kept, lease] }, [resource]);
       return lease;

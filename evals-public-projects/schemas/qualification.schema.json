@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelink.invalid/bench/qualification.schema.json",
+  "title": "Committed qualification summary",
+  "description": "Counts and hashes from tools/qualify.mjs for one PRD, and the bindings every verification must meet. It names no hidden test, mutant, superseded test or reference detail; those stay in the evaluator store (expected.json).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "prd", "source_identity_sha256", "evaluator_digest_sha256", "bindings", "hidden_tests", "baseline_failure_categories", "superseded_tests", "reference", "mutants", "runs", "tmp_roots", "filesystems", "duration_ms"],
+  "properties": {
+    "schema": { "const": "mycelink-bench/qualification@2" },
+    "project": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "prd": { "type": "string", "pattern": "^[A-Z]{2,6}-[0-9]{3}$" },
+    "source_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "evaluator_digest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "bindings": {
+      "description": "What the qualified runs rested on; a verification whose cache lock, toolchains or trusted commands differ is refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cache_lock_sha256", "toolchains", "commands"],
+      "properties": {
+        "cache_lock_sha256": { "description": "Digest of the cache lock's locked directories (null: the adapter uses no cache).", "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "toolchains": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "java": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "node": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "commands": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["full_suite_sha256", "hidden_sha256"],
+          "properties": {
+            "full_suite_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "hidden_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "hidden_tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "failing_at_baseline", "passing_at_baseline"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 1 },
+        "failing_at_baseline": { "type": "integer", "minimum": 1 },
+        "passing_at_baseline": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "baseline_failure_categories": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "assertion": { "type": "integer", "minimum": 1 },
+        "exception": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "superseded_tests": { "description": "How many upstream tests the requirement supersedes (the reference had to change them).", "type": "integer", "minimum": 0 },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["full_suite_tests", "own_tests", "tdd_units", "new_tests_by_module"],
+      "properties": {
+        "full_suite_tests": { "type": "integer", "minimum": 1 },
+        "own_tests": { "type": "integer", "minimum": 1 },
+        "tdd_units": { "type": "array", "minItems": 1, "items": { "enum": ["valid", "no-production-change"] } },
+        "new_tests_by_module": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "mutants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gating", "killed", "stress", "by_module"],
+      "properties": {
+        "gating": { "type": "integer", "minimum": 1 },
+        "killed": { "type": "integer", "minimum": 1 },
+        "by_module": {
+          "description": "Gating mutants changing each required module with runtime behaviour (module ids are public); each must be at least one.",
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "stress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["runs", "kill_rate"],
+            "properties": {
+              "runs": { "type": "integer", "minimum": 1 },
+              "kill_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "runs": { "type": "integer", "minimum": 1 },
+    "tmp_roots": { "type": "integer", "minimum": 0 },
+    "filesystems": {
+      "description": "The file systems the runs used: the work directory and every tmp root (each tmp root must be another file system).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distinct", "roots"],
+      "properties": {
+        "distinct": { "type": "integer", "minimum": 1 },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "type"],
+            "properties": {
+              "role": { "type": "string", "pattern": "^(work|tmp-root-[0-9]+)$" },
+              "type": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "duration_ms": { "type": "integer", "minimum": 0 }
+  }
+}

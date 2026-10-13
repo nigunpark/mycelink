@@ -1,0 +1,52 @@
+{
+  "description": "Mycelink's controller/worker fence: the controller never writes product code, worker worktrees, result slots or evidence; a module-worker writes only its worktree and result; the acceptance reviewer writes only its verdict; neither spawns a subagent. With the provenance ledger on, every Bash call's start and end and every subagent's stop are recorded with the shared Git state.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs\" hook controller-fence",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs\" hook tool-end",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs\" hook tool-end",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/mycelink.mjs\" hook subagent-end",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

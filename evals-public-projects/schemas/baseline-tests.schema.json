@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelink.invalid/bench/baseline-tests.schema.json",
+  "title": "Qualified upstream baseline",
+  "description": "Every upstream test id the trusted command reports on the frozen commit, with its status, as qualified by repeated identical offline runs. The verifier requires every baseline test that passed to still pass on a delivery.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "source_identity_sha256", "command_sha256", "runs", "counts", "tests"],
+  "properties": {
+    "schema": { "const": "mycelink-bench/baseline-tests@1" },
+    "project": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "source_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "command_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "runs": { "type": "integer", "minimum": 1 },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "skipped"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "skipped"] }
+        }
+      }
+    }
+  }
+}

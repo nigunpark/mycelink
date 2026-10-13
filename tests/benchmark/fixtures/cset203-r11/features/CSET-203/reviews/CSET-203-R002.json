@@ -1,0 +1,334 @@
+{
+  "schema": "mycelink-review-receipt/1",
+  "feature_id": "CSET-203",
+  "review_id": "CSET-203-R002",
+  "dispatch_id": "9fbf2e05-77eb-4e99-bb26-86327608c4f3",
+  "review": 2,
+  "rework_rounds": {
+    "used": 1,
+    "max": 2
+  },
+  "inputs": {
+    "feature_id": "CSET-203",
+    "graph_sha256": "5f7550748e8460a7c0e3d7b95b079df74d40af61dc6a65325c4ff2db26a4bdd4",
+    "criteria_sha256": "9601a5ec51400ff205dc850ed1a67c1e39400d6033a2141cbd027f8c1ce76389",
+    "manifest_sha256": "b9c13ff043e823a7193cc9a5710e7414a23b6f293d6c925a48c3e4409f2c3faa",
+    "repositories": [
+      {
+        "name": "changesets",
+        "head_sha": "5702566dee1ee6e644a729b4c4802ea3120e6e8a"
+      }
+    ]
+  },
+  "inputs_sha256": "87023f040275e4234f260e4680f1d1536a1aaac3a873dd2013fa5cb273e908fa",
+  "packet_path": ".mycelink/reviews/CSET-203/CSET-203-R002/9fbf2e05-77eb-4e99-bb26-86327608c4f3/packet.json",
+  "packet_sha256": "89ce9214e64afd5a6bb3de41556a9b7ba07aa8c9cf1f232ae232326d62a799e4",
+  "verdict_sha256": "889df862d5181b636394bb9dce8d1c681f0970b9d14cbf617bac77677c20a382",
+  "canonical_verdict_sha256": "889df862d5181b636394bb9dce8d1c681f0970b9d14cbf617bac77677c20a382",
+  "normalization": {
+    "original_sha256": "889df862d5181b636394bb9dce8d1c681f0970b9d14cbf617bac77677c20a382",
+    "canonical_sha256": "889df862d5181b636394bb9dce8d1c681f0970b9d14cbf617bac77677c20a382",
+    "changed": [],
+    "omitted": 0
+  },
+  "reviewer": {
+    "agent": "mycelink:acceptance-reviewer",
+    "model": "claude-sonnet-5-5",
+    "agent_id": "a0000000000003113",
+    "session_id": "00000000-0000-4000-8000-000000005311"
+  },
+  "transport": {
+    "kind": "agent-result",
+    "agent_id": "a0000000000003113",
+    "session_id": "00000000-0000-4000-8000-000000005311",
+    "tool_use_id": "toolu_r11_r002_reviewer",
+    "result_sha256": "f45dca4d5b06f04d1d7b8b1b66e55ff973fcdeaa9f868662b624a1063ff875b9",
+    "transcript_sha256": "60039582e68208ab616914cb7db4ed0ebc548010538ef5d2ceb601f0b702d974",
+    "transcript_path": "/home/alice/mycelink-pilot-results/CSET-203-r11/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-203-r11-with-normal-workspace/00000000-0000-4000-8000-000000005311/subagents/agent-a0000000000003113.jsonl",
+    "extraction": "fenced-json"
+  },
+  "overall": "GAPS",
+  "outcome": "GAPS",
+  "criteria": [
+    {
+      "criterion": "AC-1",
+      "verdict": "GAP",
+      "confidence": "high",
+      "clauses": [
+        {
+          "clause": "AC-1.1",
+          "evidence": [
+            "test:04a3cab213c2873b",
+            "test:a1a8087ce2607d86",
+            "file:changesets:packages/apply-release-plan/src/journal-rollback.test.ts#L215-L250"
+          ],
+          "trace": "Test 1 fails the changeset rm after the package writes and checks the tree snapshot is identical. Test 2 fails rename in pre mode and checks the snapshot, so the created pre dir is removed. Every test sets changelog:false, so a CHANGELOG.md the run created is never checked for removal on rollback."
+        },
+        {
+          "clause": "AC-1.2",
+          "evidence": [
+            "test:04a3cab213c2873b",
+            "file:changesets:packages/apply-release-plan/src/journal-rollback.test.ts#L230-L231"
+          ],
+          "trace": "err.cause is asserted toBe(boom) for the rm failure, and for the rename failure in test 2."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "partial-write",
+          "boundary": "failure after earlier package.json writes, with restore of changed and deleted files and removal of the created pre dir",
+          "covered": true,
+          "evidence": [
+            "test:04a3cab213c2873b",
+            "test:a1a8087ce2607d86"
+          ]
+        },
+        {
+          "kind": "state",
+          "boundary": "a file the run created (a new CHANGELOG.md) is removed on rollback",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "partial-write",
+          "boundary": "a failure inside the changelog write after package.json was written",
+          "covered": false,
+          "evidence": []
+        }
+      ],
+      "gap": {
+        "missing": "No apply-release-plan test enables changelog generation. Rollback of a CHANGELOG.md that did not exist before the run (restored to absence), and of an existing CHANGELOG.md that was rewritten, is never exercised.",
+        "reproduction": "In packages/apply-release-plan, use a real changelog generator (changelog not false). Start with pkg-a having no CHANGELOG.md and pkg-b with one. Make a later step fail (the changeset rm, or the pkg-b CHANGELOG write). Assert the tree snapshot equals the pre-run one: pkg-a/CHANGELOG.md absent, pkg-b/CHANGELOG.md in its previous bytes, and err.cause is the original error."
+      },
+      "producer": {
+        "module": "changesets:packages/apply-release-plan/src/index.ts"
+      }
+    },
+    {
+      "criterion": "AC-2",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-2.1",
+          "evidence": [
+            "test:a6abe52e85f0429b",
+            "file:changesets:packages/apply-release-plan/src/journal-rollback.test.ts#L252-L270"
+          ],
+          "trace": "At the first package.json write, seen[0] holds exactly one dot-prefixed file in .changeset. The journal exists before the first change (assertion at L268). It is named .apply-release-plan-journal.json (src/index.ts L96-L133)."
+        },
+        {
+          "clause": "AC-2.2",
+          "evidence": [
+            "test:a6abe52e85f0429b",
+            "test:07e6af964f110bed",
+            "file:changesets:packages/apply-release-plan/src/journal-rollback.test.ts#L269-L277"
+          ],
+          "trace": "No dot file remains in .changeset after a rollback (L269) or after a successful run (L277)."
+        },
+        {
+          "clause": "AC-2.3",
+          "evidence": [
+            "file:changesets:packages/apply-release-plan/src/index.ts#L96-L133"
+          ],
+          "trace": "Latitude clause. A JSON journal with base64 file contents was chosen."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "order",
+          "boundary": "journal exists before the first change",
+          "covered": true,
+          "evidence": [
+            "test:a6abe52e85f0429b"
+          ]
+        },
+        {
+          "kind": "state",
+          "boundary": "journal removed after success and after rollback",
+          "covered": true,
+          "evidence": [
+            "test:a6abe52e85f0429b",
+            "test:07e6af964f110bed"
+          ]
+        }
+      ],
+      "gap": null,
+      "producer": null
+    },
+    {
+      "criterion": "AC-3",
+      "verdict": "GAP",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-3.1",
+          "evidence": [
+            "file:changesets:packages/cli/src/commands/version/index.ts#L28-L36"
+          ],
+          "trace": "version() calls getPackages(cwd), which reads the workspace package.json files, before recoverInterruptedRun runs. No test covers the order. The recovery test uses a valid package.json, so it would not notice a read that fails before recovery."
+        },
+        {
+          "clause": "AC-3.2",
+          "evidence": [
+            "test:df980dfb2c3d4c5f",
+            "file:changesets:packages/cli/src/commands/version/version-recovery.test.ts#L536-L569"
+          ],
+          "trace": "A journal and a half-applied state are set up. After version() the test asserts a warning containing 'interrupted' (L562), the journal is gone (L563), and the run completes."
+        },
+        {
+          "clause": "AC-3.3",
+          "evidence": [
+            "test:df980dfb2c3d4c5f",
+            "file:changesets:packages/cli/src/commands/version/version-recovery.test.ts#L564-L569"
+          ],
+          "trace": "After recovery the version is 1.1.0, so it was bumped once, and the changeset file is gone. Recovery of a created CHANGELOG.md or a created pre dir is not exercised."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "order",
+          "boundary": "recovery runs before anything else is read, including a package.json truncated by the kill",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "state",
+          "boundary": "restore after a kill plus rerun gives the uninterrupted result",
+          "covered": true,
+          "evidence": [
+            "test:df980dfb2c3d4c5f"
+          ]
+        }
+      ],
+      "gap": {
+        "missing": "recoverInterruptedRun runs after getPackages(cwd), so the CLI reads package files before looking for the journal. A run killed mid-write that leaves a package.json truncated or invalid makes version fail before recovery. No test covers this order.",
+        "reproduction": "Create a project with a valid journal whose files entry holds the original pkg-a package.json bytes. Overwrite packages/pkg-a/package.json with invalid JSON, such as '{ \"name\": \"pkg-a\", \"ver'. Run version({cwd}). Expect it to restore the file, warn 'interrupted', remove the journal, and finish with pkg-a at 1.1.0 and the changeset consumed. Today getPackages throws first."
+      },
+      "producer": {
+        "module": "changesets:packages/cli/src/commands/version/index.ts"
+      }
+    },
+    {
+      "criterion": "AC-4",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-4.1",
+          "evidence": [
+            "test:fcd9b3d1ea4f0f01",
+            "file:changesets:packages/cli/src/commands/version/version-recovery.test.ts#L572-L588"
+          ],
+          "trace": "CHANGELOG.md is made a directory so applyReleasePlan fails. The test asserts an ExitError with code 1 (L584-L585), log.error was called, and the printed text has no stack frames (L588)."
+        },
+        {
+          "clause": "AC-4.2",
+          "evidence": [
+            "test:fcd9b3d1ea4f0f01",
+            "file:changesets:packages/cli/src/commands/version/version-recovery.test.ts#L578-L590"
+          ],
+          "trace": "The config has commit enabled and git.add and git.commit are mocked. Both are asserted not called after the failure."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "failure",
+          "boundary": "apply fails with commit enabled: exit 1, no stack trace, no git add or commit",
+          "covered": true,
+          "evidence": [
+            "test:fcd9b3d1ea4f0f01"
+          ]
+        }
+      ],
+      "gap": null,
+      "producer": null
+    },
+    {
+      "criterion": "AC-5",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-5.1",
+          "evidence": [
+            "test:fa385bfe00239d8f",
+            "test:07e6af964f110bed",
+            "gate:CSET-203.apply.journal-rollback.impl:regression",
+            "gate:CSET-203.cli.recover-fail.impl:regression",
+            "receipt:CSET-203.changesets.compat.verify"
+          ],
+          "trace": "A successful version run bumps to 1.1.0, consumes the changeset and leaves no journal (version-no-journal.test.ts L480-L486). The existing index.test.ts and cli.test.ts suites run in the regression gates."
+        },
+        {
+          "clause": "AC-5.2",
+          "evidence": [
+            "test:237aae09f5b82ead",
+            "test:33eef3a4e8bca98e",
+            "file:changesets:packages/cli/src/commands/journal-unaffected.test.ts#L326-L350"
+          ],
+          "trace": "With a journal present, status writes the same plan as without one and the journal stays untouched. add --empty creates exactly one new .md, the journal stays untouched, and no 'interrupted' warning is printed."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "state",
+          "boundary": "journal present during status and add, versus absent",
+          "covered": true,
+          "evidence": [
+            "test:237aae09f5b82ead",
+            "test:33eef3a4e8bca98e"
+          ]
+        }
+      ],
+      "gap": null,
+      "producer": null
+    }
+  ],
+  "gaps": [
+    {
+      "criterion": "AC-1",
+      "missing": "No apply-release-plan test enables changelog generation. Rollback of a CHANGELOG.md that did not exist before the run (restored to absence), and of an existing CHANGELOG.md that was rewritten, is never exercised.",
+      "reproduction": "In packages/apply-release-plan, use a real changelog generator (changelog not false). Start with pkg-a having no CHANGELOG.md and pkg-b with one. Make a later step fail (the changeset rm, or the pkg-b CHANGELOG write). Assert the tree snapshot equals the pre-run one: pkg-a/CHANGELOG.md absent, pkg-b/CHANGELOG.md in its previous bytes, and err.cause is the original error.",
+      "producer": {
+        "module": "changesets:packages/apply-release-plan/src/index.ts"
+      },
+      "confidence": "high"
+    },
+    {
+      "criterion": "AC-3",
+      "missing": "recoverInterruptedRun runs after getPackages(cwd), so the CLI reads package files before looking for the journal. A run killed mid-write that leaves a package.json truncated or invalid makes version fail before recovery. No test covers this order.",
+      "reproduction": "Create a project with a valid journal whose files entry holds the original pkg-a package.json bytes. Overwrite packages/pkg-a/package.json with invalid JSON, such as '{ \"name\": \"pkg-a\", \"ver'. Run version({cwd}). Expect it to restore the file, warn 'interrupted', remove the journal, and finish with pkg-a at 1.1.0 and the changeset consumed. Today getPackages throws first.",
+      "producer": {
+        "module": "changesets:packages/cli/src/commands/version/index.ts"
+      },
+      "confidence": "medium"
+    }
+  ],
+  "reworks": [
+    {
+      "node_id": "CSET-203.cli.recover-fail.impl",
+      "criteria": [
+        "AC-3"
+      ],
+      "by": "criterion"
+    },
+    {
+      "node_id": "CSET-203.apply.journal-rollback.impl",
+      "criteria": [
+        "AC-1"
+      ],
+      "by": "criterion"
+    }
+  ],
+  "unowned": [],
+  "refused": [],
+  "blocked": null,
+  "orchestration": {
+    "issued_epoch": 8,
+    "settled_epoch": 11,
+    "barrier": null
+  },
+  "settled_at": "2026-10-10T01:00:08.296Z",
+  "settled_by": "host"
+}

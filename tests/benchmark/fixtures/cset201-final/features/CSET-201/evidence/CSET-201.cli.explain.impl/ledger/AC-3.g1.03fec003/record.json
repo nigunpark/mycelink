@@ -1,0 +1,195 @@
+{
+  "schema": "mycelink-criterion-completion/1",
+  "node_id": "CSET-201.cli.explain.impl",
+  "criterion": "AC-3",
+  "kind": "new-behavior",
+  "generation": 1,
+  "basis": "red",
+  "source": null,
+  "parent": "CC-0eda731ae463b0d3",
+  "claim_id": "03fec003-3e33-488b-b151-e3db5e42fee6",
+  "dispatch_id": "6f89d31f-4ede-41a9-a85b-f8632c870abc",
+  "settled_at": "2026-10-11T20:58:29.055Z",
+  "order": null,
+  "repo": {
+    "repository": "changesets",
+    "base_sha": "d56cd1f0925418ee33649e3628d07c568aeb29ee",
+    "head_sha": "d56cd1f0925418ee33649e3628d07c568aeb29ee",
+    "integrated_sha": "d56cd1f0925418ee33649e3628d07c568aeb29ee"
+  },
+  "production": {
+    "paths": [],
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "proof": {
+    "test_id": "9da83e206aef97f7",
+    "test": {
+      "path": "packages/cli/src/commands/status/__tests__/status.test.ts",
+      "name": "status > --explain > prints dependent reason line"
+    },
+    "test_blob": "156612f415537ec685c834db2605b7c682b559cb",
+    "gate": "red",
+    "output_sha256": "9e59f4d83c74ad2c8798f11ccf74ee8b5697942b743b57532407ebd8efc9b4ab"
+  },
+  "red": {
+    "output_sha256": "9e59f4d83c74ad2c8798f11ccf74ee8b5697942b743b57532407ebd8efc9b4ab",
+    "record": {
+      "kind": "red",
+      "node_id": "CSET-201.cli.explain.impl",
+      "command": [
+        "pnpm",
+        "vitest",
+        "run",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile.json=${REPORT}",
+        "packages/cli/"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-11T20:45:14.029Z",
+      "finished_at": "2026-10-11T20:45:23.928Z",
+      "cwd": ".mycelink/worktrees/changesets__CSET-201.cli.explain.impl",
+      "repository": "changesets",
+      "commit_sha": "518ffa27ad8a9e34a0827f6177fdce597d8977fd",
+      "output_path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.03fec003/red.log",
+      "output_sha256": "9e59f4d83c74ad2c8798f11ccf74ee8b5697942b743b57532407ebd8efc9b4ab",
+      "failure_fingerprint": "a5025d1f67da980a",
+      "module": "cli",
+      "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+      "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+      "steps": [
+        {
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_ms": 6934
+        },
+        {
+          "argv": [
+            "git",
+            "checkout",
+            "--",
+            "packages/config/package.json"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_ms": 4
+        }
+      ],
+      "results": {
+        "format": "vitest-json",
+        "path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.03fec003/red.results.json",
+        "sha256": "455f0886aa5069783a508a161cd8b468a31c9104a41e510d87e84bbf9e9e0014",
+        "total": 259,
+        "passed": 253,
+        "failed": 5,
+        "skipped": 1
+      },
+      "red_reason": "behaviour-missing",
+      "red_category": "assertion",
+      "red_fingerprint": "17740eeccfde440a",
+      "red_detail": "prints dependent reason line, prints linked reason line, prints prerelease-exit reason line, combines --explain with --since, writes exact reasons array with --output failed for a missing behaviour (assertion)",
+      "red_tests": [
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "writes reasons with --output",
+          "status": "passed",
+          "category": "passed",
+          "type": null,
+          "fingerprint": null
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints dependent reason line",
+          "status": "failed",
+          "category": "assertion",
+          "type": "AssertionError",
+          "fingerprint": "290d4b13a2359ed3"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints fixed reason line",
+          "status": "passed",
+          "category": "passed",
+          "type": null,
+          "fingerprint": null
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints linked reason line",
+          "status": "failed",
+          "category": "assertion",
+          "type": "AssertionError",
+          "fingerprint": "c31f2491231e592e"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints prerelease-exit reason line",
+          "status": "failed",
+          "category": "assertion",
+          "type": "AssertionError",
+          "fingerprint": "c7b7d0517e67a257"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "combines --explain with --since",
+          "status": "failed",
+          "category": "assertion",
+          "type": "AssertionError",
+          "fingerprint": "500e34fa73608c2d"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "writes exact reasons array with --output",
+          "status": "failed",
+          "category": "exception",
+          "type": "TypeError",
+          "fingerprint": "d8876cf474265d1e"
+        }
+      ],
+      "red_declared": [
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "writes reasons with --output"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints dependent reason line"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints fixed reason line"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints linked reason line"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints prerelease-exit reason line"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "combines --explain with --since"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "writes exact reasons array with --output"
+        }
+      ],
+      "worktree_setup_sha256": "3c7e7b88d930e54d52d3e10c22d7ba8802e8083e7d870bb78b4593beaa44bf01",
+      "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+    }
+  },
+  "history": {
+    "output_path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/tdd-history.4c8dca2f51fc6d38.json",
+    "output_sha256": "4c8dca2f51fc6d3897dea0b884c434160e24d368433b6366d03b4d0d0d9f2520"
+  },
+  "reproof": null,
+  "archive": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.03fec003",
+  "record_id": "CC-e8793d4dd86a401e",
+  "sha256": "e8793d4dd86a401e4db79ca579131fbe12d0be4e5763cd5a40daaabbb110c6f8"
+}

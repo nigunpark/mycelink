@@ -1,0 +1,74 @@
+{
+  "schema": "mycelink-bench/baseline-tests@1",
+  "project": "spring-petclinic-microservices",
+  "source_identity_sha256": "92ab8fe8fd6e365586f2a0821fd8a3461093e8d3cc3b1d217b11b32c6cc0f8f7",
+  "command_sha256": "8bf546a5aced931896c49150a7493ca864a74109aa178198fc24c3145a8a0772",
+  "runs": 3,
+  "counts": {
+    "passed": 15,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tests": [
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.ApiGatewayApplicationRouterTest#doesNotServeTheVueApplicationForApiRequests",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.ApiGatewayApplicationRouterTest#doesNotServeTheVueApplicationForScriptRequests",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.ApiGatewayApplicationRouterTest#doesNotServeTheVueApplicationForWebjars",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.ApiGatewayApplicationRouterTest#servesTheVueApplicationForHtmlNavigation",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.ApiGatewayApplicationTests#contextLoads",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.application.VisitsServiceClientIntegrationTest#getVisitsForPets_withAvailableVisitsService",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.boundary.web.ApiGatewayControllerTest#getOwnerDetails_withAvailableVisitsService",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.boundary.web.ApiGatewayControllerTest#getOwnerDetails_withServiceError",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-api-gateway/org.springframework.samples.petclinic.api.boundary.web.FallbackControllerTest#returnsServiceUnavailableForGetRequests",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-config-server/org.springframework.samples.petclinic.config.PetclinicConfigServerApplicationTests#contextLoads",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-customers-service/org.springframework.samples.petclinic.customers.web.PetResourceTest#shouldGetAPetInJSonFormat",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-customers-service/org.springframework.samples.petclinic.customers.web.PetResourceTest#shouldReturnNotFoundWhenPetDoesNotExist",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-discovery-server/org.springframework.samples.petclinic.discovery.DiscoveryServerApplicationTests#contextLoads",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-vets-service/org.springframework.samples.petclinic.vets.web.VetResourceTest#shouldGetAListOfVets",
+      "status": "passed"
+    },
+    {
+      "id": "spring-petclinic-visits-service/org.springframework.samples.petclinic.visits.web.VisitResourceTest#shouldFetchVisits",
+      "status": "passed"
+    }
+  ]
+}

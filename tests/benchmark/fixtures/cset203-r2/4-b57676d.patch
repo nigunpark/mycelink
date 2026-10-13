@@ -1,0 +1,97 @@
+diff --git a/packages/cli/src/commands/version/index.ts b/packages/cli/src/commands/version/index.ts
+index 9b5b906..7a42831 100644
+--- a/packages/cli/src/commands/version/index.ts
++++ b/packages/cli/src/commands/version/index.ts
+@@ -1,3 +1,4 @@
++import fs from "node:fs/promises";
+ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { applyReleasePlan } from "@changesets/apply-release-plan";
+@@ -27,6 +28,8 @@ export interface VersionOptions {
+ export async function version(options: VersionOptions) {
+   const cwd = options.cwd ?? process.cwd();
+ 
++  await recoverInterruptedRun(cwd);
++
+   const packages = await getPackages(cwd);
+   await ensureChangesetFolder(packages.rootDir);
+   const config = await readConfig(packages);
+@@ -116,13 +119,26 @@ You can then run ${c.cyan("changeset version")} again to do a normal release.
+ 
+   const contextDir = path.dirname(fileURLToPath(import.meta.url));
+ 
+-  const [...touchedFiles] = await applyReleasePlan(
+-    releasePlan,
+-    packages,
+-    releaseConfig,
+-    options.snapshot,
+-    contextDir,
+-  );
++  let touchedFiles: string[];
++  try {
++    touchedFiles = [
++      ...(await applyReleasePlan(
++        releasePlan,
++        packages,
++        releaseConfig,
++        options.snapshot,
++        contextDir,
++      )),
++    ];
++  } catch (err) {
++    const message = err instanceof Error ? err.message : String(err);
++    const cause =
++      err instanceof Error && err.cause instanceof Error
++        ? `: ${err.cause.message}`
++        : "";
++    log.error(`${message}${cause}`);
++    throw new ExitError(1);
++  }
+ 
+   const [{ getVersionMessage }, commitOpts] = await getCommitFunctions(
+     releaseConfig.commit,
+@@ -156,6 +172,44 @@ You can then run ${c.cyan("changeset version")} again to do a normal release.
+   }
+ }
+ 
++async function recoverInterruptedRun(cwd: string) {
++  const journalPath = path.join(cwd, ".changeset", ".apply-release-plan.journal");
++  let raw: string;
++  try {
++    raw = await fs.readFile(journalPath, "utf8");
++  } catch (err: any) {
++    if (err?.code === "ENOENT") return;
++    throw err;
++  }
++  let journal: {
++    entries: { path: string; content: string | null }[];
++    createdDir: string;
++    dirExisted: boolean;
++  };
++  try {
++    journal = JSON.parse(raw);
++  } catch {
++    log.error(
++      `The journal ${journalPath} of an interrupted run is unreadable. Remove it manually after checking your files.`,
++    );
++    throw new ExitError(1);
++  }
++  for (const entry of journal.entries) {
++    if (entry.content === null) {
++      await fs.rm(entry.path, { recursive: true, force: true });
++    } else {
++      await fs.writeFile(entry.path, Buffer.from(entry.content, "base64"));
++    }
++  }
++  if (!journal.dirExisted) {
++    await fs.rm(journal.createdDir, { recursive: true, force: true });
++  }
++  await fs.rm(journalPath, { force: true });
++  log.warn(
++    "A previous `changeset version` run was interrupted. Its changes have been restored before versioning again.",
++  );
++}
++
+ function validateIgnoredPackageNames(
+   packages: Packages,
+   ignoreFromCli: string[] | undefined,

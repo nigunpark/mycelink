@@ -135,7 +135,9 @@ describe('context pack', () => {
 
   it('drops optional memory recall before required fields when space runs out', () => {
     const args = baseArgs();
-    args.maxBytes = 2400;
+    // Room for the required core (rules included) and a little recall.
+    // (The core carries each criterion's hash and the criteria's hash.)
+    args.maxBytes = 3400;
     args.memory = Array.from({ length: 40 }, (_, i) => ({
       id: `mem-${i}`,
       type: 'procedure',
@@ -144,7 +146,7 @@ describe('context pack', () => {
       path: `.llmwiki/procedures/mem-${i}.md`,
     }));
     const pack = buildContextPack(args);
-    expect(packBytes(pack)).toBeLessThanOrEqual(2400);
+    expect(packBytes(pack)).toBeLessThanOrEqual(3400);
     expect(pack.memory?.length ?? 0).toBeLessThan(40);
     // Required fields survive the trim.
     expect(pack.allowed_paths).toEqual(['src/**']);

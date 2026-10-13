@@ -1,0 +1,9 @@
+{
+  "schema": "mycelink-review-attestation/1",
+  "agent_id": "a0000000000000501",
+  "agent_type": "mycelink:acceptance-reviewer",
+  "session_id": "00000000-0000-4000-8000-000000005305",
+  "tool_use_id": "toolu_r5_g1_reviewer",
+  "content_sha256": "085e907e480274e979e22dffcfa40befbebe90caf524dcf4a2ac4b6ef3ebef81",
+  "at": "2026-10-09T01:44:57.576Z"
+}

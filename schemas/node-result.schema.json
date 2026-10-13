@@ -2,15 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:mycelink:schema:node-result",
   "title": "Worker session result",
-  "description": "What a worker session returns. A natural-language completion claim is not accepted; only commands, exit codes, SHAs and evidence pointers.",
+  "description": "What a worker session returns. A natural-language completion claim is not accepted; only commands, exit codes, SHAs and evidence pointers. Version 2 adds outcome CRITERIA: each criterion an acceptance review's rework orders answered on its own (criteria).",
   "type": "object",
   "required": ["schema_version", "node_id", "claim_id", "outcome", "commands", "evidence_paths"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2], "description": "2: each criterion an acceptance review's rework orders may be answered on its own (outcome CRITERIA with criteria); 1: one outcome for the whole node." },
     "node_id": { "type": "string" },
     "claim_id": { "type": "string" },
-    "outcome": { "enum": ["SUBMITTED", "RETRYABLE", "BLOCKED", "NEEDS_DECISION", "BUDGET_EXHAUSTED"] },
+    "dispatch_id": { "type": "string", "pattern": "^[0-9a-f-]{8,64}$" },
+    "orchestration_epoch": { "type": "integer", "minimum": 0, "description": "The orchestration epoch the dispatch was issued at, exactly as its ticket gives it; a result naming another epoch is refused as stale." },
+    "outcome": { "enum": ["SUBMITTED", "RETRYABLE", "BLOCKED", "NEEDS_DECISION", "BUDGET_EXHAUSTED", "REVIEW_GAP_CHALLENGE", "CRITERIA"] },
     "commands": {
       "type": "array",
       "items": {
@@ -59,6 +61,163 @@
         "output_tokens": { "type": "integer", "minimum": 0 }
       }
     },
-    "notes": { "type": "string", "maxLength": 1024 }
+    "notes": { "type": "string", "maxLength": 1024 },
+    "criterion_evidence": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "For each acceptance criterion the node serves, the test that proves it by the canonical test_id its gate published, the gate that ran it and that gate's output hash. Settle resolves the id among the tests that gate ran.",
+      "items": {
+        "type": "object",
+        "required": ["criterion", "gate", "output_sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "criterion": { "type": "string", "pattern": "^AC-[A-Za-z0-9_.-]+$" },
+          "test_id": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "The canonical id the gate printed for the test (sha256 of its adapter, path and full name)." },
+          "test": {
+            "description": "Display only beside test_id; without one, a legacy reference that must name exactly one test the gate ran.",
+            "type": "object",
+            "required": ["path", "name"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+              "name": { "type": "string", "minLength": 1, "maxLength": 1024 }
+            }
+          },
+          "gate": { "enum": ["red", "green", "regression"] },
+          "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "capsule_id": { "type": "string", "pattern": "^CAP-[0-9a-f]{16}$", "description": "Gate red only: the failing reproduction capsule this RED was promoted from (its files committed test-first, run again by this red gate)." }
+        }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "With outcome CRITERIA (schema_version 2), in an acceptance review's rework only: every criterion the rework orders, exactly once, each with its own outcome. DONE: proved by its criterion_evidence (a RED and its fix, or a compatibility unit's passing test). REVIEW_GAP_CHALLENGE: its gap in challenge.gaps (its exact reproduction passed on the unchanged base). BLOCKED or NEEDS_DECISION: its own reason (and question). Settle judges each one on its own; one execution is one attempt.",
+      "items": {
+        "type": "object",
+        "required": ["criterion", "outcome"],
+        "additionalProperties": false,
+        "properties": {
+          "criterion": { "type": "string", "pattern": "^AC-[A-Za-z0-9_.-]+$" },
+          "outcome": { "enum": ["DONE", "REVIEW_GAP_CHALLENGE", "BLOCKED", "NEEDS_DECISION"] },
+          "reason": { "type": "string", "maxLength": 1000, "description": "BLOCKED or NEEDS_DECISION: why, for this criterion alone." },
+          "decision_request": {
+            "type": "object",
+            "description": "NEEDS_DECISION: the question a person answers for this criterion.",
+            "required": ["question", "options"],
+            "additionalProperties": false,
+            "properties": {
+              "question": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "options": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 300 } },
+              "category": { "enum": ["acceptance-conflict", "contract-compatibility", "data-migration", "security-privacy", "scope-change", "budget-increase", "design-tradeoff"] }
+            }
+          },
+          "clauses": {
+            "type": "array",
+            "maxItems": 16,
+            "description": "DONE: when one test is named for this criterion and another, this criterion's own clauses traced to that test's assertion lines.",
+            "items": {
+              "type": "object",
+              "required": ["clause", "test_id", "assertions", "trace"],
+              "additionalProperties": false,
+              "properties": {
+                "clause": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "test_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+                "assertions": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 400 } },
+                "trace": { "type": "string", "maxLength": 8000 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "challenge": {
+      "type": "object",
+      "description": "With outcome REVIEW_GAP_CHALLENGE, in an acceptance review's rework only: the review's gap whose exact public reproduction, written as focused tests, passed on the unchanged integrated head. Bound to the review, the rework's exact reason, each gap's reproduction and the red gate's output; each challenged clause traced to concrete assertion lines in a passing focused test. Settle checks it all and charges no attempt when it holds.",
+      "required": ["review_id", "reason_sha256", "base_sha", "gate_output_sha256", "gaps"],
+      "additionalProperties": false,
+      "properties": {
+        "review_id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+-R[0-9]{3,}$" },
+        "reason_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "gate_output_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "The red gate that passed the focused tests; null when every gap cites a reproduction capsule." },
+        "gaps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": ["criterion", "reproduction_sha256", "tests", "clauses", "explanation"],
+            "additionalProperties": false,
+            "properties": {
+              "criterion": { "type": "string", "pattern": "^AC-[A-Za-z0-9_.-]+$" },
+              "reproduction_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "capsule": { "type": "object", "description": "The passing reproduction capsule of this gap (tdd capsule): its id and receipt hash.", "required": ["capsule_id", "capsule_sha256"], "additionalProperties": false, "properties": { "capsule_id": { "type": "string", "pattern": "^CAP-[0-9a-f]{16}$" }, "capsule_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+              "tests": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "pattern": "^[0-9a-f]{16}$" } },
+              "clauses": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "required": ["clause", "test_id", "assertions", "trace"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "clause": { "type": "string", "minLength": 1, "maxLength": 64 },
+                    "test_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+                    "assertions": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 400 } },
+                    "trace": { "type": "string", "maxLength": 8000 }
+                  }
+                }
+              },
+              "explanation": { "type": "string", "maxLength": 16000 }
+            }
+          }
+        }
+      }
+    },
+    "tdd": {
+      "type": "object",
+      "description": "The worker's account of its history, checked against the repository at settle: base and head, and per RED -> GREEN cycle its test-only and production commits.",
+      "required": ["base_sha", "head_sha", "cycles"],
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "head_sha": { "$ref": "#/$defs/sha" },
+        "cycles": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["red_commits", "green_commits"],
+            "additionalProperties": false,
+            "properties": {
+              "red_commits": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/sha" } },
+              "green_commits": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/sha" } },
+              "red_tests": {
+                "type": "array",
+                "maxItems": 512,
+                "items": {
+                  "type": "object",
+                  "required": ["path", "blob"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+                    "blob": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "outcome": { "const": "CRITERIA" } }, "required": ["outcome"] }, "then": { "required": ["criteria"], "properties": { "schema_version": { "const": 2 } } } },
+    { "if": { "required": ["criteria"] }, "then": { "properties": { "outcome": { "const": "CRITERIA" } } } }
+  ],
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
   }
 }

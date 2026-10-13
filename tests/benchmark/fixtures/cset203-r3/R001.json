@@ -1,0 +1,288 @@
+{
+  "review_id": "CSET-203-R001",
+  "overall": "GAPS",
+  "outcome": "REVIEW_GAPS",
+  "gaps": [
+    {
+      "criterion": "AC-1",
+      "missing": "Rollback is proved only for one modified package.json and one created directory. Restoring a created file (CHANGELOG.md absent before), a pre-existing CHANGELOG.md with exact bytes, deleted changesets (non-pre) and pre.json removal (exit mode) are never asserted.",
+      "reproduction": "Call applyReleasePlan with changelog enabled in a non-pre plan with two packages where one has no CHANGELOG.md, and inject a failure on fs.rm of the changeset (or mock the second package write to reject). Assert that every package.json and existing CHANGELOG.md has its exact previous bytes, the new CHANGELOG.md does not exist, the deleted changeset .md and (for preState exit) pre.json are back byte for byte, and err.cause is the injected error.",
+      "producer": {
+        "node_id": "CSET-203.arp.rollback-journal.impl"
+      },
+      "confidence": "high"
+    },
+    {
+      "criterion": "AC-3",
+      "missing": "Order (recovery before any read) is unproved; recovery of created files/dirs and of a truncated journal is unexercised via the CLI.",
+      "reproduction": "Leave a valid journal plus a state that would make reading fail (e.g. an invalid .changeset/config.json caused by the interrupted run, recorded in the journal as a file to restore) and assert version() restores it, warns 'interrupted' and then succeeds. Also use a journal with createdDirs/null-content entries, and assert those paths are absent afterwards and every package bumped once.",
+      "producer": {
+        "node_id": "CSET-203.cli.recovery-failure.impl"
+      },
+      "confidence": "medium"
+    },
+    {
+      "criterion": "AC-5",
+      "missing": "No regression evidence runs `changeset status` or `changeset add` with a journal file present in .changeset.",
+      "reproduction": "Create .changeset/.apply-release-plan-journal.json beside a changeset, run status and add, and assert same output/exit code as without the journal, the journal untouched and not listed as a changeset.",
+      "producer": {
+        "node_id": "CSET-203.changesets.compat.verify"
+      },
+      "confidence": "medium"
+    }
+  ],
+  "reworks": [],
+  "verdict": {
+    "criteria": [
+      {
+        "criterion": "AC-1",
+        "verdict": "GAP",
+        "confidence": "high",
+        "clauses": [
+          {
+            "clause": "AC-1.1",
+            "evidence": [
+              "test:d10a4cd3f4a6fd76",
+              "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L220-L233"
+            ],
+            "trace": "fs.rename is mocked to reject (pre mode, one package, changelog disabled); asserts package.json bytes restored, changeset still present, .changeset/pre dir removed. Only package-modified and created-directory cases are exercised; no created file and no deleted file is restored in any test."
+          },
+          {
+            "clause": "AC-1.2",
+            "evidence": [
+              "test:d10a4cd3f4a6fd76",
+              "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L229-L229"
+            ],
+            "trace": "err.cause toBe(original) after rename rejection."
+          }
+        ],
+        "boundaries": [
+          {
+            "kind": "partial-write",
+            "boundary": "a created file (new CHANGELOG.md, absent before) is removed on rollback",
+            "covered": false,
+            "evidence": []
+          },
+          {
+            "kind": "partial-write",
+            "boundary": "a deleted file (changeset removed in non-pre mode, or pre.json removed on exit) is restored to exact bytes after a later failure",
+            "covered": false,
+            "evidence": []
+          },
+          {
+            "kind": "failure",
+            "boundary": "failure after changelog write / multiple packages written",
+            "covered": false,
+            "evidence": []
+          },
+          {
+            "kind": "failure",
+            "boundary": "rename failure after package.json written (single package)",
+            "covered": true,
+            "evidence": [
+              "test:d10a4cd3f4a6fd76"
+            ]
+          }
+        ],
+        "gap": {
+          "missing": "Rollback is proved only for one modified package.json and one created directory. Restoring a created file (CHANGELOG.md absent before), a pre-existing CHANGELOG.md with exact bytes, deleted changesets (non-pre) and pre.json removal (exit mode) are never asserted.",
+          "reproduction": "Call applyReleasePlan with changelog enabled in a non-pre plan with two packages where one has no CHANGELOG.md, and inject a failure on fs.rm of the changeset (or mock the second package write to reject). Assert that every package.json and existing CHANGELOG.md has its exact previous bytes, the new CHANGELOG.md does not exist, the deleted changeset .md and (for preState exit) pre.json are back byte for byte, and err.cause is the injected error."
+        },
+        "producer": {
+          "node_id": "CSET-203.arp.rollback-journal.impl"
+        }
+      },
+      {
+        "criterion": "AC-2",
+        "verdict": "PASS",
+        "confidence": "medium",
+        "clauses": [
+          {
+            "clause": "AC-2.1",
+            "evidence": [
+              "test:8bf75e27c3408055",
+              "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L235-L250"
+            ],
+            "trace": "Spy on fs.writeFile observes a dot-prefixed file in .changeset before the first package.json write; journal written and fsynced first in code (journal.ts)."
+          },
+          {
+            "clause": "AC-2.2",
+            "evidence": [
+              "test:8bf75e27c3408055",
+              "test:d537c212fa73e956",
+              "file:changesets:packages/apply-release-plan/src/rollback.test.ts#L248-L258"
+            ],
+            "trace": "No dot-prefixed file remains after success and after a rolled-back failure."
+          },
+          {
+            "clause": "AC-2.3",
+            "evidence": [
+              "test:8bf75e27c3408055",
+              "file:changesets:packages/apply-release-plan/src/journal.ts#L85-L132"
+            ],
+            "trace": "Format unconstrained; journal is .apply-release-plan-journal.json."
+          }
+        ],
+        "boundaries": [
+          {
+            "kind": "order",
+            "boundary": "journal exists before first change",
+            "covered": true,
+            "evidence": [
+              "test:8bf75e27c3408055"
+            ]
+          },
+          {
+            "kind": "state",
+            "boundary": "journal removed after success and after rollback",
+            "covered": true,
+            "evidence": [
+              "test:8bf75e27c3408055",
+              "test:d537c212fa73e956"
+            ]
+          }
+        ],
+        "gap": null,
+        "producer": null
+      },
+      {
+        "criterion": "AC-3",
+        "verdict": "GAP",
+        "confidence": "medium",
+        "clauses": [
+          {
+            "clause": "AC-3.1",
+            "evidence": [
+              "file:changesets:packages/cli/src/commands/version/index.ts#L30-L37"
+            ],
+            "trace": "recoverInterruptedApply is the first call in code, but no test asserts it runs before anything else is read."
+          },
+          {
+            "clause": "AC-3.2",
+            "evidence": [
+              "test:d1e4ba883cc96392",
+              "file:changesets:packages/cli/src/commands/version/version.test.ts#L378-L389"
+            ],
+            "trace": "Hand-written journal, modified package and deleted changeset; asserts warn containing 'interrupted', journal gone."
+          },
+          {
+            "clause": "AC-3.3",
+            "evidence": [
+              "test:d1e4ba883cc96392",
+              "file:changesets:packages/cli/src/commands/version/version.test.ts#L386-L389"
+            ],
+            "trace": "Asserts version 1.1.0 and changeset consumed; only a single package, no check that the changelog or other files are not double-applied."
+          }
+        ],
+        "boundaries": [
+          {
+            "kind": "order",
+            "boundary": "recovery precedes reading config/changesets",
+            "covered": false,
+            "evidence": []
+          },
+          {
+            "kind": "partial-write",
+            "boundary": "journal records a created file or created directory (e.g. .changeset/pre) that recovery must delete",
+            "covered": false,
+            "evidence": []
+          },
+          {
+            "kind": "concurrency",
+            "boundary": "journal itself truncated/unparseable (killed during journal write)",
+            "covered": false,
+            "evidence": []
+          },
+          {
+            "kind": "state",
+            "boundary": "interrupted modified package and deleted changeset restored then versioned once",
+            "covered": true,
+            "evidence": [
+              "test:d1e4ba883cc96392"
+            ]
+          }
+        ],
+        "gap": {
+          "missing": "Order (recovery before any read) is unproved; recovery of created files/dirs and of a truncated journal is unexercised via the CLI.",
+          "reproduction": "Leave a valid journal plus a state that would make reading fail (e.g. an invalid .changeset/config.json caused by the interrupted run, recorded in the journal as a file to restore) and assert version() restores it, warns 'interrupted' and then succeeds. Also use a journal with createdDirs/null-content entries, and assert those paths are absent afterwards and every package bumped once."
+        },
+        "producer": {
+          "node_id": "CSET-203.cli.recovery-failure.impl"
+        }
+      },
+      {
+        "criterion": "AC-4",
+        "verdict": "PASS",
+        "confidence": "medium",
+        "clauses": [
+          {
+            "clause": "AC-4.1",
+            "evidence": [
+              "test:459ff26fe27d6605",
+              "file:changesets:packages/cli/src/commands/version/version.test.ts#L403-L410"
+            ],
+            "trace": "Apply fails (CHANGELOG.md is a directory); asserts ExitError code 1, logger.error called, no stack-frame lines printed."
+          },
+          {
+            "clause": "AC-4.2",
+            "evidence": [
+              "test:459ff26fe27d6605",
+              "file:changesets:packages/cli/src/commands/version/version.test.ts#L394-L412"
+            ],
+            "trace": "commit enabled in config; git.add and git.commit not called."
+          }
+        ],
+        "boundaries": [
+          {
+            "kind": "failure",
+            "boundary": "applyReleasePlan rejects with commit enabled",
+            "covered": true,
+            "evidence": [
+              "test:459ff26fe27d6605"
+            ]
+          }
+        ],
+        "gap": null,
+        "producer": null
+      },
+      {
+        "criterion": "AC-5",
+        "verdict": "GAP",
+        "confidence": "medium",
+        "clauses": [
+          {
+            "clause": "AC-5.1",
+            "evidence": [
+              "receipt:CSET-203.changesets.compat.verify",
+              "gate:CSET-203.changesets.compat.verify:regression",
+              "test:8bf75e27c3408055"
+            ],
+            "trace": "Full pnpm vitest run passed on the reviewed head; the existing apply-release-plan suite still passes and a success run leaves no journal."
+          },
+          {
+            "clause": "AC-5.2",
+            "evidence": [
+              "receipt:CSET-203.changesets.compat.verify"
+            ],
+            "trace": "Full suite passes, but no test places a journal in .changeset and runs status or add, so 'unaffected by a journal' is not shown."
+          }
+        ],
+        "boundaries": [
+          {
+            "kind": "state",
+            "boundary": "changeset status and changeset add with a leftover journal present",
+            "covered": false,
+            "evidence": []
+          }
+        ],
+        "gap": {
+          "missing": "No regression evidence runs `changeset status` or `changeset add` with a journal file present in .changeset.",
+          "reproduction": "Create .changeset/.apply-release-plan-journal.json beside a changeset, run status and add, and assert same output/exit code as without the journal, the journal untouched and not listed as a changeset."
+        },
+        "producer": {
+          "node_id": "CSET-203.changesets.compat.verify"
+        }
+      }
+    ]
+  }
+}

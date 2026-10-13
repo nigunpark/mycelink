@@ -1,0 +1,11 @@
+{
+  "name": "@ledgerline/worker",
+  "version": "1.9.0",
+  "private": true,
+  "type": "module",
+  "bin": { "ledger-worker": "bin/ledger-worker.mjs" },
+  "scripts": {
+    "start": "node bin/ledger-worker.mjs",
+    "test": "node --test"
+  }
+}

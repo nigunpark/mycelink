@@ -64,6 +64,13 @@ function readPrompt() {
   }
 }
 
+// `claude --version` answers without reading a prompt, as the real CLI does;
+// the adapter preflight probes it.
+if (has('--version')) {
+  process.stdout.write('2.1.290 (Claude Code) [mycelink fake]\n');
+  process.exit(0);
+}
+
 const prompt = readPrompt();
 
 function packFromPrompt(text) {
@@ -200,6 +207,7 @@ const changedPaths = [];
 
 function applyWriteFiles(files) {
   for (const [rel, content] of Object.entries(files ?? {})) {
+    for (const m of String(content).matchAll(/(?<![\w$.])(?:it|test)\s*\(\s*(['"])((?:\\.|(?!\1).)*)\1/g)) writtenTests.push({ path: rel, name: m[2] });
     const full = join(cwd, rel);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content, 'utf8');
@@ -216,13 +224,28 @@ function applyAppendFiles(files) {
   }
 }
 
+// The evidence hash each passing gate printed: what a worker names in its criterion evidence.
+const printed = {};
+const writtenTests = [];
+function notePrinted(gate, out, exitCode) {
+  const sha = /sha256 ([0-9a-f]{64})/.exec(out ?? '')?.[1];
+  if (gate && exitCode === 0 && sha) printed[gate] = sha;
+}
+const gateOf = (command) => {
+  const i = command.indexOf('tdd');
+  return i === -1 ? null : command[i + 1];
+};
+
 function applyRun(command) {
   let exitCode = 0;
+  let out = '';
   try {
-    execFileSync(command[0], command.slice(1), { cwd, stdio: 'ignore' });
+    out = execFileSync(command[0], command.slice(1), { cwd, stdio: 'pipe', encoding: 'utf8' });
   } catch (err) {
     exitCode = typeof err.status === 'number' ? err.status : 1;
+    out = `${err.stdout ?? ''}${err.stderr ?? ''}`;
   }
+  notePrinted(gateOf(command), out, exitCode);
   commands.push({ command, exit_code: exitCode, cwd });
   return exitCode;
 }
@@ -237,11 +260,14 @@ function applyGate(gate) {
     return 126;
   }
   let exitCode = 0;
+  let out = '';
   try {
-    execSync(line, { cwd, stdio: 'ignore' });
+    out = execSync(line, { cwd, stdio: 'pipe', encoding: 'utf8' });
   } catch (err) {
     exitCode = typeof err.status === 'number' ? err.status : 1;
+    out = `${err.stdout ?? ''}${err.stderr ?? ''}`;
   }
+  notePrinted(gate, out, exitCode);
   commands.push({ command: [line], exit_code: exitCode, cwd });
   return exitCode;
 }
@@ -304,6 +330,24 @@ const abortFingerprint = abortedStep
   ? `step-failed:${abortedStep.label}:expected-${abortedStep.expected}:got-${abortedStep.actual}`
   : null;
 
+/**
+ * The node's criteria, each proved by the first test the worker's RED
+ * declared and the hash the red gate printed; a node reopened with its RED on
+ * record names the RED the pack carries and the first test its own files
+ * declare (scenario.criterion_tests); a declaration-only node, its GREEN.
+ */
+function criterionEvidence() {
+  if (scenario.criterion_evidence !== undefined) return { criterion_evidence: scenario.criterion_evidence };
+  const acs = pack.acceptance_criteria ?? [];
+  if (acs.length === 0) return {};
+  const keptRed = (pack.latest_evidence ?? []).find((e) => e.kind === 'red')?.output_sha256;
+  const test = writtenTests[0] ?? scenario.criterion_test;
+  const red = printed.red ?? (pack.next_required_gate === 'GREEN_VERIFIED' ? keptRed : undefined);
+  if (red && test) return { criterion_evidence: acs.map((a) => ({ criterion: a.id, test, gate: 'red', output_sha256: red })) };
+  if (printed.green && !/^- red: /m.test(prompt)) return { criterion_evidence: acs.map((a) => ({ criterion: a.id, gate: 'green', output_sha256: printed.green })) };
+  return {};
+}
+
 if (resultPath && !scenario.omit_result) {
   const result = {
     schema_version: 1,
@@ -324,6 +368,7 @@ if (resultPath && !scenario.omit_result) {
       output_tokens: 50 * turns,
     },
     ...(scenario.notes ? { notes: scenario.notes } : {}),
+    ...criterionEvidence(),
     ...(scenario.result_overrides ?? {}),
   };
   if (scenario.result_slot_junction) {

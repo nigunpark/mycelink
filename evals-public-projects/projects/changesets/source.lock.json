@@ -1,0 +1,47 @@
+{
+  "schema": "mycelink-bench/source-lock@2",
+  "project": "changesets",
+  "remote": "https://github.com/changesets/changesets.git",
+  "commit": "c73949ba7b3160a4aa5729223335c190de1528f8",
+  "tree": "e459b17ff13c4196aa635bcf1f9b84db2af32101",
+  "object_format": "sha1",
+  "content": {
+    "tree_sha256": "4532c260b87dc0f5efcc59c49c4f4d51a36b71b4d9112ca502b1340eedc7c632",
+    "files": 340
+  },
+  "history": {
+    "kind": "complete",
+    "commits": 985,
+    "shallow_boundary": [],
+    "digest_sha256": "80f0444357e24b6d0f311ea4252a69ba31129617d2d43d1b207e83fcd9042fb0"
+  },
+  "bundle": {
+    "file": "changesets-c73949b.bundle",
+    "version": 2,
+    "refs": [
+      {
+        "name": "HEAD",
+        "sha": "c73949ba7b3160a4aa5729223335c190de1528f8"
+      }
+    ],
+    "prerequisites": [],
+    "transport": {
+      "sha256": "641a24171281ffda41e6a20672be8d0134005c5d02d1d75d7084fadbe62ca245",
+      "size": 7514267
+    }
+  },
+  "license": {
+    "spdx": "MIT",
+    "files": [
+      {
+        "path": "LICENSE",
+        "blob": "b52920f187847fd82db01a391f7d77f2a26eaec5"
+      },
+      {
+        "path": "packages/cli/LICENSE",
+        "blob": "b52920f187847fd82db01a391f7d77f2a26eaec5"
+      }
+    ]
+  },
+  "identity_sha256": "5286b96d7f7c3458cfd501928107e9ef0c136f708fb2c493d1a15fb9b80bda32"
+}

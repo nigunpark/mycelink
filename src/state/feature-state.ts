@@ -13,6 +13,7 @@ import type {
 import { casUpdate, readDoc, writeDocAtomic, type AtomicDoc } from './atomic-json.js';
 import { withLock } from './process-lock.js';
 import { validateAgainstSchema } from '../schema/registry.js';
+import { emptyOrchestration, syncLeases } from './orchestration.js';
 
 export const DEFAULT_BUDGET: FeatureBudget = {
   // Conservative pilot defaults, as required before any measured expansion.
@@ -75,6 +76,7 @@ export function initialState(
     pending_decisions: [],
     candidates: [],
     current_candidate: null,
+    orchestration: emptyOrchestration(),
   };
 }
 
@@ -112,7 +114,10 @@ export function saveState(featureDir: string, state: FeatureState_): AtomicDoc<F
  *
  * This is the only supported write path: it serialises concurrent hook and CLI
  * invocations, validates the result against the schema before it lands, and
- * refuses to write a state that another process changed underneath us.
+ * refuses to write a state that another process changed underneath us. The
+ * dispatch lease registry is brought in line with the claims and the open
+ * review in the same write (state/orchestration.ts), so the two never differ
+ * on disk, whatever the mutation did.
  */
 export function mutateState(
   featureDir: string,
@@ -126,6 +131,7 @@ export function mutateState(
       if (doc === null) throw new Error(`No STATE.json under ${featureDir}`);
       const next = mutate(structuredClone(doc.data));
       next.updated_at = new Date().toISOString();
+      syncLeases(next, next.updated_at);
       const problems = validateAgainstSchema('state', next);
       if (problems.length > 0) throw new StateSchemaError(problems);
       return casUpdate<FeatureState_>(stateFilePath(featureDir), doc.revision, () => next).data;

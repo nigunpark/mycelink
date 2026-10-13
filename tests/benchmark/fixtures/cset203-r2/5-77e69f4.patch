@@ -1,0 +1,171 @@
+diff --git a/packages/cli/src/commands/version/recovery-process.test.ts b/packages/cli/src/commands/version/recovery-process.test.ts
+new file mode 100644
+index 0000000..9b815c9
+--- /dev/null
++++ b/packages/cli/src/commands/version/recovery-process.test.ts
+@@ -0,0 +1,165 @@
++import { spawn } from "node:child_process";
++import fs from "node:fs/promises";
++import path from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++import { testdir } from "@changesets/test-utils";
++import { expect, it } from "vitest";
++
++const binPath = path.resolve(
++  path.dirname(fileURLToPath(import.meta.url)),
++  "../../../bin.js",
++);
++
++function run(cwd: string, env: Record<string, string> = {}) {
++  const child = spawn(process.execPath, [binPath, "version"], {
++    cwd,
++    env: { ...process.env, ...env },
++    stdio: ["ignore", "pipe", "pipe"],
++  });
++  let output = "";
++  child.stdout.on("data", (d) => (output += d));
++  child.stderr.on("data", (d) => (output += d));
++  const exited = new Promise<number | null>((resolve) =>
++    child.on("close", (code) => resolve(code)),
++  );
++  return { child, exited, getOutput: () => output };
++}
++
++async function exists(p: string) {
++  return fs.stat(p).then(
++    () => true,
++    () => false,
++  );
++}
++
++it("recovers after a real changeset version process is SIGKILLed while applying", async () => {
++  const cwd = await testdir({
++    "package.json": JSON.stringify({
++      private: true,
++      name: "root-pkg",
++      workspaces: ["packages/*"],
++    }),
++    "package-lock.json": "",
++    "packages/pkg-a/package.json": JSON.stringify({
++      name: "pkg-a",
++      version: "1.0.0",
++    }),
++    "packages/pkg-b/package.json": JSON.stringify({
++      name: "pkg-b",
++      version: "1.0.0",
++    }),
++    ".changeset/config.json": JSON.stringify({ changelog: false }),
++    ".changeset/one.md": `---\n"pkg-a": minor\n---\n\nfirst\n`,
++    ".changeset/two.md": `---\n"pkg-b": minor\n---\n\nsecond\n`,
++  });
++  const hookDir = await testdir({});
++  const marker = path.join(hookDir, "marker");
++  const hook = path.join(hookDir, "hang.mjs");
++  await fs.writeFile(
++    hook,
++    `import fs from "node:fs/promises";
++const orig = fs.writeFile;
++fs.writeFile = async function (file, ...rest) {
++  if (String(file).replaceAll("\\\\", "/").endsWith("packages/pkg-b/package.json")) {
++    await orig(${JSON.stringify(marker)}, "hung");
++    await new Promise(() => setInterval(() => {}, 1000));
++  }
++  return orig.call(this, file, ...rest);
++};
++`,
++  );
++
++  const first = run(cwd, {
++    NODE_OPTIONS: `--import ${pathToFileURL(hook).href}`,
++  });
++  const deadline = Date.now() + 30000;
++  while (!(await exists(marker)) && Date.now() < deadline) {
++    await new Promise((r) => setTimeout(r, 50));
++  }
++  expect(await exists(marker)).toBe(true);
++  first.child.kill("SIGKILL");
++  await first.exited;
++
++  const journalPath = path.join(cwd, ".changeset/.apply-release-plan.journal");
++  // the run died mid-apply: journal left behind, pkg-a already bumped
++  expect(await exists(journalPath)).toBe(true);
++  const midA = JSON.parse(
++    await fs.readFile(path.join(cwd, "packages/pkg-a/package.json"), "utf8"),
++  );
++  expect(midA.version).toBe("1.1.0");
++
++  const second = run(cwd);
++  expect(await second.exited).toBe(0);
++  expect(second.getOutput()).toContain("interrupted");
++
++  expect(await exists(journalPath)).toBe(false);
++  for (const [pkg, version] of [
++    ["pkg-a", "1.1.0"],
++    ["pkg-b", "1.1.0"],
++  ]) {
++    const json = JSON.parse(
++      await fs.readFile(path.join(cwd, "packages", pkg, "package.json"), "utf8"),
++    );
++    expect(json.version).toBe(version);
++  }
++  expect(await exists(path.join(cwd, ".changeset/one.md"))).toBe(false);
++  expect(await exists(path.join(cwd, ".changeset/two.md"))).toBe(false);
++}, 120000);
++
++it("recovers when a real process was SIGKILLed while the journal itself was being written", async () => {
++  const cwd = await testdir({
++    "package.json": JSON.stringify({
++      private: true,
++      name: "root-pkg",
++      workspaces: ["packages/*"],
++    }),
++    "package-lock.json": "",
++    "packages/pkg-a/package.json": JSON.stringify({
++      name: "pkg-a",
++      version: "1.0.0",
++    }),
++    ".changeset/config.json": JSON.stringify({ changelog: false }),
++    ".changeset/one.md": `---\n"pkg-a": minor\n---\n\nfirst\n`,
++  });
++  const hookDir = await testdir({});
++  const marker = path.join(hookDir, "marker");
++  const hook = path.join(hookDir, "hang.mjs");
++  await fs.writeFile(
++    hook,
++    `import fs from "node:fs/promises";
++const orig = fs.open;
++fs.open = async function (file, ...rest) {
++  const handle = await orig.call(this, file, ...rest);
++  if (String(file).endsWith(".apply-release-plan.journal")) {
++    await fs.writeFile(${JSON.stringify(marker)}, "hung");
++    await new Promise(() => setInterval(() => {}, 1000));
++  }
++  return handle;
++};
++`,
++  );
++
++  const first = run(cwd, {
++    NODE_OPTIONS: `--import ${pathToFileURL(hook).href}`,
++  });
++  const deadline = Date.now() + 30000;
++  while (!(await exists(marker)) && Date.now() < deadline) {
++    await new Promise((r) => setTimeout(r, 50));
++  }
++  expect(await exists(marker)).toBe(true);
++  first.child.kill("SIGKILL");
++  await first.exited;
++
++  const journalPath = path.join(cwd, ".changeset/.apply-release-plan.journal");
++  expect(await exists(journalPath)).toBe(true);
++
++  const second = run(cwd);
++  expect(await second.exited).toBe(0);
++  expect(second.getOutput()).toContain("interrupted");
++  expect(await exists(journalPath)).toBe(false);
++  const json = JSON.parse(
++    await fs.readFile(path.join(cwd, "packages/pkg-a/package.json"), "utf8"),
++  );
++  expect(json.version).toBe("1.1.0");
++  expect(await exists(path.join(cwd, ".changeset/one.md"))).toBe(false);
++}, 120000);

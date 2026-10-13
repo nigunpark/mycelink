@@ -38,8 +38,82 @@
       "enum": ["behaviour-missing", "setup-error", "syntax-error", "environment-error"],
       "description": "Only 'behaviour-missing' is a valid RED. Setup/syntax/environment failures are rejected."
     },
+    "red_category": {
+      "enum": ["assertion", "exception", "syntax", "import", "missing-symbol", "setup", "timeout", "crash", "not-run", "no-test", "passed", "compile", "environment"],
+      "description": "Why the RED counts or not, in the benchmark replay's categories. Only 'assertion' and 'exception' are valid."
+    },
+    "red_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "red_detail": { "type": "string", "maxLength": 600 },
+    "red_tests": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["file", "name", "status", "category", "type", "fingerprint"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string", "maxLength": 1024 },
+          "name": { "type": "string", "maxLength": 1024 },
+          "status": { "enum": ["passed", "failed", "skipped", "not-run"] },
+          "category": { "type": "string", "maxLength": 64 },
+          "type": { "type": ["string", "null"], "maxLength": 512 },
+          "fingerprint": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "red_declared": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "The tests the RED delta declared.",
+      "items": { "type": "object", "required": ["file", "name"], "additionalProperties": false, "properties": { "file": { "type": "string" }, "name": { "type": "string" } } }
+    },
+    "module": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$", "description": "The repository module whose command ran." },
+    "module_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "plan_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Exactly what ran: steps, command, report, timeout." },
+    "steps": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["argv", "exit_code", "timed_out", "duration_ms"],
+        "additionalProperties": false,
+        "properties": {
+          "argv": { "type": "array", "items": { "type": "string" } },
+          "exit_code": { "type": "integer" },
+          "timed_out": { "type": "boolean" },
+          "duration_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "results": {
+      "type": ["object", "null"],
+      "required": ["format", "path", "sha256", "total", "passed", "failed", "skipped"],
+      "additionalProperties": false,
+      "description": "The structured report the command wrote, normalised and stored beside the log.",
+      "properties": {
+        "format": { "enum": ["vitest-json", "junit-xml"] },
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "regression_deferred": {
+      "type": ["object", "null"],
+      "required": ["to", "failing"],
+      "additionalProperties": false,
+      "description": "A full-suite regression whose failures all lie in modules of dependents that reopen and re-verify; the candidate still runs the full suite.",
+      "properties": {
+        "to": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "failing": { "type": "array", "maxItems": 64, "items": { "type": "string" } }
+      }
+    },
     "candidate_id": { "type": ["string", "null"] },
     "scenario_id": { "type": ["string", "null"] },
-    "baseline_excluded": { "type": "array", "items": { "type": "string" } }
+    "baseline_excluded": { "type": "array", "items": { "type": "string" } },
+    "worktree_setup_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Receipt of the worktree setup of the checkout the command ran in." },
+    "setup_inputs_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The worktree setup's declared inputs (lockfile, manifests) as the checkout held them when the command ran." }
   }
 }

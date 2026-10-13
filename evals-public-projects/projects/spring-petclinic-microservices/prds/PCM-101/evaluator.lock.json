@@ -1,0 +1,20 @@
+{
+  "schema": "mycelink-bench/evaluator-lock@2",
+  "project": "spring-petclinic-microservices",
+  "prd": "PCM-101",
+  "source_identity_sha256": "92ab8fe8fd6e365586f2a0821fd8a3461093e8d3cc3b1d217b11b32c6cc0f8f7",
+  "files": {
+    "expected": 1,
+    "fingerprints": 1,
+    "hidden": 4,
+    "mutant": 3,
+    "reference": 1
+  },
+  "digest_sha256": "7a136b73356816fb7b8b325da7cc6ea3aa1cb8253a9daab1eaa075f40583455a",
+  "reference": {
+    "head": "5eaa90aee42c193a252deed9578e5c977c55d059",
+    "commits": 3
+  },
+  "hidden_tests": 19,
+  "mutants": 3
+}

@@ -11,6 +11,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -123,6 +124,53 @@ export function writeTextAtomic(file: string, text: string): void {
     rmSync(tmp, { force: true });
     throw err;
   }
+}
+
+/**
+ * Create `file` with `content` exclusively and atomically: a synced temporary
+ * file in the same directory, hard-linked into place (fails if anything, a
+ * link included, is already there); where hard links are not supported, an
+ * O_EXCL create. Never a replace.
+ */
+export function createExclusive(file: string, content: string | Uint8Array): 'created' | 'exists' {
+  const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
+  const tmp = join(dirname(file), `.${basename(file)}.${randomBytes(8).toString('hex')}.tmp`);
+  const fd = openSync(tmp, 'wx', 0o644);
+  try {
+    writeAll(fd, bytes);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    try {
+      linkSync(tmp, file);
+      return 'created';
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
+    }
+    let out: number;
+    try {
+      out = openSync(file, 'wx', 0o644);
+    } catch (again) {
+      if ((again as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
+      throw again;
+    }
+    try {
+      writeAll(out, bytes);
+      fsyncSync(out);
+    } finally {
+      closeSync(out);
+    }
+    return 'created';
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+/** Write every byte to `fd` (a write may take fewer than it was given). */
+function writeAll(fd: number, bytes: Uint8Array): void {
+  for (let at = 0; at < bytes.length; ) at += writeSync(fd, bytes, at, bytes.length - at);
 }
 
 /** Read a document, or `null` when the file does not exist. */

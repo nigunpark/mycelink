@@ -1,0 +1,223 @@
+$ ./mvnw -B -o -Dspring-boot.build-image.skip=true -pl spring-petclinic-api-gateway test
+(cwd: /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl)
+
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] --< org.springframework.samples.petclinic.api:spring-petclinic-api-gateway >--
+[INFO] Building spring-petclinic-api-gateway 4.0.1
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.2:enforce (enforce-java) @ spring-petclinic-api-gateway ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] --- git-commit-id:9.0.2:revision (default) @ spring-petclinic-api-gateway ---
+[INFO] dotGitDirectory '/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/repos/spring-petclinic-microservices/.git'
+[INFO] Collected git.build.user.name with value 
+[INFO] Collected git.build.user.email with value 
+[INFO] Collected git.branch with value main
+[INFO] Collected git.commit.id.describe with value dc9ca15
+[INFO] Collected git.commit.id.describe-short with value dc9ca15
+[INFO] Collected git.commit.id with value dc9ca15a71189bc4be6c02518d7180232c0555b7
+[INFO] Collected git.commit.id.abbrev with value dc9ca15
+[INFO] Collected git.dirty with value false
+[INFO] Collected git.commit.user.name with value Antoine Rey
+[INFO] Collected git.commit.user.email with value author@example.invalid
+[INFO] Collected git.commit.message.full with value Migrate from AngularJS to Vue.js for frontend components (#568)
+
+* Migrate from AngularJS to Vue.js for frontend components
+* refactor(run_all.sh, stop_all.sh): streamline service startup and health checks
+[INFO] Collected git.commit.message.short with value Migrate from AngularJS to Vue.js for frontend components (#568)
+[INFO] Collected git.commit.time with value 2026-10-04T23:28:29+0900
+[INFO] Collected git.commit.author.time with value 2026-10-04T23:28:29+0900
+[INFO] Collected git.commit.committer.time with value 2026-10-04T23:28:29+0900
+[INFO] Collected git.remote.origin.url with value null
+[INFO] Collected git.tags with value 
+[INFO] Collected git.tag with value 
+[INFO] Collected git.closest.tag.name with value 
+[INFO] Collected git.closest.tag.commit.count with value 
+[INFO] Collected git.total.commit.count with value 1
+[INFO] Collected git.local.branch.ahead with value NO_REMOTE
+[INFO] Collected git.local.branch.behind with value NO_REMOTE
+[INFO] Collected git.build.time with value 2026-10-12T12:33:44+0900
+[INFO] Collected git.build.version with value 4.0.1
+[INFO] Collected git.build.host with value evalhost
+[INFO] including property 'git.tags' in results
+[INFO] including property 'git.build.version' in results
+[INFO] including property 'git.branch' in results
+[INFO] including property 'git.build.host' in results
+[INFO] including property 'git.commit.id' in results
+[INFO] including property 'git.commit.user.email' in results
+[INFO] including property 'git.local.branch.behind' in results
+[INFO] including property 'git.commit.author.time' in results
+[INFO] including property 'git.build.user.name' in results
+[INFO] including property 'git.dirty' in results
+[INFO] including property 'git.closest.tag.commit.count' in results
+[INFO] including property 'git.commit.user.name' in results
+[INFO] including property 'git.commit.id.abbrev' in results
+[INFO] including property 'git.commit.id.describe-short' in results
+[INFO] including property 'git.total.commit.count' in results
+[INFO] including property 'git.commit.id.describe' in results
+[INFO] including property 'git.build.user.email' in results
+[INFO] including property 'git.commit.message.short' in results
+[INFO] including property 'git.commit.committer.time' in results
+[INFO] including property 'git.tag' in results
+[INFO] including property 'git.closest.tag.name' in results
+[INFO] including property 'git.local.branch.ahead' in results
+[INFO] including property 'git.commit.time' in results
+[INFO] including property 'git.build.time' in results
+[INFO] including property 'git.commit.message.full' in results
+[INFO] including property 'git.remote.origin.url' in results
+[INFO] Reading existing properties file [/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl/spring-petclinic-api-gateway/target/classes/git.properties] (for project spring-petclinic-api-gateway)...
+[INFO] Properties file [/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl/spring-petclinic-api-gateway/target/classes/git.properties] is up-to-date (for module spring-petclinic-api-gateway)...
+[INFO] 
+[INFO] --- spring-boot:4.0.1:build-info (default) @ spring-petclinic-api-gateway ---
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ spring-petclinic-api-gateway ---
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] Copying 47 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ spring-petclinic-api-gateway ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ spring-petclinic-api-gateway ---
+[INFO] Copying 1 resource from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ spring-petclinic-api-gateway ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ spring-petclinic-api-gateway ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running org.springframework.samples.petclinic.api.boundary.web.ApiGatewayControllerTest
+12:33:46.082 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [org.springframework.samples.petclinic.api.boundary.web.ApiGatewayControllerTest]: ApiGatewayControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+12:33:46.176 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration org.springframework.samples.petclinic.api.ApiGatewayApplication for test class org.springframework.samples.petclinic.api.boundary.web.ApiGatewayControllerTest
+12:33:46.333 [main] INFO org.springframework.boot.devtools.restart.RestartApplicationListener -- Restart disabled due to context in which it is running
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.1)
+
+2026-10-12T12:33:46.883+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.a.b.w.ApiGatewayControllerTest   : Starting ApiGatewayControllerTest using Java 21.0.12.1 with PID 2977 (started by alice in /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl/spring-petclinic-api-gateway)
+2026-10-12T12:33:46.884+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.a.b.w.ApiGatewayControllerTest   : No active profile set, falling back to 1 default profile: "default"
+2026-10-12T12:33:46.895+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:46.896+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:46.896+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@f5ce0bb uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:46.897+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:46.898+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:46.898+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@3382cf68 uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:46.898+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:46.899+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:46.899+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@2f74900b uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:48.341+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.a.b.w.ApiGatewayControllerTest   : Started ApiGatewayControllerTest in 2.017 seconds (process running for 2.953)
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.608 s -- in org.springframework.samples.petclinic.api.boundary.web.ApiGatewayControllerTest
+[INFO] Running org.springframework.samples.petclinic.api.boundary.web.FallbackControllerTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.052 s -- in org.springframework.samples.petclinic.api.boundary.web.FallbackControllerTest
+[INFO] Running org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest
+2026-10-12T12:33:48.655+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.springframework.samples.petclinic.api.ApiGatewayApplication for test class org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest
+2026-10-12T12:33:48.661+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.b.d.r.RestartApplicationListener     : Restart disabled due to context in which it is running
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.1)
+
+2026-10-12T12:33:48.777+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.a.b.web.OwnerDetailsVetNameTest  : Starting OwnerDetailsVetNameTest using Java 21.0.12.1 with PID 2977 (started by alice in /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl/spring-petclinic-api-gateway)
+2026-10-12T12:33:48.777+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.a.b.web.OwnerDetailsVetNameTest  : No active profile set, falling back to 1 default profile: "default"
+2026-10-12T12:33:48.781+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:48.782+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:48.782+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@4ac77269 uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:48.783+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:48.783+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:48.783+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@638d624a uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:48.783+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:48.784+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:48.784+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@7eb774c3 uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:49.000+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.a.b.web.OwnerDetailsVetNameTest  : Started OwnerDetailsVetNameTest in 0.34 seconds (process running for 3.612)
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.551 s -- in org.springframework.samples.petclinic.api.boundary.web.OwnerDetailsVetNameTest
+[INFO] Running org.springframework.samples.petclinic.api.application.VisitsServiceClientIntegrationTest
+2026-10-12T12:33:49.319+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] .d.DefaultDnsServerAddressStreamProvider : Failed to get name servers from /etc/resolv.conf; will fall back to JNDI
+2026-10-12T12:33:49.326+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] .d.DefaultDnsServerAddressStreamProvider : Default DNS servers: [/[2001:4860:4860:0:0:0:0:8888]:53, /[2001:4860:4860:0:0:0:0:8844]:53] (Google Public DNS as a fallback)
+2026-10-12T12:33:49.346+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] io.netty.util.internal.MacAddressUtil    : Failed to find a usable hardware address from the network interfaces; using random bytes: c0:5b:73:ef:29:c0:80:7d
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.241 s -- in org.springframework.samples.petclinic.api.application.VisitsServiceClientIntegrationTest
+[INFO] Running org.springframework.samples.petclinic.api.ApiGatewayApplicationTests
+2026-10-12T12:33:49.451+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.springframework.samples.petclinic.api.ApiGatewayApplicationTests]: ApiGatewayApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-10-12T12:33:49.456+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.springframework.samples.petclinic.api.ApiGatewayApplication for test class org.springframework.samples.petclinic.api.ApiGatewayApplicationTests
+2026-10-12T12:33:49.460+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.b.d.r.RestartApplicationListener     : Restart disabled due to context in which it is running
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.1)
+
+2026-10-12T12:33:49.527+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.api.ApiGatewayApplicationTests   : Starting ApiGatewayApplicationTests using Java 21.0.12.1 with PID 2977 (started by alice in /home/alice/mycelink-pilot-results/PCM-101-final/with-normal/workspace/platform/.mycelink/worktrees/spring-petclinic-microservices__PCM-101.gateway.vetname.impl/spring-petclinic-api-gateway)
+2026-10-12T12:33:49.527+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.api.ApiGatewayApplicationTests   : The following 1 profile is active: "test"
+2026-10-12T12:33:49.529+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:49.529+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:49.530+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@7e577eed uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:49.530+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:49.530+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/test": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:49.530+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@4cf1bd4a uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'test']): I/O error on GET request for "http://localhost:8888/api-gateway/test": Connection refused
+2026-10-12T12:33:49.530+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888/
+2026-10-12T12:33:49.530+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888/:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused. Will be trying the next url if available
+2026-10-12T12:33:49.531+09:00  WARN 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@26619e5 uris = array<String>['http://localhost:8888/'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/api-gateway/default": Connection refused
+2026-10-12T12:33:50.132+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.cloud.context.scope.GenericScope     : BeanFactory id=c127ad77-b38f-3752-9030-914b116ea4e3
+2026-10-12T12:33:50.424+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [After]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Before]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Between]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Cookie]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Header]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Host]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Method]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Path]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Query]
+2026-10-12T12:33:50.425+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [ReadBody]
+2026-10-12T12:33:50.426+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [RemoteAddr]
+2026-10-12T12:33:50.426+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Version]
+2026-10-12T12:33:50.426+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [XForwardedRemoteAddr]
+2026-10-12T12:33:50.426+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Weight]
+2026-10-12T12:33:50.426+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [CloudFoundryRouteService]
+2026-10-12T12:33:50.544+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 1 endpoint beneath base path '/actuator'
+2026-10-12T12:33:50.802+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] DiscoveryClientOptionalArgsConfiguration : Eureka HTTP Client uses RestClient.
+2026-10-12T12:33:50.945+09:00  INFO 2977 --- [api-gateway] [           main] [                                                 ] o.s.s.p.api.ApiGatewayApplicationTests   : Started ApiGatewayApplicationTests in 1.485 seconds (process running for 5.558)
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.506 s -- in org.springframework.samples.petclinic.api.ApiGatewayApplicationTests
+[INFO] Running org.springframework.samples.petclinic.api.ApiGatewayApplicationRouterTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in org.springframework.samples.petclinic.api.ApiGatewayApplicationRouterTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  8.947 s
+[INFO] Finished at: 2026-10-12T12:33:52+09:00
+[INFO] ------------------------------------------------------------------------
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home
+12:33:46,802 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [jmxConfigurator] in [ch.qos.logback.classic.LoggerContext]
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/alice/mycelink-pilot-results/PCM-101-final/with-normal/home/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+12:33:48,761 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [jmxConfigurator] in [ch.qos.logback.classic.LoggerContext]
+12:33:49,520 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [jmxConfigurator] in [ch.qos.logback.classic.LoggerContext]

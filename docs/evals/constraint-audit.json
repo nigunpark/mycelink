@@ -1,0 +1,3228 @@
+{
+  "schema": "mycelink-constraint-audit/1",
+  "base": "3a10e65",
+  "scope": "Mycelink plugin (hooks, fence, controller, state, TDD, reviewer) and the public-project benchmark harness; six public PRDs; model-free only",
+  "classification": {
+    "HARD_SAFETY": "ownership, secrets/hidden evaluator, controller/product separation, stale result isolation, resource locks, exact candidate/evidence",
+    "EVIDENCE_GATE": "an outcome checked at a semantic transition; it does not dictate implementation commands",
+    "RECOVERABLE_ADVISORY": "an unusual but legitimate situation: logged and reconciled, never a product attempt charged for an orchestration or administrative issue",
+    "OVERCONSTRAINT": "a command, path or workflow restriction the stated invariant does not need, or a case-specific coupling"
+  },
+  "freedom_envelope": {
+    "worker_may": [
+      "inspect any file and history, including the base checkout",
+      "create helpers and choose its own structure inside owned paths",
+      "edit owned files",
+      "split tests and add test data or snapshots",
+      "write through file tools, heredocs, moves and generators (computed targets in its worktree included)",
+      "commit, reset, rebase, cherry-pick and branch its own history",
+      "stash push/list/show; pop/apply/drop its own entries",
+      "run builds, tests and any local command",
+      "write scratch files outside the workspace",
+      "run its gates and preview settle (`tdd check`)"
+    ],
+    "judged_by_outcome": [
+      "ownership of the node delta at settle",
+      "test-first history at settle",
+      "criterion evidence",
+      "fresh verification of the sealed head",
+      "the benchmark replay, scope and hygiene"
+    ],
+    "never": [
+      "a registered repository's own checkout",
+      "Mycelink's state, evidence and scratch area",
+      "host-only commands and plugin hooks",
+      "another worktree's stash entries, stash clear/store",
+      "Claude Code transcripts and the provenance ledger",
+      "nested delegation"
+    ]
+  },
+  "inventory": [
+    {
+      "id": "F-01",
+      "layer": "plugin-fence",
+      "rule": "acceptance reviewer is read-only; its one write is its whole verdict to an opened generation",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "reviewer",
+      "invariant": "exact evidence: a verdict is the reviewer's own, attested",
+      "blocked": "Bash, Edit, Agent, any other Write",
+      "false_positive_risk": "low: the reviewer cannot run a reproduction itself; workers reproduce and challenge",
+      "recovery": "final-answer transport; gap challenge by the producer",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/acceptance-reviewer-fence.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "Blocked: the acceptance reviewer is read-only"
+      }
+    },
+    {
+      "id": "F-02",
+      "layer": "plugin-fence",
+      "rule": "a module-worker spawns no subagent",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "role integrity: a nested agent would run with the controller role, outside the worker fence",
+      "blocked": "Agent/Task from a worker",
+      "false_positive_risk": "low",
+      "recovery": "implement the node, or answer NEEDS_DECISION",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/worker-freedom-envelope.test.ts",
+        "tests/integration/controller-fence.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "Blocked: a module-worker spawns no subagent"
+      }
+    },
+    {
+      "id": "F-03",
+      "layer": "plugin-fence",
+      "rule": "no session runs `mycelink hook`",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "launch records and verdict attestations prove what Claude Code saw",
+      "blocked": "Bash running mycelink hook",
+      "false_positive_risk": "none",
+      "recovery": "none needed",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/review-result-transport.test.ts",
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "mycelink hook is run by Claude Code as the plugin"
+      }
+    },
+    {
+      "id": "F-04",
+      "layer": "plugin-fence",
+      "rule": "host-only commands (settle, dispatch, deliver, controller, orchestrate, review) are never a worker's",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "controller/product separation: the host judges, the worker produces",
+      "blocked": "a worker running those CLI groups",
+      "false_positive_risk": "low",
+      "recovery": "write the result and stop",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "const HOST_ONLY = new Set(['settle', 'dispatch', 'deliver', 'controller', 'orchestrate', 'review']);"
+      }
+    },
+    {
+      "id": "F-05",
+      "layer": "plugin-fence",
+      "rule": "nobody writes Claude Code session or subagent transcripts",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "exact evidence: final answers and lifecycles are proved from transcripts",
+      "blocked": "writes under <config>/projects/<project>/<session>.jsonl or .../subagents/**",
+      "false_positive_risk": "none",
+      "recovery": "none needed",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "is a Claude Code session transcript, or a subagent's transcript or meta"
+      }
+    },
+    {
+      "id": "F-06",
+      "layer": "plugin-fence",
+      "rule": "nobody writes the provenance ledger",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "attribution of every change (active only with MYCELINK_PROVENANCE)",
+      "blocked": "writes under the ledger directory",
+      "false_positive_risk": "none",
+      "recovery": "none needed",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/benchmark/controller-txn.test.ts",
+        "tests/integration/worker-calls.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "is Mycelink's provenance ledger"
+      }
+    },
+    {
+      "id": "F-07",
+      "layer": "plugin-fence",
+      "rule": "the controller never runs a worker's gate",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "evidence authorship: gate records are the worker's",
+      "blocked": "controller Bash running tdd red|green|regression|refactor|cycle or evidence record",
+      "false_positive_risk": "low",
+      "recovery": "dispatch the node to a module-worker",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/controller-fence.test.ts",
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "Blocked: the Mycelink controller does not run a worker's gate"
+      }
+    },
+    {
+      "id": "F-08",
+      "layer": "plugin-fence",
+      "rule": "worker stash: push/list/show free; pop/apply/drop only its own entry in its own worktree; never clear/store/branch",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "resource isolation: every worktree and the user share one stash",
+      "blocked": "stash clear/store/branch; taking another worktree's entry; taking any entry when the fence cannot bind the worker",
+      "false_positive_risk": "low: `git stash branch` on its own entry is refused (rare); a pop is refused when no launch binding exists (fail closed)",
+      "recovery": "commit instead, or name its own entry; RETRYABLE when it cannot go on",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/worker-stash-fence.test.ts",
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "function workerStashRefusal("
+      }
+    },
+    {
+      "id": "F-09",
+      "layer": "plugin-fence",
+      "rule": "inside a workspace a worker writes only worktrees and its result slot",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "ownership: product checkouts, Mycelink state, evidence and scratch are never a worker's",
+      "blocked": "writes to a registered repository's checkout, .mycelink outside worktrees, a feature's managed files",
+      "false_positive_risk": "low: everything outside the workspace ($TMPDIR, caches) is unfenced",
+      "recovery": "write in the worktree or under $TMPDIR",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/worker-freedom-envelope.test.ts",
+        "tests/integration/controller-fence.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "Blocked: a module-worker writes only its worktree and its result file"
+      }
+    },
+    {
+      "id": "F-10",
+      "layer": "plugin-fence",
+      "rule": "a RED-bound test file stays byte-identical once production began, unless a new cycle is declared",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "the test a RED proved is the test GREEN passes (settle refuses CHANGED_RED_BLOBS)",
+      "blocked": "editing a RED-bound test file after the production change began",
+      "false_positive_risk": "medium: renaming or tidying that test file needs `tdd cycle` or a new file",
+      "recovery": "`tdd cycle`, or a new test file; settle stays authoritative",
+      "charges_product_attempt": "no (refused before it would charge)",
+      "tests": [
+        "tests/integration/red-bound-fence.test.ts",
+        "tests/fixtures/cset203-r4-replay-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/red-bound.ts",
+        "contains": "is RED-bound: the red gate bound it at blob"
+      }
+    },
+    {
+      "id": "F-11",
+      "layer": "plugin-fence",
+      "rule": "the controller never writes worktrees, result slots, product checkouts, evidence or Mycelink scratch",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "controller/product separation; exact evidence",
+      "blocked": "any controller write into those zones, by file tool or shell",
+      "false_positive_risk": "low",
+      "recovery": "dispatch or rework the node",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/controller-fence.test.ts",
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "the Mycelink controller never writes"
+      }
+    },
+    {
+      "id": "F-12",
+      "layer": "plugin-fence",
+      "rule": "inside a workspace the controller writes only its documents (feature PRD/plan/graph/e2e, contracts, handoffs) and commits with git add/commit; approved inputs never",
+      "classification": "OVERCONSTRAINT",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "approved inputs and Mycelink-managed files are never the controller's (hard); stray scratch files are refused for hygiene parity with the benchmark transaction",
+      "blocked": "scratch files in the project directory or the control repository outside its documents",
+      "false_positive_risk": "medium in normal runtime: a notes file beside the repositories is refused",
+      "recovery": "write scratch under $TMPDIR",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/security/worker-freedom-envelope.test.ts",
+        "tests/benchmark/controller-txn.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "in a Mycelink workspace the controller writes only its own documents"
+      },
+      "note": "retained: relaxing the fence alone would turn a cheap refusal into a benchmark controller-violation rollback; the input/managed-file part is hard"
+    },
+    {
+      "id": "F-13",
+      "layer": "plugin-fence",
+      "rule": "controller code whose write targets cannot be placed is refused inside a workspace",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "a computed path could hit managed files or approved inputs (CSET-203 r9)",
+      "blocked": "interpreter or script with computed write paths, run in a workspace",
+      "false_positive_risk": "medium: helper scripts with computed paths; read-only code passes",
+      "recovery": "name paths literally, use the Write tool, or run under $TMPDIR",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/controller-fence.test.ts",
+        "tests/security/worker-freedom-envelope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "Blocked: the Mycelink fence cannot tell where this code writes"
+      }
+    },
+    {
+      "id": "F-14",
+      "layer": "plugin-fence",
+      "rule": "a call the fence cannot judge is refused inside a workspace (fail closed), allowed outside",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "no unjudged write in a workspace",
+      "blocked": "unparseable hook input",
+      "false_positive_risk": "low",
+      "recovery": "rewrite as a plain command",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/controller-fence.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/fence.ts",
+        "contains": "could not judge this"
+      }
+    },
+    {
+      "id": "F-15",
+      "layer": "plugin-fence",
+      "rule": "a call the provenance ledger cannot record does not run",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "attribution needs every call recorded",
+      "blocked": "the call, when recording fails",
+      "false_positive_risk": "low",
+      "recovery": "run it again",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/worker-calls.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "could not record this call in the provenance ledger"
+      }
+    },
+    {
+      "id": "F-16",
+      "layer": "plugin-fence",
+      "rule": "one reviewer per review generation",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "stale result isolation: one generation, one reviewer",
+      "blocked": "a second reviewer launch for a generation whose reviewer runs or answered",
+      "false_positive_risk": "low",
+      "recovery": "await the running reviewer",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/review-lifecycle.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/review-launch.ts",
+        "contains": "export function duplicateReviewerLaunch"
+      }
+    },
+    {
+      "id": "P-01",
+      "layer": "project-hook",
+      "rule": "managed state files are never edited with file tools",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "any",
+      "invariant": "controller-owned state",
+      "blocked": "Edit/Write of STATE.json, events, leases, candidates, deliveries, sessions, reviews, config",
+      "false_positive_risk": "low",
+      "recovery": "the mycelink command for it",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "is controller-owned state or protected configuration"
+      }
+    },
+    {
+      "id": "P-02",
+      "layer": "project-hook",
+      "rule": "a feature's graph was refused before feature init",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "controller",
+      "invariant": "the graph is bound by hash once STATE.json exists (GRAPH_DRIFT); before that /mycelink:plan writes it",
+      "blocked": "Write/Edit of PORTFOLIO-GRAPH.yaml before init (now allowed); after init still refused",
+      "false_positive_risk": "was high: /mycelink:plan step 4 was impossible with the Write tool",
+      "recovery": "n/a",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/project-hook-freedom.test.ts",
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "const unboundGraph ="
+      }
+    },
+    {
+      "id": "P-03",
+      "layer": "project-hook",
+      "rule": "the control repository's repositories.yaml is changed through repo register",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "any",
+      "invariant": "it names every command Mycelink runs",
+      "blocked": "direct edit",
+      "false_positive_risk": "low",
+      "recovery": "mycelink repo register",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "repositories.yaml names the commands Mycelink runs"
+      }
+    },
+    {
+      "id": "P-04",
+      "layer": "project-hook",
+      "rule": "raw git worktree add/remove, push, merge, rebase, cherry-pick, playwright and docker compose up go through Mycelink — read as commands, not text",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "any",
+      "invariant": "integration, worktrees and the runtime lease are Mycelink's",
+      "blocked": "was: any command whose text named them (commit messages, grep patterns, echo) and a worker reordering its own commits; now: the commands themselves, except a worker's rebase/cherry-pick in its own worktree",
+      "false_positive_risk": "was high; the parsed guard also catches `git -C . push` and `bash -c` forms the text match missed",
+      "recovery": "n/a",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/project-hook-freedom.test.ts",
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "function bypassRefusal("
+      }
+    },
+    {
+      "id": "P-05",
+      "layer": "project-hook",
+      "rule": "a node session (MYCELINK_NODE_ID) spawns no subagent",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "worker",
+      "invariant": "role integrity",
+      "blocked": "Agent/Task",
+      "false_positive_risk": "low",
+      "recovery": "NEEDS_DECISION",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "a node worker may not spawn subagents"
+      }
+    },
+    {
+      "id": "P-06",
+      "layer": "project-hook",
+      "rule": "a worker edits inside its own worktree and its allowed paths",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "worker",
+      "invariant": "ownership (early warning of the settle fence)",
+      "blocked": "edits outside the worktree, through links, or outside allowed_paths",
+      "false_positive_risk": "low",
+      "recovery": "stay in owned paths; NEEDS_DECISION for more",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "is outside the ownership fence of"
+      }
+    },
+    {
+      "id": "P-07",
+      "layer": "project-hook",
+      "rule": "with one node claimed, every session's edit was taken for that worker's",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "controller",
+      "invariant": "only a worker's call is a worker's",
+      "blocked": "was: the controller's own PRD/graph of another feature refused as outside the worktree",
+      "false_positive_risk": "was high while any single node was claimed",
+      "recovery": "n/a",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/project-hook-freedom.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "a controller's call is no worker's"
+      }
+    },
+    {
+      "id": "P-08",
+      "layer": "project-hook",
+      "rule": "no production edit before a verified RED — tests told apart by the repository's TDD policy, only where the generation needs a RED",
+      "classification": "EVIDENCE_GATE",
+      "status": "fixed",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "worker",
+      "invariant": "test-first (the red gate refuses a RED over production edits)",
+      "blocked": "production edits before RED; was also test-side files the policy names (__fixtures__, __snapshots__, testdata, test-utils) and compatibility-only reworks",
+      "false_positive_risk": "was medium-high: its own regex disagreed with the settle policy; now residual low (exploratory production edits before RED)",
+      "recovery": "write the failing test first; settle stays authoritative",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/project-hook-freedom.test.ts",
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "const needsRed = redRequired(active.node, runtime ?? {});"
+      }
+    },
+    {
+      "id": "P-09",
+      "layer": "project-hook",
+      "rule": "a task-list item must name a READY or CLAIMED graph node",
+      "classification": "OVERCONSTRAINT",
+      "status": "retained-candidate",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "any",
+      "invariant": "none beyond scope hygiene: a task-list item changes no state",
+      "blocked": "planning items naming no node, or a node not schedulable",
+      "false_positive_risk": "medium in normal runtime",
+      "recovery": "name a node, or keep notes elsewhere",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "a task must name an approved graph node id"
+      },
+      "note": "not changed: an explicitly tested design rule whose Claude Code event semantics were not re-verified here; recommend downgrading to advisory"
+    },
+    {
+      "id": "P-10",
+      "layer": "project-hook",
+      "rule": "a task-list item naming a node completes only with its evidence and a verified state",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "any",
+      "invariant": "no completion claim without evidence",
+      "blocked": "TaskCompleted for a node without evidence",
+      "false_positive_risk": "low-medium",
+      "recovery": "word the item without the node id, or verify first",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "cannot complete without evidence for"
+      }
+    },
+    {
+      "id": "P-11",
+      "layer": "project-hook",
+      "rule": "Stop is refused once while leases, live sessions or in-flight nodes remain",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "controller",
+      "invariant": "no leaked lease or orphaned worker",
+      "blocked": "the first Stop (an explicit second stop passes)",
+      "false_positive_risk": "low",
+      "recovery": "reconcile, or stop explicitly",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/hooks.test.ts"
+      ],
+      "anchor": {
+        "file": "src/hooks/entrypoint.ts",
+        "contains": "the feature is not in a safe stopping state"
+      }
+    },
+    {
+      "id": "S-01",
+      "layer": "core-state",
+      "rule": "only legal node edges, each with its evidence gate",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a state is only reached with the evidence it means",
+      "blocked": "illegal transitions",
+      "false_positive_risk": "low",
+      "recovery": "the next legal step",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/unit/transition.test.ts",
+        "tests/unit/transition-laundering.test.ts"
+      ],
+      "anchor": {
+        "file": "src/state/transition.ts",
+        "contains": "The only legal node edges"
+      }
+    },
+    {
+      "id": "S-02",
+      "layer": "core-state",
+      "rule": "settle and gates accept only the current claim's capability",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker, controller",
+      "invariant": "stale result isolation; exact evidence",
+      "blocked": "settling or gating with another claim's capability",
+      "false_positive_risk": "low",
+      "recovery": "the ticket's own lines; a late answer is archived",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/host-dispatch.test.ts",
+        "tests/security/worker-protocol-race.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "assertClaimCapability(nodeId, rt, capability);"
+      }
+    },
+    {
+      "id": "S-03",
+      "layer": "core-state",
+      "rule": "a dispatch that no longer counts settles STALE_ORCHESTRATION_EPOCH, archived, nothing charged",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "stale result isolation",
+      "blocked": "judging a revoked, released or superseded generation",
+      "false_positive_risk": "low",
+      "recovery": "continue the loop",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/orchestration-epoch.test.ts",
+        "tests/fixtures/cset203-r7-epoch-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "const stale = this.staleSettle(nodeId, capability, resumedBy);"
+      }
+    },
+    {
+      "id": "S-04",
+      "layer": "core-state",
+      "rule": "resource leases and controller/feature locks",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "resource locks",
+      "blocked": "a claim while its resources are busy (RETRY, nothing charged), concurrent controllers or deliveries",
+      "false_positive_risk": "low",
+      "recovery": "retry",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/unit/leases.test.ts",
+        "tests/integration/candidate-serialization.test.ts",
+        "tests/security/controller-authority.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "if (err instanceof ResourceBusyError || err instanceof NotSchedulableError) {"
+      }
+    },
+    {
+      "id": "S-05",
+      "layer": "core-state",
+      "rule": "nothing a review judges is worked on while it is out (review barrier)",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "stale result isolation: a PASS binds what it judged",
+      "blocked": "claims past an open review; a review past a live lease",
+      "false_positive_risk": "low",
+      "recovery": "await-worker / await-reviewer",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/orchestration-epoch.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "The review barrier, both ways"
+      }
+    },
+    {
+      "id": "T-01",
+      "layer": "settle-tdd",
+      "rule": "test-first history: test-only commits before production, RED blobs bound, no test change after production without a new cycle, no mixed commit, no merge",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "test-first delivery (the public case prompts require it; the independent replay judges the same)",
+      "blocked": "histories that are not test-first",
+      "false_positive_risk": "medium: commit granularity is dictated; rebase/reset to fix order are free",
+      "recovery": "reorder commits (rebase, reset) before submitting; `tdd check` previews",
+      "charges_product_attempt": "yes (TDD_HISTORY_INVALID): a worker contract failure",
+      "tests": [
+        "tests/integration/tdd-settle.test.ts",
+        "tests/unit/tdd-history.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/tdd-history.ts",
+        "contains": "every production change starts with one or more test-only commits"
+      }
+    },
+    {
+      "id": "T-02",
+      "layer": "settle-tdd",
+      "rule": "a RED counts only when it fails for missing behaviour",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "a RED proves the behaviour was missing, not a syntax or setup failure",
+      "blocked": "RED gates failing for setup, import or syntax reasons",
+      "false_positive_risk": "low-medium",
+      "recovery": "fix the test and run the red gate again (the gate refuses; nothing charged)",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/unit/red-classify.test.ts",
+        "tests/integration/red-gate-semantics.test.ts"
+      ],
+      "anchor": {
+        "file": "src/evidence/red-classify.ts",
+        "contains": "behaviour-missing"
+      }
+    },
+    {
+      "id": "T-03",
+      "layer": "settle-tdd",
+      "rule": "gate evidence ran the claim's module command",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "exact evidence: gates run the declared verifier, never a worker-chosen command",
+      "blocked": "gate records from another module command",
+      "false_positive_risk": "low: any other command may be run outside the gates",
+      "recovery": "run the ticket's gate lines",
+      "charges_product_attempt": "yes (VERIFICATION_FAILED)",
+      "tests": [
+        "tests/integration/module-gates.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "MODULE_BINDING_MISMATCH: the "
+      }
+    },
+    {
+      "id": "T-04",
+      "layer": "settle-evidence",
+      "rule": "criterion evidence names the test and gate that prove each criterion",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "every criterion proved by a bound test",
+      "blocked": "a submission whose criterion evidence is wrong",
+      "false_positive_risk": "low",
+      "recovery": "EVIDENCE_CORRECTION_REQUIRED: held, nothing charged, up to MAX_EVIDENCE_CORRECTIONS",
+      "charges_product_attempt": "no until the correction bound",
+      "tests": [
+        "tests/integration/criterion-evidence.test.ts",
+        "tests/integration/criterion-correction-cycle.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private holdForEvidenceCorrection("
+      }
+    },
+    {
+      "id": "T-05",
+      "layer": "settle-evidence",
+      "rule": "ownership fence on the node's own delta",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "ownership",
+      "blocked": "changes outside allowed_paths",
+      "false_positive_risk": "low",
+      "recovery": "NEEDS_DECISION for more paths",
+      "charges_product_attempt": "yes (OWNERSHIP_VIOLATION)",
+      "tests": [
+        "tests/integration/same-repo-ownership.test.ts",
+        "tests/integration/candidate-scope.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "fence.detail ?? 'OWNERSHIP_VIOLATION'"
+      }
+    },
+    {
+      "id": "T-06",
+      "layer": "settle-evidence",
+      "rule": "fresh verification of the sealed head on a clean checkout",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "exact candidate/evidence",
+      "blocked": "a head whose verifiers fail fresh",
+      "false_positive_risk": "low; a checkout that cannot be set up is a precondition, nothing charged",
+      "recovery": "fix and resubmit",
+      "charges_product_attempt": "yes (VERIFICATION_FAILED)",
+      "tests": [
+        "tests/integration/evidence.test.ts",
+        "tests/integration/worktree-setup.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "const verification = this.freshVerify(nodeId"
+      }
+    },
+    {
+      "id": "T-07",
+      "layer": "settle-evidence",
+      "rule": "a carried proof is revalidated by the fresh verification",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a proof from an earlier generation still holds at this head",
+      "blocked": "carried proofs whose test no longer passes",
+      "false_positive_risk": "low",
+      "recovery": "prove it again",
+      "charges_product_attempt": "yes",
+      "tests": [
+        "tests/unit/carried-proof.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "revalidateCarried({"
+      }
+    },
+    {
+      "id": "T-08",
+      "layer": "settle-attempts",
+      "rule": "a settle while the worker still runs with an empty slot answers WORKER_RUNNING",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "administrative timing never consumes a product attempt",
+      "blocked": "was: RESULT_MISSING charged to a worker that was still running; now nothing is settled, written or charged",
+      "false_positive_risk": "none: only on positive evidence (fence launch record, host transcript without completion, live host, within session wall-clock)",
+      "recovery": "wait for the completion notification, settle again",
+      "charges_product_attempt": "no (was yes)",
+      "tests": [
+        "tests/integration/worker-running.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private workerRunningSettle("
+      }
+    },
+    {
+      "id": "T-09",
+      "layer": "settle-attempts",
+      "rule": "a worker that completed without a result is RESULT_MISSING",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "a delivered result is the worker's own claim",
+      "blocked": "completed workers that wrote nothing",
+      "false_positive_risk": "low",
+      "recovery": "a fresh attempt",
+      "charges_product_attempt": "yes",
+      "tests": [
+        "tests/integration/worker-running.test.ts",
+        "tests/integration/host-dispatch.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "if (result === null) failure = 'RESULT_MISSING';"
+      }
+    },
+    {
+      "id": "T-10",
+      "layer": "settle-attempts",
+      "rule": "a holder ended by the model provider is interrupted, never RESULT_MISSING",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "provider failures never consume product attempts",
+      "blocked": "n/a (recovery)",
+      "false_positive_risk": "none",
+      "recovery": "PROVIDER_INTERRUPTED: fresh or resumed generation; bounded, then PROVIDER_UNAVAILABLE",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/provider-interrupt.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private providerSettle("
+      }
+    },
+    {
+      "id": "T-11",
+      "layer": "settle-attempts",
+      "rule": "an answer to an order bound to an older review revision is reconciled, never judged",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "stale review state never consumes product attempts (CSET-203 r14 charged two)",
+      "blocked": "n/a (recovery)",
+      "false_positive_risk": "none",
+      "recovery": "REVIEW_ORDER_REBASED / REVIEW_GAP_STALE",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/review-revision.test.ts",
+        "tests/fixtures/cset203-r14-rebase-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "if (stale !== null) return this.reconcileStaleClaim(nodeId, sessionId, stale, result);"
+      }
+    },
+    {
+      "id": "T-12",
+      "layer": "settle-attempts",
+      "rule": "a legacy BLOCKED whose RED passed every declared test in a review rework is converted to a challenge request once",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "an honest disagreement with a reviewer is not a failed attempt",
+      "blocked": "n/a (recovery)",
+      "false_positive_risk": "none",
+      "recovery": "CHALLENGE_REQUIRED, then a structured challenge",
+      "charges_product_attempt": "no (once per claim)",
+      "tests": [
+        "tests/integration/review-challenge.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "this.challengeConversionDue(nodeId, result)"
+      }
+    },
+    {
+      "id": "T-13",
+      "layer": "settle-attempts",
+      "rule": "a correction that proved and changed nothing spends a correction, not an attempt",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "evidence corrections are bounded apart from product attempts (CSET-203 r1 charged two)",
+      "blocked": "n/a (recovery)",
+      "false_positive_risk": "none",
+      "recovery": "the hold continues",
+      "charges_product_attempt": "no until the correction bound",
+      "tests": [
+        "tests/integration/criterion-correction-cycle.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private unprovenCorrection("
+      }
+    },
+    {
+      "id": "T-14",
+      "layer": "settle-attempts",
+      "rule": "integration-lock contention holds a sealed, verified submission",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "resource contention never consumes a product attempt",
+      "blocked": "was: a LockTimeoutError charged as a failed attempt; now PRECONDITION_FAILED, held, the next dispatch finishes it",
+      "false_positive_risk": "none",
+      "recovery": "dispatch finishes the held settlement",
+      "charges_product_attempt": "no (was yes)",
+      "tests": [
+        "tests/integration/worker-running.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "INTEGRATION_LOCK_BUSY"
+      }
+    },
+    {
+      "id": "T-15",
+      "layer": "settle-attempts",
+      "rule": "an integration branch moved by someone else fails the attempt",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained-candidate",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "the integration branch moves only as journaled",
+      "blocked": "INTEGRATION_BRANCH_MOVED charges the worker",
+      "false_positive_risk": "low (never observed in r1-r14), but not the worker's doing",
+      "recovery": "a fresh attempt",
+      "charges_product_attempt": "yes",
+      "tests": [
+        "tests/integration/integration-branch.test.ts"
+      ],
+      "anchor": {
+        "file": "src/git/integrate.ts",
+        "contains": "INTEGRATION_BRANCH_MOVED: "
+      },
+      "note": "residual: kept because a moved branch may be tampering and holding it would loop; candidate for a held precondition"
+    },
+    {
+      "id": "T-16",
+      "layer": "settle-attempts",
+      "rule": "an unexpected error in the adapter (claude -p) path fails the attempt",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained-candidate",
+      "scope": [
+        "runtime"
+      ],
+      "actor": "core",
+      "invariant": "known infrastructure, setup, drift and brief errors are uncharged; anything else is charged",
+      "blocked": "unclassified exceptions while running a standalone worker session",
+      "false_positive_risk": "low (adapter path only; the benchmark uses host dispatch)",
+      "recovery": "a fresh attempt",
+      "charges_product_attempt": "yes",
+      "tests": [
+        "tests/integration/adapter-preflight.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "if (err instanceof ReworkBriefError) {"
+      },
+      "note": "residual: classify further errors as infrastructure when observed"
+    },
+    {
+      "id": "T-17",
+      "layer": "settle-attempts",
+      "rule": "same-failure and rework limits park a node",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "bounded retries; review-origin reworks exempt from REWORK_LIMIT",
+      "blocked": "a third identical failure; reworks past the limit since the last delivery",
+      "false_positive_risk": "low-medium",
+      "recovery": "a person decides",
+      "charges_product_attempt": "n/a (budget)",
+      "tests": [
+        "tests/fixtures/rework-e2e.test.ts",
+        "tests/fixtures/qa-rework-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/state/transition.ts",
+        "contains": "max_same_failure"
+      }
+    },
+    {
+      "id": "T-18",
+      "layer": "settle-attempts",
+      "rule": "a worker that could not be started is handed back unspent",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "infrastructure failures never consume product attempts",
+      "blocked": "n/a (recovery)",
+      "false_positive_risk": "none",
+      "recovery": "INFRASTRUCTURE_FAILURE, retry",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/adapter-preflight.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "this.releaseForInfrastructure(nodeId, claimId"
+      }
+    },
+    {
+      "id": "T-19",
+      "layer": "settle-attempts",
+      "rule": "one rework order needed one outcome for all of its criteria",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "each ordered criterion is settled on its own evidence; valid work is never erased by one outcome for the order",
+      "blocked": "was: an order with one criterion proved by RED and fix, one whose exact reproduction passed on the base and one compatibility unit could not be answered (SUBMITTED needed an impossible RED, a challenge allowed no production change), so the worker asked a person; now a version 2 result (outcome CRITERIA) settles each criterion: DONE work integrated, a passing reproduction challenged beside it, unresolved criteria ordered again and parked with their own reasons",
+      "false_positive_risk": "none",
+      "recovery": "per-criterion answer; administrative split of the order (no attempt, no criterion budget)",
+      "charges_product_attempt": "one per execution, never per criterion (was: one attempt and a person for a valid mixed answer)",
+      "tests": [
+        "tests/unit/criterion-outcomes.test.ts",
+        "tests/integration/criterion-outcomes.test.ts",
+        "tests/fixtures/cset203-r15-partial-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "if (result !== null && result.outcome === 'CRITERIA') return this.concludeCriteria(nodeId, sessionId, result, evidence);"
+      }
+    },
+    {
+      "id": "T-20",
+      "layer": "settle-attempts",
+      "rule": "a per-criterion answer is judged criterion by criterion",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "no criterion closes without its own evidence: a DONE one by its own RED binding (or compatibility unit) and fresh verification, a challenged one by its exact reproduction passing on the base with no production change only it could drive; one test proves two criteria only when each traces its own clauses to it",
+      "blocked": "a criterion missing, repeated or not ordered; a passing test named as a RED; a failing test named as a challenge; one test for two criteria untraced; production a DONE criterion's RED does not drive beside a challenge",
+      "false_positive_risk": "low: a worker sharing one test between criteria must trace each one's clauses (held for correction, uncharged)",
+      "recovery": "evidence refusals held for correction on the same commit; tdd check names each refusal before settle",
+      "charges_product_attempt": "malformed answer or refused challenge: yes, as any refused answer; evidence refusals: no",
+      "tests": [
+        "tests/unit/criterion-outcomes.test.ts",
+        "tests/integration/criterion-outcomes.test.ts",
+        "tests/fixtures/cset203-r15-partial-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/criterion-outcomes.ts",
+        "contains": "export function criteriaForm("
+      }
+    },
+    {
+      "id": "T-21",
+      "layer": "settle-attempts",
+      "rule": "a generation that changed no production code had to run a RED of its own for the whole node",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a generation's RED is judged per criterion: its own when it ran a RED cycle; with no RED cycle and no production change, the attested RED of a completion it carries (its record's, revalidated); none for compatibility work alone",
+      "blocked": "was: a compatibility-only continuation whose passing red gate re-proved a completed criterion (CSET-203 r16) hit 'Entering REGRESSION_VERIFIED requires a RED that failed' at its regression gate and at settle, charged INVALID_RED_EVIDENCE twice and BLOCKED; now the carried RED stands, and a gate the controller's own judged record cannot enter is held uncharged (SETTLE_GATE_STATE), never counted",
+      "false_positive_risk": "none",
+      "recovery": "re-proof of an ordered completed criterion (its completed proof plus the reproduction passing on the unchanged base); administrative holds finished by the next dispatch",
+      "charges_product_attempt": "one per execution; administrative fingerprints are never counted and never park a node",
+      "tests": [
+        "tests/unit/criterion-ledger.test.ts",
+        "tests/integration/criterion-carry.test.ts",
+        "tests/fixtures/cset203-r16-carry-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "const basis = this.generationRed(nodeId, runtime, accepted, cycles);"
+      }
+    },
+    {
+      "id": "T-22",
+      "layer": "settle-evidence",
+      "rule": "a completed criterion is carried only after its record is revalidated on the new authoritative head",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "an immutable, hash-bound completion record per criterion and generation (order revision, repo base/head, production delta, RED/green/regression/compatibility evidence, settlement, lineage); carried across rebase, refinement, concurrent commit and restart only while it holds on the new head: intact, its work in the head, its test as proved, its fix present (or changed by others only where its test still passes there)",
+      "blocked": "a tampered record or archive, a stale base, a changed test, a deleted fix, a failing test on the new head: that criterion alone reopened (ordered by its own proof), the rest carried",
+      "false_positive_risk": "low: a foreign change to a completed fix triggers one module run on the base before the worker starts",
+      "recovery": "the reopened criterion is ordered again in the same generation, uncharged; at settle, a carried proof the base no longer holds (the worker never touched it) reopens it and hands the claim back unspent",
+      "charges_product_attempt": "no (a carried proof the worker itself broke: yes, as before)",
+      "tests": [
+        "tests/unit/criterion-ledger.test.ts",
+        "tests/integration/criterion-carry.test.ts",
+        "tests/fixtures/cset203-r16-carry-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/criterion-ledger.ts",
+        "contains": "export function revalidateCompletion("
+      }
+    },
+    {
+      "id": "T-23",
+      "layer": "settle-evidence",
+      "rule": "production code is never carried in behind a completed or carried proof",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "in a generation that relies on a carried or re-proved criterion, every production change follows a RED that failed a test the answer proves a DONE criterion by, as its own RED",
+      "blocked": "a production change driven by a RED no DONE criterion of the answer names (CRITERIA_PRODUCTION_UNDRIVEN)",
+      "false_positive_risk": "low: name the RED test for the criterion it drives",
+      "recovery": "a refused answer, as any",
+      "charges_product_attempt": "yes, as any refused answer",
+      "tests": [
+        "tests/integration/criterion-carry.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "CRITERIA_PRODUCTION_UNDRIVEN"
+      }
+    },
+    {
+      "id": "R-01",
+      "layer": "review",
+      "rule": "verdict schema and limits; format corrections apart from reviewer attempts",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "reviewer",
+      "invariant": "a verdict is checkable and bounded",
+      "blocked": "malformed verdicts (format corrections, then refusal)",
+      "false_positive_risk": "low after CSET-203 r5 (prose canonicalised, not refused)",
+      "recovery": "the next generation mends the form",
+      "charges_product_attempt": "reviewer generation, not product",
+      "tests": [
+        "tests/integration/review-verdict-correction.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/acceptance-review.ts",
+        "contains": "MAX_FORMAT_CORRECTIONS"
+      }
+    },
+    {
+      "id": "R-02",
+      "layer": "review",
+      "rule": "a verdict is the launched reviewer's own final answer or attested file",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "reviewer",
+      "invariant": "exact evidence",
+      "blocked": "answers no launch proves",
+      "false_positive_risk": "low",
+      "recovery": "launch with the ticket prompt",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/review-ingest.test.ts",
+        "tests/security/review-result-transport.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/review-transport.ts",
+        "contains": "export function reviewerOutput("
+      }
+    },
+    {
+      "id": "R-03",
+      "layer": "review",
+      "rule": "a reviewer still running, never launched, lost or past its wall-clock spends nothing",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "reviewer transport never consumes review attempts (CSET-203 r8, r13 spent two each)",
+      "blocked": "n/a (recovery)",
+      "false_positive_risk": "none",
+      "recovery": "await, or a fresh generation",
+      "charges_product_attempt": "no",
+      "tests": [
+        "tests/integration/review-lifecycle.test.ts",
+        "tests/fixtures/cset203-r13-reviewer-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "REVIEWER_RUNNING: the reviewer of"
+      }
+    },
+    {
+      "id": "R-04",
+      "layer": "review",
+      "rule": "per-criterion rework budgets, never a cap: past the budget a materially new gap is reworked on verified producer progress up to an emergency ceiling; repeats are not new gaps; nonconvergence stops",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "bounded review loops that still converge: duplicates, no-progress streaks, oscillating restorations, the review-session and configured wall-clock budgets and the emergency ceiling stop a review; the per-criterion count alone never does",
+      "blocked": "materially repeated gaps; a criterion at its emergency ceiling, or past its budget with no verified producer progress",
+      "false_positive_risk": "low-medium",
+      "recovery": "a person decides",
+      "charges_product_attempt": "n/a (budget)",
+      "tests": [
+        "tests/integration/review-convergence.test.ts",
+        "tests/unit/review-lineage.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/review-lineage.ts",
+        "contains": "export function judgeGapLineage"
+      }
+    },
+    {
+      "id": "R-05",
+      "layer": "review",
+      "rule": "a gap is challenged with the gap's exact reproduction passing on the unchanged head",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "disagreement with a reviewer is evidence, not assertion",
+      "blocked": "unstructured or weakened challenges",
+      "false_positive_risk": "low-medium",
+      "recovery": "CHALLENGE_REQUIRED once; structured challenge",
+      "charges_product_attempt": "yes for an invalid challenge",
+      "tests": [
+        "tests/integration/review-challenge.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/review-challenge.ts",
+        "contains": "export function judgeChallenge"
+      }
+    },
+    {
+      "id": "B-01",
+      "layer": "benchmark",
+      "rule": "sessions run inside the isolation boundary; preflight fails closed",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "secrets and hidden evaluator never reachable",
+      "blocked": "network, evaluator store, operator home",
+      "false_positive_risk": "none",
+      "recovery": "none needed",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/sandbox.test.ts",
+        "tests/benchmark/agent-isolation.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/isolation.mjs",
+        "contains": "export async function agentPreflight"
+      }
+    },
+    {
+      "id": "B-02",
+      "layer": "benchmark",
+      "rule": "evaluator leakage fails a delivery",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "hidden evaluator content never reaches an agent",
+      "blocked": "deliveries holding hidden tests or reference objects",
+      "false_positive_risk": "low (reference convergence is a warning)",
+      "recovery": "none needed",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/leakage.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/leakage.mjs",
+        "contains": "Evaluator leakage: what only the evaluator holds must never reach an"
+      }
+    },
+    {
+      "id": "B-03",
+      "layer": "benchmark",
+      "rule": "the transcript monitor names every controller write, in parity with the plugin fence",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "controller/product separation, independently of the plugin",
+      "blocked": "controller writes to product, worktrees, evidence",
+      "false_positive_risk": "low (parity-tested)",
+      "recovery": "corrective session",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/shell-writes-parity.test.ts",
+        "tests/benchmark/controller-edits.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/writes.mjs",
+        "contains": "What one Bash call writes — the benchmark's own reading"
+      }
+    },
+    {
+      "id": "B-04",
+      "layer": "benchmark",
+      "rule": "each controller session is a transaction; what is not the core's, a worker's or authoring is rolled back",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "no controller change survives in the workspace",
+      "blocked": "controller-made workspace changes",
+      "false_positive_risk": "medium historically (CSET-203 r12 blamed a worker's stash on the controller; CSET-202 final killed two sessions for a worker's push and pop beside a host wait; both fixed by causal attribution, B-05/B-11)",
+      "recovery": "selective or full rollback, corrective session",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/controller-txn.test.ts",
+        "tests/benchmark/controller-rollback.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/controller-txn.mjs",
+        "contains": "A with-arm controller session as a transaction over the workspace"
+      }
+    },
+    {
+      "id": "B-05",
+      "layer": "benchmark",
+      "rule": "a host call open beside a worker's stash makes it the controller's only when what it runs may change anything",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "worker",
+      "invariant": "only a call that could have moved the stash disqualifies the worker's attribution; overlap in time is no cause",
+      "blocked": "was: any overlapping host call made the worker's stash a controller violation (r15 relaxed a bare `sleep N` only; CSET-202 final's `sleep 100; echo waiting` killed the task and its corrective session, and a check while the session ran never applied even that); now a host call is judged by what the session's stream shows it running: waiting, printing, reading and read-only git change nothing, whatever they overlap",
+      "false_positive_risk": "was high: background workers plus a waiting host (CSET-202 final: two sessions lost, the run delivery-failed)",
+      "recovery": "n/a",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/controller-shared-git.test.ts",
+        "tests/benchmark/causal-provenance.test.ts",
+        "tests/benchmark/controller-rollback.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/causal.mjs",
+        "contains": "export function shellEffects("
+      }
+    },
+    {
+      "id": "B-06",
+      "layer": "benchmark",
+      "rule": "independent TDD replay of the delivered history",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "test-first, judged without trusting Mycelink",
+      "blocked": "non-test-first deliveries",
+      "false_positive_risk": "low",
+      "recovery": "n/a",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/tdd-replay.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/tdd.mjs",
+        "contains": "Deterministic TDD replay."
+      }
+    },
+    {
+      "id": "B-07",
+      "layer": "benchmark",
+      "rule": "delivered scope within allowed modules and shared paths; required modules changed",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "the delivery is the PRD's",
+      "blocked": "out-of-scope changes; untouched required modules",
+      "false_positive_risk": "low",
+      "recovery": "n/a",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/verify.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/scope.mjs",
+        "contains": "Changed scope of a delivery"
+      }
+    },
+    {
+      "id": "B-08",
+      "layer": "benchmark",
+      "rule": "delivery hygiene before any delivered code runs",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "any",
+      "invariant": "ancestry and configuration cannot be forged",
+      "blocked": "grafts, replace refs, links, active git config",
+      "false_positive_risk": "low",
+      "recovery": "n/a",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/delivery-hygiene.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/hygiene.mjs",
+        "contains": "Delivery hygiene"
+      }
+    },
+    {
+      "id": "B-09",
+      "layer": "benchmark",
+      "rule": "with-arm orchestration evidence: every node DONE, verified candidate, delivered",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "the with arm used Mycelink end to end",
+      "blocked": "deliveries bypassing Mycelink",
+      "false_positive_risk": "low",
+      "recovery": "n/a",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/verify.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/orchestration.mjs",
+        "contains": "Mycelink orchestration evidence in a delivered workspace"
+      }
+    },
+    {
+      "id": "B-10",
+      "layer": "benchmark",
+      "rule": "bounded continuations of an unfinished with-arm run",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "progress, bounded",
+      "blocked": "continuations past the bound or without progress",
+      "false_positive_risk": "low",
+      "recovery": "n/a",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/continuation.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/arms.mjs",
+        "contains": "MAX_CONTINUATIONS"
+      }
+    },
+    {
+      "id": "B-11",
+      "layer": "benchmark",
+      "rule": "a shared-Git transition is a worker's only as the causal tree places its call and the worker's own stash command in its own worktree made it",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "no controller change is laundered as a worker's: the stream, the hooks and Claude Code's records must agree on the call (parent Agent call, task, agent, binding's launch and claim, own transcript), the entry must be made on the worker's branch by a `git stash push` it ran in its worktree (counted once), a drop by a pop or drop of its own entry; a host call that may change anything, a call no stream shows or shows otherwise, a forged parent, transcript or start record, a late child, or a rival worker's command fails the transition closed",
+      "blocked": "the controller's stash hidden in a shell or an alias, a forged nested transcript or parent id, a sibling's or a late process's stash, an entry no running worker's worktree made",
+      "false_positive_risk": "low: real hosts wait, poll and read; a worker's stash its commands do not show (a script that stashes) fails closed at the settlement, archived, and stops nothing while the session runs",
+      "recovery": "selective rollback, the stash ref and reflog byte for byte; every entry taken out archived under refs/mycelink/archive",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/controller-shared-git.test.ts",
+        "tests/benchmark/causal-provenance.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/shared-git.mjs",
+        "contains": "function resolveActor("
+      }
+    },
+    {
+      "id": "B-12",
+      "layer": "benchmark",
+      "rule": "a check while the session runs stops it only for the controller's own hand; a stash change not yet attributed, or whose worker effects are not established, waits for the settlement",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "benchmark"
+      ],
+      "actor": "controller",
+      "invariant": "a false stop costs a session (CSET-202 final lost two); the settlement still fails closed on anything not attributed, and a rollback archives every stash entry it takes out, so approved progress is never destroyed",
+      "blocked": "nothing: a call the stream does not show yet, or a worker effect not established, is left to the settlement instead of stopping the session",
+      "false_positive_risk": "n/a",
+      "recovery": "the settlement attributes with the whole stream; selective or full rollback, entries archived",
+      "charges_product_attempt": "n/a",
+      "tests": [
+        "tests/benchmark/controller-shared-git.test.ts",
+        "tests/benchmark/controller-rollback.test.ts"
+      ],
+      "anchor": {
+        "file": "evals-public-projects/lib/controller-txn.mjs",
+        "contains": "function stashArchives("
+      }
+    },
+    {
+      "id": "T-24",
+      "layer": "settle-attempts",
+      "rule": "a focused review reproduction counted only once committed (or named by a static title); kept out of the branch it had no identity a check or challenge could cite",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "an exact focused reproduction is sealed as a reproduction capsule without a commit: run by the claim's own module command on a throwaway checkout of its unchanged base, its tests named by the run's report; a passing capsule is challenge material only, a failing one RED material only",
+      "blocked": "was: R005's exact AC-1 reproduction (two cases of one template-literal title in a loop), kept out of the branch, passed on the base, and nothing could name its tests: the red gate kept no challenge material, tdd challenge answered REVIEW_CHALLENGE_GATE_UNKNOWN, tdd check CRITERION_TEST_UNKNOWN (NO_DECLARED_TESTS once committed); the worker answered BLOCKED and the node was parked after six attempts; now tdd capsule seals it and the challenge cites it, and those refusals caused only by a valid capsule's path are held uncharged (CRITERION_CAPSULE_PATH), a BLOCKED answer beside a passing capsule converted into the challenge request",
+      "false_positive_risk": "none: a passing capsule never proves DONE, a failing one is a RED only through its committed test-first history and the red gate",
+      "recovery": "tdd capsule --criterion <AC>; the challenge line with --capsule; --carry after a rebase; the correction hold re-dispatched",
+      "charges_product_attempt": "never for a valid capsule challenge; administrative capsule holds are never counted; a forged or tampered capsule is a refused challenge, charged as before",
+      "tests": [
+        "tests/unit/reproduction-capsule.test.ts",
+        "tests/integration/reproduction-capsule.test.ts",
+        "tests/fixtures/cset203-r17-capsule-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "registerCapsule(nodeId: string, capability: string | undefined"
+      }
+    },
+    {
+      "id": "T-25",
+      "layer": "evidence",
+      "rule": "a reproduction capsule is used only as sealed: this claim's registry, its receipt and archive by hash, its claim, generation, base, module plan, order revision and criterion",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "capsule integrity: files contained in the module and fence, test paths only, never read through a link, bounded, free of credentials, the controller key, literal capabilities and prompt delimiters; immutable archive bound by hash in a registry only the capability holder writes; stale (rebased, another claim, late) is administrative, forged or tampered fails closed; feature verify and capsule verify --replay check every cited capsule independently",
+      "blocked": "a capsule of another claim, generation, base, module, revision or criterion; an id or hash no registry holds; an archive changed after sealing; unsafe content; a path outside the module or through a link",
+      "false_positive_risk": "low: a capsule stale only for its order revision is carried explicitly (--carry) when its reproduction, bytes and base are unchanged",
+      "recovery": "seal the reproduction again for the claim, or carry it; a stale citation is held for correction, uncharged",
+      "charges_product_attempt": "stale never; forged or tampered as a refused challenge",
+      "tests": [
+        "tests/unit/reproduction-capsule.test.ts",
+        "tests/integration/reproduction-capsule.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/reproduction-capsule.ts",
+        "contains": "export function capsuleUse(args: {"
+      }
+    },
+    {
+      "id": "T-26",
+      "layer": "settle-attempts",
+      "rule": "a node reopened by an upstream's rework (no order of its own) could not cite the proofs its last generation carried",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "what a node's last generation settled as carried stays carried when an upstream rework reopens it: offered in the pack (carried_criteria), cited exactly as given, its test run again by the fresh verification",
+      "blocked": "was: after QA's rework of apply-release-plan the cli's AC-4 (carried since its first generation) had no citable proof and no honest RED: the worker asked a person (CSET-203 r17 DEC, an attempt and a decision spent); now its carried proof is offered and revalidated at settle",
+      "false_positive_risk": "none: revalidateCarried re-runs the test on the sealed head",
+      "recovery": "cite the pack's carried_criteria",
+      "charges_product_attempt": "one per execution, as any re-proof",
+      "tests": [
+        "tests/fixtures/cset203-r17-capsule-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/criteria.ts",
+        "contains": "Reopened by an upstream's rework, with no order of its own"
+      }
+    },
+    {
+      "id": "T-27",
+      "layer": "delivery-evidence",
+      "rule": "a delivery refused only because an evidence pointer named bytes a later run overwrote was answered by a product rework demanding the historical RED be run again on fixed code",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a stale pointer an exact, provenance-attested archive restores is repaired administratively at delivery, under the same candidate: nothing rerun, reopened, charged or asked; the review PASS and the epoch stand. Where nothing restores it the feature is EVIDENCE_REPAIR_REQUIRED (fails closed, next action evidence-repair, never resumable by dispatch) and a product rework of the named node is refused without a person's decision",
+      "blocked": "was: the CSET-202 rerun reached R002 PASS and C001; delivery refused C001 (OUTPUT_HASH_MISMATCH: the cli's kept RED named a canonical log its second red gate had overwritten); the host ordered rework generation 2 to \"rerun the red gate\"; the worker could not honestly make a passing test fail (AC-4 holds on fa21f42) and asked a person (NEEDS_DECISION; compat.verify and the candidate build INVALIDATED). The exact bytes were in the red gate's own snapshot all along",
+      "false_positive_risk": "none: a repair copies only bytes hashing exactly as recorded from an archive the node's own records attest for that run, and moves only the broken pointer",
+      "recovery": "deliver repairs automatically; mycelink evidence repair <feature> (controller, --dry-run first); with no exact archive: restore it into the node's archives, or a person decides",
+      "charges_product_attempt": "never: no rework generation, attempt, fingerprint or decision for an evidence repair",
+      "tests": [
+        "tests/integration/evidence-repair.test.ts",
+        "tests/integration/evidence-repair-crash.test.ts",
+        "tests/fixtures/cset202-evidence-e2e.test.ts",
+        "tests/benchmark/cset202-rerun-evidence.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/deliver.ts",
+        "contains": "repairEvidence(controlRoot, featureId, { candidateId, mark: true });"
+      }
+    },
+    {
+      "id": "T-28",
+      "layer": "evidence",
+      "rule": "gate evidence is immutable from creation: every output, results file and judged history is a content-addressed artifact created exclusively before any record names it, never written again; every artifact a record names is verified on its own and across records",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "exact evidence: a record's path and hash name the same bytes forever (red, green, regression, fresh, capsule, revalidation, verification, acceptance runs and judged histories); archives copy only bytes hashing as recorded and never overwrite; feature verify checks results, the histories completion records name, carried proofs, repairs, one path named with two hashes and swapped files; only stale writer temporaries are collected",
+      "blocked": "a file or link at an artifact's name is never written over or through (the artifact takes the next free alternate); a record whose bytes, results, history or repair receipt changed; two records naming one path with two hashes; swapped files; a pointer into the repaired copies no receipt attests",
+      "false_positive_risk": "low: legacy canonical paths are still read; a stale one is repaired from an exact archive (T-29), not refused outright",
+      "recovery": "deliver or evidence repair restores a stale legacy pointer from an exact archive; tampering fails closed",
+      "charges_product_attempt": "never for storage; tampering is refused as before",
+      "tests": [
+        "tests/integration/evidence-immutable.test.ts",
+        "tests/unit/evidence-store.test.ts",
+        "tests/integration/evidence-paths.test.ts"
+      ],
+      "anchor": {
+        "file": "src/evidence/store.ts",
+        "contains": "export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array): StoredArtifact {"
+      }
+    },
+    {
+      "id": "T-29",
+      "layer": "evidence",
+      "rule": "a stale evidence pointer is repaired only from an archive whose exact bytes and provenance (node, gate, generation, claim; commit, module, plan and exit where known) the node's own records attest, by a sealed receipt bound in STATE.json",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "sources: a replaced generation's copies (the rework that archived them), a completion record still sealed as written, a red gate's snapshot (a binding of that gate in the same generation); the copy is content-addressed, the receipt self-sealed and created once, the pointer moved in one state write (a sealed record never edited: the recorded repair stands for its path), one event; idempotent across crashes, restarts and a compacted event log",
+      "blocked": "bytes that match but are attested for another node, kind, generation, claim, base, module or plan; two matching archives that disagree; an archive that is a link, a second hard link, outside the node's evidence or behind a traversal; a link or traversal at the record's own path; swapped files",
+      "false_positive_risk": "low: an archive whose provenance cannot be established is refused (EVIDENCE_REPAIR_PROVENANCE, _AMBIGUOUS, _NO_SOURCE) and the controller or a person restores it",
+      "recovery": "restore the exact bytes into the node's archives and run evidence repair, or a person decides",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/unit/evidence-provenance.test.ts",
+        "tests/integration/evidence-repair.test.ts",
+        "tests/integration/evidence-repair-crash.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/evidence-integrity.ts",
+        "contains": "export function repairSourceFor(controlRoot: string, featureId: string, state: FeatureState_, ref: EvidenceReference): SourceVerdict {"
+      }
+    },
+    {
+      "id": "T-30",
+      "layer": "review",
+      "rule": "a materially new gap of a criterion past max_criterion_reworks (2 by default) was exhausted solely by the count, however much verified progress the producers had made",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "the count is a budget: within it newness alone reworks a gap (basis budget); past it a gap is reworked when every producer reworked for the criterion's last accepted gap settled it with its own RED, a re-proof or a compatibility proof and a production change or new proof, that work in the reviewed heads (basis progress, its records named); the emergency ceiling (criterion_ceiling, default 6, configurable, granted per criterion by a person) and the session, no-progress, oscillation and wall-clock budgets stay; a repeat naming an uncovered boundary no earlier gap named is new; old lineages read with the default ceiling, their events unchanged",
+      "blocked": "a materially new gap with no verified progress since the criterion's last gap, or at the ceiling: exhausted, a person decides",
+      "false_positive_risk": "low: progress is read from the completion ledger and the reviewed heads, never from the reviewer",
+      "recovery": "automatic past the budget; at the ceiling node rework --decision grants one more",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/unit/review-lineage.test.ts",
+        "tests/integration/review-convergence.test.ts",
+        "tests/fixtures/cset201-convergence-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private progressFacts(state: FeatureState_, summary: LineageSummary, criteria: readonly string[], heads: readonly { name: string; head_sha: string }[]): Record<string, ProgressFact> {"
+      }
+    },
+    {
+      "id": "T-31",
+      "layer": "settle",
+      "rule": "a re-proof's passing tests were archived and kept out of the product: a later head never held the proof a review passed the criterion on",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "settle commits an accepted re-proof exactly as its red gate ran it (bytes hashed as recorded) as a test-only unit of the controller's (trailer Mycelink-Reproof) on the sealed head, merged three ways with the worker's own later change, journaled on the claim before the branch moves, verified fresh (its tests must pass there) and integrated; the benchmark replay credits it only as tests alone of behaviour an earlier RED drove",
+      "blocked": "a re-proof that conflicts with the worker's own later change, would remove or edit a test, or does not pass at its unit: held for correction, nothing charged",
+      "false_positive_risk": "low",
+      "recovery": "the worker runs the reproduction through the red gate again on its submitted head",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/unit/proof-units.test.ts",
+        "tests/integration/sibling-progress.test.ts",
+        "tests/benchmark/tdd-replay.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/proof-units.ts",
+        "contains": "export function planProofUnit(repoPath: string, head: string, files: readonly ProofFile[]): UnitPlan {"
+      }
+    },
+    {
+      "id": "T-32",
+      "layer": "settle",
+      "rule": "an integration never loses a sibling's standing proof: what the integration head holds of every other producer's standing completions (record, work, production change, every proof and re-proof test) the integrated commit holds too; a branch rebuilt on an older head is never integrated",
+      "classification": "HARD_SAFETY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "checked inside the integration lock before the branch moves (fast-forward or merge); a lost proof or a merge conflict is SIBLING_PROGRESS_LOST: nothing integrated or charged, the branch archived by the next claim, reissued from the latest head with the reason in the pack; past MAX_SIBLING_LOSSES the order is charged; overlapping writers are never claimed together",
+      "blocked": "a commit dropping a sibling's tests or production change, a stale base, a conflict with a sibling's integrated work",
+      "false_positive_risk": "low: a soft change of a sibling's production code (its test decides) is allowed",
+      "recovery": "automatic reissue; a worker that keeps erasing is charged",
+      "charges_product_attempt": "never, until the bound",
+      "tests": [
+        "tests/integration/sibling-progress.test.ts",
+        "tests/fixtures/cset201-convergence-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private progressLost(nodeId: string, repository: string, from: string, to: string): CompletionCoverage[] {"
+      }
+    },
+    {
+      "id": "T-33",
+      "layer": "settle",
+      "rule": "a proof is a test the submitted head declares: a RED recorded on tests never committed is no generation's own, and citing a test the head does not declare is refused",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a recorded RED whose failing tests the sealed head does not declare falls back to the carried RED of the completion it stands on; criterion evidence naming a test its head does not declare (when Mycelink can read the file) is CRITERION_TEST_UNKNOWN; \"declares\" is judged by the test's canonical identity (T-36), never by a string comparison of two runners' name shapes",
+      "blocked": "a stale or wrong worker laundering an earlier claim's uncommitted run as a proof",
+      "false_positive_risk": "low: a test only a dynamic table names is not judged by its file",
+      "recovery": "cite the proof the head holds; held for correction, nothing charged",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/integration/sibling-progress.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/criteria.ts",
+        "contains": "export function declaredAt(repoPath: string, head: string, path: string, name: string | Omit<ReportedTest, 'path'>, cache: Map<string, string | null> = new Map()): boolean | null {"
+      }
+    },
+    {
+      "id": "T-34",
+      "layer": "review",
+      "rule": "review closure requires monotonic coverage at the exact heads: a completed proof the heads lost is a regression — restored before any reviewer runs, a duplicate gap of it never ignored, a PASS on it no closure — and never spends the criterion's budget",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "every receipt pins the coverage manifest of every standing completion at its heads; a lost one orders an uncharged restoration of its producer carrying the original RED (re-proved, committed as a re-proof unit), with a regression fact in the lineage; more than MAX_REGRESSIONS restorations of one criterion is an oscillation: nonconvergent",
+      "blocked": "a candidate on heads that lost a completed proof; an ignored duplicate whose fix vanished",
+      "false_positive_risk": "low",
+      "recovery": "automatic restoration; an oscillation stops for a person",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/integration/sibling-progress.test.ts",
+        "tests/unit/review-lineage.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/criterion-coverage.ts",
+        "contains": "export function coverageManifest(args: {"
+      }
+    },
+    {
+      "id": "T-35",
+      "layer": "settle",
+      "rule": "a proof's test was 'declared at the head' only when its reported full name, or its last ` > ` segment, equalled a declared name as a string: a JUnit/Surefire report (`pkg.Class#method`) never equals the bare method the Java reader declares",
+      "classification": "OVERCONSTRAINT",
+      "status": "fixed",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "the stale-RED/proof guard (T-33), the coverage manifest, the ledger revalidation, the restoration proof, the challenge and capsule blocks and the production-undriven check match a reported test to its declaration by the runner-aware canonical identity (T-36); JS keeps its exact suite/title comparison, unchanged",
+      "blocked": "was: PCM-101 final — both Java producers ran a valid RED, GREEN and full regression; every criterion was refused CRITERION_TEST_UNKNOWN ('declares no test \"visitsTableHasNullableVetIdAndSeedVisitsHaveNoVet\"'); the visits worker, refused by tdd check, answered BLOCKED and was parked with its attempt spent; the gateway was held for an evidence correction no worker could make; a person was asked",
+      "false_positive_risk": "none left for JUnit method names; a Surefire configured to report display names only resolves through @DisplayName, else fails closed",
+      "recovery": "automatic: a hold or a parked answer this comparison made is re-evaluated administratively (T-37)",
+      "charges_product_attempt": "never now; it charged one (the visits worker's BLOCKED answer) and parked the node",
+      "tests": [
+        "tests/integration/java-criterion-identity.test.ts",
+        "tests/unit/test-identity.test.ts",
+        "tests/fixtures/pcm101-identity-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/evidence/test-identity.ts",
+        "contains": "export function resolveDeclaration(test: ReportedTest, source: string | null): DeclarationResolution {"
+      }
+    },
+    {
+      "id": "T-36",
+      "layer": "evidence",
+      "rule": "a test is identified by its normalised source path and its runner's key — JUnit: the method, package and class stripped and kept as raw evidence; JS: the full suite/title; any other runner: exact — resolved against the submitted head; a wrong or ambiguous reference is CRITERION_TEST_UNKNOWN",
+      "classification": "EVIDENCE_GATE",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a JUnit reference resolves only when its class is the file's own (the path ends with its package and top-level class, the file declares every class it names), its method is a declared test method, and nested classes, overloads and parameterized invocations are told apart by the class chain and parameter types the report names; a bare name two classes or overloads share, a fake class, a wrong package, a malformed `#`, a renamed, deleted or never-committed test, a stale head or another module's file fails closed; no suffix of any name is ever stripped for another runner. New results, RED bindings, accepted criteria and completion records carry the versioned identity (mycelink-test-identity/1) beside the raw name; a test published before identities is accepted only by the same path and an unambiguous declaration at the submitted head, with an immutable, content-addressed alias receipt — its evidence bytes never rewritten; a published identity the head's declaration does not confirm is refused",
+      "blocked": "a criterion cited by a test of another class, file, module, overload or nested class; a test the head no longer declares",
+      "false_positive_risk": "low: a Surefire report naming display names only (no method) resolves through a single matching @DisplayName, else fails closed",
+      "recovery": "cite the test by the id its gate printed; held for correction, nothing charged",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/unit/test-identity.test.ts",
+        "tests/integration/java-criterion-identity.test.ts",
+        "tests/integration/criterion-test-ids.test.ts",
+        "tests/integration/sibling-progress.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/criteria.ts",
+        "contains": "export function declarationAt(repoPath: string, head: string, test: ReportedTest, cache: Map<string, string | null> = new Map()): DeclarationResolution {"
+      }
+    },
+    {
+      "id": "T-37",
+      "layer": "settle",
+      "rule": "an identity-shape refusal the old comparison made (T-35) — a held evidence correction judged before canonical identities, or a worker's BLOCKED answer naming CRITERION_TEST_UNKNOWN/AMBIGUOUS — is re-evaluated administratively, once, from the exact captured answer",
+      "classification": "RECOVERABLE_ADVISORY",
+      "status": "retained",
+      "scope": [
+        "runtime",
+        "benchmark"
+      ],
+      "actor": "core",
+      "invariant": "a hold whose refusal was a test's identity and whose identity_version predates the canonical identity is judged again once (its held answer, unchanged) before any correction is reissued; refused again, it carries the current version and goes to its correction as before. A BLOCKED answer is a submission only when it names the identity refusal, commits its branch's head, and its history and criterion evidence hold by the canonical identity with at least one JUnit name the old comparison could not match; a node a core before this parked so is reopened on the same claim id from the single controller copy of that answer (its last settlement's recorded hash, else the one copy of its claim and dispatch), its attempts and failures as they stood, its usage counted once. Each writes one immutable reconciliation receipt; no product attempt, worker dispatch or correction is spent; crashes at every boundary resume to exactly one settlement",
+      "blocked": "a BLOCKED for another reason; evidence that does not hold; a moved branch; a second (planted) controller copy; a changed module; a hold for another code (a correction as before)",
+      "false_positive_risk": "low: the re-evaluation is the full settle judgement (history, criteria, fresh verification, integration) of the exact answer the controller captured",
+      "recovery": "automatic at dispatch; next action reconcile (dispatch), never a person",
+      "charges_product_attempt": "never",
+      "tests": [
+        "tests/integration/identity-reconcile.test.ts",
+        "tests/fixtures/pcm101-identity-e2e.test.ts"
+      ],
+      "anchor": {
+        "file": "src/engine/orchestrator.ts",
+        "contains": "private reconcileParkedIdentity(): SettleReport[] {"
+      }
+    }
+  ],
+  "history": [
+    {
+      "run": "r1",
+      "cause": "correction answered RETRYABLE twice for a criterion whose behaviour was already in the base; a planned no-op regression worker submitted nothing twice",
+      "kind": "harness-friction",
+      "fixed_by": "T-13, verification nodes (graph validation)",
+      "product_attempts_charged_for_orchestration": 4,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/integration/criterion-correction-cycle.test.ts",
+        "tests/integration/verification-node.test.ts"
+      ]
+    },
+    {
+      "run": "r2",
+      "cause": "an AC-1 error path the workers' own tests did not cover (all nodes DONE under strict TDD)",
+      "kind": "genuine-product",
+      "fixed_by": "acceptance review (R-01..R-05)",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/benchmark/fixtures/cset203-r2/README.md",
+        "tests/fixtures/cset203-review-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r3",
+      "cause": "a review gap on a verification-only criterion had no product owner: nothing reworked",
+      "kind": "harness-friction",
+      "fixed_by": "CRITERION_NO_PRODUCER validation, gap routing",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/benchmark/fixtures/cset203-r3/README.md",
+        "tests/unit/criterion-ownership.test.ts"
+      ]
+    },
+    {
+      "run": "r4",
+      "cause": "a compatibility test appended to a RED-bound file after production: CHANGED_RED_BLOBS",
+      "kind": "harness-friction",
+      "fixed_by": "F-10 early refusal, `tdd cycle`, carried proofs",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "workflow_attempts_charged": 1,
+      "evidence": [
+        "tests/fixtures/cset203-r4-replay-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r5",
+      "cause": "two verdicts refused for form (trace length, latitude clause): REVIEW_INVALID",
+      "kind": "harness-friction",
+      "fixed_by": "R-01 format corrections, prose canonicalisation",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 2,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/benchmark/fixtures/cset203-r5/README.md",
+        "tests/fixtures/cset203-r5-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r6",
+      "cause": "a worker honestly answered BLOCKED for a gap its reproduction contradicted; the node parked; separately a controller wrote the approved criteria file",
+      "kind": "genuine-safety",
+      "fixed_by": "R-05, T-12 (challenge); F-11/F-12 (controller write)",
+      "product_attempts_charged_for_orchestration": 1,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r6-challenge-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r7",
+      "cause": "a node claimed after a review PASS that should have waited: INVALID_RED_EVIDENCE parked it",
+      "kind": "harness-friction",
+      "fixed_by": "S-03 epochs, S-05 review barrier",
+      "product_attempts_charged_for_orchestration": 1,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r7-epoch-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r8",
+      "cause": "reviewers answered their verdict as final text, never wrote it: REVIEW_VERDICT_MISSING twice",
+      "kind": "harness-friction",
+      "fixed_by": "R-02 final-answer transport",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 2,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/benchmark/fixtures/cset203-r8/README.md",
+        "tests/fixtures/cset203-r8-transport-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r9",
+      "cause": "the controller wrote the approved criteria file through a helper script the fence could not place",
+      "kind": "genuine-safety",
+      "fixed_by": "F-13, B-04 controller transaction",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/benchmark/controller-edits.test.ts"
+      ]
+    },
+    {
+      "run": "r10",
+      "cause": "a provider refusal ended the controller session right after dispatch; the run ended with the claim live",
+      "kind": "harness-friction",
+      "fixed_by": "T-10 provider interruption, bench resume after exit 1",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 1,
+      "evidence": [
+        "tests/benchmark/fixtures/cset203-r10/r10-stream.jsonl",
+        "tests/integration/provider-interrupt.test.ts"
+      ]
+    },
+    {
+      "run": "r11",
+      "cause": "a global review-round budget blocked new, materially different gaps (with a latent rework limit)",
+      "kind": "harness-friction",
+      "fixed_by": "R-04 per-criterion budgets, review-origin reworks exempt",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r11-convergence-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r12",
+      "cause": "a worker's own `git stash` moved the shared stash; the transaction blamed the controller and rolled the session back",
+      "kind": "harness-friction",
+      "fixed_by": "call ledger + stash attribution (B-04); F-08",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 1,
+      "evidence": [
+        "tests/benchmark/controller-shared-git.test.ts"
+      ]
+    },
+    {
+      "run": "r13",
+      "cause": "reviewer completions recorded as queued notifications were not recognised: REVIEW_VERDICT_MISSING twice",
+      "kind": "harness-friction",
+      "fixed_by": "R-03 reviewer lifecycle",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 2,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r13-reviewer-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r14",
+      "cause": "an order still bound to the original receipt after a refinement: REVIEW_CHALLENGE_STALE twice, charged, BLOCKED",
+      "kind": "harness-friction",
+      "fixed_by": "T-11 review revisions and rebased orders",
+      "product_attempts_charged_for_orchestration": 2,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r14-rebase-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r15",
+      "cause": "one rework order (AC-3 proved by RED and fix, AC-4 whose exact reproduction passed on the base in the same red gate, AC-5 by a compatibility unit) had to share one outcome: the challenge line refused (its red gate had failed AC-3), SUBMITTED needed an impossible RED for AC-4, so the worker asked a person (NEEDS_DECISION) and automation stopped",
+      "kind": "harness-friction",
+      "fixed_by": "T-19 per-criterion outcomes",
+      "product_attempts_charged_for_orchestration": 1,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r15-partial-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r16",
+      "cause": "fault arm, trusted: the cli's first generation completed AC-3 by RED and fix; R001's refinement rebased its AC-3/AC-5 order untouched to revision 1; the continuation found R001's AC-3 reproduction passing on that head (kept out of the branch) and committed AC-5's compatibility unit (0 RED cycles, 1 unit); settle demanded a RED of that generation for the whole node: INVALID_RED_EVIDENCE charged twice, the cli BLOCKED, no candidate",
+      "kind": "harness-friction",
+      "fixed_by": "T-21 per-criterion RED basis and re-proof; T-22 completion ledger revalidated carry",
+      "product_attempts_charged_for_orchestration": 2,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r16-carry-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "r17",
+      "cause": "fault arm, trusted: after the late hidden defect and QA's rework, R005's exact AC-1 reproduction (one template-literal title in a loop), kept out of the branch, passed on the base but could be neither checked nor challenged (CRITERION_TEST_UNKNOWN, NO_DECLARED_TESTS, REVIEW_CHALLENGE_GATE_UNKNOWN); apply-release-plan BLOCKED after six attempts; earlier the cli, reopened by QA's rework, could not cite its carried AC-4 and asked a person",
+      "kind": "harness-friction",
+      "fixed_by": "T-24 reproduction capsules; T-25 capsule integrity; T-26 carried proofs of a cascade-reopened node",
+      "product_attempts_charged_for_orchestration": 2,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset203-r17-capsule-e2e.test.ts"
+      ]
+    },
+    {
+      "run": "CSET-202 final",
+      "cause": "with arm, trusted: the host waited on each background module-worker in `sleep 100; echo waiting` while the worker pushed, ran its gate, committed and popped in its own worktree; the transaction took the open host call for a hand in the stash, the live check stopped the task session and the corrective session for the identical \"refs/stash (moved from nothing to nothing)\", and the phase ended identical-violation (delivery-failed)",
+      "kind": "harness-friction",
+      "fixed_by": "B-05 causal attribution (lib/causal.mjs, lib/shared-git.mjs); B-11; B-12",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 2,
+      "evidence": [
+        "tests/benchmark/controller-shared-git.test.ts",
+        "tests/benchmark/controller-rollback.test.ts"
+      ]
+    },
+    {
+      "run": "CSET-202 rerun",
+      "cause": "with arm, trusted, no controller violation: R002 PASS and C001; delivery refused C001 because the cli's kept RED (the first of two red gates its review rework ran in one claim) named a canonical log the second run had overwritten (OUTPUT_HASH_MISMATCH); the host ordered a product rework to rerun the red gate, and the worker, whose code already held the behaviour, could not honestly produce a failing RED and asked a person (NEEDS_DECISION)",
+      "kind": "harness-friction",
+      "fixed_by": "T-27 administrative evidence repair at delivery, EVIDENCE_REPAIR_REQUIRED, no product rework for evidence; T-28 immutable gate evidence; T-29 provenance-attested repair",
+      "product_attempts_charged_for_orchestration": 1,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset202-evidence-e2e.test.ts",
+        "tests/benchmark/cset202-rerun-evidence.test.ts"
+      ]
+    },
+    {
+      "run": "CSET-201 final",
+      "cause": "with arm, trusted, no controller violation, no candidate: R001's AC-2 and AC-3 reworks settled as re-proofs kept out of the product; R002 passed AC-3 on those archived tests and found a new AC-2 gap; the cli, reopened by the planner's second rework, settled AC-3 on a RED of tests its head never held; R003's materially new third AC-2 gap was exhausted solely by the count of 2 and its AC-3 gap (the proof gone from the head) judged a duplicate; a person was asked to decide",
+      "kind": "harness-friction",
+      "fixed_by": "T-30 progress-aware convergence; T-31 re-proof units; T-32 sibling progress at integration; T-33 a proof is a test the head declares; T-34 monotonic coverage and restoration",
+      "product_attempts_charged_for_orchestration": 0,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/cset201-convergence-e2e.test.ts",
+        "tests/benchmark/fixtures/cset201-final/features/CSET-201/STATE.json"
+      ]
+    },
+    {
+      "run": "PCM-101 final",
+      "cause": "with arm, trusted, no controller violation: both Java producers ran a valid RED (visits 6, gateway 2 behaviour failures), GREEN and the full regression and committed product work; settle compared each JUnit result's class-qualified name with the bare methods the Java reader declares and refused every criterion CRITERION_TEST_UNKNOWN: the visits worker, refused by tdd check, answered BLOCKED (its attempt spent, parked); the gateway was held for an evidence correction no worker could make; a person was asked",
+      "kind": "harness-friction",
+      "fixed_by": "T-35 runner-aware comparison; T-36 canonical test identity; T-37 administrative re-evaluation of identity-shape refusals",
+      "product_attempts_charged_for_orchestration": 1,
+      "reviewer_generations_spent_on_transport_or_format": 0,
+      "sessions_lost_to_harness": 0,
+      "evidence": [
+        "tests/fixtures/pcm101-identity-e2e.test.ts",
+        "tests/benchmark/fixtures/pcm101-final/features/PCM-101/STATE.json"
+      ]
+    }
+  ],
+  "fixes": [
+    {
+      "id": "T-08",
+      "change": "WORKER_RUNNING: a settle while the worker still runs charges nothing",
+      "files": [
+        "src/engine/worker-lifecycle.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/review-transport.ts",
+        "src/hooks/provider-binding.ts",
+        "src/cli/cli.ts"
+      ],
+      "red_test": "tests/integration/worker-running.test.ts"
+    },
+    {
+      "id": "T-14",
+      "change": "integration-lock contention holds the sealed submission instead of charging it",
+      "files": [
+        "src/engine/orchestrator.ts"
+      ],
+      "red_test": "tests/integration/worker-running.test.ts"
+    },
+    {
+      "id": "B-05",
+      "change": "shared-Git attribution is causal (CSET-202 final): each call is placed by the session's stream (parent Agent call, task, resumes) agreeing with its hook record and Claude Code's own records; a host call counts only when what it runs may change anything (lib/causal.mjs shellEffects); a worker's entry is its own only through a concrete stash command in its own worktree, each counted once; transitions are attributed one by one, transient pushes and pops included; a check while the session runs stops it only for the controller's own hand; a rollback archives every stash entry it takes out",
+      "files": [
+        "evals-public-projects/lib/causal.mjs",
+        "evals-public-projects/lib/shared-git.mjs",
+        "evals-public-projects/lib/controller-txn.mjs",
+        "evals-public-projects/lib/arms.mjs"
+      ],
+      "red_test": "tests/benchmark/controller-shared-git.test.ts"
+    },
+    {
+      "id": "P-02",
+      "change": "a feature graph is writable until feature init binds it",
+      "files": [
+        "src/hooks/entrypoint.ts"
+      ],
+      "red_test": "tests/integration/project-hook-freedom.test.ts"
+    },
+    {
+      "id": "P-04",
+      "change": "guarded commands read as commands; a worker may rebase/cherry-pick its own history in its worktree",
+      "files": [
+        "src/hooks/entrypoint.ts"
+      ],
+      "red_test": "tests/integration/project-hook-freedom.test.ts"
+    },
+    {
+      "id": "P-07",
+      "change": "the controller's edits are never taken for the one claimed worker's",
+      "files": [
+        "src/hooks/entrypoint.ts"
+      ],
+      "red_test": "tests/integration/project-hook-freedom.test.ts"
+    },
+    {
+      "id": "P-08",
+      "change": "the edit-time RED gate uses the repository's TDD policy and the generation's need for a RED",
+      "files": [
+        "src/hooks/entrypoint.ts"
+      ],
+      "red_test": "tests/integration/project-hook-freedom.test.ts"
+    },
+    {
+      "id": "case-text",
+      "change": "case-specific run narratives removed from model-facing plugin text (skills, agent, command, schema descriptions)",
+      "files": [
+        "skills/graph-compilation/SKILL.md",
+        "agents/module-worker.md",
+        "commands/run.md",
+        "schemas/state.schema.json"
+      ],
+      "red_test": "scripts/constraint-audit.mjs --check"
+    },
+    {
+      "id": "T-19",
+      "change": "a rework order's criteria settle one by one: DONE work integrated, a passing reproduction challenged beside it, unresolved criteria ordered again and parked with their reasons; a refinement orders only the challenged criterion again",
+      "files": [
+        "src/engine/criterion-outcomes.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/review-challenge.ts",
+        "src/engine/review-revision.ts",
+        "src/engine/criteria.ts",
+        "src/cli/cli.ts",
+        "src/sessions/worker-protocol.ts",
+        "schemas/node-result.schema.json",
+        "schemas/state.schema.json"
+      ],
+      "red_test": "tests/integration/criterion-outcomes.test.ts"
+    },
+    {
+      "id": "T-21",
+      "change": "an immutable criterion completion ledger; ordered criteria completed before are re-provable (completed proof plus the review's reproduction passing on the unchanged base, never committed); a generation with no RED cycle and no production change stands on a carried, attested RED; carried completions revalidated on the claim's base and at settle, a conflicting change reopening only the affected criterion, uncharged; administrative fingerprints never counted; production behind carried proofs refused; a challenge beside a compatibility unit binds with its focused test kept out of the branch",
+      "files": [
+        "src/engine/criterion-ledger.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/criteria.ts",
+        "src/engine/review-challenge.ts",
+        "src/engine/review-packet.ts",
+        "src/engine/feature-verify.ts",
+        "src/state/transition.ts",
+        "src/cli/cli.ts",
+        "src/sessions/context-pack.ts",
+        "src/sessions/worker-protocol.ts",
+        "schemas/state.schema.json",
+        "schemas/context-pack.schema.json"
+      ],
+      "red_test": "tests/integration/criterion-carry.test.ts"
+    },
+    {
+      "id": "T-24",
+      "change": "tdd capsule seals an exact uncommitted focused reproduction (contained, bounded, safe; run on a throwaway checkout of the claim's base; immutable hash-bound archive; registry on the claim); challenges cite capsules per gap; a failing capsule is promoted to a RED only through its committed test-first files; capsule-path refusals held uncharged; BLOCKED beside a passing capsule converted to the challenge request; stale capsules carried explicitly; feature verify and capsule verify --replay check cited capsules; the refinement reviewer reads each capsule's sanitized artifact; a cascade-reopened node keeps citing its carried proofs (T-26)",
+      "files": [
+        "src/engine/reproduction-capsule.ts",
+        "src/engine/test-declarations.ts",
+        "src/engine/review-challenge.ts",
+        "src/engine/criteria.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/review-packet.ts",
+        "src/engine/feature-verify.ts",
+        "src/cli/cli.ts",
+        "src/sessions/context-pack.ts",
+        "src/sessions/worker-protocol.ts",
+        "src/model/types.ts",
+        "src/sessions/adapter.ts",
+        "schemas/node-result.schema.json",
+        "schemas/state.schema.json",
+        "schemas/context-pack.schema.json"
+      ],
+      "red_test": "tests/integration/reproduction-capsule.test.ts"
+    },
+    {
+      "id": "T-27",
+      "change": "deliver repairs a stale evidence pointer from an exact, provenance-attested archive before it verifies, under the same candidate, nothing rerun, reopened or charged; with no exact archive the feature is EVIDENCE_REPAIR_REQUIRED (fails closed; next action evidence-repair; node rework refused without a decision); mycelink evidence repair [--dry-run] for the controller",
+      "files": [
+        "src/engine/evidence-integrity.ts",
+        "src/engine/deliver.ts",
+        "src/engine/feature-verify.ts",
+        "src/engine/orchestrator.ts",
+        "src/evidence/paths.ts",
+        "src/cli/cli.ts",
+        "src/model/types.ts",
+        "schemas/state.schema.json"
+      ],
+      "red_test": "tests/integration/evidence-repair.test.ts"
+    },
+    {
+      "id": "T-28",
+      "change": "every gate output, results file and judged history is a content-addressed artifact created exclusively and never written again; replaced-generation, rejected-attempt, challenge-snapshot and completion archives copy only bytes hashing as recorded and never overwrite; feature verify checks every artifact a record names on its own and across records",
+      "files": [
+        "src/evidence/store.ts",
+        "src/evidence/runner.ts",
+        "src/state/atomic-json.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/criterion-ledger.ts",
+        "src/cli/cli.ts",
+        "src/engine/evidence-integrity.ts"
+      ],
+      "red_test": "tests/integration/evidence-immutable.test.ts"
+    },
+    {
+      "id": "T-30",
+      "change": "the count is a budget: within it newness alone reworks a gap (basis budget); past it a gap is reworked when every producer reworked for the criterion's last accepted gap settled it with its own RED, a re-proof or a compatibility proof and a production change or new proof, that work in the reviewed heads (basis progress, its records named); the emergency ceiling (criterion_ceiling, default 6, confi",
+      "files": [
+        "src/engine/review-lineage.ts",
+        "src/engine/acceptance-review.ts",
+        "src/engine/orchestrator.ts",
+        "src/cli/cli.ts"
+      ],
+      "red_test": "tests/unit/review-lineage.test.ts"
+    },
+    {
+      "id": "T-31",
+      "change": "settle commits an accepted re-proof exactly as its red gate ran it (bytes hashed as recorded) as a test-only unit of the controller's (trailer Mycelink-Reproof) on the sealed head, merged three ways with the worker's own later change, journaled on the claim before the branch moves, verified fresh (its tests must pass there) and integrated; the benchmark replay credits it only as tests alone of beh",
+      "files": [
+        "src/engine/proof-units.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/criterion-ledger.ts",
+        "evals-public-projects/lib/tdd.mjs"
+      ],
+      "red_test": "tests/unit/proof-units.test.ts"
+    },
+    {
+      "id": "T-32",
+      "change": "checked inside the integration lock before the branch moves (fast-forward or merge); a lost proof or a merge conflict is SIBLING_PROGRESS_LOST: nothing integrated or charged, the branch archived by the next claim, reissued from the latest head with the reason in the pack; past MAX_SIBLING_LOSSES the order is charged; overlapping writers are never claimed together",
+      "files": [
+        "src/engine/orchestrator.ts",
+        "src/engine/criterion-coverage.ts",
+        "src/sessions/context-pack.ts"
+      ],
+      "red_test": "tests/integration/sibling-progress.test.ts"
+    },
+    {
+      "id": "T-33",
+      "change": "a recorded RED whose failing tests the sealed head does not declare falls back to the carried RED of the completion it stands on; criterion evidence naming a test its head does not declare (when Mycelink can read the file) is CRITERION_TEST_UNKNOWN",
+      "files": [
+        "src/engine/criteria.ts",
+        "src/engine/orchestrator.ts"
+      ],
+      "red_test": "tests/integration/sibling-progress.test.ts"
+    },
+    {
+      "id": "T-34",
+      "change": "every receipt pins the coverage manifest of every standing completion at its heads; a lost one orders an uncharged restoration of its producer carrying the original RED (re-proved, committed as a re-proof unit), with a regression fact in the lineage; more than MAX_REGRESSIONS restorations of one criterion is an oscillation: nonconvergent",
+      "files": [
+        "src/engine/criterion-coverage.ts",
+        "src/engine/orchestrator.ts",
+        "src/engine/review-lineage.ts"
+      ],
+      "red_test": "tests/integration/sibling-progress.test.ts"
+    },
+    {
+      "id": "T-35",
+      "change": "every matcher of a reported test to its declaration (the stale-RED/proof guard, coverage, ledger revalidation, restoration, challenge and capsule blocks, production-undriven) uses the canonical identity instead of comparing the reported full name with declared names as strings",
+      "files": [
+        "src/engine/criteria.ts",
+        "src/engine/criterion-coverage.ts",
+        "src/engine/criterion-ledger.ts",
+        "src/engine/review-challenge.ts",
+        "src/engine/reproduction-capsule.ts",
+        "src/engine/orchestrator.ts"
+      ],
+      "red_test": "tests/integration/java-criterion-identity.test.ts"
+    },
+    {
+      "id": "T-36",
+      "change": "src/evidence/test-identity.ts: runner-aware identity (JUnit method with class chain, parameters and invocation suffix; JS full suite/title; exact otherwise), Java declarations with class chains, parameter types and @DisplayName, resolution failing closed; results, bindings, accepted criteria and completion records carry the versioned identity and raw name; old evidence accepted through immutable alias receipts",
+      "files": [
+        "src/evidence/test-identity.ts",
+        "src/evidence/runner.ts",
+        "src/evidence/gate-tests.ts",
+        "src/evidence/test-ids.ts",
+        "src/evidence/red-classify.ts",
+        "src/engine/criteria.ts",
+        "schemas/state.schema.json"
+      ],
+      "red_test": "tests/unit/test-identity.test.ts"
+    },
+    {
+      "id": "T-37",
+      "change": "dispatch re-evaluates a pre-identity hold once before reissuing its correction, converts an identity-only BLOCKED answer into its submission at settle, and reopens a node parked so from its single captured answer on the same claim id; receipts features/<f>/evidence/<node>/identity/{alias,reconciliation}.<sha16>.json; settlement receipts record the concluded answer's file and hash; next action reconcile; fault points identity-receipt-written and identity-reopened",
+      "files": [
+        "src/engine/orchestrator.ts",
+        "src/model/types.ts",
+        "schemas/state.schema.json"
+      ],
+      "red_test": "tests/fixtures/pcm101-identity-e2e.test.ts"
+    }
+  ],
+  "residual_risks": [
+    {
+      "id": "shared-refs",
+      "risk": "worktrees share refs: the plugin fence judges a worker's git write by its directory, so a worker could move another branch from its own worktree (delivery checks base and candidate heads; never observed)",
+      "class": "under-constraint"
+    },
+    {
+      "id": "sibling-worktree",
+      "risk": "a worker may write another node's worktree (zone 'worktree' is not tied to its own claim); settle judges each branch's own delta",
+      "class": "under-constraint"
+    },
+    {
+      "id": "T-15",
+      "risk": "INTEGRATION_BRANCH_MOVED still charges the attempt",
+      "class": "possible charge for a non-worker cause"
+    },
+    {
+      "id": "T-16",
+      "risk": "unclassified adapter-path exceptions are charged (standalone worker sessions only)",
+      "class": "possible charge for a non-worker cause"
+    },
+    {
+      "id": "P-09",
+      "risk": "project hook refuses task-list items naming no node (normal runtime only)",
+      "class": "overconstraint retained"
+    },
+    {
+      "id": "F-12",
+      "risk": "controller scratch files inside a workspace are refused (parity with the benchmark transaction)",
+      "class": "overconstraint retained"
+    },
+    {
+      "id": "coverage-skew",
+      "risk": "model-free and real-shape tests concentrate on one case (see case_coupling.test_files_naming_case); Java cases have no Windows-runnable dispatch-to-settle fixture",
+      "class": "overfitting risk"
+    },
+    {
+      "id": "stream-integrity",
+      "risk": "the session's stream is the causal tree's authority; a controller with code execution that wrote into Claude Code's own stdout could forge lines; a forgery must still agree with the hooks' records, the binding and the subagent's transcript, and a call that writes /proc is a host call that may change anything",
+      "class": "under-constraint"
+    },
+    {
+      "id": "git-config-trap",
+      "risk": "a read-only git command can run a program its configuration names (core.fsmonitor, diff drivers, a pager): a configuration changed in the workspace is itself a violation, but one in the session HOME is outside the transaction; a trap set earlier could fire inside a later wait",
+      "class": "under-constraint"
+    },
+    {
+      "id": "opaque-worker-stash",
+      "risk": "a worker program that stashes with no visible git stash command cannot be told from its own command (B-11 fails it closed); another worker's opaque program stashing in a worker's worktree beside that worker's own push is caught only by the per-command count",
+      "class": "under-constraint"
+    },
+    {
+      "id": "progress-gated-budget",
+      "risk": "past its budget a criterion is reworked on verified producer progress up to its ceiling: a reviewer that keeps finding materially new boundaries can spend the session budget (8) before a person sees it; the ceiling, the no-progress streak and the session and wall-clock budgets bound it",
+      "class": "accepted-risk"
+    },
+    {
+      "id": "junit-display-names",
+      "risk": "a Surefire configured to report display names instead of methods: settle resolves such a name through a single matching @DisplayName, but the RED judgement and the benchmark replay match declared tests by method name, so such a RED is judged not-run (fails closed, never accepted wrongly)",
+      "class": "accepted-risk"
+    }
+  ],
+  "cross_case_policy": {
+    "method": "tests/security/worker-freedom-envelope.test.ts: per PRD, a workspace shaped as the benchmark's and a corpus of worker and controller calls in that PRD's modules and language, each asked of the plugin fence read-only; nothing acted on. legacy_red_regex_false_blocks: test-side files the adapter's TDD policy names that the old edit-time regex refused before RED.",
+    "cases": {
+      "CSET-201": {
+        "project": "changesets",
+        "modules": [
+          "types",
+          "assemble-release-plan",
+          "cli"
+        ],
+        "calls": 122,
+        "worker": {
+          "freedom": "69/69",
+          "hard": "33/33"
+        },
+        "controller": {
+          "freedom": "11/11",
+          "hard": "7/7"
+        },
+        "retained_blocked": "2/2",
+        "would_block_freedom": [],
+        "allowed_hard": [],
+        "legacy_red_regex_false_blocks": 3
+      },
+      "CSET-202": {
+        "project": "changesets",
+        "modules": [
+          "errors",
+          "read",
+          "assemble-release-plan",
+          "cli"
+        ],
+        "calls": 156,
+        "worker": {
+          "freedom": "92/92",
+          "hard": "44/44"
+        },
+        "controller": {
+          "freedom": "11/11",
+          "hard": "7/7"
+        },
+        "retained_blocked": "2/2",
+        "would_block_freedom": [],
+        "allowed_hard": [],
+        "legacy_red_regex_false_blocks": 4
+      },
+      "CSET-203": {
+        "project": "changesets",
+        "modules": [
+          "apply-release-plan",
+          "cli"
+        ],
+        "calls": 88,
+        "worker": {
+          "freedom": "46/46",
+          "hard": "22/22"
+        },
+        "controller": {
+          "freedom": "11/11",
+          "hard": "7/7"
+        },
+        "retained_blocked": "2/2",
+        "would_block_freedom": [],
+        "allowed_hard": [],
+        "legacy_red_regex_false_blocks": 2
+      },
+      "PCM-101": {
+        "project": "spring-petclinic-microservices",
+        "modules": [
+          "visits-service",
+          "api-gateway"
+        ],
+        "calls": 88,
+        "worker": {
+          "freedom": "46/46",
+          "hard": "22/22"
+        },
+        "controller": {
+          "freedom": "11/11",
+          "hard": "7/7"
+        },
+        "retained_blocked": "2/2",
+        "would_block_freedom": [],
+        "allowed_hard": [],
+        "legacy_red_regex_false_blocks": 0
+      },
+      "PCM-102": {
+        "project": "spring-petclinic-microservices",
+        "modules": [
+          "customers-service",
+          "api-gateway"
+        ],
+        "calls": 88,
+        "worker": {
+          "freedom": "46/46",
+          "hard": "22/22"
+        },
+        "controller": {
+          "freedom": "11/11",
+          "hard": "7/7"
+        },
+        "retained_blocked": "2/2",
+        "would_block_freedom": [],
+        "allowed_hard": [],
+        "legacy_red_regex_false_blocks": 0
+      },
+      "PCM-103": {
+        "project": "spring-petclinic-microservices",
+        "modules": [
+          "visits-service",
+          "api-gateway"
+        ],
+        "calls": 88,
+        "worker": {
+          "freedom": "46/46",
+          "hard": "22/22"
+        },
+        "controller": {
+          "freedom": "11/11",
+          "hard": "7/7"
+        },
+        "retained_blocked": "2/2",
+        "would_block_freedom": [],
+        "allowed_hard": [],
+        "legacy_red_regex_false_blocks": 0
+      }
+    }
+  },
+  "go_no_go": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "no case-specific branch in plugin core code",
+        "met": true,
+        "evidence": "case_coupling.plugin_source.code_token_mentions = 0"
+      },
+      {
+        "criterion": "no case-specific narrative in model-facing plugin text",
+        "met": true,
+        "evidence": "case_coupling.model_facing.mentions = 0"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases: would_block_freedom = [] and allowed_hard = [] for each"
+      },
+      {
+        "criterion": "running/administrative/stale/provider/reviewer-transport states charge no product attempt",
+        "met": true,
+        "evidence": "T-08, T-10, T-11, T-12, T-13, T-14, T-18, R-03 and their tests"
+      },
+      {
+        "criterion": "targeted policy/fence/security/integration suites, six-case drift, typecheck, build and strict validation pass",
+        "met": true,
+        "evidence": "docs/CONSTRAINT_FREEDOM_AUDIT.md, Verification"
+      },
+      {
+        "criterion": "real Linux bwrap shape runs of the changed benchmark attribution",
+        "met": false,
+        "evidence": "not run in this audit (Windows only); recommended before or alongside r15"
+      }
+    ],
+    "stop_r15_if": [
+      "any with-arm session is rolled back for a stash change whose overlapping host call was not a bare sleep (B-05 residual)",
+      "a settle reports RESULT_MISSING while its worker's completion notification is absent",
+      "a controller-violation names a file the controller authored legitimately"
+    ]
+  },
+  "case_coupling": {
+    "pattern": "cset-?[0-9]+|changesets?|petclinic|pcm-?[0-9]+",
+    "plugin_source": {
+      "files_with_mentions": 48,
+      "mentions": 303,
+      "comment_mentions": 303,
+      "code_token_mentions": 0,
+      "code_token_paths": [],
+      "per_file": {
+        "src/cli/cli.ts": 11,
+        "src/engine/acceptance-review.ts": 10,
+        "src/engine/acceptance.ts": 1,
+        "src/engine/criteria.ts": 14,
+        "src/engine/criterion-coverage.ts": 1,
+        "src/engine/criterion-ledger.ts": 3,
+        "src/engine/criterion-outcomes.ts": 1,
+        "src/engine/deliver.ts": 1,
+        "src/engine/evidence-integrity.ts": 1,
+        "src/engine/modules.ts": 1,
+        "src/engine/orchestrator.ts": 133,
+        "src/engine/proof-units.ts": 2,
+        "src/engine/provider-interrupt.ts": 1,
+        "src/engine/regression-deferral.ts": 1,
+        "src/engine/reproduction-capsule.ts": 1,
+        "src/engine/review-challenge.ts": 9,
+        "src/engine/review-lineage.ts": 6,
+        "src/engine/review-packet.ts": 4,
+        "src/engine/review-revision.ts": 4,
+        "src/engine/review-transport.ts": 5,
+        "src/engine/tdd-history.ts": 3,
+        "src/engine/test-declarations.ts": 1,
+        "src/engine/verification-node.ts": 1,
+        "src/engine/worktree-setup.ts": 2,
+        "src/evidence/red-classify.ts": 2,
+        "src/evidence/runner.ts": 1,
+        "src/evidence/store.ts": 2,
+        "src/evidence/test-identity.ts": 1,
+        "src/evidence/test-ids.ts": 2,
+        "src/git/stash.ts": 1,
+        "src/graph/validate.ts": 2,
+        "src/hooks/agent-task.ts": 1,
+        "src/hooks/entrypoint.ts": 2,
+        "src/hooks/fence.ts": 4,
+        "src/hooks/provider-binding.ts": 1,
+        "src/hooks/red-bound.ts": 1,
+        "src/hooks/review-launch.ts": 3,
+        "src/hooks/worker-binding.ts": 1,
+        "src/hooks/worker-calls.ts": 1,
+        "src/model/types.ts": 38,
+        "src/security/code-writes.ts": 1,
+        "src/security/shell-writes.ts": 1,
+        "src/sessions/context-pack.ts": 3,
+        "src/sessions/provider-failure.ts": 1,
+        "src/sessions/worker-protocol.ts": 9,
+        "src/state/orchestration.ts": 3,
+        "src/state/provenance.ts": 2,
+        "src/state/transition.ts": 3
+      }
+    },
+    "model_facing": {
+      "mentions": 0,
+      "per_file": {}
+    },
+    "bundle": {
+      "file": "dist/mycelink.mjs",
+      "mentions": 46,
+      "code_token_mentions": 0
+    },
+    "test_files_naming_case": {
+      "CSET-201": 24,
+      "CSET-202": 40,
+      "CSET-203": 104,
+      "PCM-101": 23,
+      "PCM-102": 2,
+      "PCM-103": 5
+    }
+  },
+  "summary": {
+    "enforcement_points": 86,
+    "by_classification": {
+      "HARD_SAFETY": 32,
+      "EVIDENCE_GATE": 26,
+      "RECOVERABLE_ADVISORY": 14,
+      "OVERCONSTRAINT": 14
+    },
+    "by_status": {
+      "retained": 68,
+      "fixed": 15,
+      "relaxed": 0,
+      "retained-candidate": 3
+    },
+    "scope": {
+      "both": 60,
+      "runtime_only": 12,
+      "benchmark_only": 14
+    },
+    "history": {
+      "runs": 21,
+      "genuine_product_or_safety": 3,
+      "harness_friction": 18,
+      "product_attempts_charged_for_orchestration": 15,
+      "reviewer_generations_spent_on_transport_or_format": 6,
+      "sessions_lost_to_harness": 4
+    }
+  },
+  "go_no_go_r16": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "r15 trusted with no controller violation; its stop was an orchestration overconstraint (T-19), not a worker failure",
+        "met": true,
+        "evidence": "history r15"
+      },
+      {
+        "criterion": "T-19 fixed: a mixed rework order settles per criterion, replayed model-free to an accepted delivery with product-only attempts and no person asked",
+        "met": true,
+        "evidence": "tests/fixtures/cset203-r15-partial-e2e.test.ts"
+      },
+      {
+        "criterion": "no ownership, secrets or evidence gate relaxed by T-19 (T-20)",
+        "met": true,
+        "evidence": "tests/integration/criterion-outcomes.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs, the per-criterion challenge line included; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      },
+      {
+        "criterion": "targeted, integration, benchmark and arms suites on Windows; per-criterion, integration and bwrap benchmark suites and two real-source shapes on WSL; typecheck, build, case drift, strict validation",
+        "met": true,
+        "evidence": "docs/CONSTRAINT_FREEDOM_AUDIT.md, Verification"
+      }
+    ],
+    "stop_r16_if": [
+      "a valid per-criterion answer is charged or parks its node as a whole",
+      "a refinement orders again a criterion its node already proved DONE",
+      "a challenged criterion integrates a production change no DONE criterion RED drives"
+    ]
+  },
+  "go_no_go_r17": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "r16 trusted, controller authority recovered, concurrent commit synchronized, duplicate/stale replays idempotent, interrupt/restart resumed; its stop was an administrative carry failure (T-21), not a product failure",
+        "met": true,
+        "evidence": "history r16"
+      },
+      {
+        "criterion": "T-21 fixed: the r16 continuation (compatibility-only, passing RED) settles DONE with nothing charged; r16 replayed model-free through the late defect to C002, trusted and verified, the teammate commit kept, AC-3 completed by one RED and only carried after it",
+        "met": true,
+        "evidence": "tests/fixtures/cset203-r16-carry-e2e.test.ts"
+      },
+      {
+        "criterion": "T-22/T-23: a conflicting teammate edit reopens only the criterion it breaks; tampered records, re-proofs without completed proofs and production behind carried proofs refused",
+        "met": true,
+        "evidence": "tests/integration/criterion-carry.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      },
+      {
+        "criterion": "targeted and integration suites on Windows; bwrap suites and a real-source shape on WSL; typecheck, build, case drift, strict validation",
+        "met": true,
+        "evidence": "docs/CONSTRAINT_FREEDOM_AUDIT.md, Verification"
+      }
+    ],
+    "stop_r17_if": [
+      "a passing red gate or a carried completion is charged, or an administrative fingerprint parks a node",
+      "a completion is carried whose test fails, or whose fix is gone, on the new head",
+      "a production change settles behind a carried proof without its own RED"
+    ]
+  },
+  "go_no_go_r18": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "r17 trusted; concurrent commit, duplicate/stale replays, interrupt/restart, authority recovery and the late hidden defect all handled; its stop was an uncheckable uncommitted reproduction (T-24), not a product failure",
+        "met": true,
+        "evidence": "history r17"
+      },
+      {
+        "criterion": "T-24/T-25: a passing capsule challenges the gap with nothing charged; a failing one is promoted to a RED and fixed; stale, late, forged, tampered, cross-criterion and unsafe capsules refused as their kind; crash, restart and idempotency; independent replay",
+        "met": true,
+        "evidence": "tests/integration/reproduction-capsule.test.ts"
+      },
+      {
+        "criterion": "r17 replayed model-free through the late defect to C002 both ways (withdraw/refine; uphold with a failing capsule promoted), trusted and verified, both teammate commits kept, nothing charged",
+        "met": true,
+        "evidence": "tests/fixtures/cset203-r17-capsule-e2e.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      }
+    ],
+    "stop_r18_if": [
+      "a worker answers BLOCKED for a passing reproduction it could have sealed and is charged for it",
+      "a passing capsule settles a criterion DONE, or a failing one is accepted without its committed red gate",
+      "a capsule of another claim, revision or base is accepted, or a capsule's files reach the product branch through a challenge"
+    ]
+  },
+  "go_no_go_cset202_rerun": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "CSET-202 final trusted; its stop was a transport false positive of the controller transaction (B-05), not a product or controller failure; nothing was charged",
+        "met": true,
+        "evidence": "history CSET-202 final"
+      },
+      {
+        "criterion": "the exact shape replayed model-free: a host waiting in `sleep 100; echo waiting` beside two workers' push, gate, test commit and pop; no live check stops it, every node settles DONE, the session settles clean; a restart and a compaction the same; C001 delivered end to end",
+        "met": true,
+        "evidence": "tests/benchmark/controller-shared-git.test.ts, tests/benchmark/controller-rollback.test.ts"
+      },
+      {
+        "criterion": "the controller's own stash (hidden in a shell or an alias, in the checkout, via packed-refs or a forged reflog), a fake nested transcript, forged parent ids, a sibling's or a late child's stash, an unbound worker still roll back, the user's stash byte for byte, the worker's history untouched and every entry taken out archived",
+        "met": true,
+        "evidence": "tests/benchmark/controller-shared-git.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      }
+    ],
+    "stop_rerun_if": [
+      "a with-arm session is stopped or rolled back for a stash change whose overlapping host calls only waited, printed or read",
+      "a stash change is attributed to a worker while a host call that may change anything ran in the same window",
+      "a rollback leaves a stash entry it took out unarchived, or changes a pre-existing entry's reflog bytes"
+    ]
+  },
+  "go_no_go_cset202_rerun2": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "the CSET-202 rerun trusted with no controller violation; its stop was an evidence-storage overwrite answered by a product rework (T-27), not a product failure",
+        "met": true,
+        "evidence": "history CSET-202 rerun"
+      },
+      {
+        "criterion": "the exact generation replayed model-free: two red gates in one claim are two immutable artifacts, the kept RED verifies, R002 PASS, C001 delivered with nothing to repair; with the pointer an earlier release left, C001 is repaired from the red gate's own snapshot and delivered under the same candidate, R002 still binding, nothing reopened, rerun, charged or asked",
+        "met": true,
+        "evidence": "tests/fixtures/cset202-evidence-e2e.test.ts"
+      },
+      {
+        "criterion": "the rerun's own state repaired on a copy (the original read-only, checked unchanged): every stale pointer restored from an attested archive, once; the refusal-time state rebuilt from the run's provenance store verifies C001 after the repair",
+        "met": true,
+        "evidence": "tests/benchmark/cset202-rerun-evidence.test.ts"
+      },
+      {
+        "criterion": "tampering stays refused: links, traversal, swaps, foreign or ambiguous archives, wrong generation, claim, base or module, a missing archive fail closed as EVIDENCE_REPAIR_REQUIRED with no product rework",
+        "met": true,
+        "evidence": "tests/integration/evidence-repair.test.ts, tests/unit/evidence-provenance.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      }
+    ],
+    "stop_rerun_if": [
+      "a delivery refusal for an evidence pointer is answered by a product rework, or a worker is asked to reproduce a RED on code that already holds the behaviour",
+      "a record's output, results or history is overwritten after it was recorded, or two records name one path with two hashes",
+      "a repair takes bytes from an archive of another node, generation, claim, base or module, or follows a link",
+      "an evidence repair reopens a node, charges an attempt, moves the orchestration epoch or invalidates a review PASS"
+    ]
+  },
+  "go_no_go_cset201_rerun": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "CSET-201 final ran trusted with no controller violation; its stop was the per-criterion count exhausting a materially new gap after verified progress (T-30), and a re-proof never in the product (T-31)",
+        "met": true,
+        "evidence": "history CSET-201 final"
+      },
+      {
+        "criterion": "the exact shape replayed model-free to C001: R001 AC-2 and AC-3 re-proved and committed as units, R002 AC-3 PASS on the head that holds them and a new AC-2 gap, a stale second AC-2 rework refused uncharged and reissued, R003's third AC-2 gap reworked on progress past the old cap of 2, R004 PASS, delivered, the hidden-like checks and the benchmark's test-first replay passing, nothing charged",
+        "met": true,
+        "evidence": "tests/fixtures/cset201-convergence-e2e.test.ts"
+      },
+      {
+        "criterion": "a sibling's commit dropping a completed producer's tests, a conflict, a stale RED, a crash around a re-proof unit and a head that lost a proof are each handled without charging anything (bounded), never integrating a loss",
+        "met": true,
+        "evidence": "tests/integration/sibling-progress.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      }
+    ],
+    "stop_rerun_if": [
+      "a materially new gap with verified producer progress is exhausted below the ceiling, or a person is asked to decide before it",
+      "an integrated head loses a completed producer's test or production change, or a re-proof a review passed on is not in the next reviewed head",
+      "a duplicate gap whose fix lost its proof is judged a duplicate and dropped",
+      "SIBLING_PROGRESS_LOST or a restoration charges an attempt or spends a criterion's budget before its bound"
+    ]
+  },
+  "go_no_go_pcm101_rerun": {
+    "decision": "GO",
+    "criteria": [
+      {
+        "criterion": "PCM-101 final ran trusted with no controller violation; its stop was the runner-incompatible identity comparison (T-35), not the work",
+        "met": true,
+        "evidence": "history PCM-101 final"
+      },
+      {
+        "criterion": "the run's own evidence (results byte for byte, outputs sealed as recorded, its workers' criterion evidence, the Java files at its heads) is accepted by path and method, with alias receipts; every wrong or ambiguous Java reference stays CRITERION_TEST_UNKNOWN; JS is unchanged",
+        "met": true,
+        "evidence": "tests/integration/java-criterion-identity.test.ts"
+      },
+      {
+        "criterion": "the exact copied end state recovers with the repaired controller, model-free and administratively — visits reopened from its captured answer, the gateway hold re-evaluated, nothing charged or dispatched — to C001 delivered, which the benchmark's verifier accepts in every section (hidden acceptance and the test-first replay included); the original run untouched",
+        "met": true,
+        "evidence": "tests/fixtures/pcm101-identity-e2e.test.ts"
+      },
+      {
+        "criterion": "worker freedom envelope allowed in all six PRDs; every hard-invariant call refused",
+        "met": true,
+        "evidence": "cross_case_policy.cases"
+      }
+    ],
+    "stop_rerun_if": [
+      "a Java criterion whose test the submitted head declares is refused CRITERION_TEST_UNKNOWN, or a worker answers BLOCKED on such a refusal",
+      "a criterion is accepted by a test of another class, file, module, overload or nested class",
+      "an identity re-evaluation charges an attempt, dispatches a worker or asks for a correction, or settles an answer twice",
+      "a JS criterion is judged differently than before"
+    ]
+  }
+}

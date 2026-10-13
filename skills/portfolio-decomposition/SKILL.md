@@ -48,6 +48,20 @@ DTO — write it down:
 The graph validator enforces the last point. A consumer that does not depend
 on its producer is a race, not a plan.
 
+## Criteria proved by existing tests
+
+A criterion that only says existing behaviour must not change (a
+compatibility criterion) still belongs to the implementation node whose
+code it is about — its product producer, where a gap the acceptance review
+finds in it is reworked — and is proved again, with any final full-suite
+check, by a verification node (`node_type: verification`, see the
+`graph-compilation` skill), which the controller runs itself on the
+integrated work of every producer of its repository. A verification node is
+never a criterion's only owner. Never plan a worker node that has nothing
+to commit: a worker with no allowed paths could only make a no-op
+submission, which settle refuses. A behaviour the feature adds belongs to
+the implementation node that owns it, proved by its RED.
+
 ## What goes to the user
 
 Only product decisions: contradictory acceptance criteria, whether breaking a

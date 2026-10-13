@@ -52,7 +52,14 @@ describe('README walkthrough', () => {
     expect(existsSync(join(control, '.claude', 'settings.json'))).toBe(true);
     expect(existsSync(join(control, 'repositories.yaml'))).toBe(true);
 
-    makeGitRepo(control, { files: { '.gitignore': '.mycelink/\n' } });
+    // init already wrote the .mycelink/ ignore entry; nothing is added by hand.
+    expect(readFileSync(join(control, '.gitignore'), 'utf8')).toMatch(/^\/\.mycelink\/$/m);
+    makeGitRepo(control, { files: { 'README.md': '# control\n' } });
+
+    // Step 1a: open the controller key, as documented.
+    const opened = harness(['controller', 'open', '--control-root', control, '--json']);
+    expect(opened.stderr).toBe('');
+    const key = (JSON.parse(opened.stdout) as { authority: string }).authority;
 
     // Step 1b: repo register, exactly as documented (argv after `--`)
     for (const [name, path] of [
@@ -64,6 +71,8 @@ describe('README walkthrough', () => {
         'register',
         '--control-root',
         control,
+        '--authority',
+        key,
         '--name',
         name,
         '--path',
@@ -148,7 +157,7 @@ describe('README walkthrough', () => {
 
     // Step 3: validate, init, loop validate
     expect(harness(['graph', 'validate', 'FEAT-101', '--control-root', control]).code).toBe(0);
-    expect(harness(['feature', 'init', 'FEAT-101', '--control-root', control]).code).toBe(0);
+    expect(harness(['feature', 'init', 'FEAT-101', '--control-root', control, '--authority', key]).code).toBe(0);
     expect(harness(['loop', 'validate', 'FEAT-101', '--control-root', control]).code).toBe(0);
 
     // Step 4: ready

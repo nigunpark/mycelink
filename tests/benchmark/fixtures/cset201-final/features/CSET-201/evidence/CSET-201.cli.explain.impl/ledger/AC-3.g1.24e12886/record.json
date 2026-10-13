@@ -1,0 +1,180 @@
+{
+  "schema": "mycelink-criterion-completion/1",
+  "node_id": "CSET-201.cli.explain.impl",
+  "criterion": "AC-3",
+  "kind": "new-behavior",
+  "generation": 1,
+  "basis": "reproved",
+  "source": "CC-8ac15b560879d1cd",
+  "parent": "CC-8ac15b560879d1cd",
+  "claim_id": "24e12886-ba5e-46c5-b169-6c3c3de9686e",
+  "dispatch_id": "12bf7870-520c-4c64-91bb-1b55f62fdff8",
+  "settled_at": "2026-10-11T20:47:33.001Z",
+  "order": {
+    "review_id": "CSET-201-R001",
+    "revision": 0,
+    "receipt_sha256": "f602e4e37ea14978a31f5989e0997f140c731145be6e2514a9866c67f1ea8482",
+    "reproduction_sha256": "31d8d7dbdcadddeb88b8f2aa4c1601303af16832bb50a0aad29aa630fe876434"
+  },
+  "repo": {
+    "repository": "changesets",
+    "base_sha": "518ffa27ad8a9e34a0827f6177fdce597d8977fd",
+    "head_sha": "518ffa27ad8a9e34a0827f6177fdce597d8977fd",
+    "integrated_sha": "518ffa27ad8a9e34a0827f6177fdce597d8977fd"
+  },
+  "production": {
+    "paths": [],
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "proof": {
+    "test_id": "3c97870af53f1aa8",
+    "test": {
+      "path": "packages/cli/src/commands/status/__tests__/status.test.ts",
+      "name": "status > --explain > prints reason lines under each package"
+    },
+    "test_blob": "156612f415537ec685c834db2605b7c682b559cb",
+    "gate": "green",
+    "output_sha256": "d98cf941ef1dea7bc9ecb0ecfd5230742e9d0d381341d38a9a87a44f00db0afa"
+  },
+  "red": {
+    "output_sha256": "30092c8081f3cd96838ddc895613fbca45a75473691128b9d1a72dd0749657e3",
+    "record": {
+      "kind": "red",
+      "node_id": "CSET-201.cli.explain.impl",
+      "command": [
+        "pnpm",
+        "vitest",
+        "run",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile.json=${REPORT}",
+        "packages/cli/"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-11T20:35:29.008Z",
+      "finished_at": "2026-10-11T20:35:38.879Z",
+      "cwd": ".mycelink/worktrees/changesets__CSET-201.cli.explain.impl",
+      "repository": "changesets",
+      "commit_sha": "706140148e5924486340db3f188b4b28ca248a2e",
+      "output_path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g0.b12ac763/red.log",
+      "output_sha256": "30092c8081f3cd96838ddc895613fbca45a75473691128b9d1a72dd0749657e3",
+      "failure_fingerprint": "e08cafe5acd5bf27",
+      "module": "cli",
+      "module_sha256": "c3d0a5884aff1f52cb8286fadc1ad5a27158bc02a4f79545a6485f654c64f4e7",
+      "plan_sha256": "21397a4cbac41493590c4ecb6612d702c2e976976ccad2c63c2c7bc6df1f9ebc",
+      "steps": [
+        {
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_ms": 6928
+        },
+        {
+          "argv": [
+            "git",
+            "checkout",
+            "--",
+            "packages/config/package.json"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_ms": 4
+        }
+      ],
+      "results": {
+        "format": "vitest-json",
+        "path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g0.b12ac763/red.results.json",
+        "sha256": "461279b898d10bcc1110bf06a0b8901671894dc92b25a7664d48806e8381a0ad",
+        "total": 253,
+        "passed": 250,
+        "failed": 2,
+        "skipped": 1
+      },
+      "red_reason": "behaviour-missing",
+      "red_category": "assertion",
+      "red_fingerprint": "0f281967c6d0a2b1",
+      "red_detail": "prints reason lines under each package, writes reasons with --output failed for a missing behaviour (assertion)",
+      "red_tests": [
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "should not exit early with a non-zero error code when only changed packages are private and versioning for private packages is turned off",
+          "status": "passed",
+          "category": "passed",
+          "type": null,
+          "fingerprint": null
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints reason lines under each package",
+          "status": "failed",
+          "category": "assertion",
+          "type": "AssertionError",
+          "fingerprint": "de2500872d4529d6"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "writes reasons with --output",
+          "status": "failed",
+          "category": "assertion",
+          "type": "AssertionError",
+          "fingerprint": "074d37653fcd1d3f"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "does not print reasons without --explain",
+          "status": "passed",
+          "category": "passed",
+          "type": null,
+          "fingerprint": null
+        }
+      ],
+      "red_declared": [
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "should not exit early with a non-zero error code when only changed packages are private and versioning for private packages is turned off"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "prints reason lines under each package"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "writes reasons with --output"
+        },
+        {
+          "file": "packages/cli/src/commands/status/__tests__/status.test.ts",
+          "name": "does not print reasons without --explain"
+        }
+      ],
+      "worktree_setup_sha256": "54d28237a7678844e0bf107a62cfd05e64ecd33767388e20e417a361f22f300c",
+      "setup_inputs_sha256": "542f5821681ee6364f4671ded152c80b22050af6290470275103e5cda9d1dce9"
+    }
+  },
+  "history": {
+    "output_path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/tdd-history.06c46a1c21082711.json",
+    "output_sha256": "06c46a1c210827115f0ce4b4493a4ee835b9273b949b67a10f615631e2709591"
+  },
+  "reproof": {
+    "gate_output_sha256": "e61c551b24846dba9153000732ffcc4bd114a0014f26d43f9dab144c27041662",
+    "tests": [
+      {
+        "test_id": "32cc5f64cc45514b",
+        "path": "packages/cli/src/commands/status/__tests__/status.test.ts",
+        "full_name": "status > --explain > writes exact reasons array with --output"
+      }
+    ],
+    "files": [
+      {
+        "path": "packages/cli/src/commands/status/__tests__/status.test.ts",
+        "sha256": "e1638ee7bdcd45bb2890cdddaa08f128d09e7f7bdd58045d5421cf48d863852c",
+        "archived": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.24e12886/reproof/packages/cli/src/commands/status/__tests__/status.test.ts"
+      }
+    ]
+  },
+  "archive": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.24e12886",
+  "record_id": "CC-0eda731ae463b0d3",
+  "sha256": "0eda731ae463b0d335bf05af66827271f886aae38cc012b838a4be5a2951b07a"
+}

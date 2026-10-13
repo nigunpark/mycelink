@@ -1,0 +1,123 @@
+diff --git a/packages/apply-release-plan/src/index.test.ts b/packages/apply-release-plan/src/index.test.ts
+index 20e3469..45596b6 100644
+--- a/packages/apply-release-plan/src/index.test.ts
++++ b/packages/apply-release-plan/src/index.test.ts
+@@ -18,7 +18,7 @@ import type {
+ } from "@changesets/types";
+ import { getPackages } from "@manypkg/get-packages";
+ import { exec } from "tinyexec";
+-import { describe, expect, it, test } from "vitest";
++import { describe, expect, it, test, vi } from "vitest";
+ import { applyReleasePlan } from "./index.ts";
+ 
+ const changesetsCliChangelogPath = path.resolve(
+@@ -3612,4 +3612,109 @@ describe("apply release plan", () => {
+       );
+     });
+   });
++
++  describe("rollback and journal", () => {
++    async function setupTwoPackages() {
++      const releasePlan = new FakeReleasePlan(
++        [],
++        [
++          {
++            name: "pkg-b",
++            type: "minor",
++            oldVersion: "1.0.0",
++            newVersion: "1.1.0",
++            changesets: ["quick-lions-devour"],
++          },
++        ],
++      );
++      const tempDir = await testdir({
++        "package.json": JSON.stringify({
++          private: true,
++          workspaces: ["packages/*"],
++        }),
++        "package-lock.json": "",
++        ".changeset/quick-lions-devour.md": "---\n---\n\nhello\n",
++        "packages/pkg-a/package.json": JSON.stringify({
++          name: "pkg-a",
++          version: "1.0.0",
++        }),
++        "packages/pkg-b/package.json": JSON.stringify({
++          name: "pkg-b",
++          version: "1.0.0",
++        }),
++      });
++      const packages = await getPackages(tempDir);
++      return { releasePlan, tempDir, packages };
++    }
++
++    it("restores files and rejects with the original error as cause", async () => {
++      const { releasePlan, tempDir, packages } = await setupTwoPackages();
++      const aPath = path.join(tempDir, "packages/pkg-a/package.json");
++      const before = await fs.readFile(aPath);
++      const changesetBefore = await fs.readFile(
++        path.join(tempDir, ".changeset/quick-lions-devour.md"),
++      );
++      const bPath = path.join(tempDir, "packages/pkg-b/package.json");
++      await fs.rm(bPath);
++      await fs.mkdir(bPath);
++
++      let error: any;
++      try {
++        await applyReleasePlan(
++          releasePlan.getReleasePlan(),
++          packages,
++          releasePlan.config,
++        );
++      } catch (e) {
++        error = e;
++      }
++      expect(error).toBeDefined();
++      expect(error.cause?.code).toBe("EISDIR");
++      expect(Buffer.compare(await fs.readFile(aPath), before)).toBe(0);
++      expect(
++        Buffer.compare(
++          await fs.readFile(
++            path.join(tempDir, ".changeset/quick-lions-devour.md"),
++          ),
++          changesetBefore,
++        ),
++      ).toBe(0);
++      expect(
++        (await fs.readdir(path.join(tempDir, ".changeset"))).filter((f) =>
++          f.startsWith("."),
++        ),
++      ).toEqual([]);
++    });
++
++    it("writes a dot-prefixed journal in .changeset before the first change and removes it after success", async () => {
++      const { releasePlan, tempDir, packages } = await setupTwoPackages();
++      const original = fs.writeFile;
++      let journalsAtFirstWrite: string[] | undefined;
++      const spy = vi
++        .spyOn(fs, "writeFile")
++        .mockImplementation(async (...args: any[]) => {
++          if (journalsAtFirstWrite === undefined) {
++            journalsAtFirstWrite = (
++              await fs.readdir(path.join(tempDir, ".changeset"))
++            ).filter((f) => f.startsWith("."));
++          }
++          return (original as any)(...args);
++        });
++      try {
++        await applyReleasePlan(
++          releasePlan.getReleasePlan(),
++          packages,
++          releasePlan.config,
++        );
++      } finally {
++        spy.mockRestore();
++      }
++      expect(journalsAtFirstWrite?.length).toBeGreaterThan(0);
++      expect(
++        (await fs.readdir(path.join(tempDir, ".changeset"))).filter((f) =>
++          f.startsWith("."),
++        ),
++      ).toEqual([]);
++    });
++  });
+ });

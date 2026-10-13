@@ -1,0 +1,481 @@
+{
+  "schema": "mycelink-review-receipt/1",
+  "feature_id": "CSET-201",
+  "review_id": "CSET-201-R003",
+  "dispatch_id": "1ae94b9b-66a5-4440-a7c2-c9f83ed974a2",
+  "review": 3,
+  "rework_rounds": {
+    "used": 2,
+    "max": 2
+  },
+  "inputs": {
+    "feature_id": "CSET-201",
+    "graph_sha256": "16cd48828b418546eb57087c08677e7effafe05b0356513f95de3efa9d3929b3",
+    "criteria_sha256": "0b5d4f15a4280297c4912e317bcccc5658b12648a52fb1604ada573612e98487",
+    "manifest_sha256": "1ddb98b3f994cd82bc5536c75992695bada110b00934757dee780ec2bc786a3a",
+    "repositories": [
+      {
+        "name": "changesets",
+        "head_sha": "d56cd1f0925418ee33649e3628d07c568aeb29ee"
+      }
+    ]
+  },
+  "inputs_sha256": "c702bbdf31f15c1827b1e760e506fa6f8bef1c0361a60ed589694feadecb4123",
+  "packet_path": ".mycelink/reviews/CSET-201/CSET-201-R003/1ae94b9b-66a5-4440-a7c2-c9f83ed974a2/packet.json",
+  "packet_sha256": "81b9515a74a50e2ffb2e2e675f418f8c28ee791fa105e44594cf23f6a454dfbf",
+  "verdict_sha256": "a43a0ccb41d33732955f28cb51cc0be58d170246f3d92e8a21bb4b87ffe967e7",
+  "canonical_verdict_sha256": "a43a0ccb41d33732955f28cb51cc0be58d170246f3d92e8a21bb4b87ffe967e7",
+  "normalization": {
+    "original_sha256": "a43a0ccb41d33732955f28cb51cc0be58d170246f3d92e8a21bb4b87ffe967e7",
+    "canonical_sha256": "a43a0ccb41d33732955f28cb51cc0be58d170246f3d92e8a21bb4b87ffe967e7",
+    "changed": [],
+    "omitted": 0
+  },
+  "reviewer": {
+    "agent": "mycelink:acceptance-reviewer",
+    "model": "claude-sonnet-5-5",
+    "agent_id": "a0000000000002013",
+    "session_id": "00000000-0000-4000-8000-000000005201"
+  },
+  "transport": {
+    "kind": "agent-result",
+    "agent_id": "a0000000000002013",
+    "session_id": "00000000-0000-4000-8000-000000005201",
+    "tool_use_id": "toolu_c201_r003_reviewer",
+    "result_sha256": "76c25ab12ed052a551df9b4566f7ea426eb0c0c40817a39641b4a670a8c15f41",
+    "transcript_sha256": "566b3bd2dde14b0c80bb6879644123fe838b0e3861ecff8837ae0675892b303a",
+    "transcript_path": "/home/alice/mycelink-pilot-results/CSET-201-final/with-normal/home/.claude/projects/-home-alice-mycelink-pilot-results-CSET-201-final-with-normal-workspace/00000000-0000-4000-8000-000000005201/subagents/agent-a0000000000002013.jsonl",
+    "extraction": "fenced-json"
+  },
+  "overall": "GAPS",
+  "outcome": "REVIEW_GAPS",
+  "criteria": [
+    {
+      "criterion": "AC-1",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-1.1",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L17-L33"
+          ],
+          "trace": "ReleaseReason exported; ComprehensiveReleaseBase gains reasons?: ReleaseReason[]."
+        },
+        {
+          "clause": "AC-1.2",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L17-L19"
+          ],
+          "trace": "changeset member declared as specified."
+        },
+        {
+          "clause": "AC-1.3",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L18"
+          ],
+          "trace": "changeset: string."
+        },
+        {
+          "clause": "AC-1.4",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L18-L20"
+          ],
+          "trace": "bumpType VersionType; dependent member begins."
+        },
+        {
+          "clause": "AC-1.5",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L21-L24"
+          ],
+          "trace": "dependency: string."
+        },
+        {
+          "clause": "AC-1.6",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L21-L25"
+          ],
+          "trace": "dependencyType: DependencyType."
+        },
+        {
+          "clause": "AC-1.7",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L21-L26"
+          ],
+          "trace": "versionRange: string."
+        },
+        {
+          "clause": "AC-1.8",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L21-L27"
+          ],
+          "trace": "bumpType: VersionType."
+        },
+        {
+          "clause": "AC-1.9",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L28"
+          ],
+          "trace": "fixed member declared."
+        },
+        {
+          "clause": "AC-1.10",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L28"
+          ],
+          "trace": "group: string[]."
+        },
+        {
+          "clause": "AC-1.11",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L28-L29"
+          ],
+          "trace": "bumpType; linked member declared."
+        },
+        {
+          "clause": "AC-1.12",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L29"
+          ],
+          "trace": "group: string[]."
+        },
+        {
+          "clause": "AC-1.13",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L29-L30"
+          ],
+          "trace": "prerelease-exit member declared."
+        },
+        {
+          "clause": "AC-1.14",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L30"
+          ],
+          "trace": "bumpType: \"patch\"."
+        },
+        {
+          "clause": "AC-1.15",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L17-L30"
+          ],
+          "trace": "union has exactly five members."
+        },
+        {
+          "clause": "AC-1.16",
+          "evidence": [
+            "file:changesets:packages/types/src/index.ts#L17-L30",
+            "gate:CSET-201.types.reason.decl:green"
+          ],
+          "trace": "Semantics are carried by AC-2/AC-3 implementations; the declaration matches the text."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "other",
+          "boundary": "type declaration compiles and existing suites still pass",
+          "covered": true,
+          "evidence": [
+            "test:43b436d674f034b4",
+            "gate:CSET-201.types.reason.decl:green"
+          ]
+        }
+      ],
+      "gap": null,
+      "producer": null
+    },
+    {
+      "criterion": "AC-2",
+      "verdict": "GAP",
+      "confidence": "high",
+      "clauses": [
+        {
+          "clause": "AC-2.1",
+          "evidence": [
+            "test:43b436d674f034b4",
+            "file:changesets:packages/assemble-release-plan/src/index.test.ts#L1572-L1593"
+          ],
+          "trace": "Sixth arg passed; explain true/false/undefined asserted."
+        },
+        {
+          "clause": "AC-2.2",
+          "evidence": [
+            "test:c8c99c65170a345a",
+            "test:057de34c46f4d74e"
+          ],
+          "trace": "Only dependencies/fixed/linked/changeset scenarios; no pre-exit, peer/optional/dev/ignored dependents."
+        },
+        {
+          "clause": "AC-2.3",
+          "evidence": [
+            "test:057de34c46f4d74e"
+          ],
+          "trace": "Order tested only for changeset then group; dependent patch then major, and multiple changesets untested."
+        },
+        {
+          "clause": "AC-2.4",
+          "evidence": [],
+          "trace": "No test makes the planner offer the same reason twice."
+        },
+        {
+          "clause": "AC-2.5",
+          "evidence": [
+            "test:c8c99c65170a345a"
+          ],
+          "trace": "Chain a->b->c tested; a dependency added by a fixed group is not."
+        },
+        {
+          "clause": "AC-2.6",
+          "evidence": [
+            "test:057de34c46f4d74e"
+          ],
+          "trace": "Unchanged bump asserted for fixed (pkg-c) and linked (pkg-c)."
+        },
+        {
+          "clause": "AC-2.7",
+          "evidence": [
+            "test:43b436d674f034b4"
+          ],
+          "trace": "'reasons' in release is false for undefined and explain:false."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "state",
+          "boundary": "several changesets list the same package without raising the bump",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "state",
+          "boundary": "pre-mode exit adds prerelease-exit reason",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "order",
+          "boundary": "dependent patch then major: two ordered reasons, no duplicates",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "state",
+          "boundary": "dependent of a package added by a fixed group",
+          "covered": false,
+          "evidence": []
+        }
+      ],
+      "gap": {
+        "missing": "AC-1 says one changeset reason per changeset (including none), but flattenReleases (flatten-releases.ts L41-L63) adds a reason only for the first changeset or when it raises the bump. A second changeset listing the same package at the same or lower bump, or a none changeset, gets no reason. Also untested: pre-exit, peerDependencies, a dependent of a group-added package, dependent patch then major order.",
+        "reproduction": "assembleReleasePlan with two changesets both listing pkg-a as patch, explain:true: expect two changeset reasons (one per changeset id). Also a 'none' changeset for pkg-b: expect a changeset reason with bumpType none. Add pre-exit state (expect prerelease-exit patch), a peerDependencies dependent, and a dependent of a fixed-group-added package naming that package as dependency."
+      },
+      "producer": {
+        "module": "changesets:packages/assemble-release-plan/src/flatten-releases.ts"
+      }
+    },
+    {
+      "criterion": "AC-3",
+      "verdict": "GAP",
+      "confidence": "high",
+      "clauses": [
+        {
+          "clause": "AC-3.1",
+          "evidence": [
+            "test:3c97870af53f1aa8"
+          ],
+          "trace": "Output contains changeset lines; the usual list is not otherwise compared."
+        },
+        {
+          "clause": "AC-3.2",
+          "evidence": [
+            "test:3c97870af53f1aa8",
+            "file:changesets:packages/cli/src/commands/status/__tests__/status.test.ts#L633-L641"
+          ],
+          "trace": "Only one package, one reason, with --verbose, contains-style assertion; ordering of several reasons untested."
+        },
+        {
+          "clause": "AC-3.3",
+          "evidence": [
+            "test:3c97870af53f1aa8"
+          ],
+          "trace": "Only the changeset line is asserted; dependent, fixed, linked, prerelease-exit lines have no test at this head (the named tests of earlier gates are absent from status.test.ts)."
+        },
+        {
+          "clause": "AC-3.4",
+          "evidence": [
+            "test:3c97870af53f1aa8",
+            "test:610f6b46769c3110"
+          ],
+          "trace": "--verbose and --output only; --since with --explain is untested at this head."
+        },
+        {
+          "clause": "AC-3.5",
+          "evidence": [
+            "test:610f6b46769c3110",
+            "file:changesets:packages/cli/src/commands/status/__tests__/status.test.ts#L643-L650"
+          ],
+          "trace": "Only toBeDefined on reasons; content not compared."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "input",
+          "boundary": "dependent/fixed/linked/prerelease-exit line formats",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "input",
+          "boundary": "--since main combined with --explain",
+          "covered": false,
+          "evidence": []
+        },
+        {
+          "kind": "state",
+          "boundary": "--output reasons content equals planner reasons",
+          "covered": false,
+          "evidence": []
+        }
+      ],
+      "gap": {
+        "missing": "status.test.ts at the head holds only three --explain tests. Dependent, fixed, linked, prerelease-exit line text, multi-reason order, --since, and exact --output reasons are never asserted (earlier-named tests are not in the integrated head).",
+        "reproduction": "In a git repo with pkg-b depending on pkg-a via peerDependencies '~1.2.0' and a 'workspace:^1.0.0' dependent, fixed group [pkg-a,pkg-c] and linked group, run status({explain:true,verbose:true}) and assert the exact ordered lines '    - reason: dependent of pkg-a (peerDependencies ~1.2.0) -> patch' etc. Run in pre-exit state for the exiting prerelease mode line. Run with since:'main' and assert reason lines. Assert plan.json releases[i].reasons toEqual the expected arrays."
+      },
+      "producer": {
+        "module": "changesets:packages/cli/src/commands/status/__tests__/status.test.ts"
+      }
+    },
+    {
+      "criterion": "AC-4",
+      "verdict": "PASS",
+      "confidence": "medium",
+      "clauses": [
+        {
+          "clause": "AC-4.1",
+          "evidence": [
+            "gate:CSET-201.changesets.compat.verify:regression",
+            "receipt:CSET-201.changesets.compat.verify",
+            "test:5505170114271872",
+            "file:changesets:packages/cli/src/commands/status/index.ts#L35-L70"
+          ],
+          "trace": "Without explain, options undefined is passed so no reasons property exists and no extra lines print; existing status tests pass in the regression gate at the reviewed head."
+        }
+      ],
+      "boundaries": [
+        {
+          "kind": "state",
+          "boundary": "status without --explain prints and writes unchanged",
+          "covered": true,
+          "evidence": [
+            "test:5505170114271872"
+          ]
+        }
+      ],
+      "gap": null,
+      "producer": null
+    }
+  ],
+  "gaps": [
+    {
+      "criterion": "AC-2",
+      "missing": "AC-1 says one changeset reason per changeset (including none), but flattenReleases (flatten-releases.ts L41-L63) adds a reason only for the first changeset or when it raises the bump. A second changeset listing the same package at the same or lower bump, or a none changeset, gets no reason. Also untested: pre-exit, peerDependencies, a dependent of a group-added package, dependent patch then major order.",
+      "reproduction": "assembleReleasePlan with two changesets both listing pkg-a as patch, explain:true: expect two changeset reasons (one per changeset id). Also a 'none' changeset for pkg-b: expect a changeset reason with bumpType none. Add pre-exit state (expect prerelease-exit patch), a peerDependencies dependent, and a dependent of a fixed-group-added package naming that package as dependency.",
+      "producer": {
+        "module": "changesets:packages/assemble-release-plan/src/flatten-releases.ts"
+      },
+      "confidence": "high"
+    },
+    {
+      "criterion": "AC-3",
+      "missing": "status.test.ts at the head holds only three --explain tests. Dependent, fixed, linked, prerelease-exit line text, multi-reason order, --since, and exact --output reasons are never asserted (earlier-named tests are not in the integrated head).",
+      "reproduction": "In a git repo with pkg-b depending on pkg-a via peerDependencies '~1.2.0' and a 'workspace:^1.0.0' dependent, fixed group [pkg-a,pkg-c] and linked group, run status({explain:true,verbose:true}) and assert the exact ordered lines '    - reason: dependent of pkg-a (peerDependencies ~1.2.0) -> patch' etc. Run in pre-exit state for the exiting prerelease mode line. Run with since:'main' and assert reason lines. Assert plan.json releases[i].reasons toEqual the expected arrays.",
+      "producer": {
+        "module": "changesets:packages/cli/src/commands/status/__tests__/status.test.ts"
+      },
+      "confidence": "high"
+    }
+  ],
+  "reworks": [],
+  "unowned": [],
+  "refused": [],
+  "blocked": "AC-2 (its 2 of 2 accepted rework(s) spent; CSET-201-R003's materially new reproduction 68d39cc6cd8f): exhausted. Every other allowable gap was reworked and settled first; no candidate is cut. Lineage: AC-1 0/2, AC-2 2/2, AC-3 1/2, AC-4 0/2; head 920772f3649a. A person decides: record a decision and rework past the block (node rework --decision grants each exhausted criterion one more accepted rework), or supersede the feature.",
+  "lineage": {
+    "prev_sha256": "920772f3649a54abb361c280ac0e5e6c8807525bb33d905a3ae44294ede90ba7",
+    "head_sha256": "eb3aebbfbc129cbd557cc3291264b8f659fb1a8c7c6ee724b979c8d8bf7b84a7",
+    "events": [
+      {
+        "seq": 6,
+        "kind": "gap",
+        "sha256": "30d1fe6bd79fc14e1a41d6783ec310f1cb286ff756e974775d88c8abaacbe9ba"
+      },
+      {
+        "seq": 7,
+        "kind": "gap",
+        "sha256": "0c101ea57e1c1bfb34db433949b92c654f1e01124e1bc8c57f50192724025b64"
+      },
+      {
+        "seq": 8,
+        "kind": "review",
+        "sha256": "1fc198bd90048e092ec9f50b36117de4ea65a1a907e311ad9db307781a04653a"
+      },
+      {
+        "seq": 9,
+        "kind": "blocked",
+        "sha256": "eb3aebbfbc129cbd557cc3291264b8f659fb1a8c7c6ee724b979c8d8bf7b84a7"
+      }
+    ],
+    "gaps": [
+      {
+        "criterion": "AC-2",
+        "reproduction_sha256": "68d39cc6cd8f5376ff97dbdeaf067f9b86c135c9c79ed26851cdd8984381f71f",
+        "fingerprint": "e36d827ac7fe1ddbe19010196a73a598f5d97255dc092fe6c381ccf5df436da5",
+        "verdict": "exhausted",
+        "duplicate_of": null
+      },
+      {
+        "criterion": "AC-3",
+        "reproduction_sha256": "a05b51cab80f18169f75a686b48f65af78993698856c47771f4b3e6a0a2870d9",
+        "fingerprint": "b80e3dcac2161f3fab66d4f948744bebf8c6147a3ec4340e8f8517a357d9148d",
+        "verdict": "duplicate",
+        "duplicate_of": "31d8d7dbdcadddeb88b8f2aa4c1601303af16832bb50a0aad29aa630fe876434"
+      }
+    ],
+    "progress": [
+      "producer-change"
+    ],
+    "review_sessions": 3,
+    "no_progress_streak": 0,
+    "budgets": {
+      "AC-1": {
+        "accepted_reworks": 0,
+        "max": 2,
+        "remaining": 2,
+        "exhausted": false
+      },
+      "AC-2": {
+        "accepted_reworks": 2,
+        "max": 2,
+        "remaining": 0,
+        "exhausted": false
+      },
+      "AC-3": {
+        "accepted_reworks": 1,
+        "max": 2,
+        "remaining": 1,
+        "exhausted": false
+      },
+      "AC-4": {
+        "accepted_reworks": 0,
+        "max": 2,
+        "remaining": 2,
+        "exhausted": false
+      }
+    }
+  },
+  "orchestration": {
+    "issued_epoch": 9,
+    "settled_epoch": 10,
+    "barrier": null
+  },
+  "settled_at": "2026-10-11T21:03:54.074Z",
+  "settled_by": "host"
+}

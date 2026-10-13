@@ -1,0 +1,1034 @@
+{
+  "schema": "mycelink-plugin-eval-summary",
+  "schemaVersion": 1,
+  "reportDate": "2026-10-06",
+  "report": "docs/evals/2026-10-06-multimodule-plugin-eval.md",
+  "suite": {
+    "evalDir": "evals-multimodule",
+    "commit": "531a8bf",
+    "cases": [
+      "existing-refunds-cold",
+      "existing-refunds-informed",
+      "greenfield-refunds"
+    ],
+    "acceptanceTests": 23
+  },
+  "environment": {
+    "host": "WSL (Linux)",
+    "platform": "linux-x64",
+    "node": "v22.12.0",
+    "claudeCodeVersion": "2.1.290",
+    "model": "sonnet",
+    "plugin": {
+      "name": "mycelink",
+      "version": "0.2.0-beta.1"
+    },
+    "ablation": "with-without",
+    "threshold": 1,
+    "concurrency": 1
+  },
+  "stages": {
+    "initialNeutralPilot": {
+      "promptHasMycelinkInstruction": false,
+      "startedAt": "2026-10-06T03:10:59.897Z",
+      "durationSeconds": 1376,
+      "costUsdTopLevel": 5.1239848,
+      "pluginEvalAggregates": {
+        "casesTotal": 3,
+        "casesPassed": 3,
+        "overallScore": 1,
+        "overallPassRate": 1,
+        "meanDelta": 0
+      },
+      "functionalPasses": 6,
+      "functionalRuns": 6,
+      "withArmActivated": 0,
+      "withArmRuns": 3,
+      "validAsPluginEvidence": false,
+      "independentVerification": null,
+      "armTotals": {
+        "with": {
+          "costUsd": 2.3779186,
+          "judgeCostUsd": 0.009135,
+          "turns": 53,
+          "durationSeconds": 600
+        },
+        "without": {
+          "costUsd": 2.7460662,
+          "judgeCostUsd": 0.008958,
+          "turns": 58,
+          "durationSeconds": 776
+        }
+      },
+      "cases": [
+        {
+          "case": "existing-refunds-cold",
+          "scenario": "existing-cold",
+          "runsPerArm": 1,
+          "pluginEval": {
+            "scoreWith": 1,
+            "scoreWithout": 1,
+            "passRateWith": 1,
+            "passRateWithout": 1,
+            "delta": 0
+          },
+          "arms": {
+            "with": {
+              "score": 1,
+              "passed": true,
+              "turns": 18,
+              "costUsd": 0.6426904,
+              "judgeCostUsd": 0.003,
+              "durationSeconds": 132,
+              "error": null,
+              "failedScoredGraders": [],
+              "activationIndicators": {
+                "mycelink-skill-invoked": false,
+                "mycelink-controller-used": false,
+                "mycelink-orchestrate-run": false,
+                "mycelink-control-plane-created": false,
+                "mycelink-feature-state-recorded": false,
+                "mycelink-candidate-created": false
+              }
+            },
+            "without": {
+              "score": 1,
+              "passed": true,
+              "turns": 16,
+              "costUsd": 0.5733592,
+              "judgeCostUsd": 0.0026819999999999995,
+              "durationSeconds": 134,
+              "error": null,
+              "failedScoredGraders": []
+            }
+          }
+        },
+        {
+          "case": "existing-refunds-informed",
+          "scenario": "existing-informed",
+          "runsPerArm": 1,
+          "pluginEval": {
+            "scoreWith": 1,
+            "scoreWithout": 1,
+            "passRateWith": 1,
+            "passRateWithout": 1,
+            "delta": 0
+          },
+          "arms": {
+            "with": {
+              "score": 1,
+              "passed": true,
+              "turns": 19,
+              "costUsd": 0.6722579999999999,
+              "judgeCostUsd": 0.0027419999999999996,
+              "durationSeconds": 151,
+              "error": null,
+              "failedScoredGraders": [],
+              "activationIndicators": {
+                "mycelink-skill-invoked": false,
+                "mycelink-controller-used": false,
+                "mycelink-orchestrate-run": false,
+                "mycelink-control-plane-created": false,
+                "mycelink-feature-state-recorded": false,
+                "mycelink-candidate-created": false
+              }
+            },
+            "without": {
+              "score": 1,
+              "passed": true,
+              "turns": 20,
+              "costUsd": 0.732283,
+              "judgeCostUsd": 0.0029219999999999975,
+              "durationSeconds": 141,
+              "error": null,
+              "failedScoredGraders": []
+            }
+          }
+        },
+        {
+          "case": "greenfield-refunds",
+          "scenario": "greenfield",
+          "runsPerArm": 1,
+          "pluginEval": {
+            "scoreWith": 1,
+            "scoreWithout": 1,
+            "passRateWith": 1,
+            "passRateWithout": 1,
+            "delta": 0
+          },
+          "arms": {
+            "with": {
+              "score": 1,
+              "passed": true,
+              "turns": 16,
+              "costUsd": 1.0629701999999999,
+              "judgeCostUsd": 0.003393,
+              "durationSeconds": 317,
+              "error": null,
+              "failedScoredGraders": [],
+              "activationIndicators": {
+                "mycelink-skill-invoked": false,
+                "mycelink-controller-used": false,
+                "mycelink-orchestrate-run": false,
+                "mycelink-control-plane-created": false,
+                "mycelink-feature-state-recorded": false,
+                "mycelink-candidate-created": false
+              }
+            },
+            "without": {
+              "score": 1,
+              "passed": true,
+              "turns": 22,
+              "costUsd": 1.4404240000000001,
+              "judgeCostUsd": 0.003354000000000001,
+              "durationSeconds": 501,
+              "error": null,
+              "failedScoredGraders": []
+            }
+          }
+        }
+      ]
+    },
+    "forcedConditionalUsePilot": {
+      "promptHasMycelinkInstruction": true,
+      "startedAt": "2026-10-06T05:20:27.790Z",
+      "durationSeconds": 1509,
+      "costUsdTopLevel": 5.5405246,
+      "costExcludesNestedMycelinkWorkers": true,
+      "pluginEvalAggregates": {
+        "casesTotal": 3,
+        "casesPassed": 1,
+        "overallScore": 0.4166666666666667,
+        "overallPassRate": 0.3333333333333333,
+        "meanDelta": -0.5625
+      },
+      "withArmActivated": 3,
+      "withArmRuns": 3,
+      "selftest": {
+        "passed": 81,
+        "failed": 0,
+        "ok": true
+      },
+      "independentVerification": {
+        "verifierSchema": "ledgerline-eval-aggregate-verification/1",
+        "verifierVersion": "1.0.0",
+        "ok": false,
+        "with": {
+          "completionOk": 1,
+          "orchestrationOk": 0,
+          "fullMycelinkSuccess": 0,
+          "runs": 3,
+          "mycelinkWorkerTokensTotal": 0
+        },
+        "without": {
+          "completionOk": 3,
+          "verified": 3,
+          "runs": 3
+        }
+      },
+      "armTotals": {
+        "with": {
+          "costUsd": 3.191605,
+          "judgeCostUsd": 0.008862,
+          "turns": 116,
+          "durationSeconds": 675
+        },
+        "without": {
+          "costUsd": 2.3489196,
+          "judgeCostUsd": 0.008304,
+          "turns": 59,
+          "durationSeconds": 834
+        }
+      },
+      "cases": [
+        {
+          "case": "existing-refunds-cold",
+          "scenario": "existing-cold",
+          "runsPerArm": 1,
+          "pluginEval": {
+            "scoreWith": 1,
+            "scoreWithout": 1,
+            "passRateWith": 1,
+            "passRateWithout": 1,
+            "delta": 0
+          },
+          "arms": {
+            "with": {
+              "score": 1,
+              "passed": true,
+              "turns": 76,
+              "costUsd": 2.1394258000000006,
+              "judgeCostUsd": 0.003234,
+              "durationSeconds": 417,
+              "error": null,
+              "failedScoredGraders": [],
+              "activationIndicators": {
+                "mycelink-skill-invoked": true,
+                "mycelink-controller-used": true,
+                "mycelink-orchestrate-run": false,
+                "mycelink-control-plane-created": true,
+                "mycelink-feature-state-recorded": true,
+                "mycelink-candidate-created": true
+              },
+              "verifier": {
+                "verified": 0,
+                "completionOk": 1,
+                "orchestrationOk": 0,
+                "orchestrationRequired": true,
+                "reportingOk": true,
+                "mycelinkWorkerTokens": 0,
+                "acceptanceRerun": {
+                  "verdict": "PASS",
+                  "tests": 23,
+                  "pass": 23,
+                  "fail": 0
+                },
+                "moduleTests": {
+                  "core": {
+                    "pass": 21,
+                    "fail": 0
+                  },
+                  "api": {
+                    "pass": 20,
+                    "fail": 0
+                  },
+                  "worker": {
+                    "pass": 11,
+                    "fail": 0
+                  },
+                  "cli": {
+                    "pass": 10,
+                    "fail": 0
+                  }
+                },
+                "commitsSinceBaseline": {
+                  "core": 1,
+                  "api": 1,
+                  "worker": 1,
+                  "cli": 1
+                },
+                "modulesClean": true,
+                "failedChecks": {
+                  "completion": [],
+                  "reporting": [],
+                  "orchestration": [
+                    "nodes-done:LEDGER-142",
+                    "evidence-files:LEDGER-142",
+                    "feature-verify:LEDGER-142",
+                    "candidate-verify:LEDGER-142",
+                    "a-feature-is-complete"
+                  ]
+                },
+                "mycelink": {
+                  "featureId": "LEDGER-142",
+                  "featureState": "CANDIDATE_READY",
+                  "nodeStates": {
+                    "LEDGER-142.core.refund-defs.impl": "REGRESSION_VERIFIED",
+                    "LEDGER-142.api.refunds.impl": "REGRESSION_VERIFIED",
+                    "LEDGER-142.worker.settle.impl": "REGRESSION_VERIFIED",
+                    "LEDGER-142.cli.refunds.impl": "REGRESSION_VERIFIED",
+                    "LEDGER-142.release.candidate.build": "INVALIDATED"
+                  },
+                  "currentCandidate": "LEDGER-142-C001",
+                  "evidenceRecords": 12,
+                  "sessionsTotal": 4,
+                  "featureVerifyOk": false,
+                  "candidateVerifyProblems": [
+                    "CONTROL_SHA_DRIFT"
+                  ],
+                  "usage": {
+                    "model_turns": 0,
+                    "wall_clock_ms": 42,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "sessions": 4
+                  }
+                }
+              },
+              "orchestrateRunTrace": {
+                "source": "session trace (not a grader)",
+                "attempts": 2,
+                "stopReasons": [
+                  "BLOCKED",
+                  "BLOCKED"
+                ],
+                "successfulInvocations": 0,
+                "blockCause": "worker spawn failure (SPAWN_FAILED) repeated to max_same_failure 2"
+              }
+            },
+            "without": {
+              "score": 1,
+              "passed": true,
+              "turns": 15,
+              "costUsd": 0.5910814,
+              "judgeCostUsd": 0.0029189999999999997,
+              "durationSeconds": 138,
+              "error": null,
+              "failedScoredGraders": [],
+              "verifier": {
+                "verified": 1,
+                "completionOk": 1,
+                "orchestrationOk": 0,
+                "orchestrationRequired": false,
+                "reportingOk": true,
+                "mycelinkWorkerTokens": 0,
+                "acceptanceRerun": {
+                  "verdict": "PASS",
+                  "tests": 23,
+                  "pass": 23,
+                  "fail": 0
+                },
+                "moduleTests": {
+                  "core": {
+                    "pass": 15,
+                    "fail": 0
+                  },
+                  "api": {
+                    "pass": 13,
+                    "fail": 0
+                  },
+                  "worker": {
+                    "pass": 9,
+                    "fail": 0
+                  },
+                  "cli": {
+                    "pass": 8,
+                    "fail": 0
+                  }
+                },
+                "commitsSinceBaseline": {
+                  "core": 1,
+                  "api": 1,
+                  "worker": 1,
+                  "cli": 1
+                },
+                "modulesClean": true,
+                "failedChecks": {
+                  "completion": [],
+                  "reporting": []
+                }
+              }
+            }
+          }
+        },
+        {
+          "case": "existing-refunds-informed",
+          "scenario": "existing-informed",
+          "runsPerArm": 1,
+          "pluginEval": {
+            "scoreWith": 0.125,
+            "scoreWithout": 0.9375,
+            "passRateWith": 0,
+            "passRateWithout": 0,
+            "delta": -0.8125
+          },
+          "arms": {
+            "with": {
+              "score": 0.125,
+              "passed": false,
+              "turns": 29,
+              "costUsd": 0.4548928,
+              "judgeCostUsd": 0.0027960000000000007,
+              "durationSeconds": 104,
+              "error": null,
+              "failedScoredGraders": [
+                "acceptance-verdict-pass",
+                "acceptance-suite-pristine",
+                "all-acceptance-tests-pass",
+                "every-module-committed-clean-and-green",
+                "machine-readable-report-pass",
+                "ran-acceptance-suite",
+                "summary-states-verdict",
+                "honest-completion-claim"
+              ],
+              "activationIndicators": {
+                "mycelink-skill-invoked": true,
+                "mycelink-controller-used": true,
+                "mycelink-orchestrate-run": false,
+                "mycelink-control-plane-created": true,
+                "mycelink-feature-state-recorded": true,
+                "mycelink-candidate-created": false
+              },
+              "verifier": {
+                "verified": 0,
+                "completionOk": 0,
+                "orchestrationOk": 0,
+                "orchestrationRequired": true,
+                "reportingOk": false,
+                "mycelinkWorkerTokens": 0,
+                "acceptanceRerun": {
+                  "verdict": "FAIL",
+                  "tests": 23,
+                  "pass": 7,
+                  "fail": 16
+                },
+                "moduleTests": {
+                  "core": {
+                    "pass": 10,
+                    "fail": 0
+                  },
+                  "api": {
+                    "pass": 7,
+                    "fail": 0
+                  },
+                  "worker": {
+                    "pass": 5,
+                    "fail": 0
+                  },
+                  "cli": {
+                    "pass": 4,
+                    "fail": 0
+                  }
+                },
+                "commitsSinceBaseline": {
+                  "core": 0,
+                  "api": 0,
+                  "worker": 0,
+                  "cli": 0
+                },
+                "modulesClean": true,
+                "failedChecks": {
+                  "completion": [
+                    "module-changed:core",
+                    "module-changed:api",
+                    "module-changed:worker",
+                    "module-changed:cli",
+                    "acceptance-rerun-pass",
+                    "tests-added:core",
+                    "tests-added:api",
+                    "tests-added:worker",
+                    "tests-added:cli",
+                    "core-minor-release"
+                  ],
+                  "reporting": [
+                    "in-run-report-present"
+                  ],
+                  "orchestration": [
+                    "nodes-done:LEDGER-142",
+                    "evidence-files:LEDGER-142",
+                    "feature-verify:LEDGER-142",
+                    "candidate-recorded:LEDGER-142",
+                    "control-repo-committed",
+                    "a-feature-is-complete"
+                  ]
+                },
+                "mycelink": {
+                  "featureId": "LEDGER-142",
+                  "featureState": "RUNNING",
+                  "nodeStates": {
+                    "LEDGER-142.core.refund-definitions.impl": "BLOCKED",
+                    "LEDGER-142.api.refund-requests.impl": "PLANNED",
+                    "LEDGER-142.worker.refund-settlement.impl": "PLANNED",
+                    "LEDGER-142.cli.refunds-command.impl": "PLANNED",
+                    "LEDGER-142.release.candidate.build": "PLANNED"
+                  },
+                  "currentCandidate": null,
+                  "evidenceRecords": 0,
+                  "sessionsTotal": 2,
+                  "featureVerifyOk": false,
+                  "candidateVerifyProblems": null,
+                  "usage": {
+                    "model_turns": 0,
+                    "wall_clock_ms": 21,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "sessions": 2
+                  }
+                }
+              },
+              "orchestrateRunTrace": {
+                "source": "session trace (not a grader)",
+                "attempts": 1,
+                "stopReasons": [
+                  "BLOCKED"
+                ],
+                "successfulInvocations": 0,
+                "blockCause": "worker spawn failure (SPAWN_FAILED) repeated to max_same_failure 2"
+              }
+            },
+            "without": {
+              "score": 0.9375,
+              "passed": false,
+              "turns": 18,
+              "costUsd": 0.5962208,
+              "judgeCostUsd": 0.002396999999999998,
+              "durationSeconds": 133,
+              "error": null,
+              "failedScoredGraders": [
+                "honest-completion-claim"
+              ],
+              "verifier": {
+                "verified": 1,
+                "completionOk": 1,
+                "orchestrationOk": 0,
+                "orchestrationRequired": false,
+                "reportingOk": true,
+                "mycelinkWorkerTokens": 0,
+                "acceptanceRerun": {
+                  "verdict": "PASS",
+                  "tests": 23,
+                  "pass": 23,
+                  "fail": 0
+                },
+                "moduleTests": {
+                  "core": {
+                    "pass": 14,
+                    "fail": 0
+                  },
+                  "api": {
+                    "pass": 14,
+                    "fail": 0
+                  },
+                  "worker": {
+                    "pass": 9,
+                    "fail": 0
+                  },
+                  "cli": {
+                    "pass": 8,
+                    "fail": 0
+                  }
+                },
+                "commitsSinceBaseline": {
+                  "core": 1,
+                  "api": 1,
+                  "worker": 1,
+                  "cli": 1
+                },
+                "modulesClean": true,
+                "failedChecks": {
+                  "completion": [],
+                  "reporting": []
+                }
+              }
+            }
+          }
+        },
+        {
+          "case": "greenfield-refunds",
+          "scenario": "greenfield",
+          "runsPerArm": 1,
+          "pluginEval": {
+            "scoreWith": 0.125,
+            "scoreWithout": 1,
+            "passRateWith": 0,
+            "passRateWithout": 1,
+            "delta": -0.875
+          },
+          "arms": {
+            "with": {
+              "score": 0.125,
+              "passed": false,
+              "turns": 11,
+              "costUsd": 0.5972864000000002,
+              "judgeCostUsd": 0.002832000000000001,
+              "durationSeconds": 154,
+              "error": null,
+              "failedScoredGraders": [
+                "acceptance-verdict-pass",
+                "acceptance-suite-pristine",
+                "all-acceptance-tests-pass",
+                "every-module-committed-clean-and-green",
+                "machine-readable-report-pass",
+                "ran-acceptance-suite",
+                "summary-states-verdict",
+                "honest-completion-claim"
+              ],
+              "activationIndicators": {
+                "mycelink-skill-invoked": true,
+                "mycelink-controller-used": true,
+                "mycelink-orchestrate-run": false,
+                "mycelink-control-plane-created": true,
+                "mycelink-feature-state-recorded": true,
+                "mycelink-candidate-created": false
+              },
+              "verifier": {
+                "verified": 0,
+                "completionOk": 0,
+                "orchestrationOk": 0,
+                "orchestrationRequired": true,
+                "reportingOk": false,
+                "mycelinkWorkerTokens": 0,
+                "acceptanceRerun": {
+                  "verdict": "FAIL",
+                  "tests": 23,
+                  "pass": 0,
+                  "fail": 23
+                },
+                "moduleTests": {
+                  "core": {
+                    "pass": 0,
+                    "fail": 0
+                  },
+                  "api": {
+                    "pass": 0,
+                    "fail": 0
+                  },
+                  "worker": {
+                    "pass": 0,
+                    "fail": 0
+                  },
+                  "cli": {
+                    "pass": 0,
+                    "fail": 0
+                  }
+                },
+                "commitsSinceBaseline": {
+                  "core": 0,
+                  "api": 0,
+                  "worker": 0,
+                  "cli": 0
+                },
+                "modulesClean": true,
+                "failedChecks": {
+                  "completion": [
+                    "module-changed:core",
+                    "module-changed:api",
+                    "module-changed:worker",
+                    "module-changed:cli",
+                    "acceptance-rerun-pass",
+                    "tests-added:core",
+                    "tests-added:api",
+                    "tests-added:worker",
+                    "tests-added:cli"
+                  ],
+                  "reporting": [
+                    "in-run-report-present"
+                  ],
+                  "orchestration": [
+                    "nodes-done:LEDGER-100",
+                    "evidence-files:LEDGER-100",
+                    "feature-verify:LEDGER-100",
+                    "candidate-recorded:LEDGER-100",
+                    "a-feature-is-complete"
+                  ]
+                },
+                "mycelink": {
+                  "featureId": "LEDGER-100",
+                  "featureState": "RUNNING",
+                  "nodeStates": {
+                    "LEDGER-100.core.storage.impl": "BLOCKED",
+                    "LEDGER-100.core.domain.impl": "PLANNED",
+                    "LEDGER-100.api.orders.impl": "PLANNED",
+                    "LEDGER-100.api.refunds.impl": "PLANNED",
+                    "LEDGER-100.worker.capture.impl": "PLANNED",
+                    "LEDGER-100.worker.settlement.impl": "PLANNED",
+                    "LEDGER-100.cli.orders.impl": "PLANNED",
+                    "LEDGER-100.cli.refunds.impl": "PLANNED"
+                  },
+                  "currentCandidate": null,
+                  "evidenceRecords": 0,
+                  "sessionsTotal": 2,
+                  "featureVerifyOk": false,
+                  "candidateVerifyProblems": null,
+                  "usage": {
+                    "model_turns": 0,
+                    "wall_clock_ms": 19,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "sessions": 2
+                  }
+                }
+              },
+              "orchestrateRunTrace": {
+                "source": "session trace (not a grader)",
+                "attempts": 1,
+                "stopReasons": [
+                  "BLOCKED"
+                ],
+                "successfulInvocations": 0,
+                "blockCause": "worker spawn failure (SPAWN_FAILED) repeated to max_same_failure 2"
+              }
+            },
+            "without": {
+              "score": 1,
+              "passed": true,
+              "turns": 26,
+              "costUsd": 1.1616174000000001,
+              "judgeCostUsd": 0.002988000000000001,
+              "durationSeconds": 563,
+              "error": null,
+              "failedScoredGraders": [],
+              "verifier": {
+                "verified": 1,
+                "completionOk": 1,
+                "orchestrationOk": 0,
+                "orchestrationRequired": false,
+                "reportingOk": true,
+                "mycelinkWorkerTokens": 0,
+                "acceptanceRerun": {
+                  "verdict": "PASS",
+                  "tests": 23,
+                  "pass": 23,
+                  "fail": 0
+                },
+                "moduleTests": {
+                  "core": {
+                    "pass": 15,
+                    "fail": 0
+                  },
+                  "api": {
+                    "pass": 21,
+                    "fail": 0
+                  },
+                  "worker": {
+                    "pass": 10,
+                    "fail": 0
+                  },
+                  "cli": {
+                    "pass": 8,
+                    "fail": 0
+                  }
+                },
+                "commitsSinceBaseline": {
+                  "core": 1,
+                  "api": 1,
+                  "worker": 1,
+                  "cli": 1
+                },
+                "modulesClean": true,
+                "failedChecks": {
+                  "completion": [],
+                  "reporting": []
+                }
+              }
+            }
+          }
+        }
+      ],
+      "orchestrateRunTraceTotals": {
+        "attempts": 4,
+        "blocked": 4,
+        "succeeded": 0
+      },
+      "workerTokensZeroExplanation": "Every orchestrated node attempt failed to spawn the worker executable, so each recorded session settled as failed with no model turn (sessions 4/2/2, 19-42 ms wall clock)."
+    }
+  },
+  "statisticalNote": "n=1 run per case per arm; pilot only, not statistically significant",
+  "verdict": {
+    "mycelinkVersion": "0.2.0-beta.1",
+    "reliableForPerfectEndToEndCompletion": false,
+    "comparedWithDirectClaude": "worse in this pilot",
+    "summary": "With Mycelink use required, the independent verifier found full Mycelink success (completion and valid orchestration) in 0/3 runs and completion in 1/3; direct Claude without the plugin completed 3/3. orchestrate run was attempted in all three WITH sessions but every attempt stopped BLOCKED because the worker process could not be spawned."
+  },
+  "correction": {
+    "date": "2026-10-06",
+    "basis": "read-only review of session traces and Mycelink source at 531a8bf",
+    "previousClaim": "mycelink orchestrate run was never invoked",
+    "corrected": "orchestrate run was attempted in all three WITH sessions (existing-cold twice, existing-informed once, greenfield once); every attempt stopped BLOCKED on a worker spawn failure",
+    "graderInterpretation": {
+      "grader": "mycelink-orchestrate-run",
+      "rawValuePreserved": false,
+      "meaning": "no recognized successful invocation; not evidence of no attempt"
+    }
+  },
+  "rootCauseReview": {
+    "productSourceChanged": false,
+    "rootCauses": [
+      {
+        "id": "A1",
+        "class": "A",
+        "summary": "worker executable not visible to the controller; doctor does not preflight it",
+        "source": [
+          "src/workspace/workspace.ts",
+          "src/sessions/claude-cli-adapter.ts",
+          "src/cli/cli.ts"
+        ]
+      },
+      {
+        "id": "A2",
+        "class": "A",
+        "summary": "infrastructure spawn errors consume node retries and BLOCK the node after two identical failures",
+        "source": [
+          "src/engine/orchestrator.ts",
+          "src/state/transition.ts",
+          "src/state/feature-state.ts"
+        ]
+      },
+      {
+        "id": "A3",
+        "class": "A",
+        "summary": "node claim bypasses readiness/dependency checks; BLOCKED can be laundered through INVALIDATED, which resets attempts",
+        "source": [
+          "src/cli/cli.ts",
+          "src/engine/orchestrator.ts",
+          "src/state/transition.ts",
+          "src/scheduler/ready.ts"
+        ]
+      },
+      {
+        "id": "A4",
+        "class": "A/B",
+        "summary": "CLI primitives cannot move REGRESSION_VERIFIED to DONE; only runNode does",
+        "source": [
+          "src/cli/cli.ts",
+          "src/engine/orchestrator.ts"
+        ]
+      },
+      {
+        "id": "A5",
+        "class": "A",
+        "summary": "absolute evidence paths break after the workspace is sealed",
+        "source": [
+          "src/evidence/runner.ts",
+          "src/cli/cli.ts"
+        ]
+      },
+      {
+        "id": "A6",
+        "class": "A/B",
+        "summary": "candidate pins control-repository HEAD while Mycelink state lives and is committed in the same repository, causing self-drift",
+        "source": [
+          "src/git/candidate.ts"
+        ]
+      },
+      {
+        "id": "A7",
+        "class": "A",
+        "summary": "init omits the .mycelink/ .gitignore entry that the tests add",
+        "source": [
+          "src/cli/cli.ts",
+          "src/workspace/workspace.ts",
+          "tests/helpers/portfolio-fixture.ts",
+          "tests/integration/readme-walkthrough.test.ts"
+        ]
+      },
+      {
+        "id": "A8",
+        "class": "A",
+        "summary": "slash-command argument templates are off by one ($1 used for the first argument)",
+        "source": [
+          "commands/"
+        ]
+      },
+      {
+        "id": "A9",
+        "class": "A/B",
+        "summary": "no base-branch delivery step; integration stops at feature/<id>",
+        "source": [
+          "src/git/integrate.ts",
+          "commands/run.md"
+        ]
+      }
+    ]
+  },
+  "architectureAssessment": {
+    "category": "B",
+    "description": "moderate workflow/interface redesign plus category A local defects; not fundamentally unsound (C)",
+    "minimalAFixes": [
+      "preflight worker executable in doctor and before first claim",
+      "classify spawn/infrastructure errors so they do not consume node attempts",
+      "route node claim through readiness; require justification and keep history when leaving BLOCKED via INVALIDATED",
+      "store repository-relative evidence paths",
+      "write .mycelink/ to .gitignore in init",
+      "fix slash-command argument indices",
+      "print per-node BLOCKED detail in human orchestrate run output"
+    ],
+    "keyBRedesign": [
+      {
+        "id": "R1",
+        "summary": "host-native worker dispatch via Agent-tool ticket/settle, or an external worker daemon"
+      },
+      {
+        "summary": "role-scoped claim capabilities with a complete legitimate path to DONE"
+      },
+      {
+        "summary": "run state outside the pinned control tree, or candidate bound to a content hash"
+      },
+      {
+        "summary": "detached durable runs that outlive the host turn"
+      },
+      {
+        "summary": "explicit verified delivery to module base branches"
+      }
+    ],
+    "outlook": {
+      "kind": "judgement, not measurement",
+      "aOnlyFixesEnableNestedWorkersInCurrentSandbox": false,
+      "aPlusR1PlusDelivery": "3/3 plausible but unproven",
+      "estimatedFullSuccessAfterOneOrTwoRounds": {
+        "low": 0.5,
+        "high": 0.65,
+        "measured": false
+      }
+    }
+  },
+  "defectPriorities": [
+    {
+      "rank": 1,
+      "priority": "P0",
+      "rootCauses": [
+        "A1",
+        "A2"
+      ],
+      "needs": [
+        "R1"
+      ],
+      "defect": "workers never dispatched in the sandbox; all 4 orchestrate run attempts stopped BLOCKED on worker spawn failure"
+    },
+    {
+      "rank": 2,
+      "priority": "P0",
+      "rootCauses": [
+        "A3",
+        "A4"
+      ],
+      "needs": [
+        "role-scoped claim capabilities",
+        "detached durable runs"
+      ],
+      "defect": "after BLOCKED the session stops with no code or hand-progresses nodes outside orchestration"
+    },
+    {
+      "rank": 3,
+      "priority": "P1",
+      "rootCauses": [
+        "A6"
+      ],
+      "defect": "candidate invalidated by control-repository self-drift"
+    },
+    {
+      "rank": 4,
+      "priority": "P1",
+      "rootCauses": [
+        "A5"
+      ],
+      "defect": "evidence outputs missing at verification"
+    },
+    {
+      "rank": 5,
+      "priority": "P1",
+      "rootCauses": [
+        "A7"
+      ],
+      "defect": "control repository left dirty"
+    },
+    {
+      "rank": 6,
+      "priority": "P1",
+      "rootCauses": [
+        "A9"
+      ],
+      "defect": "no delivery to module base branches"
+    },
+    {
+      "rank": 7,
+      "priority": "P2",
+      "rootCauses": [
+        "A8"
+      ],
+      "defect": "slash-command arguments off by one"
+    },
+    {
+      "rank": 8,
+      "priority": "P2",
+      "rootCauses": [],
+      "defect": "no activation on neutral prompts"
+    },
+    {
+      "rank": 9,
+      "priority": "P2",
+      "rootCauses": [],
+      "defect": "overhead when it does work"
+    }
+  ]
+}

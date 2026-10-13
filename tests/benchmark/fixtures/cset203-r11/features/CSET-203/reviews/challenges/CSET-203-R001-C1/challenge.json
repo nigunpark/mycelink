@@ -1,0 +1,103 @@
+{
+  "schema": "mycelink-review-challenge/1",
+  "feature_id": "CSET-203",
+  "challenge_id": "CSET-203-R001-C1",
+  "review_id": "CSET-203-R001",
+  "node_id": "CSET-203.apply.journal-rollback.impl",
+  "claim_id": "7e64cfb1-da14-4045-a078-16f02cd2f241",
+  "dispatch_id": "cbb16c90-bceb-434d-9ba4-b90c9ec1bb32",
+  "generation": 1,
+  "review_receipt": {
+    "path": "features/CSET-203/reviews/CSET-203-R001.json",
+    "sha256": "208609066d998907299645b0a2ca3a24886541632c1bd43188ad7b2f82b05f12"
+  },
+  "reason_sha256": "41b6dfba13f9a2415928875d07305bc58a167c8d9a27e87de108b64ebd9262f3",
+  "base_sha": "aaf1974ffc6bb8268a9734e0013a845b8f489006",
+  "head_sha": "dba8a01289d812e1f68865bae0312a53f3581164",
+  "gate": {
+    "kind": "red",
+    "output_path": "features/CSET-203/reviews/challenges/CSET-203-R001-C1/gate/red.log",
+    "output_sha256": "88e9b7b6c8e3e2eb3d1492e25ffed63d0c1f98cb7c51940a59811f58dc927183",
+    "results_path": "features/CSET-203/reviews/challenges/CSET-203-R001-C1/gate/red.results.json",
+    "results_sha256": "6e0714841559fd089f9c5778650f0a7d5e2f873c39fde374846ec956f5ce7c1a",
+    "exit_code": 0,
+    "commit_sha": "0a2860bf99ce565619c9007de70b92fda0dd9d9d",
+    "recorded_output_sha256": "88e9b7b6c8e3e2eb3d1492e25ffed63d0c1f98cb7c51940a59811f58dc927183"
+  },
+  "tests": [
+    {
+      "test_id": "56b7a81279e8b939",
+      "path": "packages/apply-release-plan/src/rollback-created-files.test.ts",
+      "full_name": "rollback of created files > removes created CHANGELOG.md files after a later failure without pre.json",
+      "status": "passed"
+    },
+    {
+      "test_id": "33b9db204bc71365",
+      "path": "packages/apply-release-plan/src/rollback-created-files.test.ts",
+      "full_name": "rollback of created files > removes created CHANGELOG.md files and pre dir after a later failure in pre mode without pre.json",
+      "status": "passed"
+    }
+  ],
+  "files": [
+    {
+      "path": "packages/apply-release-plan/src/rollback-created-files.test.ts",
+      "blob": "e76c296164d26fbb65356d3d507168d06dbad350",
+      "sha256": "5403e715cfe5b5e2721dea3d54993855f0f80d94ad77518567764d9b3828c6ad",
+      "archived": "features/CSET-203/reviews/challenges/CSET-203-R001-C1/files/packages/apply-release-plan/src/rollback-created-files.test.ts"
+    }
+  ],
+  "gaps": [
+    {
+      "criterion": "AC-1",
+      "round": 1,
+      "missing": "Every rollback test uses changelog:false and a fixture where pre.json already exists. The restore branch that deletes a file the run created (previous content null) is never exercised. A failure after a CHANGELOG write is not exercised either.",
+      "reproduction": "Use a fixture with no CHANGELOG.md for pkg-a and pkg-b and a config whose changelog is '@changesets/cli/changelog'. Inject a failure after the changelogs are written, for example make fs.rm of the changeset file throw. Assert the whole-tree snapshot equals the original, so the new CHANGELOG.md files are absent again. Repeat with preState set and no .changeset/pre.json, and assert pre.json is absent after the rejection.",
+      "reproduction_sha256": "c681540612674d9c15a05bc7d3f49b0af47c0aba8af3af95a4f6a8a961f777dd",
+      "tests": [
+        "56b7a81279e8b939",
+        "33b9db204bc71365"
+      ],
+      "clauses": [
+        {
+          "clause": "AC-1.1",
+          "test_id": "56b7a81279e8b939",
+          "assertions": [
+            "file:changesets:packages/apply-release-plan/src/rollback-created-files.test.ts#L109-L109",
+            "file:changesets:packages/apply-release-plan/src/rollback-created-files.test.ts#L111-L113"
+          ],
+          "trace": "Failure is injected after changelogs are written (changelogsExisted asserted); whole-tree snapshot equals original and created pre.json/CHANGELOG.md are absent."
+        },
+        {
+          "clause": "AC-1.2",
+          "test_id": "56b7a81279e8b939",
+          "assertions": [
+            "file:changesets:packages/apply-release-plan/src/rollback-created-files.test.ts#L110-L110"
+          ],
+          "trace": "The rejection's cause is the injected error."
+        },
+        {
+          "clause": "AC-1.1",
+          "test_id": "33b9db204bc71365",
+          "assertions": [
+            "file:changesets:packages/apply-release-plan/src/rollback-created-files.test.ts#L117-L117",
+            "file:changesets:packages/apply-release-plan/src/rollback-created-files.test.ts#L119-L121"
+          ],
+          "trace": "Failure is injected after changelogs are written (changelogsExisted asserted); whole-tree snapshot equals original and created pre.json/CHANGELOG.md are absent."
+        },
+        {
+          "clause": "AC-1.2",
+          "test_id": "33b9db204bc71365",
+          "assertions": [
+            "file:changesets:packages/apply-release-plan/src/rollback-created-files.test.ts#L118-L118"
+          ],
+          "trace": "The rejection's cause is the injected error."
+        }
+      ],
+      "explanation": "The reproduction already passes on this code: rollback removes files and directories whose previous state was absent. Note: the AC-5 gap (status/add with a journal) lies in packages/cli, outside this node's allowed_paths."
+    }
+  ],
+  "challenge_sha256": "85ff62366c6fe3ad1145b6c94fa26774338665b8a98995bd9cb8335ab709e2e9",
+  "normalization": {
+    "changed": []
+  }
+}
