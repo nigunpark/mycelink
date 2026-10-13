@@ -82,7 +82,8 @@ describe('CSET-203 r13: a reviewer that runs in the background', () => {
     const run = await withArm(plan);
     const slow = plan.entries().filter((e) => e['slow_reviewer']).map((e) => e['slow_reviewer']);
     expect(slow).toHaveLength(1);
-    expect(slow[0]).toMatchObject({ early: { ingest: 'REVIEWER_RUNNING', settle: 'REVIEWER_RUNNING', lifecycle: 'RUNNING' }, ingest: 'INGESTED', settle: 'PASS' });
+    // It ended because the host asked while it ran, never by the stand-in's own fail-safe.
+    expect(slow[0]).toMatchObject({ early: { ingest: 'REVIEWER_RUNNING', settle: 'REVIEWER_RUNNING', lifecycle: 'RUNNING' }, fail_safe: false, ingest: 'INGESTED', settle: 'PASS' });
     expect(slow[0].awaits.length).toBeGreaterThan(1);
     expect(slow[0].awaits.slice(0, -1).every((s: string) => s === 'RUNNING')).toBe(true);
     expect(slow[0].awaits.at(-1)).toBe('COMPLETED');

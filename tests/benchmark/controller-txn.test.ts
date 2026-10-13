@@ -20,7 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { join, resolve } from 'node:path';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 // @ts-expect-error -- plain ESM module without type declarations
-import { attestRollbacks, beginTransaction, classifyTransaction, noteHarnessChange, resumeTransaction, rollbackManifestDigest, settleTransaction } from '../../evals-public-projects/lib/controller-txn.mjs';
+import { attestRollbacks, beginTransaction, classifyTransaction, lightCheck, noteHarnessChange, resumeTransaction, rollbackManifestDigest, settleTransaction } from '../../evals-public-projects/lib/controller-txn.mjs';
 // @ts-expect-error -- plain ESM module without type declarations
 import { injectConcurrentCommit } from '../../evals-public-projects/lib/faults.mjs';
 // @ts-expect-error -- plain ESM module without type declarations
@@ -207,6 +207,31 @@ describe('who changed what in a controller session', () => {
       { git: 'repos/x/.git', ref: 'refs/heads/mine', from: forged, to: null },
     ]);
     expect(g(w.repo, ['branch', '--contains', forged])).toBe('');
+  });
+
+  it('a check while a core git command is still running judges nothing of what that command is writing: a worktree it is checking out is the core’s until it is done', async () => {
+    const w = workspace();
+    const txn = begin(w);
+    core(w, ['init', w.platform]);
+    await later();
+    // The core's `git worktree add` is under way: its intent recorded, no done yet; git has made the worktree's admin
+    // directory and is checking its files out while a light check walks the workspace.
+    const now = () => (BigInt(Date.now()) * 1_000_000n).toString();
+    const wt = join(w.platform, '.mycelink', 'worktrees', 'x__F-1.a.impl');
+    const commonDir = join(w.repo, '.git');
+    writeFileSync(join(w.ledger, 'ledger.jsonl'), `${JSON.stringify({ kind: 'git-intent', pid: process.pid, seq: 9001, t: now(), sub: 'worktree', cwd: w.repo, common_dir: commonDir, all_refs: false, stash: false })}\n`, { flag: 'a' });
+    mkdirSync(join(commonDir, 'worktrees', 'x__F-1.a.impl'), { recursive: true });
+    writeFileSync(join(commonDir, 'worktrees', 'x__F-1.a.impl', 'gitdir'), `${join(wt, '.git')}\n`);
+    mkdirSync(join(wt, 'src'), { recursive: true });
+    writeFileSync(join(wt, '.git'), `gitdir: ${join(commonDir, 'worktrees', 'x__F-1.a.impl')}\n`);
+    writeFileSync(join(wt, 'src', 'a.js'), 'export const a = 1;\n');
+    await later();
+    const check = lightCheck({ txn, stream: '' });
+    expect(check.unauthorized.map((u: any) => u.path)).toEqual([]);
+    // A change of the controller's own beside it is still found.
+    writeFileSync(join(w.platform, 'notes.txt'), 'mine\n');
+    await later();
+    expect(lightCheck({ txn, previous: check.snapshot, stream: '' }).unauthorized.map((u: any) => u.path)).toEqual(['platform/notes.txt']);
   });
 
   it('a helper process the controller left writing is caught by what it wrote, not by what the transcript says', async () => {
