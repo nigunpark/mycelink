@@ -1,0 +1,20 @@
+{
+  "schema": "mycelink-bench/evaluator-lock@2",
+  "project": "changesets",
+  "prd": "CSET-203",
+  "source_identity_sha256": "5286b96d7f7c3458cfd501928107e9ef0c136f708fb2c493d1a15fb9b80bda32",
+  "files": {
+    "expected": 1,
+    "fingerprints": 1,
+    "hidden": 3,
+    "mutant": 3,
+    "reference": 1
+  },
+  "digest_sha256": "f939ef763fbb6fc3d9c9ac08489b8b95396ef6bdf53e1df01d0edcc9a1d1e5ed",
+  "reference": {
+    "head": "49ad0f79885351896b748de557a2120774cb9790",
+    "commits": 3
+  },
+  "hidden_tests": 15,
+  "mutants": 3
+}

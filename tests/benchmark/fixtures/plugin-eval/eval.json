@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.290",
+  "startedAt": "2026-10-06T16:46:19.657Z",
+  "durationSeconds": 2089,
+  "costUsd": 7.8582926,
+  "partial": false,
+  "suite": {
+    "root": "{{PLUGIN_ROOT}}",
+    "ablation": "none",
+    "modelOverride": "sonnet",
+    "threshold": 1,
+    "concurrency": 1,
+    "plugins": [
+      {
+        "name": "mycelink",
+        "version": "0.2.0-beta.1",
+        "path": "{{PLUGIN_ROOT}}"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "existing-refunds-cold",
+      "dir": "evals-multimodule/existing-refunds-cold",
+      "source": "case_yaml",
+      "promptMarkdown": "Ledgerline needs partial refunds. The requirement LEDGER-142 has been approved: `platform/requirements/LEDGER-142-partial-refunds.md`. `platform/` is our coordination repository; the code lives in four separate Git repositories under `repos/` (core, api, worker, cli).\n\nPlease deliver the feature end to end: every acceptance criterion implemented and tested in the repository that owns it, no regressions, and everything committed. Leave each module repository checked out at the commit you are delivering.\n\nIf the Mycelink plugin is available, you must use it to coordinate and deliver the work; if it is not available, proceed directly without it.\n\nQA's acceptance suite is in `acceptance/` — don't modify it. When you're done, run `node acceptance/run.mjs` from this directory and leave its `acceptance-results/` output in place.\n\nNobody will be available to answer questions while you work, so make reasonable decisions consistent with the requirement and list them in your final summary. End with a short summary that states the acceptance verdict and the commit you delivered in each module repository.\n",
+      "runsPerCase": 3,
+      "timeoutSeconds": 3600,
+      "maxTurns": 150,
+      "graders": [
+        {
+          "name": "acceptance-verdict-pass",
+          "type": "regex",
+          "weight": 4,
+          "config": {
+            "target": {
+              "source": "file",
+              "path": "acceptance-results/SUMMARY.txt"
+            },
+            "pattern": "^ACCEPTANCE VERDICT: PASS$",
+            "flags": "m",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "acceptance-suite-pristine",
+          "type": "regex",
+          "weight": 2,
+          "config": {
+            "target": {
+              "source": "file",
+              "path": "acceptance-results/SUMMARY.txt"
+            },
+            "pattern": "^suite_sha256: 2fa903dd8ce11b381dbc6f3214cdf800d2a51a72918f3d2401751237f21e5490$",
+            "flags": "m",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 25,
+            "costUsd": 3.2957216,
+            "judgeCostUsd": 0.002205,
+            "durationSeconds": 816,
+            "startedAt": "2026-10-06T16:46:19.695Z",
+            "error": null,
+            "tracePath": "{{HOME}}/finalhead-eval-tmp/claude-eval-6zCIsT/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "acceptance-verdict-pass",
+                "passed": true,
+                "weight": 4,
+                "explanation": "matched ^ACCEPTANCE VERDICT: PASS$",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "acceptance-suite-pristine",
+                "passed": true,
+                "weight": 2,
+                "explanation": "matched ^suite_sha256: 2fa903dd8ce11b381dbc6f3214cdf800d2a51a72918f3d2401751237f21e5490$",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 3,
+    "casesPassed": 2,
+    "overallScore": 0.8974358974358975,
+    "overallPassRate": 0.6666666666666666
+  }
+}

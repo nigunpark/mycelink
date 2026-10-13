@@ -1,5 +1,10 @@
 # Public readiness — Mycelink 0.2.0-beta.1
 
+> **Historical record.** This is the readiness review for the first public
+> beta, `0.2.0-beta.1`, kept as it was written. It is not updated for later
+> releases; see [CHANGELOG.md](CHANGELOG.md) and
+> [docs/RELEASING.md](docs/RELEASING.md).
+
 **Status: PUBLIC_CI_GREEN.** The repository is public at
 <https://github.com/nigunpark/mycelink>. The first public CI run
 (`37105450954`) failed on all six matrix legs; the fix (`41b99d8`) is pushed

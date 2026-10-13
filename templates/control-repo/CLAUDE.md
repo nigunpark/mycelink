@@ -33,6 +33,10 @@ features. Conversation history is never the source of truth.
   run, released in `finally` on every path.
 - Workers implement one node, inside one worktree, within one ownership
   fence, and never spawn subagents.
+- Run features with `/mycelink:run`: `mycelink dispatch` hands out one ticket
+  at a time for the Agent tool's `module-worker`, and `mycelink settle`
+  takes the result back. Never hand-progress nodes or do a worker's job in
+  the host session; deliver with `mycelink deliver`.
 - Ask the user only about product decisions, and record them in
   `DECISIONS.md`.
 

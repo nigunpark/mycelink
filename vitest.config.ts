@@ -4,8 +4,10 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     // The pilot suite is the only one that can incur model usage. It is
-    // opt-in and never part of the default run.
-    exclude: ['**/node_modules/**', 'tests/pilot/**'],
+    // opt-in and never part of the default run. The benchmark's fixtures
+    // hold recorded copies of the evaluated projects' own tests: data that
+    // suites read, never suites themselves.
+    exclude: ['**/node_modules/**', 'tests/pilot/**', 'tests/benchmark/fixtures/**'],
     environment: 'node',
     globalSetup: ['tests/helpers/global-setup.ts'],
     // Harness tests create real git repos and real file locks on disk.

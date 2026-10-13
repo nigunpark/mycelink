@@ -46,7 +46,11 @@ const EDGES: Record<NodeState, readonly NodeState[]> = {
   // Mid-flight verified states may fall back to READY when an attempt ends
   // without reaching DONE. Nothing was integrated and the evidence already
   // recorded is kept, so the next attempt resumes at its real next gate.
+  // They may also return to RED_PENDING: a RED run again after its tests
+  // changed, or the RED of a new red -> green cycle within the attempt
+  // (each RED binds its own test files; settle checks every cycle).
   RED_VERIFIED: [
+    'RED_PENDING',
     'GREEN_PENDING',
     'REVIEW_VERIFIED',
     'READY',
@@ -64,7 +68,13 @@ const EDGES: Record<NodeState, readonly NodeState[]> = {
     'BUDGET_EXHAUSTED',
     'PAUSED',
   ],
+  // GREEN may run again at a later head of the same attempt (a compatibility
+  // criterion's regression test committed after the code, which its output
+  // must name); a new cycle's production still follows its own RED, and
+  // settle judges the whole history and re-runs green at the head anyway.
   GREEN_VERIFIED: [
+    'RED_PENDING',
+    'GREEN_PENDING',
     'REFACTOR_VERIFIED',
     'REGRESSION_VERIFIED',
     'READY',
@@ -73,8 +83,8 @@ const EDGES: Record<NodeState, readonly NodeState[]> = {
     'INVALIDATED',
     'PAUSED',
   ],
-  REFACTOR_VERIFIED: ['REGRESSION_VERIFIED', 'READY', 'BLOCKED', 'NEEDS_DECISION', 'INVALIDATED', 'PAUSED'],
-  REGRESSION_VERIFIED: ['REVIEW_VERIFIED', 'READY', 'BLOCKED', 'NEEDS_DECISION', 'INVALIDATED', 'PAUSED'],
+  REFACTOR_VERIFIED: ['RED_PENDING', 'REGRESSION_VERIFIED', 'READY', 'BLOCKED', 'NEEDS_DECISION', 'INVALIDATED', 'PAUSED'],
+  REGRESSION_VERIFIED: ['RED_PENDING', 'GREEN_PENDING', 'REVIEW_VERIFIED', 'READY', 'BLOCKED', 'NEEDS_DECISION', 'INVALIDATED', 'PAUSED'],
   REVIEW_VERIFIED: ['INTEGRATED', 'READY', 'BLOCKED', 'NEEDS_DECISION', 'INVALIDATED', 'PAUSED'],
   INTEGRATED: ['DONE', 'BLOCKED', 'INVALIDATED', 'PAUSED'],
   DONE: ['INVALIDATED'],
@@ -123,7 +133,44 @@ export interface TransitionOptions {
   inputChanged?: boolean;
   /** Recorded on INTEGRATED. */
   integratedSha?: string;
+  /**
+   * INVALIDATED for a controller-authorized rework: the node's own DONE work
+   * is reopened because a later check found it wrong. Its inputs did not
+   * change, so its attempts and failure fingerprints carry on (no fresh
+   * budget), and all its evidence, RED included, is dropped: the repair must
+   * prove itself from a new RED.
+   */
+  rework?: boolean;
+  /**
+   * The attempt ended for an infrastructure reason (no worker could start,
+   * the host was interrupted), not because of the task. Returning to READY
+   * gives the attempt back and counts an interruption instead.
+   */
+  refundAttempt?: boolean;
+  /**
+   * With refundAttempt: a controller precondition did not hold (the node's
+   * worktree could not be set up). The attempt is given back and nothing is
+   * counted, not even an interruption: no worker ran.
+   */
+  precondition?: boolean;
+  /**
+   * With refundAttempt: a model provider ended the attempt's holder
+   * (CSET-203 r10). Given back, and counted on the provider ledger
+   * (engine/provider-interrupt.ts) rather than as an interruption: its own
+   * bounds stop the feature PROVIDER_UNAVAILABLE, never the node BLOCKED.
+   */
+  provider?: boolean;
   now?: string;
+}
+
+/**
+ * A full-suite regression whose failures all lie where dependents of the
+ * node re-verify (engine/regression-deferral.ts): its obligation passed to
+ * them, and only the controller's regression gate or fresh verification
+ * records it so.
+ */
+export function deferredRegression(record: EvidenceRecord): boolean {
+  return record.kind === 'regression' && Array.isArray(record.regression_deferred?.to) && (record.regression_deferred?.to.length ?? 0) > 0;
 }
 
 function sameCommand(a: readonly string[], b: readonly string[]): boolean {
@@ -140,11 +187,33 @@ function requireNode(graph: PortfolioGraph, nodeId: string): GraphNode {
  * Check the evidence gates for entering `to`. Throws with a specific code so
  * hooks can surface a short, actionable block reason.
  */
+/**
+ * Whether the node's current generation needs its own RED: every node whose
+ * graph requires one, except in a rework naming compatibility criteria only
+ * (its code is in the generation's base; a compatibility-regression unit
+ * proves it, engine/tdd-history.ts).
+ */
+export function redRequired(node: Pick<GraphNode, 'required_evidence'>, runtime: { rework_brief?: { red_required?: false } | null }): boolean {
+  return node.required_evidence.includes('red') && runtime.rework_brief?.red_required !== false;
+}
+
+/**
+ * A node whose current or settled generation proved itself without a RED: a
+ * compatibility-only rework (its brief, or once DONE its judged history: no
+ * RED cycle, compatibility-regression units only, after a rework).
+ */
+export function provedWithoutRed(runtime: { rework_brief?: { red_required?: false } | null; tdd_history?: { ok: boolean; cycles: number; compatibility_units?: number } | null; rework_history?: unknown[] }): boolean {
+  if (runtime.rework_brief?.red_required === false) return true;
+  const h = runtime.tdd_history ?? null;
+  return h !== null && h.ok && h.cycles === 0 && (h.compatibility_units ?? 0) > 0 && (runtime.rework_history?.length ?? 0) > 0;
+}
+
 function checkEvidenceGate(
   node: GraphNode,
-  runtime: { evidence: Partial<Record<EvidenceKind, EvidenceRecord>> },
+  runtime: { evidence: Partial<Record<EvidenceKind, EvidenceRecord>>; rework_brief?: { red_required?: false } | null },
   to: NodeState,
 ): void {
+  const needsRed = redRequired(node, runtime);
   const kind = EVIDENCE_GATE[to];
   if (kind !== undefined) {
     const record = runtime.evidence[kind];
@@ -170,7 +239,7 @@ function checkEvidenceGate(
           `RED failed for "${record.red_reason ?? 'unclassified'}"; only a missing behaviour is a valid RED.`,
         );
       }
-    } else if (record.exit_code !== 0) {
+    } else if (record.exit_code !== 0 && !deferredRegression(record)) {
       throw new TransitionError(
         'VERIFIER_FAILED',
         node.id,
@@ -178,7 +247,9 @@ function checkEvidenceGate(
       );
     }
 
-    if (kind === 'green') {
+    // A node whose graph requires no RED (a declaration-only change) proves GREEN alone;
+    // settle then holds its history to declaration paths only (engine/tdd-history.ts).
+    if (kind === 'green' && needsRed) {
       const red = runtime.evidence.red;
       if (!red) {
         throw new TransitionError(
@@ -200,6 +271,7 @@ function checkEvidenceGate(
   // Terminal gates: every declared evidence kind must be present and passing.
   if (to === 'REGRESSION_VERIFIED' || to === 'REVIEW_VERIFIED' || to === 'DONE') {
     const needed = node.required_evidence.filter((k) => {
+      if (k === 'red' && !needsRed) return false;
       if (to === 'REGRESSION_VERIFIED') return k === 'red' || k === 'green' || k === 'regression';
       if (to === 'REVIEW_VERIFIED') return k !== 'e2e' && k !== 'candidate';
       return true;
@@ -214,7 +286,16 @@ function checkEvidenceGate(
           `Entering ${to} requires "${kindNeeded}" evidence; none is recorded.`,
         );
       }
-      if (kindNeeded !== 'red' && rec.exit_code !== 0) {
+      // A RED re-run that passed or failed for setup reasons replaces the
+      // record; it is never carried to a terminal gate as if it were a RED.
+      if (kindNeeded === 'red' && (rec.exit_code === 0 || rec.red_reason !== 'behaviour-missing')) {
+        throw new TransitionError(
+          'INVALID_RED_EVIDENCE',
+          node.id,
+          `Entering ${to} requires a RED that failed for a missing behaviour; the recorded one ${rec.exit_code === 0 ? 'exited 0' : `failed for "${rec.red_reason ?? 'unclassified'}"`}.`,
+        );
+      }
+      if (kindNeeded !== 'red' && rec.exit_code !== 0 && !deferredRegression(rec)) {
         throw new TransitionError(
           'VERIFIER_FAILED',
           node.id,
@@ -223,6 +304,11 @@ function checkEvidenceGate(
       }
     }
   }
+}
+
+/** Whether `from -> to` is a declared edge (no evidence or justification checks). */
+export function isDeclaredEdge(from: NodeState, to: NodeState): boolean {
+  return from === to || EDGES[from].includes(to);
 }
 
 /**
@@ -254,7 +340,10 @@ export function applyNodeTransition(
     );
   }
 
-  if (JUSTIFIED_EXITS.has(from) && to === 'READY') {
+  // Every way out of a parked state needs the same justification: READY
+  // directly, or INVALIDATED / PAUSED / EXCLUDED, each of which leads back to
+  // READY. Moving between parked states (BLOCKED <-> NEEDS_DECISION) does not.
+  if (JUSTIFIED_EXITS.has(from) && !JUSTIFIED_EXITS.has(to)) {
     if (!options.decisionId && options.inputChanged !== true) {
       throw new TransitionError(
         'UNBLOCK_REQUIRES_JUSTIFICATION',
@@ -271,6 +360,10 @@ export function applyNodeTransition(
   runtime.updated_at = now;
 
   if (to === 'CLAIMED') runtime.attempts += 1;
+  if (options.refundAttempt === true && to === 'READY') {
+    runtime.attempts = Math.max(0, runtime.attempts - 1);
+    if (options.precondition !== true && options.provider !== true) runtime.interruptions = (runtime.interruptions ?? 0) + 1;
+  }
   if (CLAIM_RELEASING.has(to)) runtime.claim = null;
 
   if (to === 'BLOCKED' || to === 'NEEDS_DECISION' || to === 'BUDGET_EXHAUSTED') {
@@ -284,12 +377,17 @@ export function applyNodeTransition(
       runtime.attempts = 0;
       runtime.failure_counts = {};
       runtime.last_failure_fingerprint = null;
+      if (runtime.rework_brief) runtime.rework_brief.attempt_base = 0;
     }
   }
 
   if (to === 'INTEGRATED' && options.integratedSha) {
     runtime.integrated_sha = options.integratedSha;
   }
+  // The rework is repaired; a later reopening has a reason of its own.
+  if (to === 'DONE' && runtime.rework_brief) runtime.rework_brief = null;
+  // A refused history was redone test-first.
+  if (to === 'DONE' && runtime.tdd_rejection) runtime.tdd_rejection = null;
   if (to === 'INVALIDATED') {
     // RED is a historical fact: a test once proved the behaviour was missing,
     // and an upstream change does not undo that. Everything downstream of it
@@ -297,14 +395,24 @@ export function applyNodeTransition(
     // Keeping RED also means a node whose behaviour still holds can be
     // re-verified without manufacturing a fake failing test.
     const red = runtime.evidence.red;
-    runtime.evidence = red ? { red } : {};
+    runtime.evidence = red && options.rework !== true ? { red } : {};
     runtime.integrated_sha = null;
-    // Invalidation means the inputs changed, so this is a different problem.
-    // Carrying the old attempt count and fingerprints forward would exhaust
-    // the budget before the new problem had a single attempt.
-    runtime.attempts = 0;
-    runtime.failure_counts = {};
-    runtime.last_failure_fingerprint = null;
+    if (JUSTIFIED_EXITS.has(from) || options.rework === true) {
+      // A parked node keeps the history that parked it, and a reworked node
+      // the history of the work found wrong: attempts and fingerprints
+      // travel through INVALIDATED. A rework's own attempts are counted from
+      // its brief's attempt_base (scheduler/ready.ts), never by resetting them.
+      runtime.blocked_reason = null;
+    } else {
+      // Invalidating finished or in-flight work means its inputs changed, so
+      // this is a different problem. Carrying the old attempt count and
+      // fingerprints forward would exhaust the budget before the new problem
+      // had a single attempt.
+      runtime.attempts = 0;
+      runtime.failure_counts = {};
+      runtime.last_failure_fingerprint = null;
+      if (runtime.rework_brief) runtime.rework_brief.attempt_base = 0;
+    }
   }
 
   return next;
@@ -315,6 +423,23 @@ export interface FailureOptions {
   now?: string;
   /** Overrides the feature-level max_same_failure for this node. */
   maxSameFailure?: number;
+}
+
+/**
+ * A settlement whose own judged, verified record a gate cannot enter (CSET-203 r16: its RED, as the controller recorded
+ * it, was not the generation's): the controller's state, held and finished by the next dispatch, never the work's.
+ */
+export const SETTLE_GATE_STATE = 'SETTLE_GATE_STATE';
+
+/**
+ * Fingerprints of administrative states — the controller's own bookkeeping of a carry, a rebase, a revalidation or a
+ * stale order, never what the work did (CSET-203 r16). Recorded as the node's last failure when one reaches here, but
+ * never counted: the same administrative fingerprint can never park a node.
+ */
+const ADMINISTRATIVE = /^(?:SETTLE_GATE_STATE|CRITERION_REOPENED|COMPLETION_[A-Z_]+|REVIEW_ORDER_REBASED|REVIEW_GAP_STALE|REVIEW_REVISION_REPLACED|STALE_ORCHESTRATION_EPOCH|WORKER_RUNNING|INTEGRATION_LOCK_BUSY)\b/;
+
+export function isAdministrativeFingerprint(fingerprint: string): boolean {
+  return ADMINISTRATIVE.test(fingerprint);
 }
 
 /**
@@ -336,10 +461,21 @@ export function recordFailure(
   const runtime = next.nodes[nodeId];
   if (!runtime) throw new TransitionError('UNKNOWN_NODE', nodeId, `No runtime state.`);
 
-  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
-  runtime.failure_counts[fingerprint] = count;
   runtime.last_failure_fingerprint = fingerprint;
   runtime.updated_at = options.now ?? new Date().toISOString();
+  // The controller's own administrative state is never the work's failure: never counted, never parks the node.
+  if (isAdministrativeFingerprint(fingerprint)) return next;
+  // A fingerprint counts once per claim: a worker iterating on a failing
+  // gate inside one attempt is not looping. The same fingerprint in another
+  // attempt counts again, which is what stops a real loop.
+  const claim = runtime.claim;
+  if (claim) {
+    const counted = claim.counted_fingerprints ?? [];
+    if (counted.includes(fingerprint)) return next;
+    claim.counted_fingerprints = [...counted, fingerprint].slice(-50);
+  }
+  const count = (runtime.failure_counts[fingerprint] ?? 0) + 1;
+  runtime.failure_counts[fingerprint] = count;
 
   const limit =
     options.maxSameFailure ?? node.worker.max_same_failure ?? next.budget.max_same_failure;

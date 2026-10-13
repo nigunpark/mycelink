@@ -1,8 +1,10 @@
 # Threat model
 
 This document describes what Mycelink protects, from whom, and how. It covers
-`0.2.0-beta.1`. Each mitigation names the code that implements it and the
-tests that prove it.
+`0.3.0-beta.1`. Each mitigation names the code that implements it and the
+tests that prove it. The controller authority, claim capabilities and hook
+fences that several mitigations rely on are specified in
+[PERMISSION_MODEL.md](PERMISSION_MODEL.md).
 
 ## What Mycelink is
 
@@ -45,6 +47,55 @@ It has no server component, opens no listening ports and sends no telemetry.
   `tests/integration/hooks.test.ts`,
   `tests/security/untrusted-content.test.ts`).
 - TaskCompleted is blocked without evidence regardless of prose claims.
+
+### T1b. Criterion evidence that proves less than the criterion says
+
+- A test id named for a criterion proves nothing about the clauses its
+  assertions never reach (CSET-203 r2). An independent, read-only acceptance
+  reviewer judges every criterion by its words before any candidate; its
+  verdict is advisory, but its bindings (review, generation, inputs hash),
+  coverage (every clause traced, every boundary covered, regression evidence
+  for compatibility) and evidence ids are checked mechanically, its Write is
+  attested by the fence, and its PASS receipt is bound to the repository
+  heads, graph and criteria a candidate binds (`src/engine/acceptance-review.ts`;
+  `tests/integration/acceptance-review.test.ts`,
+  `tests/security/acceptance-reviewer-fence.test.ts`). A forged, stale,
+  incomplete or unattested verdict is refused; hidden acceptance stays the
+  final judge. Its prose is canonicalised where it enters (NFC, whitespace,
+  a marked cut at its bound with the original's length and hash kept; never
+  an id, hash, path, evidence reference or list), and refused when it
+  carries control or bidirectional characters, invalid Unicode, credentials,
+  Mycelink authority or embedded instructions, since a GAP's reproduction
+  becomes a worker's rework reason; the receipt binds the canonical verdict
+  and the attested original's hash
+  (`tests/security/review-verdict-content.test.ts`). A worker's
+  review-gap challenge is data checked against the claim, the red gate's
+  own snapshot of the tests it ran, the review's pinned receipt and the
+  repository (exact reason and reproduction hashes, tests added only, no
+  production change, concrete assertions); its prose is canonicalised and
+  refused on the same grounds, its archived evidence is Mycelink's alone
+  (the fence refuses every writer), and nothing of it is integrated; a
+  refinement is a reviewer verdict like any other, attested and judged
+  (`src/engine/review-challenge.ts`;
+  `tests/security/review-challenge-content.test.ts`,
+  `tests/integration/review-challenge.test.ts`). A reviewer's final answer
+  is taken as its verdict (CSET-203 r8) only as Claude Code recorded it,
+  never from the controller's words: the fence records the host session's
+  Agent call for the reviewer (call id, session, transcript, prompt hash,
+  open generation, epoch) where only Mycelink writes, nobody writes a
+  session or subagent transcript or meta, and no session runs the hook
+  entrypoint itself; `review ingest` (and settle) prove the answer is the
+  completed final message of exactly that launched reviewer, bound to the
+  open generation's capability, epoch and inputs, accept it only when the
+  whole answer is one JSON object (raw or one ```json fence; bounded bytes
+  and depth, no duplicate key), write it to the generation's verdict file
+  alone, exclusively and through no link, and attest it with the answer's
+  and transcript's hashes; a written verdict and a different answer are
+  refused (`REVIEW_OUTPUT_CONFLICT`) (`src/engine/review-transport.ts`;
+  `tests/security/review-result-transport.test.ts`,
+  `tests/integration/review-ingest.test.ts`). Residual: code running as the
+  same OS user that bypasses the fence (not a tool call) can still forge
+  transcripts, as it can forge any file.
 
 ### T2. Prompt injection through PRD, plan or graph text
 
@@ -125,6 +176,27 @@ It has no server component, opens no listening ports and sends no telemetry.
   merge`, `git rebase`, `git cherry-pick` and worktree management in sessions.
   Destructive Git operations (`reset --hard`, `clean`) run only inside
   Mycelink's own integration worktrees.
+- A repository's `worktree_setup` is operator configuration that Mycelink
+  executes in every worktree it creates (worker, fresh verification,
+  delivery acceptance). It is argv only (never a shell), runs with a
+  hardened environment (the session's PATH, HOME and cache locations and
+  its own declared `env`; no proxy, credential, loader or Mycelink
+  variable), within a timeout, and is refused when it changes a tracked
+  file, leaves untracked output, moves HEAD, changes git configuration or
+  hooks (configuration it changed is restored), or leaves a link out of the
+  worktree. Each run leaves a receipt bound to the worktree, its commit and
+  the configuration's hash; claims, tickets, packs and evidence bind it, so
+  a worker cannot change what prepared its worktree. Hooks block direct
+  edits of the control repository's `repositories.yaml`. A setup may
+  declare `inputs` (relative globs inside the worktree, never `..` or
+  `.git`): the receipt binds their content (a symlinked input as the link,
+  never followed), and a gate that finds them changed runs the same setup
+  again before anything else, refusing the gate when it fails. A worker
+  can thereby make the controller run the operator's setup over manifests
+  it wrote; that runs nothing its own tests could not, under the same
+  environment and receipt checks. Residual: a
+  same-user process can still rewrite installed dependencies inside its own
+  worktree; fresh verification sets up its own clean checkout.
 
 ### T11. Supply chain and release integrity
 

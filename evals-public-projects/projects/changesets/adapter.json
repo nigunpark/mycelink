@@ -1,0 +1,86 @@
+{
+  "schema": "mycelink-bench/project-adapter@1",
+  "id": "changesets",
+  "name": "Changesets",
+  "implementation": "pnpm-vitest",
+  "source_lock": "source.lock.json",
+  "workspace": { "repo_dir": "repos/changesets", "branch": "main" },
+  "modules": [
+    { "id": "apply-release-plan", "path": "packages/apply-release-plan", "description": "@changesets/apply-release-plan: writes versions, changelogs and consumes changesets" },
+    { "id": "assemble-release-plan", "path": "packages/assemble-release-plan", "description": "@changesets/assemble-release-plan: computes the release plan" },
+    { "id": "changelog-git", "path": "packages/changelog-git", "description": "@changesets/changelog-git" },
+    { "id": "changelog-github", "path": "packages/changelog-github", "description": "@changesets/changelog-github" },
+    { "id": "cli", "path": "packages/cli", "description": "@changesets/cli: the `changeset` command" },
+    { "id": "color", "path": "packages/color", "description": "@changesets/color" },
+    { "id": "config", "path": "packages/config", "description": "@changesets/config: config schema, parsing and validation" },
+    { "id": "errors", "path": "packages/errors", "description": "@changesets/errors: shared error classes" },
+    { "id": "get-dependents-graph", "path": "packages/get-dependents-graph", "description": "@changesets/get-dependents-graph" },
+    { "id": "get-github-info", "path": "packages/get-github-info", "description": "@changesets/get-github-info" },
+    { "id": "get-release-plan", "path": "packages/get-release-plan", "description": "@changesets/get-release-plan" },
+    { "id": "get-version-range-type", "path": "packages/get-version-range-type", "description": "@changesets/get-version-range-type" },
+    { "id": "git", "path": "packages/git", "description": "@changesets/git" },
+    { "id": "logger", "path": "packages/logger", "description": "@changesets/logger" },
+    { "id": "parse", "path": "packages/parse", "description": "@changesets/parse: changeset file parser" },
+    { "id": "pre", "path": "packages/pre", "description": "@changesets/pre: pre mode state" },
+    { "id": "read", "path": "packages/read", "description": "@changesets/read: reads changeset files" },
+    { "id": "release-utils", "path": "packages/release-utils", "description": "@changesets/release-utils" },
+    { "id": "should-skip-package", "path": "packages/should-skip-package", "description": "@changesets/should-skip-package" },
+    { "id": "types", "path": "packages/types", "description": "@changesets/types: shared TypeScript types (declarations only: src/index.ts)", "runtime_tests": false },
+    { "id": "write", "path": "packages/write", "description": "@changesets/write: writes changeset files" },
+    { "id": "test-utils", "path": "scripts/test-utils", "description": "@changesets/test-utils: shared test fixtures (private)" },
+    { "id": "e2e", "path": "scripts/e2e", "description": "@changesets/e2e: end-to-end suite (separate dependency set)" },
+    { "id": "site", "path": "site", "description": "documentation website (no runtime tests upstream)", "runtime_tests": false }
+  ],
+  "shared_paths": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "tsdown.config.ts", "vitest.config.ts", "eslint.config.js", ".changeset/**", "docs/**", "wiki/**", ".github/**", "README.md", "LICENSE"],
+  "test_paths": ["**/*.test.ts", "**/__tests__/**", "**/__snapshots__/**", "**/__acceptance__/**", "**/test-utils/**", "scripts/test-utils/**"],
+  "toolchain": {
+    "runtime": "node",
+    "versions": { "node": "24.14.1", "pnpm": "11.13.1" },
+    "cache": { "kind": "pnpm-store", "dir": "pnpm/changesets", "corepack_dir": "corepack" }
+  },
+  "env": {
+    "TZ": "UTC",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "CI": "1",
+    "NO_COLOR": "1",
+    "COREPACK_ENABLE_NETWORK": "0",
+    "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+    "npm_config_registry": "http://127.0.0.1:9/",
+    "pnpm_config_minimum_release_age": "0",
+    "pnpm_config_trust_policy": "off"
+  },
+  "commands": {
+    "timeout_seconds": 1800,
+    "install": ["pnpm", "install", "--frozen-lockfile", "--offline", "--filter=!@changesets/e2e", "--package-import-method=copy"],
+    "build": ["pnpm", "build"],
+    "test": ["pnpm", "vitest", "run"]
+  },
+  "tolerated_build_mutations": [
+    {
+      "path": "packages/config/package.json",
+      "baseline_blob": "9b706145cd02835446a983547d185c0a72ceb6ae",
+      "built_blob": "e711d5a415975d2254a294ace5f70bee4bcb2f69",
+      "evidence": "Upstream quirk: `pnpm build` (tsdown) rewrites `inlinedDependencies.valibot` from 1.4.2 to 1.5.0, the version pnpm-lock.yaml resolves, on every build of the frozen commit."
+    }
+  ],
+  "baseline_exclusions": [
+    {
+      "scope": "scripts/e2e/**",
+      "reason": "The upstream end-to-end suite has its own workspace and dependency set (npm/pnpm/yarn binaries, node-pty, a local registry). The root vitest config excludes it and the upstream bootstrap does not install it.",
+      "evidence": "vitest.config.ts: exclude [...configDefaults.exclude, \"scripts/e2e/**\"]; package.json: \"bootstrap\": \"pnpm install --filter=!@changesets/e2e\"."
+    }
+  ],
+  "harness": {
+    "frozen": ["package.json", "pnpm-workspace.yaml", "tsconfig.json", "tsdown.config.ts", "vitest.config.ts", "eslint.config.js", "**/tsdown.config.*", "**/tsconfig*.json", "**/vitest.config.*", "**/vitest.workspace.*", "**/vite.config.*", "**/babel.config.*", "**/.babelrc*", "**/.npmrc", "**/.pnpmfile.cjs"],
+    "forbidden_new": ["**/package.json", "**/pnpm-workspace.yaml", "**/vitest.config.*", "**/vitest.workspace.*", "**/vitest.setup.*", "**/vite.config.*", "**/setupTests.*", "**/setup-tests.*", "**/jest.config.*", "**/.mocharc*", "**/babel.config.*", "**/.babelrc*", "**/tsconfig*.json", "**/tsdown.config.*", "**/.npmrc", "**/.pnpmfile.cjs", "**/__mocks__/**"],
+    "framework_modules": ["vitest", "@vitest/*", "vite", "vite-node", "chai", "tinyspy", "jest", "@jest/*", "node:test"],
+    "manifests": "pnpm"
+  },
+  "workspace_notes": [
+    "Dependencies install offline from a pre-populated pnpm store; do not add dependencies.",
+    "Tests resolve workspace packages through their built dist: run `pnpm build` before `pnpm vitest run`, and again after changing package sources.",
+    "Upstream quirk: `pnpm build` rewrites packages/config/package.json (inlinedDependencies valibot 1.4.2 -> 1.5.0). Do not commit that change.",
+    "The test suite creates git repositories and needs a git identity (GIT_AUTHOR_* / GIT_COMMITTER_* or a global user.name and user.email)."
+  ]
+}

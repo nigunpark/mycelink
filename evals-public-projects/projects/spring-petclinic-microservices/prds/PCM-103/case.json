@@ -1,0 +1,67 @@
+{
+  "schema": "mycelink-bench/prd-case@1",
+  "id": "PCM-103",
+  "case": "petclinic-idempotent-visit-booking",
+  "project": "spring-petclinic-microservices",
+  "archetype": "failure-concurrency-recovery",
+  "title": "Book a visit exactly once, even when requests are retried",
+  "requirement": "requirement.md",
+  "modules": {
+    "required": [
+      "visits-service",
+      "api-gateway"
+    ],
+    "allowed": [
+      "visits-service",
+      "api-gateway"
+    ]
+  },
+  "allowed_shared_paths": [
+    "docs/**",
+    "README.md"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "modules": [
+        "visits-service"
+      ],
+      "kind": "compatibility"
+    },
+    {
+      "id": "AC-6",
+      "modules": [
+        "api-gateway"
+      ]
+    }
+  ],
+  "budget": {
+    "max_turns": 200,
+    "timeout_seconds": 3600
+  },
+  "evaluator_lock": "evaluator.lock.json"
+}

@@ -1,0 +1,62 @@
+{
+  "schema": "mycelink-bench/prd-case@1",
+  "id": "PCM-102",
+  "case": "petclinic-not-found-semantics",
+  "project": "spring-petclinic-microservices",
+  "archetype": "backward-compatible-behavioral-change",
+  "title": "Unknown owners and pets answer 404 everywhere",
+  "requirement": "requirement.md",
+  "modules": {
+    "required": [
+      "customers-service",
+      "api-gateway"
+    ],
+    "allowed": [
+      "customers-service",
+      "api-gateway"
+    ]
+  },
+  "allowed_shared_paths": [
+    "docs/**",
+    "README.md"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "modules": [
+        "customers-service"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "modules": [
+        "customers-service"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "modules": [
+        "api-gateway"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "modules": [
+        "api-gateway"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "modules": [
+        "customers-service",
+        "api-gateway"
+      ],
+      "kind": "compatibility"
+    }
+  ],
+  "budget": {
+    "max_turns": 200,
+    "timeout_seconds": 3600
+  },
+  "evaluator_lock": "evaluator.lock.json"
+}

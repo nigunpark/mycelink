@@ -9,6 +9,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { gitDone, gitIntent } from '../state/provenance.js';
 
 export interface GitResult {
   exitCode: number;
@@ -36,12 +37,15 @@ export interface GitOptions {
 }
 
 export function runGit(cwd: string, args: string[], options: GitOptions = {}): GitResult {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', ...options.env };
+  // With MYCELINK_PROVENANCE, what a command that can change the repository changed is recorded (state/provenance.ts).
+  const recorded = gitIntent(cwd, args, env);
   const proc = spawnSync('git', args, {
     cwd,
     encoding: 'utf8',
     timeout: options.timeoutMs ?? 120_000,
     windowsHide: true,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...options.env },
+    env,
   });
   const result: GitResult = {
     exitCode: proc.status ?? (proc.error ? 127 : 1),
@@ -49,6 +53,7 @@ export function runGit(cwd: string, args: string[], options: GitOptions = {}): G
     stderr: proc.stderr ?? (proc.error ? String(proc.error.message) : ''),
     command: ['git', ...args],
   };
+  if (recorded !== null) gitDone(recorded, result.exitCode);
   if (result.exitCode !== 0 && !options.allowFail) throw new GitError(result);
   return result;
 }

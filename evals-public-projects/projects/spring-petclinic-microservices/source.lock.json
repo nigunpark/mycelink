@@ -1,0 +1,48 @@
+{
+  "schema": "mycelink-bench/source-lock@2",
+  "project": "spring-petclinic-microservices",
+  "remote": "https://github.com/spring-petclinic/spring-petclinic-microservices.git",
+  "commit": "dc9ca15a71189bc4be6c02518d7180232c0555b7",
+  "tree": "331b9c634e1e411e89a42cc740f6e641e5de2340",
+  "object_format": "sha1",
+  "content": {
+    "tree_sha256": "fd546a2917171e4d7fc747264c457449f2538841a55836a8b5cc59eb1b1a97ee",
+    "files": 200
+  },
+  "history": {
+    "kind": "shallow",
+    "commits": 1,
+    "shallow_boundary": [
+      "dc9ca15a71189bc4be6c02518d7180232c0555b7"
+    ],
+    "digest_sha256": "bdc834228d9bb03b5716bf303360aa398ed96ed1361a708205ff55baaf4a38e7"
+  },
+  "bundle": {
+    "file": "spring-petclinic-microservices-dc9ca15.bundle",
+    "version": 2,
+    "refs": [
+      {
+        "name": "HEAD",
+        "sha": "dc9ca15a71189bc4be6c02518d7180232c0555b7"
+      }
+    ],
+    "prerequisites": [],
+    "transport": {
+      "sha256": "b3041b620456429e7e48b473befaae1f4e20c3c8791b019d5b359225d9c33f9f",
+      "size": 1431986
+    }
+  },
+  "license": {
+    "spdx": "Apache-2.0",
+    "files": [
+      {
+        "path": "LICENSE",
+        "blob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+      }
+    ]
+  },
+  "identity_sha256": "92ab8fe8fd6e365586f2a0821fd8a3461093e8d3cc3b1d217b11b32c6cc0f8f7",
+  "notes": [
+    "The bundle was cut from a depth-1 clone: it holds one commit whose parent aefaf7fa9eb0ab911a24c346ca0e4dc5837251c7 is absent. `git fetch` from it fails its connectivity check, so the importer unbundles the pack and records the commit as the shallow boundary."
+  ]
+}

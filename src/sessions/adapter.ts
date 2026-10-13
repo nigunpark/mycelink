@@ -8,10 +8,21 @@
 import type { UsageTotals } from '../model/types.js';
 
 export interface NodeResult {
-  schema_version: 1;
+  /** 2: each criterion an acceptance review's rework orders may be answered on its own (outcome CRITERIA). */
+  schema_version: 1 | 2;
   node_id: string;
   claim_id: string;
-  outcome: 'SUBMITTED' | 'RETRYABLE' | 'BLOCKED' | 'NEEDS_DECISION' | 'BUDGET_EXHAUSTED';
+  /** The host dispatch generation the result answers (host-dispatched claims only). */
+  dispatch_id?: string;
+  /** The orchestration epoch the dispatch was issued at, as its ticket gives it (state/orchestration.ts). */
+  orchestration_epoch?: number;
+  /**
+   * REVIEW_GAP_CHALLENGE: in an acceptance review's rework, the review's exact reproduction passed on the unchanged
+   * integrated head; `challenge` says so, structured, for settle to check (engine/review-challenge.ts).
+   * CRITERIA (schema_version 2): each criterion the rework orders answered on its own, in `criteria`
+   * (engine/criterion-outcomes.ts): some done, some challenged, some unresolved, in one execution.
+   */
+  outcome: 'SUBMITTED' | 'RETRYABLE' | 'BLOCKED' | 'NEEDS_DECISION' | 'BUDGET_EXHAUSTED' | 'REVIEW_GAP_CHALLENGE' | 'CRITERIA';
   commands: { command: string[]; exit_code: number; cwd?: string }[];
   commit_sha?: string | null;
   branch?: string | null;
@@ -25,6 +36,78 @@ export interface NodeResult {
   } | null;
   usage?: Partial<UsageTotals>;
   notes?: string;
+  /**
+   * The worker's own account of its history: the base and head it worked
+   * between and, per RED -> GREEN cycle, its test-only and production
+   * commits (optionally the RED test files by blob). Settle checks it
+   * against the repository; a claim that does not match fails closed.
+   */
+  tdd?: {
+    base_sha: string;
+    head_sha: string;
+    cycles: { red_commits: string[]; green_commits: string[]; red_tests?: { path: string; blob: string | null }[] }[];
+  };
+  /**
+   * For each acceptance criterion the node serves: the named test that proves
+   * it, the gate that ran it and that gate's output hash (engine/criteria.ts).
+   */
+  criterion_evidence?: CriterionEvidence[];
+  /** With outcome REVIEW_GAP_CHALLENGE: the challenge of a review gap (schemas/node-result.schema.json). With outcome CRITERIA: the gaps of its challenged criteria. */
+  challenge?: WorkerChallenge;
+  /** With outcome CRITERIA: every criterion the rework orders, exactly once, with its own outcome. */
+  criteria?: CriterionOutcome[];
+}
+
+/** One ordered criterion's own outcome in a per-criterion result (engine/criterion-outcomes.ts). */
+export interface CriterionOutcome {
+  criterion: string;
+  outcome: 'DONE' | 'REVIEW_GAP_CHALLENGE' | 'BLOCKED' | 'NEEDS_DECISION';
+  /** BLOCKED or NEEDS_DECISION: why, for this criterion alone. */
+  reason?: string;
+  /** NEEDS_DECISION: the question a person answers for this criterion. */
+  decision_request?: { question: string; options: string[]; category?: string };
+  /** DONE: a test named for this criterion and another, traced to this criterion's own clauses. */
+  clauses?: { clause: string; test_id: string; assertions: string[]; trace: string }[];
+}
+
+/** A review-gap challenge as a worker writes it (engine/review-challenge.ts judges it). */
+export interface WorkerChallenge {
+  review_id: string;
+  reason_sha256: string;
+  base_sha: string;
+  /** The red gate whose run of the focused tests passed; null when every gap cites a reproduction capsule instead. */
+  gate_output_sha256: string | null;
+  gaps: {
+    criterion: string;
+    reproduction_sha256: string;
+    /** The passing reproduction capsule of this gap (engine/reproduction-capsule.ts): its id and receipt hash. */
+    capsule?: { capsule_id: string; capsule_sha256: string };
+    tests: string[];
+    clauses: { clause: string; test_id: string; assertions: string[]; trace: string }[];
+    explanation: string;
+  }[];
+}
+
+export interface CriterionEvidence {
+  criterion: string;
+  /**
+   * The canonical id of the test that proves it, as the gate that ran it
+   * published it (evidence/test-ids.ts). Absent only for a declaration
+   * criterion (or a declaration-only node's), proved by its GREEN alone.
+   */
+  test_id?: string;
+  /**
+   * Beside a test_id, display only. Without one (legacy), the path and name
+   * count only when they name exactly one test the gate ran.
+   */
+  test?: { path: string; name: string };
+  gate: 'red' | 'green' | 'regression';
+  output_sha256: string;
+  /**
+   * A RED promoted from a failing reproduction capsule of this claim (gate "red" only): the capsule that ran the
+   * review's exact reproduction on the unchanged base and failed. Its files must be what the history committed.
+   */
+  capsule_id?: string;
 }
 
 export type SessionStatus =
@@ -118,6 +201,12 @@ export interface SessionAdapter {
 export function statusForOutcome(outcome: NodeResult['outcome']): SessionStatus {
   switch (outcome) {
     case 'SUBMITTED':
+      return 'done';
+    case 'REVIEW_GAP_CHALLENGE':
+      // A claim for settle to judge, like a submission: never a parked node (engine/review-challenge.ts).
+      return 'done';
+    case 'CRITERIA':
+      // Each ordered criterion's own outcome, for settle to judge one by one: never the whole node parked or failed.
       return 'done';
     case 'BLOCKED':
       return 'blocked';

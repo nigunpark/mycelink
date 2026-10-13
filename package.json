@@ -1,6 +1,6 @@
 {
   "name": "mycelink",
-  "version": "0.2.0-beta.1",
+  "version": "0.3.0-beta.1",
   "description": "Connect repositories. Coordinate agents. Ship one feature.",
   "license": "Apache-2.0",
   "author": "Mycelink Contributors",
@@ -22,7 +22,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "build:check": "node scripts/build.mjs && git diff --exit-code -- dist THIRD_PARTY_NOTICES.md",
+    "build:check": "node scripts/build.mjs && git diff --exit-code -- dist THIRD_PARTY_NOTICES.md schemas/acceptance-review-verdict.schema.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
@@ -32,6 +32,10 @@
     "test:release": "vitest run tests/release",
     "test:plugin": "vitest run tests/plugin-e2e",
     "test:pilot": "vitest run --config vitest.pilot.config.ts",
+    "test:benchmark": "vitest run tests/benchmark",
+    "bench:cases:check": "node evals-public-projects/tools/generate-cases.mjs --check",
+    "bench:selftest": "node evals-public-projects/tools/selftest.mjs",
+    "audit:constraints:check": "node scripts/constraint-audit.mjs --check",
     "package": "node scripts/package.mjs",
     "validate:plugin": "claude plugin validate --strict .",
     "verify": "npm run typecheck && npm run build && vitest run"

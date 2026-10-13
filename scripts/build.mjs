@@ -75,5 +75,26 @@ chmodSync(outfile, 0o755);
 
 writeFileSync(noticesFile, thirdPartyNotices(root, [...bundled].sort()), 'utf8');
 
+// The acceptance reviewer's verdict schema, generated from the bounds the judge
+// itself reads (VERDICT_LIMITS in src/engine/acceptance-review.ts), so the
+// schema, the reviewer's prompt and the judge cannot drift apart.
+const schemaModule = await build({
+  absWorkingDir: root,
+  stdin: { contents: "export { verdictJsonSchema } from './src/engine/acceptance-review.ts';", resolveDir: root, loader: 'ts' },
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22.12',
+  write: false,
+  logLevel: 'warning',
+  banner: { js: "import { createRequire as __mycelinkCreateRequire } from 'node:module';\nconst require = __mycelinkCreateRequire(import.meta.url);" },
+});
+const schemaTmp = join(root, 'build', 'verdict-schema.mjs');
+mkdirSync(dirname(schemaTmp), { recursive: true });
+writeFileSync(schemaTmp, schemaModule.outputFiles[0].text);
+const { verdictJsonSchema } = await import(`file://${schemaTmp.replace(/\\/g, '/')}`);
+rmSync(schemaTmp, { force: true });
+writeFileSync(join(root, 'schemas', 'acceptance-review-verdict.schema.json'), JSON.stringify(verdictJsonSchema(), null, 2) + '\n', 'utf8');
+
 const bytes = readFileSync(outfile).byteLength;
 process.stdout.write(`built ${outfile} (${bytes} bytes); ${bundled.size} bundled packages\n`);

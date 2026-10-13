@@ -12,7 +12,7 @@ completion.
 Conversation history is never the source of truth. The PRD, the graph, the
 state file, the event log, recorded command evidence and Git SHAs are.
 
-> **Status: public beta (`0.2.0-beta.1`).** Interfaces may change before 1.0.
+> **Status: public beta (`0.3.0-beta.1`).** Interfaces may change before 1.0.
 > Mycelink is an independent, third-party project. It is **not affiliated with
 > or endorsed by Anthropic**. Licensed under [Apache-2.0](LICENSE). No telemetry.
 
@@ -199,8 +199,8 @@ claude plugin install mycelink@mycelink-marketplace
 ```bash
 # download mycelink-<version>.zip and mycelink-<version>.zip.sha256 from
 # https://github.com/nigunpark/mycelink/releases
-sha256sum -c mycelink-0.2.0-beta.1.zip.sha256        # PowerShell: Get-FileHash
-unzip mycelink-0.2.0-beta.1.zip -d mycelink
+sha256sum -c mycelink-0.3.0-beta.1.zip.sha256        # PowerShell: Get-FileHash
+unzip mycelink-0.3.0-beta.1.zip -d mycelink
 claude plugin marketplace add ./mycelink
 claude plugin install mycelink@mycelink-marketplace
 ```
@@ -234,28 +234,79 @@ Inside Claude Code (commands are namespaced by the plugin):
 /mycelink:verify FEAT-101
 ```
 
+`/mycelink:run FEAT-101` on its own runs every phase without stopping in
+between: init (if needed), PRD, plan, the dispatch/settle loop, the
+independent acceptance review, the candidate and delivery. The phase commands are for running one step by hand.
+
 The same flow with the CLI (`node <plugin>/bin/mycelink.mjs`, shown as
 `mycelink`):
 
 ```bash
 # 1. Create and version a control repository, then register repositories.
 mycelink init ../control && git -C ../control init
-mycelink repo register --control-root ../control --name core --path ../core --base-branch main -- npm test
-mycelink repo register --control-root ../control --name api  --path ../api  --base-branch main -- python -m pytest
+#    Controller-only commands need the controller key. It is printed once
+#    and never stored; workers never receive it. Keep it as $KEY below.
+mycelink controller open --control-root ../control --json   # -> {"authority": "<key>", ...}
+mycelink repo register --control-root ../control --authority $KEY --name core --path ../core --base-branch main -- npm test
+mycelink repo register --control-root ../control --authority $KEY --name api  --path ../api  --base-branch main -- python -m pytest
+#    Settle checks each node's history test-first; which paths are tests has
+#    conservative defaults, replaced per repository with --test-paths,
+#    --production-roots and --declaration-paths (comma-separated globs).
+#    A repository whose dependencies are not tracked (node_modules) also gets
+#    --worktree-setup '["npm","ci","--offline"]': the controller runs it, argv
+#    only, in every new worktree before a worker or verifier uses it.
 mycelink repo audit  --control-root ../control
 mycelink doctor      --control-root ../control
 
 # 2. Write features/FEAT-101/PRD.md and PORTFOLIO-GRAPH.yaml
 #    (/mycelink:prd and /mycelink:plan do this with you; see templates/).
 
-# 3. Validate, initialise, inspect, run, prove.
+# 3. Validate, initialise, inspect.
 mycelink graph validate     FEAT-101 --control-root ../control
-mycelink feature init       FEAT-101 --control-root ../control
+mycelink feature init       FEAT-101 --control-root ../control --authority $KEY
 mycelink orchestrate ready  FEAT-101 --control-root ../control
-mycelink orchestrate run    FEAT-101 --control-root ../control --json
+
+# 4. Run: the host loop /mycelink:run drives inside Claude Code.
+mycelink dispatch FEAT-101 --control-root ../control --authority $KEY --json
+#    -> {"status": "DISPATCHED", "ticket": {...}}: give ticket.prompt to the
+#       Agent tool (subagent mycelink:module-worker); it writes ticket.result_slot.
+mycelink settle   FEAT-101 <node-id> --capability <ticket.capability> --control-root ../control --json
+#    ... repeat dispatch/settle. Once every node is DONE, dispatch hands out the
+#    acceptance review (ticket.kind acceptance-review): give its prompt to the
+#    Agent tool (subagent mycelink:acceptance-reviewer), then run its
+#    settle_command (review settle). PASS lets the candidate be cut; GAPS has
+#    reworked the producers its gaps belong to. Repeat until ALL_SETTLED.
+
+# 5. Prove and deliver.
 mycelink feature verify     FEAT-101 --control-root ../control
 mycelink candidate verify   FEAT-101 --control-root ../control
+mycelink deliver            FEAT-101 --control-root ../control --authority $KEY --json
+
+# 6. A check that fails after a node was DONE (acceptance on the delivered
+#    commits, say) is repaired in the same feature, not a new feature id:
+mycelink feature owners FEAT-101 <repo>:<path> --since-delivery --control-root ../control   # which node owns it
+mycelink node rework FEAT-101 <node-id> --reason "<failing check: input, expected, actual>" --control-root ../control --authority $KEY
+#    ... then dispatch/settle again; the new candidate binds every repository; deliver.
 ```
+
+Outside Claude Code, `mycelink orchestrate run FEAT-101 --json` drives the
+same cycle with the standalone CLI adapter, which spawns `claude -p`
+workers itself; `mycelink doctor` reports whether that executable can start.
+Neither `dispatch` nor `deliver` ever pushes. A candidate always binds
+every registered repository (one the feature never touched at its base), and
+pins only the global configuration and its own feature's files, so planning
+another feature does not invalidate it.
+
+`settle` and the gate commands take the claim's `--capability`, never the
+controller key. The first key of a control repository is opened before any
+work is dispatched. After that, a new key comes only from its holder
+(`controller open --authority $KEY`, which rotates it while no claim is
+live) or from you at an interactive terminal (`controller open --takeover`),
+so a worker can never mint one. A new Claude session, after the session that
+held the key ended, recovers it with `controller open --recover` (refused while
+that session, an adapter worker or a settle still runs); only then does it ask
+you for a takeover. See
+[docs/PERMISSION_MODEL.md](docs/PERMISSION_MODEL.md).
 
 `--control-root` can be omitted when you run from inside the control
 repository (it is found by walking up to `mycelink.config.json`) or when
@@ -292,6 +343,7 @@ repositories:
 | `brain_dir` | `null` | optional LLM Wiki Brain directory |
 | `allow_shell_commands` | `false` | permit verifiers that declare `shell: true` (trusts graph authors with arbitrary commands) |
 | `allow_dangerous_permission_bypass` | `false` | permit permission-bypass flags in `claude_extra_args` (only for disposable sandboxes) |
+| `acceptance_review` | `{"required": true, "max_rounds": 2}` | the independent, read-only acceptance review before any candidate; per criterion, `max_rounds` (1..5) accepted reworks on a materially new gap alone, then more on verified producer progress up to `criterion_ceiling` (max_rounds..32, default 6, where a person decides); `max_review_sessions` (1..64, default 8) and an optional `review_wall_clock_minutes` bound the review; fixed per feature at `feature init` |
 
 The PreToolUse hook blocks model edits to `mycelink.config.json` and
 `.claude/settings.json`; change them yourself.
@@ -330,7 +382,8 @@ verification commands (argv) and a worker budget.
 claude plugin marketplace update mycelink-marketplace
 claude plugin update mycelink@mycelink-marketplace
 # then, for every control repository, refresh the hook paths:
-node <new-install-path>/bin/mycelink.mjs init <control-repo>
+node <new-install-path>/bin/mycelink.mjs controller open --takeover --control-root <control-repo>   # in your terminal; prints a new key
+node <new-install-path>/bin/mycelink.mjs init <control-repo> --authority <key>
 node <new-install-path>/bin/mycelink.mjs doctor --control-root <control-repo>
 ```
 
@@ -377,7 +430,7 @@ entries from its `.claude/settings.json` by hand.
 | Symptom | Fix |
 |---|---|
 | `Mycelink runtime bundle is missing` | you are in a source checkout without `dist/`; run `npm ci && npm run build`, or install a release |
-| `doctor`: `hooks point at a missing launcher` | the plugin moved after an update; re-run `mycelink init <control-repo>` |
+| `doctor`: `hooks point at a missing launcher` | the plugin moved after an update; re-run `mycelink init <control-repo> --authority <key>` (the key from `mycelink controller open --takeover` in your terminal) |
 | `Unsafe feature id` / `Unsafe branch name` | ids are `UPPERCASE-123`; branch names must be valid Git refs and must not start with `-` |
 | `SHELL_NOT_ALLOWED` | the verifier asks for a shell; use argv, or set `allow_shell_commands: true` knowingly |
 | `BATCH_METACHARACTER` (Windows) | call the real executable instead of a `.cmd` shim, or drop the metacharacter |

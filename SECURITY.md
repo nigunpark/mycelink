@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 0.2.x (beta) | Yes — security fixes are released as new patch or beta versions |
-| < 0.2 | No |
+| 0.3.x (beta) | Yes — security fixes are released as new patch or beta versions |
+| < 0.3 | No |
 
 ## Reporting a vulnerability
 

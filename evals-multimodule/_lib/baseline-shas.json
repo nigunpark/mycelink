@@ -1,0 +1,23 @@
+{
+  "greenfield": {
+    "platform": "bf3d9f5247475f46299f4a591aed88782f8e8264",
+    "core": "9c6115221e106a3c949823cd9712bdbd0dabeb17",
+    "api": "424c6ae11f51f766980058c50e47b12c5f670d65",
+    "worker": "c2ee8d71d757e12466ef8581c067f6cffd83d2c0",
+    "cli": "64cdf5a9963b80e53487d4a66401b9ea44ce99fb"
+  },
+  "existing-cold": {
+    "platform": "e4e03e349c1489f8d987ba3d046339e147c7e00a",
+    "core": "c578bed03c43fb8829efbbb0376b8187e044965c",
+    "api": "11e61a9ef86d799216a297482d2e67c08dedb430",
+    "worker": "b2738b13f6e27e48a23ba032a3ca320469afb22a",
+    "cli": "80f7d98fced67201568f32f8807661e59fc10077"
+  },
+  "existing-informed": {
+    "platform": "e080885cb37b10c2707847f948880d9537207388",
+    "core": "c578bed03c43fb8829efbbb0376b8187e044965c",
+    "api": "11e61a9ef86d799216a297482d2e67c08dedb430",
+    "worker": "b2738b13f6e27e48a23ba032a3ca320469afb22a",
+    "cli": "80f7d98fced67201568f32f8807661e59fc10077"
+  }
+}

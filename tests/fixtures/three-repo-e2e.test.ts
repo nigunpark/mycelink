@@ -32,6 +32,7 @@ import { readEvents } from '../../src/state/event-log.js';
 import { planShards } from '../../src/e2e/scheduler.js';
 import { loadScenarios } from '../../src/e2e/runner.js';
 import { featurePaths } from '../../src/workspace/paths.js';
+import { asController } from '../helpers/authority.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -52,7 +53,7 @@ async function harness(p: Portfolio, argv: string[]): Promise<RunResult> {
       err += t + '\n';
     },
   };
-  const code = await main([...argv, '--control-root', p.control], io);
+  const code = await main([...asController(argv, p.control), '--control-root', p.control], io);
   return { code, out, err };
 }
 
@@ -73,20 +74,29 @@ function tddStep(p: Portfolio, phase: string, nodeId: string): string[] {
   ];
 }
 
-/** A worker scenario that does real TDD: failing test, RED, implement, GREEN. */
+/**
+ * A worker scenario that does real TDD: failing test, RED, implement, GREEN.
+ * A RED must declare a new or changed test, so a node reopened for a new
+ * behaviour names it (`testName`).
+ */
 function tddScenario(
   p: Portfolio,
   nodeId: string,
   sourceFile: string,
   sourceBody: string,
+  testName = `${nodeId} behaves`,
 ): unknown {
+  const testFile = sourceFile.replace(/^src\//, 'tests/').replace(/\.js$/, '.test.mjs');
   return {
     outcome: 'SUBMITTED',
     turns: 3,
     steps: [
-      // The test file already exists in the fixture repo and fails because the
-      // source is missing: commit nothing, just record the RED.
+      // Test-first, as settle checks it: a declared test, the RED (the fixture
+      // runner fails because the source is missing), the test committed alone,
+      // then the production change alone.
+      { write_files: { [testFile]: `import { test } from 'node:test';\n\ntest(${JSON.stringify(testName)}, () => {});\n` } },
       { label: 'tdd-red', run: tddStep(p, 'red', nodeId), expect_exit: 0 },
+      { git_commit: `test: ${nodeId} (RED)` },
       { write_files: { [sourceFile]: sourceBody } },
       { git_commit: `implement ${nodeId}` },
       { label: 'tdd-green', run: tddStep(p, 'green', nodeId), expect_exit: 0 },
@@ -101,9 +111,12 @@ function tddScenario(
  * action is to re-prove GREEN and regression, not to invent a new failing test.
  */
 function revalidateScenario(p: Portfolio, nodeId: string): unknown {
+  // Its criterion is still proved by the test its retained RED declared.
+  const file = nodeId.endsWith('.core.publish.impl') ? 'tests/publish.test.mjs' : nodeId.endsWith('.web.render.impl') ? 'tests/view.test.mjs' : 'tests/consume.test.mjs';
   return {
     outcome: 'SUBMITTED',
     turns: 1,
+    criterion_test: { path: file, name: `${nodeId} behaves` },
     steps: [
       { label: 'tdd-green', run: tddStep(p, 'green', nodeId), expect_exit: 0 },
       { label: 'tdd-regression', run: tddStep(p, 'regression', nodeId), expect_exit: 0 },
@@ -242,7 +255,9 @@ describe('three-repository portfolio, end to end', () => {
       expect(red, `${nodeId} red evidence`).toBeDefined();
       expect(red?.exit_code).not.toBe(0);
       expect(red?.red_reason).toBe('behaviour-missing');
-      expect(existsSync(red?.output_path ?? '')).toBe(true);
+      // Stored relative to the control root, so a moved workspace still resolves it.
+      expect(red?.output_path).toMatch(new RegExp(`^features/${FEATURE_ID}/evidence/`));
+      expect(existsSync(join(p.control, red?.output_path ?? '-'))).toBe(true);
 
       const green = state?.nodes[nodeId]?.evidence.green;
       expect(green?.exit_code).toBe(0);
@@ -320,6 +335,8 @@ describe('three-repository portfolio, end to end', () => {
         `${FEATURE_ID}.api.consume.impl`,
         'src/consume.js',
         'export const JOB_RESULT_V2 = true;\nexport function consume(e) { return e.v === 2 ? e : null; }\n',
+        // The changed contract is a new behaviour: its RED declares a changed test.
+        'consumes the order-status version the contract names',
       ),
     });
 
@@ -385,6 +402,7 @@ describe('three-repository portfolio, end to end', () => {
         `${FEATURE_ID}.api.consume.impl`,
         'src/consume.js',
         'export const JOB_RESULT_V3 = true;\nexport function consume(e) { return e.v === 3 ? e : null; }\n',
+        'consumes the order-status version the contract names',
       ),
     });
 

@@ -169,6 +169,7 @@ describeIfClaude('isolated plugin harness', () => {
       'cancel',
       'decision',
       'verify',
+      'deliver',
     ]) {
       expect(out, `command ${command} missing from inventory`).toContain(command);
     }
@@ -180,12 +181,14 @@ describeIfClaude('isolated plugin harness', () => {
       'integration-failure-attribution',
       'e2e-scheduling',
       'brain-memory',
+      'host-dispatch',
     ]) {
       expect(out, `skill ${skill} missing from inventory`).toContain(skill);
     }
     for (const agent of [
       'portfolio-planner',
       'module-worker',
+      'acceptance-reviewer',
       'fresh-verifier',
       'failure-attributor',
       'e2e-worker',
@@ -204,11 +207,41 @@ describeIfClaude('isolated plugin harness', () => {
     expect(tokens).toBeLessThan(4000);
   });
 
-  it('ships no always-on plugin hooks, because enforcement is project-scoped', () => {
+  it('ships the controller/worker fence and the call ledger’s after-hooks, which leave unrelated projects alone', () => {
     const run = record('details-hooks', runClaude(profile, ['plugin', 'details', PLUGIN_NAME]));
-    // Hooks belong to a control repository, installed by `mycelink init`.
-    // A plugin-scoped hook would run in every unrelated project.
-    expect(run.stdout).toMatch(/Hooks \(0\)/);
+    // The rest of the hooks belong to a control repository, installed by
+    // `mycelink init`. The fence is the plugin's own (the controller is the
+    // top-level session, whatever its project), and it judges nothing outside
+    // a Mycelink workspace.
+    // The after-hooks (CSET-203 r12) record a call's end and a subagent's stop for the provenance ledger, and nothing without it.
+    expect(run.stdout).toMatch(/Hooks \(4\)\s+PreToolUse, PostToolUse, PostToolUseFailure, SubagentStop/);
+
+    const list = runClaude(profile, ['plugin', 'list', '--json']);
+    const installPath = (JSON.parse(list.stdout) as { id: string; installPath: string }[]).find((p) => p.id === PLUGIN_ID)?.installPath as string;
+    const unrelated = join(profile.workspace, 'unrelated');
+    mkdirSync(unrelated, { recursive: true });
+    const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+    for (const tool of [
+      { tool_name: 'Write', tool_input: { file_path: join(unrelated, 'a.txt'), content: 'x' } },
+      { tool_name: 'Bash', tool_input: { command: "sed -i 's/a/b/' a.txt > out.txt" } },
+    ]) {
+      const proc = spawnSync(process.execPath, [join(installPath, 'bin', 'mycelink.mjs'), 'hook', 'controller-fence'], {
+        cwd: unrelated,
+        input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd: unrelated, ...tool }),
+        encoding: 'utf8',
+        env: { ...profile.env, CLAUDE_PROJECT_DIR: unrelated },
+        timeout: 60_000,
+        windowsHide: true,
+      });
+      expect({ tool: tool.tool_name, code: proc.status, err: proc.stderr }).toEqual({ tool: tool.tool_name, code: 0, err: '' });
+    }
+    for (const [event, payload] of [
+      ['tool-end', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_1' }],
+      ['subagent-end', { hook_event_name: 'SubagentStop', agent_id: 'a1', agent_type: 'mycelink:module-worker' }],
+    ] as const) {
+      const proc = spawnSync(process.execPath, [join(installPath, 'bin', 'mycelink.mjs'), 'hook', event], { cwd: unrelated, input: JSON.stringify({ cwd: unrelated, ...payload }), encoding: 'utf8', env: { ...profile.env, CLAUDE_PROJECT_DIR: unrelated }, timeout: 60_000, windowsHide: true });
+      expect({ event, code: proc.status, out: proc.stdout, err: proc.stderr }).toEqual({ event, code: 0, out: '', err: '' });
+    }
   });
 
   it('runs mycelink from the installed copy', () => {

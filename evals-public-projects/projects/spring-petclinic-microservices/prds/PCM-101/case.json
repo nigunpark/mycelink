@@ -1,0 +1,75 @@
+{
+  "schema": "mycelink-bench/prd-case@1",
+  "id": "PCM-101",
+  "case": "petclinic-visit-vet-assignment",
+  "project": "spring-petclinic-microservices",
+  "archetype": "additive-vertical-slice",
+  "title": "Record which veterinarian handled a visit",
+  "requirement": "requirement.md",
+  "modules": {
+    "required": [
+      "visits-service",
+      "api-gateway"
+    ],
+    "allowed": [
+      "visits-service",
+      "api-gateway",
+      "vets-service"
+    ]
+  },
+  "allowed_shared_paths": [
+    "docs/**",
+    "README.md"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "modules": [
+        "visits-service"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "modules": [
+        "api-gateway"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "modules": [
+        "api-gateway"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "modules": [
+        "visits-service",
+        "api-gateway"
+      ],
+      "kind": "compatibility"
+    }
+  ],
+  "budget": {
+    "max_turns": 200,
+    "timeout_seconds": 3600
+  },
+  "evaluator_lock": "evaluator.lock.json"
+}

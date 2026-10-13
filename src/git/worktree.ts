@@ -12,6 +12,7 @@ import {
   branchExists,
   changedPathsSince,
   listWorktrees,
+  resolveRef,
   runGit,
 } from './git.js';
 import { assertFeatureId, assertNodeId } from '../security/names.js';
@@ -65,6 +66,12 @@ export interface CreateWorktreeArgs {
   baseBranch: string;
   worktreeRoot: string;
   repositoryName?: string;
+  /**
+   * The exact commit a new branch starts from (the repository's integration
+   * head once anything is integrated). Defaults to `baseBranch`. Ignored when
+   * the branch already exists: its commits are kept.
+   */
+  startPoint?: string;
 }
 
 export interface WorkerWorktree {
@@ -72,6 +79,8 @@ export interface WorkerWorktree {
   branch: string;
   base: string;
   created: boolean;
+  /** The commit a branch created by this call started from; null when the branch already existed. */
+  startSha: string | null;
 }
 
 /**
@@ -94,7 +103,7 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
   // live worktree below and then fail to re-add it.
   const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && existsSync(target)) {
-    return { worktree: target, branch, base: args.baseBranch, created: false };
+    return { worktree: target, branch, base: args.baseBranch, created: false, startSha: null };
   }
   if (registered && !existsSync(target)) {
     // Directory vanished (deleted by a crash or by the user): drop the stale
@@ -105,17 +114,19 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
     rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 
+  let startSha: string | null = null;
   if (branchExists(repo, branch)) {
     runGit(repo, ['worktree', 'add', target, branch]);
   } else {
-    runGit(repo, ['worktree', 'add', '-b', branch, target, args.baseBranch]);
+    startSha = resolveRef(repo, args.startPoint ?? args.baseBranch);
+    runGit(repo, ['worktree', 'add', '-b', branch, target, startSha]);
   }
 
   // Deterministic line endings: a worker diff must not be polluted by CRLF.
   runGit(target, ['config', 'core.autocrlf', 'false']);
   runGit(target, ['config', 'commit.gpgsign', 'false']);
 
-  return { worktree: target, branch, base: args.baseBranch, created: true };
+  return { worktree: target, branch, base: args.baseBranch, created: true, startSha };
 }
 
 function baseName(p: string): string {

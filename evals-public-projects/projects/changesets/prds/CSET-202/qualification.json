@@ -1,0 +1,66 @@
+{
+  "schema": "mycelink-bench/qualification@2",
+  "project": "changesets",
+  "prd": "CSET-202",
+  "source_identity_sha256": "5286b96d7f7c3458cfd501928107e9ef0c136f708fb2c493d1a15fb9b80bda32",
+  "evaluator_digest_sha256": "fc8067f0065f698c1acdacb8e62a37f0b5bf85e6ac8171d98c600d6b995026c9",
+  "bindings": {
+    "cache_lock_sha256": "aaa1dcdcf485d67f4eb4bc9e6a6ca73f7c2054870da173896655201cd764b350",
+    "toolchains": {
+      "node": "8c0043d1d6848ea3eccaf165697c3ded3f400e045f457870a89e0923b933faef"
+    },
+    "commands": {
+      "full_suite_sha256": "86e52505affe317fc8fb59f0f455435264e7bd94e8aca748f7a895a2b9e89419",
+      "hidden_sha256": "ab893a6cd55b29084ed29ffdbb98af0b118c28e31437654f1f979c20e40e1c47"
+    }
+  },
+  "hidden_tests": {
+    "total": 19,
+    "failing_at_baseline": 14,
+    "passing_at_baseline": 5
+  },
+  "baseline_failure_categories": {
+    "assertion": 14
+  },
+  "superseded_tests": 2,
+  "reference": {
+    "full_suite_tests": 818,
+    "own_tests": 18,
+    "tdd_units": [
+      "valid"
+    ],
+    "new_tests_by_module": {
+      "errors": 3,
+      "read": 2,
+      "assemble-release-plan": 6,
+      "cli": 7
+    }
+  },
+  "mutants": {
+    "gating": 4,
+    "killed": 4,
+    "stress": [],
+    "by_module": {
+      "errors": 1,
+      "read": 1,
+      "assemble-release-plan": 1,
+      "cli": 1
+    }
+  },
+  "runs": 2,
+  "tmp_roots": 1,
+  "filesystems": {
+    "distinct": 2,
+    "roots": [
+      {
+        "role": "work",
+        "type": "ext4"
+      },
+      {
+        "role": "tmp-root-1",
+        "type": "tmpfs"
+      }
+    ]
+  },
+  "duration_ms": 193950
+}
