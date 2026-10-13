@@ -287,5 +287,5 @@ describe('the review and the epoch', () => {
       expect(await settleReview(s, r)).toMatchObject({ outcome: 'PASS', idempotent: true });
       expect(verState(s).orchestration.epoch).toBe(issued + 1);
     }
-  });
+  }, 300_000);
 });

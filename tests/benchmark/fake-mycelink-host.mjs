@@ -95,6 +95,10 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+// Pipes are asynchronous on macOS and Windows (synchronous on Linux): a stand-in that exits right after its last
+// line would drop what was still buffered, cutting its own stream mid-line. Write through, as a real CLI does.
+for (const stream of [process.stdout, process.stderr]) stream._handle?.setBlocking?.(true);
+
 /** A file's text, or null when nothing (readable) is there. */
 function readOrNull(file) {
   try {
@@ -837,16 +841,23 @@ async function slowReviewer(ticket, line) {
   const completer = [
     "const fs = require('node:fs');",
     'const [own, session, sessionId, agentId, agent, description, answer, ms, marker] = process.argv.slice(1);',
-    'setTimeout(() => {',
+    // It runs at least `ms`, and until the host has asked while it runs (its go file): on a slow machine a fixed time
+    // alone could end it before the host's first question, and the test would measure the machine.
+    "const finish = (fn) => setTimeout(function wait() { fs.existsSync(marker + '.go') ? fn() : setTimeout(wait, 50); }, Number(ms));",
+    'finish(() => {',
     '  const at = () => new Date().toISOString();',
     "  fs.appendFileSync(own, JSON.stringify({ timestamp: at(), sessionId, isSidechain: true, agentId, type: 'assistant', attributionAgent: 'mycelink:acceptance-reviewer', message: { id: 'msg_slow_' + agentId, role: 'assistant', model: 'stand-in-reviewer', content: [{ type: 'text', text: answer }], stop_reason: 'end_turn' } }) + '\\n');",
     "  const note = '<task-notification>\\n<task-id>' + agentId + '</task-id>\\n<tool-use-id>' + agent + '</tool-use-id>\\n<status>completed</status>\\n<summary>Agent \"' + description + '\" finished</summary>\\n<result>' + answer + '</result>\\n</task-notification>';",
     "  fs.appendFileSync(session, JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at(), sessionId, content: note }) + '\\n');",
     '  fs.writeFileSync(marker, String(Date.now()));',
-    '}, Number(ms));',
+    '});',
   ].join('\n');
   const child = spawn(process.execPath, ['-e', completer, own, sessionTranscript, SESSION, agentId, agent, description, answer, String(plan.slowReviewerMs ?? 6000), marker], { stdio: 'ignore', windowsHide: true });
   const seen = { review_id: ticket.review_id, agent_id: agentId, early: null, awaits: [], ingest: null, settle: null };
+  // Asked while it runs: from then on the background reviewer may finish.
+  const go = () => {
+    if (!existsSync(`${marker}.go`)) writeFileSync(`${marker}.go`, '');
+  };
   try {
     // r13's host, after its sleep: ingest and settle together. Neither may spend the generation while the reviewer runs.
     const early = { ingest: JSON.parse(line(ticket.ingest_command).stdout || '{}'), settle: JSON.parse(line(ticket.settle_command).stdout || '{}') };
@@ -855,9 +866,11 @@ async function slowReviewer(ticket, line) {
     for (let i = 0; i < 120; i++) {
       const w = JSON.parse(line(ticket.await_command.replace(/--wait-seconds \d+/, '--wait-seconds 2')).stdout || '{}');
       seen.awaits.push(w.state ?? null);
+      go();
       if (w.state !== 'RUNNING') break;
     }
   } finally {
+    go();
     await new Promise((r) => (child.exitCode !== null ? r() : child.on('exit', r)));
   }
   // Claude Code's stream records its end, as it did r13's.

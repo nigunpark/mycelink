@@ -414,7 +414,7 @@ describe('CSET-203 r6: a passing reproduction of a review GAP is challenged, not
     expect(verState(b.s).acceptance_review.challenges).toHaveLength(1);
     expect(await settle(b.s, b.t)).toMatchObject({ outcome: 'REVIEW_CHALLENGED', idempotent: true });
     expect(verState(b.s).acceptance_review.challenges).toHaveLength(1);
-  });
+  }, 300_000);
 
   it('two challenge-refinement rounds per gap: the third challenge blocks the review REVIEW_DISPUTE with its evidence, the node DONE, not BLOCKED', async () => {
     const { s } = await challenged();
