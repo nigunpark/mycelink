@@ -843,7 +843,10 @@ async function slowReviewer(ticket, line) {
     'const [own, session, sessionId, agentId, agent, description, answer, ms, marker] = process.argv.slice(1);',
     // It runs at least `ms`, and until the host has asked while it runs (its go file): on a slow machine a fixed time
     // alone could end it before the host's first question, and the test would measure the machine.
-    "const finish = (fn) => setTimeout(function wait() { fs.existsSync(marker + '.go') ? fn() : setTimeout(wait, 50); }, Number(ms));",
+    // A host that never asks must not leave it waiting for ever: after 120 s it ends anyway, and says so (its
+    // .failsafe file, logged as fail_safe) — a run where that happened never passes as one where the host asked.
+    'const start = Date.now();',
+    "const finish = (fn) => setTimeout(function wait() { if (fs.existsSync(marker + '.go')) return fn(); if (Date.now() - start > 120000) { fs.writeFileSync(marker + '.failsafe', ''); return fn(); } setTimeout(wait, 50); }, Number(ms));",
     'finish(() => {',
     '  const at = () => new Date().toISOString();',
     "  fs.appendFileSync(own, JSON.stringify({ timestamp: at(), sessionId, isSidechain: true, agentId, type: 'assistant', attributionAgent: 'mycelink:acceptance-reviewer', message: { id: 'msg_slow_' + agentId, role: 'assistant', model: 'stand-in-reviewer', content: [{ type: 'text', text: answer }], stop_reason: 'end_turn' } }) + '\\n');",
@@ -853,7 +856,7 @@ async function slowReviewer(ticket, line) {
     '});',
   ].join('\n');
   const child = spawn(process.execPath, ['-e', completer, own, sessionTranscript, SESSION, agentId, agent, description, answer, String(plan.slowReviewerMs ?? 6000), marker], { stdio: 'ignore', windowsHide: true });
-  const seen = { review_id: ticket.review_id, agent_id: agentId, early: null, awaits: [], ingest: null, settle: null };
+  const seen = { review_id: ticket.review_id, agent_id: agentId, early: null, awaits: [], fail_safe: false, ingest: null, settle: null };
   // Asked while it runs: from then on the background reviewer may finish.
   const go = () => {
     if (!existsSync(`${marker}.go`)) writeFileSync(`${marker}.go`, '');
@@ -863,7 +866,9 @@ async function slowReviewer(ticket, line) {
     const early = { ingest: JSON.parse(line(ticket.ingest_command).stdout || '{}'), settle: JSON.parse(line(ticket.settle_command).stdout || '{}') };
     seen.early = { ingest: early.ingest.outcome ?? null, settle: early.settle.outcome ?? null, lifecycle: early.settle.lifecycle ?? null };
     // /mycelink:run's way: the await line, again while it answers RUNNING.
-    for (let i = 0; i < 120; i++) {
+    // Bounded in time too: a reviewer Mycelink never sees end shows as awaits that never reach COMPLETED, not as a hang.
+    const until = Date.now() + 240_000;
+    for (let i = 0; i < 120 && Date.now() < until; i++) {
       const w = JSON.parse(line(ticket.await_command.replace(/--wait-seconds \d+/, '--wait-seconds 2')).stdout || '{}');
       seen.awaits.push(w.state ?? null);
       go();
@@ -871,8 +876,9 @@ async function slowReviewer(ticket, line) {
     }
   } finally {
     go();
-    await new Promise((r) => (child.exitCode !== null ? r() : child.on('exit', r)));
+    await new Promise((r) => (child.exitCode !== null ? r() : (child.on('exit', r), child.on('error', r))));
   }
+  seen.fail_safe = existsSync(`${marker}.failsafe`);
   // Claude Code's stream records its end, as it did r13's.
   const end = existsSync(marker) ? Number(readFileSync(marker, 'utf8')) : Date.now();
   emit({ type: 'system', subtype: 'task_updated', task_id: agentId, patch: { status: 'completed', end_time: end }, session_id: SESSION });
