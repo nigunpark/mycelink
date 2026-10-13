@@ -38,7 +38,7 @@
  * no production change is attributable to the challenged criterion alone.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ChallengeRedSnapshot, EvidenceRecord, GraphNode, NodeRuntime, PortfolioGraph, ReviewRecord, TddRedBinding, UnresolvedCriterionRecord } from '../model/types.js';
 import type { NodeResult, WorkerChallenge } from '../sessions/adapter.js';
@@ -47,6 +47,7 @@ import { stableStringify } from '../graph/validate.js';
 import { checkEvidenceOutput } from '../evidence/paths.js';
 import { testTitle } from '../evidence/test-identity.js';
 import { writeTextAtomic } from '../state/atomic-json.js';
+import { readRegular } from '../security/paths.js';
 import { canonicalProse, criterionClauses, receiptProblem, truncateProse, unsafeContent, type Gap, type NormalizedField } from './acceptance-review.js';
 import { criterionKind } from './criteria.js';
 import { declaredTestTemplates, declaredTests, priorTestChanges, templateMatches, testLanguage, testsInDelta, type DeltaEntry } from './test-declarations.js';
@@ -845,7 +846,9 @@ export function archiveChallenge(args: {
     const bytes = readFileSync(join(controlRoot, ...from.split('/')));
     const target = join(dir, ...to.split('/'));
     mkdirSync(dirname(target), { recursive: true });
-    if (!existsSync(target) || sha256(readFileSync(target)) !== sha256(bytes)) writeFileSync(target, bytes);
+    // What is there is read through one descriptor; a copy is replaced atomically, never written through a link.
+    const current = readRegular(target)?.bytes ?? null;
+    if (current === null || sha256(current) !== sha256(bytes)) writeTextAtomic(target, bytes);
     return sha256(bytes);
   };
   // The red gate's output and results — or, every gap citing a capsule (CSET-203 r17), the first capsule's run's; each

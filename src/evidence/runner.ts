@@ -9,8 +9,8 @@
 import { createHash } from 'node:crypto';
 import { runCommandSync, runShellScriptSync, shellScriptOf } from '../security/exec.js';
 import { redactText } from '../security/redact.js';
-import { isInsideReal } from '../security/paths.js';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { isInsideReal, readRegular } from '../security/paths.js';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { ClaimVerification, EvidenceKind, EvidenceRecord, ModuleReport } from '../model/types.js';
@@ -19,6 +19,7 @@ import { relativeInside } from './paths.js';
 import { writeImmutable } from './store.js';
 import { classifyRedOutput, judgeRed, parseJUnit, parseVitestJson, redReasonFor, type DeclaredTest, type TestResult } from './red-classify.js';
 import { canonicalTests, type CanonicalTest } from './test-ids.js';
+import { attributeByDeclaration } from './junit-attribution.js';
 import { reportedIdentity } from './test-identity.js';
 
 /**
@@ -117,7 +118,8 @@ const SIGNAL = [
 export function normaliseFailureLine(line: string): string {
   return line
     .replace(/[A-Za-z]:[\\/][^\s:)'"]+/g, '<path>')
-    .replace(/(?:\/[\w.@-]+)+\.[A-Za-z0-9]+/g, '<path>')
+    // Any POSIX path, a directory's too (a fresh worktree per attempt), as any Windows path above.
+    .replace(/(?:\/[\w.@-]+)+/g, '<path>')
     .replace(/0x[0-9a-fA-F]+/g, '<hex>')
     .replace(/\b[0-9a-f]{7,40}\b/g, '<sha>')
     .replace(/\b\d+(\.\d+)?\s?(ms|s|sec|seconds|minutes)\b/gi, '<dur>')
@@ -355,19 +357,16 @@ const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 
 /** The results a structured report holds; none when it is missing or cannot be read (every declared test then did not run). */
 function readReport(report: ModuleReport, file: string | null, dir: string | null, cwd: string, modulePath: string | null): TestResult[] {
-  const read = (path: string): string | null => {
-    try {
-      const st = lstatSync(path);
-      return st.isFile() && st.size <= MAX_REPORT_BYTES ? readFileSync(path, 'utf8') : null;
-    } catch {
-      return null;
-    }
-  };
+  // Through one descriptor, never through a link: what is checked is what is read.
+  const read = (path: string): string | null => readRegular(path, MAX_REPORT_BYTES)?.bytes.toString('utf8') ?? null;
   if (file !== null) {
     const text = read(file);
     if (text === null) return [];
     try {
-      return report.format === 'vitest-json' ? parseVitestJson(text, { root: cwd }) : parseJUnit(text, { root: cwd });
+      if (report.format === 'vitest-json') return parseVitestJson(text, { root: cwd });
+      // Node 22's reporter names no test file: each test is attributed from its module's sources, where they leave one.
+      const scope = modulePath !== null && isInsideReal(cwd, resolve(cwd, modulePath)) ? resolve(cwd, modulePath) : cwd;
+      return parseJUnit(text, { root: cwd, attribute: attributeByDeclaration({ root: cwd, scope }) });
     } catch {
       return [];
     }

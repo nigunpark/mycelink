@@ -26,12 +26,26 @@
  *
  * One process appends whole lines, each with one write; several Mycelink
  * processes may append to the same ledger.
+ *
+ * One call is one change: what node:fs does inside one of the process's calls
+ * (appendFileSync writes through the exported writeFileSync; on Node 22,
+ * rmSync removes through rimraf's unlinkSync and rmdirSync) is part of that
+ * call, recorded by its intent and done, and nothing node:fs reads for it is a
+ * read of the process. The ledger is the same on every Node.
+ *
+ * Every path is recorded by its canonical name (security/paths.ts): the real
+ * place, however the process spelled it. macOS reaches its temp directory
+ * through `/var` (a link to `/private/var`), GitHub's Windows runners through
+ * the 8.3 name `C:\Users\RUNNER~1`, while git names a repository's common
+ * directory by its real path; a file the process wrote and the git metadata a
+ * command changed must be named alike to be told apart from anyone else's.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canonicalPath, realpathDeepest } from '../security/paths.js';
 
 const nodeRequire = createRequire(import.meta.url);
 // The CommonJS face of node:fs: patching it and syncing reaches every ESM import of a function.
@@ -70,6 +84,40 @@ const original = Object.fromEntries(FUNCTIONS.map((n) => [n, fs[n] as Fn])) as R
 const originalRead = Object.fromEntries(READ_FUNCTIONS.map((n) => [n, fs[n] as Fn])) as Record<(typeof READ_FUNCTIONS)[number], Fn>;
 /** Above zero while the recorder itself reads (node's readFileSync opens through the exported openSync): nothing it reads is the process's. */
 let quiet = 0;
+/** Above zero while one of the process's node:fs calls runs: whatever node:fs does inside it is that call's. */
+let depth = 0;
+
+/** Run one of the process's node:fs calls: nothing inside it is recorded on its own, nothing it reads is the process's. */
+function within<T>(call: () => T): T {
+  depth += 1;
+  quiet += 1;
+  try {
+    return call();
+  } finally {
+    quiet -= 1;
+    depth -= 1;
+  }
+}
+
+/** The canonical name of the entry an absolute path names, looked up unrecorded: naming a path reads nothing of the process's. */
+function named(abs: string): string {
+  quiet += 1;
+  try {
+    return canonicalPath(abs);
+  } finally {
+    quiet -= 1;
+  }
+}
+
+/** The real place of a directory (a git command's working directory, a common directory, the ledger's), looked up unrecorded. */
+function place(abs: string): string {
+  quiet += 1;
+  try {
+    return realpathDeepest(abs);
+  } finally {
+    quiet -= 1;
+  }
+}
 const lstat = fs.lstatSync;
 const readFileOriginal = fs.readFileSync;
 const readFile = ((...args: Parameters<typeof fs.readFileSync>) => {
@@ -142,11 +190,11 @@ function write(r: Recorder, record: Record<string, unknown>): void {
   (original.appendFileSync as Fn)(r.ledger, `${JSON.stringify(record)}\n`);
 }
 
-/** A path argument as an absolute path, or null (a descriptor, or nothing a path names). */
+/** A path argument by its canonical name, or null (a descriptor, or nothing a path names). */
 function pathOf(p: unknown): string | null {
-  if (typeof p === 'string') return resolve(p);
-  if (Buffer.isBuffer(p)) return resolve(p.toString('utf8'));
-  if (p instanceof URL) return resolve(fileURLToPath(p));
+  if (typeof p === 'string') return named(resolve(p));
+  if (Buffer.isBuffer(p)) return named(resolve(p.toString('utf8')));
+  if (p instanceof URL) return named(resolve(fileURLToPath(p)));
   return null;
 }
 
@@ -258,20 +306,24 @@ function wrapped(name: (typeof FUNCTIONS)[number]): Fn {
   const fn = original[name];
   return function (this: unknown, ...args: any[]) {
     const r = active;
-    if (r === null) return fn.apply(this, args);
+    // Inside one of the process's calls, a call node:fs makes for itself is part of that one.
+    if (r === null || depth > 0) return fn.apply(this, args);
+    const call = (): any => within(() => fn.apply(this, args));
     const outside = (p: string | null): p is string => p !== null && !inside(p, r.dir);
     switch (name) {
       case 'openSync': {
+        // A read inside a read already noted (readFileSync opens through the exported openSync), or the recorder's own.
+        if (quiet > 0 && !writes(args[1] ?? 'r')) return call();
         const path = pathOf(args[0]);
-        if (!outside(path)) return fn.apply(this, args);
+        if (!outside(path)) return call();
         if (!writes(args[1] ?? 'r')) {
           noteRead(r, path);
-          return fn.apply(this, args);
+          return call();
         }
         const seq = intent(r, name, [path]);
         let fd: number;
         try {
-          fd = fn.apply(this, args);
+          fd = call();
         } catch (error) {
           done(r, seq, name, [{ path, state: stateOf(path, r) }]);
           throw error;
@@ -281,7 +333,7 @@ function wrapped(name: (typeof FUNCTIONS)[number]): Fn {
       }
       case 'closeSync': {
         const tracked = typeof args[0] === 'number' ? r.fds.get(args[0]) : undefined;
-        const result = fn.apply(this, args);
+        const result = call();
         if (tracked !== undefined) {
           r.fds.delete(args[0]);
           const [seq, path] = tracked.split('\0') as [string, string];
@@ -291,16 +343,16 @@ function wrapped(name: (typeof FUNCTIONS)[number]): Fn {
       }
       case 'createWriteStream': {
         const path = pathOf(args[0]);
-        if (!outside(path)) return fn.apply(this, args);
+        if (!outside(path)) return call();
         const seq = intent(r, name, [path]);
-        const stream = fn.apply(this, args);
+        const stream = call();
         stream.on('close', () => {
           if (active === r) done(r, seq, name, [{ path, state: stateOf(path, r) }]);
         });
         return stream;
       }
       case 'mkdtempSync': {
-        const made = fn.apply(this, args) as string;
+        const made = call() as string;
         const path = pathOf(made);
         if (outside(path)) {
           flushReads(r);
@@ -314,11 +366,11 @@ function wrapped(name: (typeof FUNCTIONS)[number]): Fn {
     // Every other function names its target(s) by path; a descriptor's change is recorded when it is closed.
     const targets: string[] =
       name === 'renameSync' ? [pathOf(args[0]), pathOf(args[1])].filter(outside) : name === 'symlinkSync' || name === 'linkSync' || name === 'copyFileSync' || name === 'cpSync' ? [pathOf(args[1])].filter(outside) : [pathOf(args[0])].filter(outside);
-    if (targets.length === 0) return fn.apply(this, args);
+    if (targets.length === 0) return call();
     const seq = intent(r, name, targets);
     let result: unknown;
     try {
-      result = fn.apply(this, args);
+      result = call();
     } finally {
       const states: { path: string; state: PathState }[] = [];
       for (const path of targets) {
@@ -329,7 +381,7 @@ function wrapped(name: (typeof FUNCTIONS)[number]): Fn {
       // A recursive mkdir names the first directory it made: every one from there down.
       if (name === 'mkdirSync' && typeof result === 'string') {
         // Windows answers with a `\\?\` long-path prefix.
-        const first = resolve(result.replace(/^\\\\\?\\/, ''));
+        const first = named(resolve(result.replace(/^\\\\\?\\/, '')));
         for (let p = dirname(targets[0] as string); inside(p, first) && p !== targets[0]; p = dirname(p)) states.unshift({ path: p, state: stateOf(p, r) });
       }
       if (name === 'cpSync') for (const p of walk(targets[0] as string)) states.push({ path: p, state: stateOf(p, r) });
@@ -344,7 +396,8 @@ function readWrapped(name: (typeof READ_FUNCTIONS)[number]): Fn {
   const fn = originalRead[name];
   return function (this: unknown, ...args: any[]) {
     const r = active;
-    if (r === null) return fn.apply(this, args);
+    // Nothing is noted while the recorder reads, or node:fs reads inside one of the process's calls.
+    if (r === null || quiet > 0) return fn.apply(this, args);
     try {
       noteRead(r, pathOf(args[0]));
     } catch {
@@ -372,8 +425,8 @@ export function installProvenance(argv: readonly string[], env: NodeJS.ProcessEn
   const crash = Number(env['MYCELINK_PROVENANCE_CRASH_AFTER_INTENT']);
   const positional = argv.filter((a) => !a.startsWith('-'));
   active = {
-    dir: resolve(dir),
-    ledger: join(resolve(dir), 'ledger.jsonl'),
+    dir: place(resolve(dir)),
+    ledger: join(place(resolve(dir)), 'ledger.jsonl'),
     group: positional[0] ?? '',
     sub: positional[1] ?? '',
     seq: 0,
@@ -634,16 +687,16 @@ export function gitIntent(cwd: string, args: readonly string[], env: NodeJS.Proc
   if (!changes) {
     // A read a later change may rest on: where, when, and which refs it could see.
     if (sub !== '') {
-      if (r.gitReads.length < MAX_GIT_READS) r.gitReads.push({ sub, cwd: resolve(cwd), t: now(), ...refReach(sub, rest) });
+      if (r.gitReads.length < MAX_GIT_READS) r.gitReads.push({ sub, cwd: place(resolve(cwd)), t: now(), ...refReach(sub, rest) });
       else r.readsTruncated = true;
     }
     return null;
   }
   const q = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8', env, windowsHide: true });
-  const common = q.status === 0 && q.stdout.trim() !== '' ? resolve(q.stdout.trim()) : null;
+  const common = q.status === 0 && q.stdout.trim() !== '' ? place(resolve(cwd, q.stdout.trim())) : null;
   flushReads(r);
   const seq = ++r.seq;
-  append(r, { kind: 'git-intent', pid: process.pid, seq, t: now(), sub, cwd: resolve(cwd), common_dir: common, ...refReach(sub, rest) });
+  append(r, { kind: 'git-intent', pid: process.pid, seq, t: now(), sub, cwd: place(resolve(cwd)), common_dir: common, ...refReach(sub, rest) });
   r.intents += 1;
   if (r.crashAfterIntent !== null && r.intents >= r.crashAfterIntent) process.kill(process.pid, 'SIGKILL');
   return { seq, sub, common, before: common === null ? null : gitMeta(common, r) };

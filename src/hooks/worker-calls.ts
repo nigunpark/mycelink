@@ -42,6 +42,7 @@ import { loadRepositories } from '../workspace/workspace.js';
 import { commonDirOf } from '../git/stash.js';
 import { PROVENANCE_ENV, MAX_KEPT_BYTES, unrecorded } from '../state/provenance.js';
 import { sessionHolder } from '../util/process-identity.js';
+import { readRegular } from '../security/paths.js';
 
 export const CALLS_SCHEMA = 'mycelink-calls/1';
 export const CALLS_FILE = 'calls.jsonl';
@@ -109,7 +110,8 @@ function looseRefs(dir: string, prefix: string, out: Record<string, string>): vo
     if (st.isDirectory()) looseRefs(p, `${prefix}/${name}`, out);
     else if (st.isFile() && !name.endsWith('.lock')) {
       try {
-        const text = readFileSync(p, 'utf8').trim();
+        // Through one descriptor, never through a link: a ref swapped since the look is read as nothing.
+        const text = (readRegular(p, 4096)?.bytes.toString('utf8') ?? '').trim();
         if (OID.test(text) || /^ref: \S+$/.test(text)) out[`${prefix}/${name}`] = text;
       } catch {
         // gone meanwhile

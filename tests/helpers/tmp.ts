@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -31,6 +31,18 @@ export function windowsShortPathAlias(dir: string): string | null {
     windowsVerbatimArguments: true,
   }).trim();
   return out !== '' && out.toLowerCase() !== long.toLowerCase() ? out : null;
+}
+
+/**
+ * A second name for an existing directory, reached through a directory link
+ * (a junction on Windows) in a scratch directory of its own: the way macOS
+ * hands out its temp directory (`/var` is a link to `/private/var`), while
+ * git, a child's working directory and a test runner name the real path.
+ */
+export function linkedAlias(dir: string, name = 'alias'): string {
+  const alias = join(makeTmpDir('alias-'), name);
+  symlinkSync(resolve(dir), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  return alias;
 }
 
 export function cleanupTmpRoots(): void {

@@ -25,7 +25,7 @@ import type {
 import { validateGraph, validateRepositories } from '../graph/validate.js';
 import { loadState } from '../state/feature-state.js';
 import { featurePaths, controlPaths, type FeaturePaths, type ControlPaths } from './paths.js';
-import { writeTextAtomic } from '../state/atomic-json.js';
+import { createExclusive, writeTextAtomic } from '../state/atomic-json.js';
 import { namesOpenedFile } from '../security/paths.js';
 import { AcceptanceError, graphAcceptanceProblems, loadAcceptanceManifest } from '../engine/acceptance.js';
 
@@ -189,11 +189,9 @@ export function initControlRepo(controlRoot: string, config: Partial<MycelinkCon
   ]) {
     mkdirSync(dir, { recursive: true });
   }
-  if (!existsSync(paths.config)) {
-    writeTextAtomic(paths.config, JSON.stringify({ ...DEFAULT_CONFIG, ...config }, null, 2) + '\n');
-  }
-  const keep = join(paths.featuresDir, '.gitkeep');
-  if (!existsSync(keep)) writeFileSync(keep, '');
+  // Each created only where nothing is (exclusively, never a replace): a config the operator wrote stays theirs.
+  createExclusive(paths.config, JSON.stringify({ ...DEFAULT_CONFIG, ...config }, null, 2) + '\n');
+  createExclusive(join(paths.featuresDir, '.gitkeep'), '');
   ensureScratchIgnored(paths.controlRoot);
   return paths;
 }
