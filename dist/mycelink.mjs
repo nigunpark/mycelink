@@ -26211,6 +26211,10 @@ function contentName(stem2, sha, ext, n = 0) {
   return `${stem2}.${sha.slice(0, 16)}${n > 0 ? `-${n}` : ""}${ext}`;
 }
 function artifactAt(file, sha) {
+  const at = artifactState(file, sha);
+  return at === "linked" ? "other" : at;
+}
+function artifactState(file, sha) {
   let fd;
   try {
     fd = openSync7(file, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
@@ -26225,11 +26229,22 @@ function artifactAt(file, sha) {
   }
   try {
     const st = fstatSync5(fd, { bigint: true });
+    if (st.isFile() && st.nlink > 1n) return "linked";
     if (!st.isFile() || st.nlink !== 1n || st.size > BigInt(MAX_ARTIFACT_BYTES) || !namesOpenedFile(file, st)) return "other";
     return sha25612(readFileSync18(fd)) === sha ? "same" : "other";
   } finally {
     closeSync9(fd);
   }
+}
+var LINKED_WAITS = 100;
+var PAUSE = new Int32Array(new SharedArrayBuffer(4));
+function settledAt(file, sha) {
+  let at = artifactState(file, sha);
+  for (let wait = 0; at === "linked" && wait < LINKED_WAITS; wait++) {
+    Atomics.wait(PAUSE, 0, 0, 20);
+    at = artifactState(file, sha);
+  }
+  return at === "linked" ? "other" : at;
 }
 function writeImmutable(dir, stem2, ext, content) {
   const bytes2 = typeof content === "string" ? Buffer.from(content, "utf8") : content;
@@ -26238,7 +26253,7 @@ function writeImmutable(dir, stem2, ext, content) {
   for (let n = 0; n <= MAX_ALTERNATES; n++) {
     const file = join25(dir, contentName(stem2, sha, ext, n));
     for (let look = 0; look < 2; look++) {
-      const at = artifactAt(file, sha);
+      const at = settledAt(file, sha);
       if (at === "same") return { file, sha256: sha, created: false };
       if (at === "other") break;
       if (createExclusive(file, bytes2) === "created") return { file, sha256: sha, created: true };
@@ -26248,12 +26263,13 @@ function writeImmutable(dir, stem2, ext, content) {
 }
 function keepExactCopy(source, expected, dir) {
   if (artifactAt(source, expected) !== "same") return null;
-  const bytes2 = readFileSync18(source);
+  const bytes2 = readRegular(source, MAX_ARTIFACT_BYTES)?.bytes ?? null;
+  if (bytes2 === null || sha25612(bytes2) !== expected) return null;
   mkdirSync9(dir, { recursive: true });
   const name = basename5(source);
   const target = join25(dir, name);
   for (let look = 0; look < 2; look++) {
-    const at = artifactAt(target, expected);
+    const at = settledAt(target, expected);
     if (at === "same") return { file: target, sha256: expected, created: false };
     if (at === "other") break;
     if (createExclusive(target, bytes2) === "created") return { file: target, sha256: expected, created: true };

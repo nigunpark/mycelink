@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { createExclusive } from '../state/atomic-json.js';
-import { namesOpenedFile } from '../security/paths.js';
+import { namesOpenedFile, readRegular } from '../security/paths.js';
 
 /** Alternates tried after the content-addressed name before the store gives up. */
 const MAX_ALTERNATES = 32;
@@ -56,6 +56,12 @@ export function contentName(stem: string, sha: string, ext: string, n = 0): stri
  * without following a final link, so nothing swapped in is ever hashed.
  */
 export function artifactAt(file: string, sha: string): 'missing' | 'same' | 'other' {
+  const at = artifactState(file, sha);
+  return at === 'linked' ? 'other' : at;
+}
+
+/** As artifactAt, telling apart a file with more than one name ('linked'): an artifact still being linked into place has two for a moment. */
+function artifactState(file: string, sha: string): 'missing' | 'same' | 'other' | 'linked' {
   let fd: number;
   try {
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
@@ -71,6 +77,7 @@ export function artifactAt(file: string, sha: string): 'missing' | 'same' | 'oth
   }
   try {
     const st = fstatSync(fd, { bigint: true });
+    if (st.isFile() && st.nlink > 1n) return 'linked';
     if (!st.isFile() || st.nlink !== 1n || st.size > BigInt(MAX_ARTIFACT_BYTES) || !namesOpenedFile(file, st)) return 'other';
     return sha256(readFileSync(fd)) === sha ? 'same' : 'other';
   } finally {
@@ -83,6 +90,23 @@ export function artifactAt(file: string, sha: string): 'missing' | 'same' | 'oth
  * exclusively; never overwriting or writing through anything. The artifact is
  * whole and in place when this returns, before any record may name it.
  */
+/** Looks, 20 ms apart, at a name a racing writer is still linking into place (about two seconds in all). */
+const LINKED_WAITS = 100;
+const PAUSE = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * What is at a name, once a racing writer is done with it: createExclusive links its file into place and then drops
+ * its temporary name, so an artifact has two names for a moment. One that keeps a second name is something else.
+ */
+function settledAt(file: string, sha: string): 'missing' | 'same' | 'other' {
+  let at = artifactState(file, sha);
+  for (let wait = 0; at === 'linked' && wait < LINKED_WAITS; wait++) {
+    Atomics.wait(PAUSE, 0, 0, 20);
+    at = artifactState(file, sha);
+  }
+  return at === 'linked' ? 'other' : at;
+}
+
 export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array): StoredArtifact {
   const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
   const sha = sha256(bytes);
@@ -91,7 +115,7 @@ export function writeImmutable(dir: string, stem: string, ext: string, content: 
     const file = join(dir, contentName(stem, sha, ext, n));
     // A racing writer of the same bytes may create it between the look and the create: look again after `exists`.
     for (let look = 0; look < 2; look++) {
-      const at = artifactAt(file, sha);
+      const at = settledAt(file, sha);
       if (at === 'same') return { file, sha256: sha, created: false };
       if (at === 'other') break;
       if (createExclusive(file, bytes) === 'created') return { file, sha256: sha, created: true };
@@ -107,12 +131,14 @@ export function writeImmutable(dir: string, stem: string, ext: string, content: 
  */
 export function keepExactCopy(source: string, expected: string, dir: string): StoredArtifact | null {
   if (artifactAt(source, expected) !== 'same') return null;
-  const bytes = readFileSync(source);
+  // The bytes kept are the bytes checked: read through one descriptor and hashed again.
+  const bytes = readRegular(source, MAX_ARTIFACT_BYTES)?.bytes ?? null;
+  if (bytes === null || sha256(bytes) !== expected) return null;
   mkdirSync(dir, { recursive: true });
   const name = basename(source);
   const target = join(dir, name);
   for (let look = 0; look < 2; look++) {
-    const at = artifactAt(target, expected);
+    const at = settledAt(target, expected);
     if (at === 'same') return { file: target, sha256: expected, created: false };
     if (at === 'other') break;
     if (createExclusive(target, bytes) === 'created') return { file: target, sha256: expected, created: true };
