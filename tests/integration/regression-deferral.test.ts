@@ -16,6 +16,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
 import { commitShopControl, createShop, moduleVerifier, shopCli, shopState, SHOP_FEATURE, type Shop } from '../helpers/shop-fixture.js';
 import { fulfil, type ShopTicket, type ShopWork } from '../helpers/shop-worker.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -157,7 +158,7 @@ describe('a producer regression deferred to the dependents it invalidates', () =
     expect(producer.evidence.regression).toMatchObject({ exit_code: 1, regression_deferred: { to: [CLI], failing: ['packages/cli/test/git.test.mjs'] } });
     // Until the dependent re-verifies, the feature is not complete, and says why.
     const pending = JSON.parse((await shopCli(s, ['feature', 'verify', SHOP_FEATURE, '--json'])).out) as { problems: string[] };
-    expect(pending.problems).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^REGRESSION_DEFERRED: ${ERR.replace(/\./g, '\\.')} deferred its regression to ${CLI.replace(/\./g, '\\.')}, which is (PLANNED|READY)`))]));
+    expect(pending.problems).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^REGRESSION_DEFERRED: ${escapeRegExp(ERR)} deferred its regression to ${escapeRegExp(CLI)}, which is (PLANNED|READY)`))]));
 
     const second = await step(s);
     expect(second.ticket?.node_id).toBe(CLI);

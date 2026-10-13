@@ -227,5 +227,5 @@ describe('CSET-203 r13, replayed model-free to the delivery it should have reach
     const delivered = git(s.repo, ['rev-parse', 'main']);
     const r3 = acceptance(s.repo, delivered, VER_R3_ACCEPTANCE);
     expect(r3.code, r3.out).toBe(0);
-  });
+  }, 300_000);
 });

@@ -82,6 +82,7 @@ import { reviewPacket, verdictFor, writeVerdict } from '../helpers/review-agent.
 import { replayUnit, segmentUnits } from '../../evals-public-projects/lib/tdd.mjs';
 // @ts-expect-error -- plain ESM module without type declarations
 import { createAdapter } from '../../evals-public-projects/lib/adapters/index.mjs';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -199,7 +200,7 @@ describe('CSET-201 final normal arm, replayed model-free to the delivery it shou
     const lost = await settle(s, stale);
     expect(lost.outcome, lost.detail).toBe('PRECONDITION_FAILED');
     expect(lost.detail).toMatch(/SIBLING_PROGRESS_LOST/);
-    expect(lost.detail).toMatch(new RegExp(`${CLI.replace(/\./g, '\\.')}.*AC-3|AC-3.*${CLI.replace(/\./g, '\\.')}`));
+    expect(lost.detail).toMatch(new RegExp(`${escapeRegExp(CLI)}.*AC-3|AC-3.*${escapeRegExp(CLI)}`));
     commitExpControl(s, 'assemble: stale branch refused');
     // Nothing integrated, nothing charged; the next dispatch reissues the order from the latest head.
     expect(git(s.repo, ['rev-parse', featureBranch])).toBe(r002Head);

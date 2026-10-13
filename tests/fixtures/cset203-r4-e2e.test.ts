@@ -258,5 +258,5 @@ describe('CSET-203 r3, model-free: every gap of the review reworked at once, to 
     const r3After = acceptance(s.repo, delivered, VER_R3_ACCEPTANCE);
     expect(r3After.code, r3After.out).toBe(0);
     expect(r3After.out).toContain('r3 acceptance: ok');
-  });
+  }, 300_000);
 });

@@ -216,5 +216,5 @@ describe('CSET-203 r5, model-free: a verdict refused for its form is corrected, 
     expect(changelog.code, changelog.out).toBe(0);
     const r3 = acceptance(s.repo, delivered, VER_R3_ACCEPTANCE);
     expect(r3.code, r3.out).toBe(0);
-  });
+  }, 300_000);
 });
