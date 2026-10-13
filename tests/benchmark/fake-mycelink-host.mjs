@@ -95,6 +95,16 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+/** A file's text, or null when nothing (readable) is there. */
+function readOrNull(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+
 // ---- the stand-in acceptance-reviewer subagent (as evals-public-projects/lib/review-standin.mjs) ----
 // Inlined: the sandbox binds this host file alone, so it imports no sibling module.
 const REVIEWER = 'mycelink:acceptance-reviewer';
@@ -589,7 +599,8 @@ async function worker(ticket) {
     const changed = [];
     for (const [path, body] of Object.entries(files)) {
       const file = join(wt, ...path.split('/'));
-      if (existsSync(file) && readFileSync(file, 'utf8') === body) continue;
+      // What is there, read once (nothing there reads as null): no look first, then a read.
+      if (readOrNull(file) === body) continue;
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, body);
       changed.push(path);

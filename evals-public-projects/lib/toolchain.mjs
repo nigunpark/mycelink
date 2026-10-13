@@ -19,6 +19,7 @@ import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, canonicalSha256, sha256Hex } from './hash.mjs';
+import { readRegular } from './fsread.mjs';
 
 const SUITE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -153,7 +154,12 @@ export function directoryDigest(root, { exclude = () => false } = {}) {
       const st = lstatSync(full);
       if (st.isSymbolicLink()) files.push({ path: rel, size: 0, link: readlinkSync(full) });
       else if (st.isDirectory()) walk(full);
-      else if (st.isFile()) files.push({ path: rel, size: st.size, sha256: sha256Hex(readFileSync(full)) });
+      else if (st.isFile()) {
+        // Read through one descriptor: a file swapped since the look fails the manifest rather than hashing something else.
+        const bytes = readRegular(full)?.bytes;
+        if (bytes === undefined) throw new Error(`${rel} changed while it was read`);
+        files.push({ path: rel, size: bytes.length, sha256: sha256Hex(bytes) });
+      }
     }
   };
   walk(root);

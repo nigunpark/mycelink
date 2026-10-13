@@ -77,7 +77,7 @@ function scanJs(src) {
         }
         value += src[j++];
       }
-      literals.set(i, { value, static: isStatic });
+      literals.set(i, { value, static: isStatic, raw: src.slice(i + 1, j) });
       blank(i, j + 1);
       i = j + 1;
     } else {
@@ -85,6 +85,57 @@ function scanJs(src) {
     }
   }
   return { masked: masked.join(''), literals };
+}
+
+/** The first argument of each call `re` finds: its literal, when it is one. */
+function firstLiterals(src, re) {
+  const { masked, literals } = scanJs(src);
+  const found = [];
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    const modifiers = m[1].replace(/\s/g, '').split('.').filter(Boolean);
+    if (modifiers.some((x) => x === 'each' || x === 'for')) continue;
+    let at = m.index + m[0].length;
+    while (at < src.length && /\s/.test(src[at])) at++;
+    const literal = literals.get(at);
+    if (literal) found.push(literal);
+  }
+  return found;
+}
+
+/** Suites a JS/TS source declares with a static name (`describe(...)`, `suite(...)`, with modifiers), in source order. */
+export function declaredJsSuites(src) {
+  return firstLiterals(src, /(?<![\w$.])(?:describe|suite)((?:\s*\.\s*[A-Za-z]+)*)\s*\(/g).filter((l) => l.static).map((l) => l.value);
+}
+
+/** The title templates of a JS/TS source's tests that interpolate (`test(\`reads ${x}\`)`), raw, in source order. */
+export function declaredJsTemplates(src) {
+  return firstLiterals(src, /(?<![\w$.])(?:it|test)((?:\s*\.\s*[A-Za-z]+)*)\s*\(/g).filter((l) => !l.static && l.raw !== undefined).map((l) => l.raw);
+}
+
+/** Whether `name` is a title `template` can produce: its static parts exactly, each interpolation at least one character. */
+export function templateMatches(template, name) {
+  const parts = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < template.length; i++) {
+    const c = template[i];
+    if (depth === 0 && c === '\\') {
+      current += template[i + 1] ?? '';
+      i++;
+    } else if (depth === 0 && c === '$' && template[i + 1] === '{') {
+      parts.push(current);
+      current = '';
+      depth = 1;
+      i++;
+    } else if (depth > 0) {
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+    } else current += c;
+  }
+  parts.push(current);
+  if (parts.length < 2) return false;
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${parts.map(escape).join('.+?')}$`, 's').test(name);
 }
 
 function declaredJsTests(src) {

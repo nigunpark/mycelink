@@ -22,7 +22,7 @@
  * with --write-baseline). The cache digests are checked again afterwards.
  */
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createAdapter } from '../lib/adapters/index.mjs';
@@ -34,6 +34,7 @@ import { validate, loadSchema } from '../lib/schema.mjs';
 import { importSource, readFrozenFile, verifySourceBundle } from '../lib/source.mjs';
 import { requireSandbox } from '../lib/sandbox.mjs';
 import { corepackLastKnownGood, loadToolchains, privateCopy, recordCacheLock, resolveCacheRoot, verifyCacheLock } from '../lib/toolchain.mjs';
+import { readRegular } from '../lib/fsread.mjs';
 
 function version(argv, env = {}) {
   const r = spawnSync(argv[0], argv.slice(1), { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env }, timeout: 120_000 });
@@ -123,8 +124,10 @@ async function prepare(flags) {
       // same pnpm, offline, instead of corepack's "latest".
       const lkg = JSON.stringify(corepackLastKnownGood((await readFrozenFile({ lock, bundlePath, path: 'package.json' })).toString('utf8')), null, 2) + '\n';
       const lkgPath = join(cacheRoot, cache.corepack_dir, 'lastKnownGood.json');
-      if (existsSync(join(cacheRoot, cache.corepack_dir)) && (!existsSync(lkgPath) || readFileSync(lkgPath, 'utf8') !== lkg)) {
-        writeFileSync(lkgPath, lkg);
+      // What is there is read through one descriptor; the pin is replaced whole (rename), never written through a link.
+      if (existsSync(join(cacheRoot, cache.corepack_dir)) && readRegular(lkgPath)?.bytes.toString('utf8') !== lkg) {
+        writeFileSync(`${lkgPath}.${process.pid}.tmp`, lkg, { flag: 'wx' });
+        renameSync(`${lkgPath}.${process.pid}.tmp`, lkgPath);
         steps.push(`${project.id}: pinned corepack's last-known-good package manager to the project's packageManager`);
       }
     }

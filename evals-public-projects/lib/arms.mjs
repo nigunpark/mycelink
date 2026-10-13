@@ -51,7 +51,7 @@
  * each left it), the fault records and the verdict, never evaluator content.
  */
 import { spawnSync } from 'node:child_process';
-import { createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { createAdapter } from './adapters/index.mjs';
@@ -97,6 +97,7 @@ import { isolationRecord, start as startConfined } from './sandbox.mjs';
 import { pinRecord } from './suite-pin.mjs';
 import { sessionFailure } from './provider.mjs';
 import { buildWorkspace } from './workspace.mjs';
+import { readRegular } from './fsread.mjs';
 
 export const ARMS = ['without', 'with'];
 
@@ -1360,6 +1361,8 @@ function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoP
     let spawnError = null;
     let pending = '';
     let finished = false;
+    // Set once the process has exited on its own: its streams may still be draining, but nothing stops it any more.
+    let exited = false;
     child.stdout.on('data', (chunk) => {
       out.write(chunk);
       pending += chunk.toString('utf8');
@@ -1385,8 +1388,9 @@ function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoP
       killTree(child);
     };
     const timer = setInterval(() => {
-      // A session already being stopped is never polled again: no fault fires into it.
-      if (endedBy !== null) return;
+      // A session already being stopped, or already ended on its own (its output still draining), is never polled
+      // again: no fault fires into it, and a violation it left is the settlement's to find after it.
+      if (endedBy !== null || exited) return;
       if (Date.now() >= deadline) return stop('budget');
       const action = poll();
       if (action === 'interrupt' || action === 'controller-violation') stop(action);
@@ -1428,6 +1432,7 @@ function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoP
     });
     child.on('close', finish);
     child.on('exit', (code, signal) => {
+      exited = true;
       const t = setTimeout(() => {
         child.stdout.destroy();
         child.stderr.destroy();
@@ -1799,12 +1804,8 @@ export async function runArm({
   const readScript = (p) => {
     const abs = resolve(p);
     if (!under(abs, ws) && !under(abs, home)) return null;
-    try {
-      const st = lstatSync(abs);
-      return st.isFile() && st.size <= 256 * 1024 ? readFileSync(abs, 'utf8') : null;
-    } catch {
-      return null;
-    }
+    // Through one descriptor, never through a link: what is checked is what is read.
+    return readRegular(abs, 256 * 1024)?.bytes.toString('utf8') ?? null;
   };
   const session = async ({ purpose, phase, text, deadline, resumes, corrects, continuation, provider_recovery }) => {
     const n = record.sessions.length + 1;

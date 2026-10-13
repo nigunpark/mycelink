@@ -219,7 +219,8 @@ describe('prepareSourceBundle', () => {
     const lock = lockFor(complete, { kind: 'complete', commits: 3 });
     const target = join(makeTmpDir('bench-prepare-'), 'sources', 'x.bundle');
     const r = await prepareSourceBundle({ lock, from: upstream, target });
-    expect(r).toMatchObject({ ok: true, bundle: target, transport: { sha256: sha256(readFileSync(target)), size: statSync(target).size } });
+    const written = readFileSync(target);
+    expect(r).toMatchObject({ ok: true, bundle: target, transport: { sha256: sha256(written), size: written.length } });
     expect(failed(await verifySourceBundle({ lock, bundlePath: target }))).toEqual([]);
     // Reproducible: preparing again gives the same content, and refuses to overwrite a different file unasked.
     const again = await prepareSourceBundle({ lock, from: upstream, target: join(makeTmpDir('bench-prepare-'), 'x.bundle') });

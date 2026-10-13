@@ -129,6 +129,18 @@ describe('real access is found in every spelling', () => {
     });
   }
 
+  it('reads a Glob pattern as a glob, never as a regular expression: classes, negation, alternatives, metacharacters literal, no blow-up', () => {
+    const glob = (pattern: string) => scan(transcript([{ name: 'Glob', input: { pattern } }])).hits.map((h: any) => h.root);
+    const EVALUATOR = '/home/alice/mycelink-benchmark-cache/evaluator';
+    expect(glob('/home/alice/mycelink-benchmark-cach[a-f]/evaluator/**')).toContain(EVALUATOR);
+    expect(glob('/home/alice/mycelink-benchmark-cach[!e]/evaluator/**')).not.toContain(EVALUATOR);
+    expect(glob('/home/alice/mycelink-benchmark-{elsewhere,cache}/evaluator/**')).toContain(EVALUATOR);
+    expect(glob('/home/alice/mycelink-benchmark-cach[.*+(]/evaluator/**')).toEqual([]);
+    const started = Date.now();
+    expect(glob(`/home/alice/${'*e'.repeat(40)}z/**`)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it('names a recursive tool pointed above a root as a probe, not a hit', () => {
     for (const use of [bash('find / -name "*.bundle"'), bash('grep -rn hidden /home'), bash('ls -R /tmp'), { name: 'Grep', input: { pattern: 'x', path: '/home/alice' } }]) {
       const r = scan(transcript([use]));

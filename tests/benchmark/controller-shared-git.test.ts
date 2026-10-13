@@ -47,6 +47,7 @@ import { fulfil, gateTests, packOf, writeFiles, type GateRun, type ShopTicket } 
 import { asController } from '../helpers/authority.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { attestRollbacks, beginTransaction, lightCheck, resumeTransaction, settleTransaction } from '../../evals-public-projects/lib/controller-txn.mjs';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -618,7 +619,7 @@ describe('two workers of one repository', () => {
     y.h.end(y.a, ca, `git -C ${q(y.ta.worktree)} status`);
     const r2 = settleTransaction({ txn: y.txn });
     expect(r2.violation).toBe(true);
-    expect(reasonsOf(r2).join('; ')).toMatch(new RegExp(`may have pushed in ${y.ta.node_id.replace(/\./g, '\\.')}’s worktree`));
+    expect(reasonsOf(r2).join('; ')).toMatch(new RegExp(`may have pushed in ${escapeRegExp(y.ta.node_id)}’s worktree`));
 
     // A pushes its own entry while B pushes in A's worktree too: two entries on A's branch, either could be B's.
     const z = await twoWorkers();

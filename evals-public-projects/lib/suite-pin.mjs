@@ -10,10 +10,19 @@
  * baselines and qualifications as committed, never as the working tree
  * holds them while the run goes on.
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { exportTree, revParse, safeGit } from './git.mjs';
+
+/** A directory's real place: git names a checkout so (macOS: /private/var for /var; Windows: the long form of an 8.3 name). */
+function real(dir) {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
 
 /** `{ ok, problems, pin }`: pin = { root, checkout, commit, path, tree, dirty }. */
 export function pinSuite(root, { expectCommit = null } = {}) {
@@ -21,7 +30,7 @@ export function pinSuite(root, { expectCommit = null } = {}) {
   const top = safeGit(suite, ['rev-parse', '--show-toplevel']);
   if (top.code !== 0) return { ok: false, problems: [`the suite ${suite} is not in a Git checkout: it cannot be pinned to a commit`], pin: null };
   const checkout = resolve(top.stdout);
-  const path = relative(checkout, suite).split('\\').join('/');
+  const path = relative(real(checkout), real(suite)).split('\\').join('/');
   const commit = revParse(checkout, 'HEAD');
   const tree = commit ? revParse(checkout, path ? `${commit}:${path}` : `${commit}^{tree}`) : null;
   const status = safeGit(checkout, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', path || '.'], { encoding: 'buffer' });
