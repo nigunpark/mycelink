@@ -871,6 +871,10 @@ It makes no cost, latency or uplift claim.
   gone: the result is now captured into a controller-owned quarantine by
   atomic rename before it is validated (see *Security*). Found by the CI run
   for the previous fix (Windows, Node 22.12.0 leg only).
+- `mycelink --help` printed the usage and exited 1, and `mycelink -h` was an
+  unknown command group (exit 2). `help`, `--help` and `-h`, alone or with a
+  command group, now print the usage and exit 0; no command group still
+  exits 1 and an unknown one 2.
 
 ### Security
 
