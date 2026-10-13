@@ -65,6 +65,7 @@ import { cite, completedProof, dispatch, firstGenerations, reprove, reverifyCli,
 import { Orchestrator, type SettleFaultPoint } from '../../src/engine/orchestrator.js';
 import type { SessionAdapter } from '../../src/sessions/adapter.js';
 import { mutateState } from '../../src/state/feature-state.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -229,7 +230,7 @@ describe("a sibling never erases a completed producer's tests", () => {
       const res = await settle(s, t);
       expect(head(s), `attempt ${n}`).toBe(integrated);
       expect(res.detail, `attempt ${n}`).toMatch(/SIBLING_PROGRESS_LOST/);
-      expect(res.detail).toMatch(new RegExp(`${CLI.replace(/\./g, '\\.')} AC-3`));
+      expect(res.detail).toMatch(new RegExp(`${escapeRegExp(CLI)} AC-3`));
       if (n <= 2) {
         expect(res.outcome, `attempt ${n}: ${res.detail}`).toBe('PRECONDITION_FAILED');
         expect(charged(s, CLI2), `attempt ${n}`).toEqual({});

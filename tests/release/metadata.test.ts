@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
+import { escapeRegExp } from '../helpers/regex.js';
 
 const ROOT = resolve(process.cwd());
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
@@ -65,7 +66,7 @@ describe('identity and version', () => {
     expect(versions.slice(0, 2)).toEqual(['Unreleased', pkg.version]);
     const unreleased = changelog.slice(changelog.indexOf('## [Unreleased]'), changelog.indexOf(`## [${pkg.version}]`));
     expect(unreleased).not.toMatch(/^\s*[-*] /m);
-    expect(changelog).toMatch(new RegExp(`^\\[${pkg.version.replace(/\./g, '\\.')}\\]: `, 'm'));
+    expect(changelog).toMatch(new RegExp(`^\\[${escapeRegExp(pkg.version)}\\]: `, 'm'));
   });
 
   it('is GitHub-distributed, not npm-published, on supported Node versions', () => {

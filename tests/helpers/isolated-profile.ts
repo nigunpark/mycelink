@@ -2,7 +2,7 @@
  * Isolated Claude Code profile.
  *
  * Every run gets its own GUID-scoped tree under
- * `<LOCALAPPDATA on Windows, os.tmpdir() elsewhere>/MycelinkPluginE2E/runs/<guid>`
+ * `<LOCALAPPDATA on Windows, os.tmpdir() elsewhere>/MycelinkPluginE2E/runs/<guid>-<mkdtemp suffix>`
  * with separate source, workspace, config, home, temp, npm and artifact
  * directories, so a plugin test can never read or write the developer's real
  * Claude configuration.
@@ -11,8 +11,8 @@
  * variables, identical on Windows, Linux and macOS.
  */
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 
@@ -76,8 +76,11 @@ export function claudeVersion(): string {
  * directory survives being copied.
  */
 export function createIsolatedProfile(pluginSource: string): IsolatedProfile {
-  const id = randomUUID();
-  const root = join(profilesRoot(), id);
+  mkdirSync(profilesRoot(), { recursive: true });
+  // A directory of its own, made by mkdtemp (an unpredictable name, owner-only on POSIX): never a guessable path under
+  // a temp root another user can write to.
+  const root = mkdtempSync(join(profilesRoot(), `${randomUUID()}-`));
+  const id = basename(root);
 
   const source = join(root, 'source');
   const workspace = join(root, 'workspace');
@@ -86,7 +89,7 @@ export function createIsolatedProfile(pluginSource: string): IsolatedProfile {
   const temp = join(root, 'temp');
   const npm = join(root, 'npm');
   const artifacts = join(root, 'artifacts');
-  for (const dir of [root, source, workspace, config, home, temp, npm, artifacts]) {
+  for (const dir of [source, workspace, config, home, temp, npm, artifacts]) {
     mkdirSync(dir, { recursive: true });
   }
 

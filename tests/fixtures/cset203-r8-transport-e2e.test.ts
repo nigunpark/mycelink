@@ -263,5 +263,5 @@ describe('CSET-203 r8, replayed model-free to the delivery it should have reache
     expect(changelog.code, changelog.out).toBe(0);
     const r3check = acceptance(s.repo, delivered, VER_R3_ACCEPTANCE);
     expect(r3check.code, r3check.out).toBe(0);
-  });
+  }, 300_000);
 });

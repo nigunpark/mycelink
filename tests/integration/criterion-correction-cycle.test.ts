@@ -53,6 +53,7 @@ import {
   type Ver,
 } from '../helpers/version-fixture.js';
 import { commit, fulfil, packOf, runGate, writeFiles, type GateRun, type ShopTicket } from '../helpers/shop-worker.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -254,7 +255,7 @@ describe('a new behaviour mapped to GREEN is corrected by a RED cycle of its own
     const { t } = await heldOnAc4(s);
     const reconciled = JSON.parse((await verCli(s, ['session', 'reconcile', VER_FEATURE, '--json'])).out);
     expect(reconciled.pending_dispatches).toEqual([expect.objectContaining({ node_id: CLI, claim_id: t.claim_id, settlement: 'correction' })]);
-    expect((await verCli(s, ['session', 'reconcile', VER_FEATURE])).out).toMatch(new RegExp(`pending dispatch ${CLI.replace(/\./g, '\\.')} \\(held for its criterion evidence: resume it and give the correction ticket to a module-worker\\): mycelink dispatch ${VER_FEATURE} --resume`));
+    expect((await verCli(s, ['session', 'reconcile', VER_FEATURE])).out).toMatch(new RegExp(`pending dispatch ${escapeRegExp(CLI)} \\(held for its criterion evidence: resume it and give the correction ticket to a module-worker\\): mycelink dispatch ${VER_FEATURE} --resume`));
     const resumed = await dispatch(s, '--resume', CLI);
     expect(resumed.status).toBe('DISPATCHED');
     expect(resumed.ticket!.correction).toMatchObject({ criterion: 'AC-4', cycle: true });

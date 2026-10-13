@@ -29,6 +29,7 @@ import { clone } from '../helpers/graph-fixtures.js';
 import { validateGraph } from '../../src/graph/validate.js';
 import { modulesOf, verifierFor } from '../../src/engine/modules.js';
 import type { RepositoryDecl } from '../../src/model/types.js';
+import { escapeRegExp } from '../helpers/regex.js';
 
 const FULL_SUITE = ['sh', '-c', 'pnpm build && git checkout -- packages/config/package.json && pnpm vitest run'];
 
@@ -166,7 +167,7 @@ describe('a verification node proves compatibility by existing tests, without a 
     const result = validate(g);
     expect(result.ok).toBe(false);
     const problem = result.problems.find((p) => p.code === 'WORKER_NODE_CHANGES_NOTHING');
-    expect(problem?.detail).toMatch(new RegExp(`${COMPAT.replace(/\./g, '\\.')}.*node_type: verification`));
+    expect(problem?.detail).toMatch(new RegExp(`${escapeRegExp(COMPAT)}.*node_type: verification`));
     for (const type of ['review', 'integration', 'knowledge', 'runtime-deploy']) {
       Object.assign(node(g, COMPAT), { node_type: type });
       expect(codes(g), type).toContain('WORKER_NODE_CHANGES_NOTHING');
