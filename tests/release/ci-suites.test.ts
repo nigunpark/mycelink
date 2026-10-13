@@ -1,0 +1,94 @@
+/**
+ * No required suite silently disappears from CI.
+ *
+ * `npm test`, CI and the release workflow run the suites through one runner
+ * (scripts/test-suites.mjs), bounded and sharded. Every file Vitest collects
+ * belongs to exactly one suite and one shard; every suite and shard is run by
+ * exactly one CI group; both workflows run every group, on every OS and Node
+ * version CI claims; nothing in them runs an unbounded `vitest run` or
+ * `npm test` any more (CI 38347201692).
+ */
+import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+import YAML from 'yaml';
+// @ts-expect-error -- plain ESM script without type declarations
+import { CI_GROUPS, SUITES, collectedFiles, selection, shardsOf } from '../../scripts/test-suites.mjs';
+
+const ROOT = resolve(process.cwd());
+const workflow = (f: string) => YAML.parse(readFileSync(join(ROOT, '.github', 'workflows', f), 'utf8')) as { jobs: Record<string, any> };
+type Group = { id: string; runs: string[] };
+const suites = Object.keys(SUITES) as string[];
+
+/** What Vitest itself collects with the repository's config. */
+function vitestCollects(): string[] {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('VITEST')));
+  const list = spawnSync(process.execPath, [join(ROOT, 'node_modules', 'vitest', 'vitest.mjs'), 'list', '--filesOnly', '--json'], { cwd: ROOT, env, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  expect(list.status, list.stderr).toBe(0);
+  return (JSON.parse(list.stdout) as { file: string }[]).map((f) => relative(ROOT, f.file).replace(/\\/g, '/')).sort();
+}
+
+describe('the suites', () => {
+  it('are exactly what Vitest collects: every file in one suite, none twice, none left out', () => {
+    const collected = vitestCollects();
+    expect(collectedFiles()).toEqual(collected);
+    const bySuite = suites.flatMap((s) => selection(s).files as string[]);
+    expect([...bySuite].sort()).toEqual(collected);
+    expect(new Set(bySuite).size).toBe(bySuite.length);
+    for (const s of ['unit', 'integration', 'security', 'fixtures', 'release', 'plugin-e2e', 'benchmark']) expect(selection(s).files.length, s).toBeGreaterThan(0);
+  });
+
+  it('cut each suite into shards that partition it, and bound how many files run at once', () => {
+    for (const s of suites) {
+      const shards = shardsOf(s) as { files: string[] }[];
+      expect(shards.length, s).toBe(SUITES[s].shards);
+      const all = shards.flatMap((x) => x.files);
+      expect([...all].sort(), s).toEqual(selection(s).files);
+      expect(new Set(all).size, s).toBe(all.length);
+      for (const x of shards) expect(x.files.length, s).toBeGreaterThan(0);
+      expect(SUITES[s].maxWorkers, s).toBeGreaterThanOrEqual(1);
+      expect(SUITES[s].maxWorkers, s).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('weigh only files that exist', () => {
+    const weights = JSON.parse(readFileSync(join(ROOT, 'scripts', 'test-weights.json'), 'utf8')) as Record<string, number>;
+    const collected = new Set(collectedFiles());
+    expect(Object.keys(weights).filter((f) => !collected.has(f))).toEqual([]);
+  });
+});
+
+describe('the CI groups', () => {
+  it('run every suite, and every shard of it, exactly once', () => {
+    const runs = (CI_GROUPS as Group[]).flatMap((g) => g.runs);
+    const expected = suites.flatMap((s) => (SUITES[s].shards === 1 ? [s] : Array.from({ length: SUITES[s].shards }, (_, i) => `${s}:${i + 1}/${SUITES[s].shards}`)));
+    expect([...runs].sort()).toEqual([...expected].sort());
+  });
+
+  it.each(['ci.yml', 'release.yml'])('are all run by %s, by the runner, and nothing runs the suites unbounded', (f) => {
+    const wf = workflow(f);
+    const test = wf.jobs['test'];
+    expect(test.strategy.matrix.group).toEqual((CI_GROUPS as Group[]).map((g) => g.id));
+    const runs = (test.steps as { run?: string; name?: string }[]).filter((s) => s.run !== undefined);
+    expect(runs.map((s) => s.run)).toContain('node scripts/test-suites.mjs ci ${{ matrix.group }}');
+    expect(runs.find((s) => s.run!.includes('test-suites.mjs'))!.name).toBe('Test ${{ matrix.group }}');
+    expect(String(test.name)).toContain('${{ matrix.group }}');
+    expect(test['timeout-minutes']).toBeLessThanOrEqual(60);
+    const text = readFileSync(join(ROOT, '.github', 'workflows', f), 'utf8');
+    expect(text).not.toMatch(/\bnpm test\b|\bnpx vitest\b|vitest run(?! --config vitest\.pilot)/);
+  });
+
+  it('gate the release package on every group', () => {
+    expect(workflow('release.yml').jobs['verify'].needs).toBe('test');
+    expect(workflow('release.yml').jobs['publish'].needs).toBe('verify');
+  });
+
+  it('are what npm test and the suite scripts run', () => {
+    const scripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts as Record<string, string>;
+    expect(scripts['test']).toBe('node scripts/test-suites.mjs all');
+    for (const [script, suite] of [['test:unit', 'unit'], ['test:integration', 'integration'], ['test:security', 'security'], ['test:fixture', 'fixtures'], ['test:release', 'release'], ['test:plugin', 'plugin-e2e'], ['test:benchmark', 'benchmark']]) {
+      expect(scripts[script!], script).toBe(`node scripts/test-suites.mjs run ${suite}`);
+    }
+  });
+});

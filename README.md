@@ -450,7 +450,8 @@ prefer) when asking for help.
 npm ci
 npm run typecheck
 npm run build          # dist/mycelink.mjs + THIRD_PARTY_NOTICES.md (commit both)
-npm test               # unit, integration, security, fixture, release, plugin-e2e
+npm test               # unit, integration, security, fixtures, release, plugin-e2e, benchmark: one bounded suite at a time
+npm run test:ci -- integration-2   # one CI group, exactly as CI runs it (node scripts/test-suites.mjs list)
 npm run package        # artifacts/mycelink-<version>.zip, .sha256, SBOM.spdx.json
 claude plugin validate --strict .
 ```

@@ -96,17 +96,21 @@ describe('ci.yml', () => {
     }
   });
 
-  it('covers Windows, Linux and macOS on Node 22.12 and 24', () => {
-    const matrix = ci.jobs['test']?.strategy?.matrix as { os: string[]; node: string[] };
-    expect(matrix.os.sort()).toEqual(['macos-latest', 'ubuntu-latest', 'windows-latest']);
-    expect(matrix.node).toEqual(['22.12.0', '24']);
+  it('covers Windows, Linux and macOS on Node 22.12 and 24, for the checks and every test group', () => {
+    for (const job of ['checks', 'test']) {
+      const matrix = ci.jobs[job]?.strategy?.matrix as { os: string[]; node: string[] };
+      expect([...matrix.os].sort(), job).toEqual(['macos-latest', 'ubuntu-latest', 'windows-latest']);
+      expect(matrix.node, job).toEqual(['22.12.0', '24']);
+    }
   });
 
   it('runs every required gate', () => {
-    const runs = (ci.jobs['test']?.steps ?? []).map((s) => s.run ?? '').join('\n');
-    for (const gate of ['npm ci', 'npm audit', 'npm run typecheck', 'npm run build', 'git diff --exit-code', 'npm test', 'claude plugin validate --strict .', 'npm run package']) {
+    const runs = (ci.jobs['checks']?.steps ?? []).map((s) => s.run ?? '').join('\n');
+    for (const gate of ['npm ci', 'npm audit', 'npm run typecheck', 'npm run build', 'git diff --exit-code', 'claude plugin validate --strict .', 'npm run package']) {
       expect(runs, gate).toContain(gate);
     }
+    const tests = (ci.jobs['test']?.steps ?? []).map((s) => s.run ?? '').join('\n');
+    expect(tests).toContain('node scripts/test-suites.mjs ci ${{ matrix.group }}');
   });
 });
 
@@ -125,8 +129,30 @@ describe('release.yml', () => {
 
   it('verifies, packages reproducibly and uploads zip, checksum and SBOM', () => {
     const text = readFileSync(join(DIR, 'release.yml'), 'utf8');
-    for (const needle of ['npm test', 'claude plugin validate --strict .', 'npm run package', 'SOURCE_DATE_EPOCH', '.zip.sha256', 'SBOM.spdx.json', 'gh release create']) {
+    for (const needle of ['node scripts/test-suites.mjs ci', 'claude plugin validate --strict .', 'npm run package', 'SOURCE_DATE_EPOCH', '.zip.sha256', 'SBOM.spdx.json', 'gh release create']) {
       expect(text, needle).toContain(needle);
+    }
+  });
+});
+
+describe('codeql.yml', () => {
+  const ql = existsSync(join(DIR, 'codeql.yml')) ? load('codeql.yml') : ({ on: {}, jobs: {} } as Workflow);
+  const init = Object.values(ql.jobs).flatMap((j) => j.steps ?? []).find((s) => s.uses?.startsWith('github/codeql-action/init@'));
+
+  it('runs on pull requests, pushes to main and a schedule, with the security-extended queries', () => {
+    expect(Object.keys(ql.on as Record<string, unknown>)).toEqual(expect.arrayContaining(['push', 'pull_request', 'schedule']));
+    expect(init?.with?.['languages']).toBe('javascript-typescript');
+    expect(init?.with?.['queries']).toBe('security-extended');
+  });
+
+  it('scans the shipped runtime sources, hooks, scripts and the executable eval tooling: only the generated bundle and the fake Claude are left out', () => {
+    const config = YAML.parse(String(init?.with?.['config'] ?? '')) as { 'paths-ignore'?: string[]; paths?: string[] } | null;
+    // dist/ is generated from src/ (scanned) by scripts/build.mjs; tests/fake-claude is a test stand-in that never ships.
+    expect(config?.['paths-ignore'] ?? []).toEqual(['dist', 'tests/fake-claude']);
+    expect(config?.paths).toBeUndefined();
+    const ignored = config?.['paths-ignore'] ?? [];
+    for (const scanned of ['src', 'bin', 'hooks', 'scripts', 'evals-public-projects/lib', 'evals-public-projects/tools', 'evals-multimodule']) {
+      expect(ignored.filter((p) => scanned === p || scanned.startsWith(`${p}/`) || p === '**' || p === '*'), scanned).toEqual([]);
     }
   });
 });
