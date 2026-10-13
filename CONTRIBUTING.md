@@ -23,7 +23,7 @@ of the license). Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 npm ci
 npm run typecheck
 npm run build          # regenerates dist/mycelink.mjs and THIRD_PARTY_NOTICES.md
-npm test
+npm test               # every suite in turn, bounded (scripts/test-suites.mjs)
 claude plugin validate --strict .
 ```
 

@@ -528,6 +528,34 @@ It makes no cost, latency or uplift claim.
 
 ### Fixed
 
+- **Node 22's test runner output is read as Node 24's.** Node's JUnit
+  reporter names each test's file only from Node 24.11, so on Node 22 every
+  declared RED test read "not run". A file-less result is now attributed to
+  the one test file of the module that declares it (statically or by a
+  template that carries its title), never when another file could have run
+  it or its failure's stack names another file. On Node 22 `node --test`
+  prints TAP into a pipe: the output-only RED check and regression deferral
+  now read its diagnostics, so a RED failing on a missing constructor is
+  refused there too, as on Node 24.
+- **One place, one name (macOS `/var`, Windows 8.3 names).** A runner, git
+  and a child's working directory name the real path of a directory the
+  controller reached through a link or a short name. Reported test files,
+  the provenance ledger (its file and git records alike), the benchmark's
+  suite pin, workspace keys and registered-repository checks now compare
+  canonical places; containment still requires the real path inside the
+  real root.
+- The provenance ledger records one change per call (`appendFileSync`
+  writes through the exported `writeFileSync`; Node 22's `rmSync` through
+  its own `unlinkSync`), the same on every Node.
+- A failing verifier that prints nothing had a new fingerprint on every
+  attempt on Linux and macOS (its fresh working directory was in it), so
+  the same failure twice never blocked the node.
+- `npm test`, CI and the release workflow run the suites through one
+  bounded runner (`scripts/test-suites.mjs`): each suite in its own Vitest
+  process with a worker limit, the large ones in duration-balanced shards,
+  every collected file in exactly one; CI runs each shard as its own job on
+  all six OS and Node legs.
+
 - **A test is its path and its runner's key (PCM-101 final).** JUnit
   reports name `pkg.Class#method` while the Java reader declares bare
   methods, and the two were compared as strings, so every Java criterion
@@ -877,6 +905,17 @@ It makes no cost, latency or uplift claim.
   exits 1 and an unknown one 2.
 
 ### Security
+
+- Every file the core and the hooks look at before reading (result and
+  verdict slots, launch records, reports, ledgers, transcripts, setup
+  receipts) is now read through one descriptor opened without following a
+  link and without blocking, checked by its own `fstat` and against the
+  path's file id, bounded (CodeQL `js/file-system-race` on the release pull
+  request). Files Mycelink creates only where nothing is (the config, a
+  review's diff) are created exclusively; copies are replaced atomically.
+- The benchmark's transcript scan matches globs directly instead of
+  compiling a session's pattern into a regular expression
+  (`js/regex-injection`).
 
 These issues were found by CodeQL on the worker-transport pull request.
 
