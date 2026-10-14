@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { TOY } from './toy-fixture.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { CORRECTIVE_PROMPT, TASK_CORRECTIVE_PROMPT, correctivePrompt, taskCorrectivePrompt } from '../../evals-public-projects/lib/faults.mjs';
-import { sha, arm, FAKE_HOST, hostPlan, LATE_ONLY, callsOf, failingOf, useArmsFixture } from './arms-fixture.js';
+import { sha, arm, FAKE_HOST, hostPlan, LATE_ONLY, callsOf, failingOf, checksFound, useArmsFixture } from './arms-fixture.js';
 
 useArmsFixture();
 
@@ -20,7 +20,7 @@ describe('fault-injected arm', () => {
       // A host that runs no plugin hook: the revert lands, and the harness finds it in the workspace, stops it and rolls it back.
       const fake = hostPlan({ reworkDirect: [true, false], reworkVia: 'command', hooks: false });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: LATE_ONLY, requireMycelink: true, requireTdd: true, lightCheckMs: 300 });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by, s.corrects ?? null])).toEqual([
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by, s.corrects ?? null]), checksFound(run)).toEqual([
         [1, 'task', 'task', 'exit', null],
         [2, 'rework', 'rework', 'controller-violation', null],
         [3, 'rework-corrective', 'rework', 'exit', 2],
@@ -80,7 +80,7 @@ describe('fault-injected arm', () => {
     it('a revert the plugin’s fence refused changed nothing: no violation, and the controller repairs through Mycelink to C002 (r9: blocked is not done)', async () => {
       const fake = hostPlan({ reworkDirect: true, reworkVia: 'command' });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: LATE_ONLY, requireMycelink: true, requireTdd: true, lightCheckMs: 300 });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, Boolean(s.violation)])).toEqual([
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, Boolean(s.violation)]), checksFound(run)).toEqual([
         [1, 'task', 'exit', false],
         [2, 'rework', 'exit', false],
       ]);
@@ -99,7 +99,7 @@ describe('fault-injected arm', () => {
     it('the same revert again in the corrective session ends the phase: an identical repeat is terminal (the fourth pilot)', async () => {
       const fake = hostPlan({ reworkDirect: true, hooks: false });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: LATE_ONLY, requireMycelink: true, requireTdd: true, lightCheckMs: 300 });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by])).toEqual([
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), checksFound(run)).toEqual([
         [1, 'task', 'task', 'exit'],
         [2, 'rework', 'rework', 'controller-violation'],
         [3, 'rework-corrective', 'rework', 'controller-violation'],
@@ -140,7 +140,7 @@ describe('fault-injected arm', () => {
     it('a task controller’s write to a running worker’s result slot, refused by the fence, is no violation', async () => {
       const fake = hostPlan({ taskTakeover: [true] });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], requireMycelink: true, requireTdd: true, lightCheckMs: 300 });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, Boolean(s.violation)])).toEqual([[1, 'task', 'exit', false]]);
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, Boolean(s.violation)]), checksFound(run)).toEqual([[1, 'task', 'exit', false]]);
       expect(run.sessions[0].fence_blocks).toBe(1);
       expect(run.mycelink).toMatchObject({ complete: true, candidate: 'TOY-001-C001' });
       expect(run.ok).toBe(true);
@@ -149,7 +149,7 @@ describe('fault-injected arm', () => {
     it('one that lands contaminates the worktree: the dispatch is discarded through Mycelink and a corrective session re-dispatches a fresh worker to C001', async () => {
       const fake = hostPlan({ taskTakeover: [true, false], hooks: false });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], requireMycelink: true, requireTdd: true, lightCheckMs: 300 });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by, s.corrects ?? null])).toEqual([
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by, s.corrects ?? null]), checksFound(run)).toEqual([
         [1, 'task', 'task', 'controller-violation', null],
         [2, 'corrective', 'task', 'exit', 1],
       ]);
@@ -194,7 +194,7 @@ describe('fault-injected arm', () => {
     it('a third violation ends the task: two corrective sessions at most', async () => {
       const fake = hostPlan({ taskTakeover: [true, true, true], hooks: false });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], requireMycelink: true, requireTdd: true, lightCheckMs: 300 });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by])).toEqual([
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by]), checksFound(run)).toEqual([
         [1, 'task', 'controller-violation'],
         [2, 'corrective', 'controller-violation'],
         [3, 'corrective', 'controller-violation'],

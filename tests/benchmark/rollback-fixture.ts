@@ -72,6 +72,8 @@ export const run = (fake: { dir: string; file: string }, options: { lightCheckMs
 
 export const failingOf = (v: any) => Object.entries(v.sections).flatMap(([name, s]: [string, any]) => (s?.checks ?? []).filter((c: any) => !c.ok && c.severity !== 'warning').map((c: any) => `${name}:${c.id}`));
 export const shape = (r: any) => r.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, s.corrects ?? null, Boolean(s.violation)]);
+/** On a shape mismatch, what each session's checks found: its stop, its violation, what its settlement could not attribute. */
+export const found = (r: any) => JSON.stringify(r.sessions.map((s: any) => ({ ended_by: s.ended_by, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null })));
 
 /** The corrective session completed the feature through Mycelink, the violation recovered and on the record. */
 export function recovered(r: any, fake: ReturnType<typeof hostPlan>, sessions = 2) {
