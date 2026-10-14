@@ -5,8 +5,10 @@
  * An archive is verified against its manifest and extracted once per test
  * file into a short temporary directory of its own, never into the
  * repository: there Vitest could collect a recorded project's test file and
- * the constraint audit could count it. It is removed when the process exits.
+ * the constraint audit could count it. It is removed after the test file's
+ * last test (Vitest ends its workers without an `exit` event to hook).
  */
+import { afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +28,9 @@ function removeTrees(): void {
   trees.clear();
 }
 
+// Imported while a test file is collected: this hook is that file's.
+afterAll(removeTrees);
+
 /** The directory holding archive `name`'s files (`tests/benchmark/fixtures/<name>.tar`), exactly as the manifest lists them. */
 export function fixtureTree(name: string): string {
   const known = trees.get(name);
@@ -37,7 +42,6 @@ export function fixtureTree(name: string): string {
     rmSync(dir, { recursive: true, force: true });
     throw error;
   }
-  if (trees.size === 0) process.once('exit', removeTrees);
   trees.set(name, dir);
   return dir;
 }
