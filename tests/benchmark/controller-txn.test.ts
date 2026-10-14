@@ -250,10 +250,14 @@ describe('who changed what in a controller session', () => {
     mkdirSync(join(commonDir, 'worktrees'));
     // An automatic gc in some git command: update-server-info's list of the refs.
     writeFileSync(join(commonDir, 'info', 'refs'), `${g(w.repo, ['rev-parse', 'main'])}\trefs/heads/main\n`);
+    // The control repository's is its own Git state, as before (CI 38498972537: housekeeping there made a clean session's
+    // settlement selective).
+    writeFileSync(join(w.platform, '.git', 'info', 'refs'), `${g(w.platform, ['rev-parse', 'main'])}\trefs/heads/main\n`);
     await later();
     expect(lightCheck({ txn, stream: '' }).unauthorized).toEqual([]);
     const r = settleTransaction({ txn });
     expect(r).toMatchObject({ violation: false, unauthorized: [] });
+    expect(r.authorized.find((d: any) => d.path === 'platform/.git/info/refs')).toMatchObject({ by: 'control-git' });
     expect(r.housekeeping.map((h: any) => h.path).sort()).toEqual(['repos/x/.git/info/refs', 'repos/x/.git/worktrees']);
     expect(existsSync(join(commonDir, 'worktrees'))).toBe(false);
     expect(existsSync(join(commonDir, 'info', 'refs'))).toBe(false);

@@ -582,10 +582,11 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
     const own = ownOf(key);
     const adm = adminOf(key);
     const repo = repoOf(key);
-    // A lock, or what git derives for itself: `info/refs`, update-server-info's list of the refs, which a repack or an
-    // automatic gc in any git command rewrites (CI 38489750013: a task session stopped for it). Neither is a ref,
-    // an object or a file anything is built from.
-    const gitLock = /(?:^|\/)\.git\/(?:.*\/)?[^/]*\.lock$/.test(key) || /(?:^|\/)\.git\/info\/refs$/.test(key);
+    const gitLock = /(?:^|\/)\.git\/(?:.*\/)?[^/]*\.lock$/.test(key);
+    // What git derives for itself: `info/refs`, update-server-info's list of the refs, which a repack or an automatic gc
+    // in any git command rewrites (CI 38489750013: a task session stopped for it); no ref, object or file anything is
+    // built from. A control repository's stays its own, as all of its Git state (below).
+    const gitDerived = /(?:^|\/)\.git\/info\/refs$/.test(key);
     const by = attested(key, post_);
     const dirty = repo !== null ? checkedOut.get(repo) : undefined;
     const h = harnessOf(key);
@@ -594,6 +595,7 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
     // Claude Code's own project files beside the workspace's repositories (never a control repository's hook settings).
     else if (control !== '' && (key === '.claude' || key.startsWith('.claude/'))) Object.assign(d, { verdict: 'housekeeping', by: 'host', category: 'host', inert: true });
     else if (control !== null && (p[0] === '.git' || rel === '.git')) Object.assign(d, { verdict: 'authorized', by: 'control-git' });
+    else if (gitDerived) Object.assign(d, { verdict: 'housekeeping', by: 'git', category: 'git', inert: true });
     else if (control !== null && ((p[0] === 'features' && (p.length <= 2 || AUTHORED.has(p[2]))) || p[0] === 'contracts' || p[0] === 'handoffs')) Object.assign(d, { verdict: 'authorized', by: 'authoring' });
     else if (by !== null) Object.assign(d, { verdict: 'authorized', by });
     // An acceptance reviewer's verdict: its own Write, attested beside it by the plugin's hook (core) with its canonical hash.
