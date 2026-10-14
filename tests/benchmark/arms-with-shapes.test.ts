@@ -11,19 +11,31 @@ import { ISOLATED } from './isolation-fixture.js';
 import { TOY } from './toy-fixture.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { casePrompt } from '../../evals-public-projects/lib/cases.mjs';
-import { qaPrompt, toy, project, prd, arm, FAKE_HOST, testOf, hostPlan, DEFAULT_SHAPE, callsOf, failingOf, checksFound, useArmsFixture } from './arms-fixture.js';
+import { qaPrompt, toy, project, prd, arm, FAKE_HOST, testOf, hostPlan, DEFAULT_SHAPE, callsOf, failingOf, checksFound, standInEnds, useArmsFixture } from './arms-fixture.js';
 
 useArmsFixture();
+
+/**
+ * Each run's own budget (the task's, half of it the rework's) ends a session that stops answering well inside the test's
+ * bound, so a run that stalls ends, with its record and its diagnostics, instead of timing the test out (CI 38533631962).
+ */
+const BOUNDED = { budgetSeconds: 360 };
 
 describe('fault-injected arm', () => {
   describe('the with arm, model-free: a stand-in host on the sealed Mycelink', () => {
     it('works every fault of the plan: teammate commit, replayed settles, late defect, an interrupt 2 s into the rework, and a Mycelink rework that delivers C002', async () => {
       const fake = hostPlan({ reworkStalls: ['start'] });
-      const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'elapsed-seconds', seconds: 2, phase: 'rework' }), requireMycelink: true, requireTdd: true });
+      const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'elapsed-seconds', seconds: 2, phase: 'rework' }), requireMycelink: true, requireTdd: true, ...BOUNDED });
       expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), checksFound(run)).toEqual([
         [1, 'task', 'task', 'exit'],
         [2, 'rework', 'rework', 'interrupt'],
         [3, 'rework-resume', 'rework', 'exit'],
+      ]);
+      // The interrupted session was stopped where it waited, before anything: no child process of its own was running.
+      expect(standInEnds(fake)).toEqual([
+        { kind: 'task', last: 'exit 0' },
+        { kind: 'rework', last: 'await-stop start' },
+        { kind: 'rework', last: 'exit 0' },
       ]);
       const byKind = Object.fromEntries(run.faults.map((f: any) => [f.kind, f]));
       expect(byKind['concurrent-commit']).toMatchObject({ applied: true, path: 'TEAM-NOTES.md', sync: 'done' });
@@ -69,13 +81,20 @@ describe('fault-injected arm', () => {
     it('the fourth pilot’s shape: an interrupted task resumed to C001, the exact late defect, and a controller rework through the producer node that delivers C002', async () => {
       // The task is interrupted at its first commit, mod-a's test after its RED; a fresh session resumes it.
       const fake = hostPlan({ taskStalls: ['red'] });
-      const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count: 1, phase: 'task' }), requireMycelink: true, requireTdd: true });
+      const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count: 1, phase: 'task' }), requireMycelink: true, requireTdd: true, ...BOUNDED });
       // On a mismatch, what each session's checks found.
       const found = checksFound(run);
       expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), found).toEqual([
         [1, 'task', 'task', 'interrupt'],
         [2, 'resume', 'task', 'exit'],
         [3, 'rework', 'rework', 'exit'],
+      ]);
+      // The interrupt its first commit triggered landed where the stand-in stalls, in that commit's call once the commit had
+      // landed, before its PostToolUse hook ran: on every platform the same place, with no child process of its own running.
+      expect(standInEnds(fake)).toEqual([
+        { kind: 'task', last: 'await-stop red' },
+        { kind: 'task', last: 'exit 0' },
+        { kind: 'rework', last: 'exit 0' },
       ]);
       const byKind = Object.fromEntries(run.faults.map((f: any) => [f.kind, f]));
       expect(byKind['interrupt-restart']).toMatchObject({
@@ -193,13 +212,20 @@ describe('fault-injected arm', () => {
       plan.work['mod-a'].draft = r.draft;
       plan.regression['mod-a'] = r.regression;
       writeFileSync(fake.file, JSON.stringify(plan));
-      const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count: 1, phase: 'task' }), requireMycelink: true, requireTdd: true });
+      const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count: 1, phase: 'task' }), requireMycelink: true, requireTdd: true, ...BOUNDED });
       // On a mismatch, what each session's checks found.
       const found = checksFound(run);
       expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), found).toEqual([
         [1, 'task', 'task', 'interrupt'],
         [2, 'resume', 'task', 'exit'],
         [3, 'rework', 'rework', 'exit'],
+      ]);
+      // The interrupt its first commit triggered landed where the stand-in stalls, in that commit's call once the commit had
+      // landed, before its PostToolUse hook ran: on every platform the same place, with no child process of its own running.
+      expect(standInEnds(fake)).toEqual([
+        { kind: 'task', last: 'await-stop red' },
+        { kind: 'task', last: 'exit 0' },
+        { kind: 'rework', last: 'exit 0' },
       ]);
       const defect = run.faults.find((f: any) => f.kind === 'late-hidden-defect');
       expect(defect).toMatchObject({ applied: true, module: 'mod-a', affected: { module: 'mod-a', path: 'mod-a', repository: 'repos/toyshop' } });

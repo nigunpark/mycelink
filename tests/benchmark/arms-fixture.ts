@@ -6,8 +6,9 @@
  * are set by its beforeAll. The tests are cut into files so that CI can run
  * the longest ones on different runners (scripts/test-suites.mjs).
  */
-import { afterAll, beforeAll, expect } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { afterAll, beforeAll, expect, onTestFailed } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import net from 'node:net';
 import { join } from 'node:path';
@@ -77,12 +78,72 @@ export function fakePlan(extra: Record<string, unknown> = {}) {
   return { dir, file, entries: () => readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) };
 }
 
-export const arm = (name: string, fake: { dir: string; file: string }, options: Record<string, unknown> = {}) =>
-  runArm({
+/** The tail of a text file, or null when there is none. */
+const tail = (file: string, lines: number) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).slice(-lines).join('\n') : null);
+
+/**
+ * What a failed arm test — an assertion, or its own timeout — says of the run, from what was written through while it ran
+ * (a timeout never reaches the run's record): the harness's account of each session's process (harness-trace.log beside
+ * the plan), where each stand-in session stood (host-trace.jsonl: its last steps, and anything that did not answer), and
+ * each session's stderr. A session still running is killed with what it started: nothing outlives the test.
+ */
+export function armDiagnostics(fake: { dir: string }, outDir: string): string {
+  const harness = join(fake.dir, 'harness-trace.log');
+  const lines = existsSync(harness) ? readFileSync(harness, 'utf8').split('\n').filter(Boolean) : [];
+  const running = new Map<string, number>();
+  for (const l of lines) {
+    const started = /session (\d+): started \(pid (\d+)\)/.exec(l);
+    if (started) running.set(started[1]!, Number(started[2]));
+    const ended = /session (\d+): ended \(/.exec(l);
+    if (ended) running.delete(ended[1]!);
+  }
+  const killed: string[] = [];
+  for (const [n, pid] of running) {
+    try {
+      if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 30_000 });
+      else process.kill(-pid, 'SIGKILL');
+      killed.push(`session ${n} (pid ${pid})`);
+    } catch {
+      // already gone
+    }
+  }
+  const host = join(fake.dir, 'host-trace.jsonl');
+  const events = existsSync(host) ? readFileSync(host, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+  const brief = (e: any) => `${e.t?.slice(11, 23)} ${e.ev}${e.label ? ` ${e.label}` : ''}${e.command ? ` ${String(e.command).slice(0, 120)}` : ''}${e.where ? ` at ${e.where}` : ''}${e.code !== undefined ? ` ${e.code}` : ''}${e.ms !== undefined ? ` ${e.ms} ms` : ''}${e.timed_out ? ' TIMED OUT' : ''}${e.message ? ` ${String(e.message).split('\n')[0]}` : ''}`;
+  const sessions = [...new Set(events.map((e: any) => e.session))].map((session) => {
+    const mine = events.filter((e: any) => e.session === session);
+    const anomalies = mine.filter((e: any) => /unanswered|timeout|^error$/.test(e.ev));
+    return `stand-in ${session} (${mine.find((e: any) => e.ev === 'start')?.kind ?? '?'}), ${mine.length} events; last:\n${mine.slice(-8).map(brief).join('\n')}${anomalies.length ? `\nunanswered:\n${anomalies.map(brief).join('\n')}` : ''}`;
+  });
+  const sessionsDir = join(outDir, 'sessions');
+  const stderr = existsSync(sessionsDir) ? readdirSync(sessionsDir).filter((f) => f.endsWith('.stderr.log')).map((f) => `${f}:\n${tail(join(sessionsDir, f), 15) ?? ''}`) : [];
+  return [`harness:\n${lines.slice(-40).join('\n')}`, ...sessions, ...stderr, killed.length ? `killed, still running: ${killed.join(', ')}` : 'no session left running'].join('\n---\n');
+}
+
+/** Each stand-in session of a run, in order: its kind, and the last thing its trace shows it doing (where it ended). */
+export function standInEnds(fake: { dir: string }): { kind: string; last: string }[] {
+  const host = join(fake.dir, 'host-trace.jsonl');
+  const events = existsSync(host) ? readFileSync(host, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+  return [...new Set(events.map((e: any) => e.session))].map((session) => {
+    const mine = events.filter((e: any) => e.session === session);
+    const last = mine.at(-1);
+    return { kind: mine.find((e: any) => e.ev === 'start')?.kind ?? '?', last: last.ev === 'await-stop' ? `await-stop ${last.where}` : last.ev === 'exit' ? `exit ${last.code}` : last.ev };
+  });
+}
+
+export const arm = (name: string, fake: { dir: string; file: string }, options: Record<string, unknown> = {}) => {
+  const outDir = (options.outDir as string | undefined) ?? join(makeTmpDir('bench-a-run-'), 'run');
+  // Written through as it happens, so that it outlives a timeout.
+  const trace = join(fake.dir, 'harness-trace.log');
+  const t0 = Date.now();
+  const log = (line: string) => appendFileSync(trace, `+${((Date.now() - t0) / 1000).toFixed(1)}s ${line}\n`);
+  onTestFailed(() => {
+    console.error(`arm ${name} run ${outDir}:\n${armDiagnostics(fake, outDir)}`);
+  });
+  return runArm({
     suiteRoot: toy.suite,
     caseKey: TOY_PRD,
     arm: name,
-    outDir: join(makeTmpDir('bench-a-run-'), 'run'),
     cacheRoot: toy.cacheRoot,
     claude: [process.execPath, FAKE],
     pollMs: 100,
@@ -92,8 +153,11 @@ export const arm = (name: string, fake: { dir: string; file: string }, options: 
     sessionBinds: [{ path: fake.dir, rw: true }],
     preflightProxy: PROXY,
     proxyAllow: ['api.anthropic.com:443', PROXY.allowed],
+    log,
     ...options,
+    outDir,
   });
+};
 
 // The with arm, model-free: a stand-in host (fake-mycelink-host.mjs) on the sealed Mycelink.
 export const FAKE_HOST = join(REPO_ROOT, 'tests', 'benchmark', 'fake-mycelink-host.mjs');
