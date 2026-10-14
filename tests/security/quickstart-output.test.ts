@@ -16,6 +16,7 @@ import * as realFs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { readCommittedAsset } from '../helpers/committed-asset.js';
 
 type Op = 'openSync' | 'writeFileSync' | 'rmSync' | 'mkdirSync';
 
@@ -118,8 +119,11 @@ describe('quickstart setup: the workspace directory', () => {
     const scratch = makeTmpDir('qs-out-');
     const root = prepareOutput(join(scratch, 'parent', 'new'));
     const marker = join(root, MARKER);
-    expect(realFs.lstatSync(marker).isFile()).toBe(true);
-    expect(JSON.parse(realFs.readFileSync(marker, 'utf8'))).toMatchObject({ schema: 'mycelink-quickstart/1', feature_id: 'ORD-101' });
+    const markerBytes = readCommittedAsset(marker, 4096);
+    expect(JSON.parse(markerBytes.toString('utf8'))).toMatchObject({
+      schema: 'mycelink-quickstart/1',
+      feature_id: 'ORD-101',
+    });
     if (POSIX) {
       expect(mode(root)).toBe(0o700);
       expect(mode(marker)).toBe(0o600);
