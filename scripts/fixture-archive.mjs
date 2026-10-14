@@ -29,7 +29,7 @@
  *   node scripts/fixture-archive.mjs pack <name> <dir>     write <name>.tar and <name>.manifest.json from a tree
  */
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -258,17 +258,27 @@ export function extractArchive(name, dest, dir = FIXTURES) {
   return files.map((f) => f.path);
 }
 
+/** A regular file's bytes through one descriptor: never a link followed (where the platform can refuse one), never anything but a file. */
+function readRegular(full, path) {
+  const fd = openSync(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`${path}: not a regular file`);
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Every regular file under `src` as { path, data }, sorted by path; a link or any other kind of entry is refused. */
 export function readTree(src) {
   const root = resolve(src);
   const files = [];
   const walk = (abs, rel) => {
-    for (const entry of readdirSync(abs).sort()) {
-      const full = join(abs, entry);
-      const path = rel === '' ? entry : `${rel}/${entry}`;
-      const st = lstatSync(full);
-      if (st.isDirectory()) walk(full, path);
-      else if (st.isFile()) files.push({ path, data: readFileSync(full) });
+    for (const entry of readdirSync(abs, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const full = join(abs, entry.name);
+      const path = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      if (entry.isDirectory()) walk(full, path);
+      else if (entry.isFile()) files.push({ path, data: readRegular(full, path) });
       else throw new Error(`${path}: not a regular file or directory`);
     }
   };
