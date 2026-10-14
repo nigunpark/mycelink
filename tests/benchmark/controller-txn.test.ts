@@ -16,6 +16,7 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
@@ -256,6 +257,40 @@ describe('who changed what in a controller session', () => {
     expect(r.housekeeping.map((h: any) => h.path).sort()).toEqual(['repos/x/.git/info/refs', 'repos/x/.git/worktrees']);
     expect(existsSync(join(commonDir, 'worktrees'))).toBe(false);
     expect(existsSync(join(commonDir, 'info', 'refs'))).toBe(false);
+  });
+
+  it('a lock git left beside what the core made decides nothing: the container is the core’s, the lock housekeeping', async () => {
+    const w = workspace();
+    const txn = begin(w);
+    core(w, ['init', w.platform]);
+    await later();
+    // The core's `git worktree add`, done: the admin directory and its gitdir file, as its record has them; on Windows,
+    // a HEAD.lock git could not delete while another handle held it, left beside them.
+    const now = () => (BigInt(Date.now()) * 1_000_000n).toString();
+    const commonDir = join(w.repo, '.git');
+    const admin = join(commonDir, 'worktrees', 'x');
+    mkdirSync(admin, { recursive: true });
+    writeFileSync(join(admin, 'gitdir'), 'somewhere/.git\n');
+    writeFileSync(join(admin, 'HEAD.lock'), 'ref: refs/heads/main\n');
+    const mode = (p: string) => statSync(p).mode & 0o7777;
+    const files = {
+      [admin]: [{ t: 'absent' }, { t: 'd', mode: mode(admin) }],
+      [join(admin, 'gitdir')]: [{ t: 'absent' }, { t: 'f', mode: mode(join(admin, 'gitdir')), sha256: createHash('sha256').update('somewhere/.git\n').digest('hex') }],
+    };
+    for (const [kind, extra] of [['git-intent', { cwd: w.repo, all_refs: false, stash: false }], ['git-done', { exit: 0, changed: { refs: {}, files, indexes: {} } }]] as const) {
+      writeFileSync(join(w.ledger, 'ledger.jsonl'), `${JSON.stringify({ kind, pid: process.pid, seq: 9004, t: now(), sub: 'worktree', common_dir: commonDir, ...extra })}\n`, { flag: 'a' });
+    }
+    await later();
+    const r = settleTransaction({ txn });
+    expect(r).toMatchObject({ violation: false, unauthorized: [] });
+    expect(r.authorized.filter((d: any) => d.path.startsWith('repos/x/.git/worktrees')).map((d: any) => [d.path, d.by]).sort()).toEqual([
+      ['repos/x/.git/worktrees', 'core'],
+      ['repos/x/.git/worktrees/x', 'core'],
+      ['repos/x/.git/worktrees/x/gitdir', 'core'],
+    ]);
+    expect(r.housekeeping.map((h: any) => h.path)).toEqual(['repos/x/.git/worktrees/x/HEAD.lock']);
+    expect(existsSync(join(admin, 'HEAD.lock'))).toBe(false);
+    expect(existsSync(join(admin, 'gitdir'))).toBe(true);
   });
 
   it('an empty directory in a `.git` no core git command ran on, or one with something in it, is still the controller’s', async () => {

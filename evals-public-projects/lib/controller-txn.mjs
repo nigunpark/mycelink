@@ -690,15 +690,19 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
     const was = d.change === 'created' ? post.entries[d.key] : pre.entries[d.key];
     if (was?.t !== 'd') continue;
     const inside = deltas.filter((x) => x.kind === 'entry' && x.key !== d.key && under(x.key, d.key));
-    if (inside.length > 0 && inside.every((x) => x.verdict === 'authorized')) Object.assign(d, { verdict: 'authorized', by: inside[0].by, container: true });
+    // A lock git left beside them (on Windows, when another handle holds it as git deletes it) is housekeeping: it
+    // decides nothing about the container (CI 38496139927, a session's `.git/worktrees`).
+    const held = inside.filter((x) => x.verdict !== 'housekeeping');
+    if (held.length > 0 && held.every((x) => x.verdict === 'authorized')) Object.assign(d, { verdict: 'authorized', by: held[0].by, container: true });
     // ... and the container of a contaminated worktree's files goes with them, through Mycelink.
-    else if (inside.length > 0 && inside.every((x) => x.verdict === 'authorized' || x.worktree)) {
-      const w = inside.find((x) => x.worktree);
+    else if (held.length > 0 && held.every((x) => x.verdict === 'authorized' || x.worktree)) {
+      const w = held.find((x) => x.worktree);
       Object.assign(d, { category: w.category, worktree: w.worktree, container: true });
     }
-    // ... and one left empty inside a `.git` the core ran git on: git removes `worktrees` with the last worktree, but on
-    // Windows that rmdir fails while another handle holds the directory, and git leaves it (CI 38489750013).
-    else if (d.change === 'created' && inside.length === 0 && gitDirOf(d.key) !== null && L.git.some((g) => g.common === gitDirOf(d.key)) && !Object.keys(post.entries).some((k) => under(k, d.key) && k !== d.key)) {
+    // ... and one in a `.git` holding git's housekeeping only, or left empty where the core ran git: git removes
+    // `worktrees` with the last worktree, but on Windows that rmdir fails while another handle holds the directory, and
+    // git leaves it (CI 38489750013).
+    else if (gitDirOf(d.key) !== null && ((inside.length > 0 && held.length === 0) || (d.change === 'created' && inside.length === 0 && L.git.some((g) => g.common === gitDirOf(d.key)) && !Object.keys(post.entries).some((k) => under(k, d.key) && k !== d.key)))) {
       Object.assign(d, { verdict: 'housekeeping', by: 'git', category: 'git', inert: true, container: true });
     }
   }
