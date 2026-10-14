@@ -32,7 +32,7 @@ comparison with plain Claude Code, and no measure of code quality.
 | Repositories | `orders-api` and `orders-web`: two independent local Git repositories, each with its own `.git` and `main`, no shared remote, no submodule. A third, `control/`, holds Mycelink's PRD, graph, state and evidence. |
 | Feature | ORD-101 *Delayed orders with an expected delivery date*: contract v1 → v2, four acceptance criteria ([PRD](../../examples/quickstart/control/features/ORD-101/PRD.md)) |
 | Graph | `ORD-101.api.status.impl` → `ORD-101.web.status.impl` → `ORD-101.release.candidate.build` |
-| Software | Claude Code 2.1.290, model Claude Opus 5.5, Mycelink `0.3.0-beta.1` from this repository; Windows host |
+| Software | Claude Code 2.1.290, model Claude Opus 5.5, Mycelink `0.3.0-beta.1` from adoption commit `f3afb6ae92b18bf3af67252d74fcc784d1420dd6`; Windows host |
 | Network | none of Mycelink's own; the only traffic was Claude Code's model requests. The demo repositories have no remotes. |
 
 ## Method
