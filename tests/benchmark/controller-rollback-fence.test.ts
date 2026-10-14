@@ -58,7 +58,6 @@ describe('a controller that changes the workspace itself, outside the fence', ()
     ['a renamed one is restored and its new name removed', 'rename', 'platform/features/TOY-001/events.jsonl (deleted; a Mycelink-managed file)', (ws: string) => expect(existsSync(join(ws, 'platform', 'features', 'TOY-001', 'events.jsonl.bak'))).toBe(false)],
     ['a mode change is reverted', 'chmod', 'platform/mycelink.config.json (', (ws: string) => expect(statSync(join(ws, 'platform', 'mycelink.config.json')).mode & 0o200).not.toBe(0)],
     ['a file replaced by a symlink is a file again', 'symlink', 'platform/requirements/TOY-001.md (type; ', (ws: string) => expect(lstatSync(join(ws, 'platform', 'requirements', 'TOY-001.md')).isSymbolicLink()).toBe(false)],
-    ['a commit on main in the product repository goes back, branch, index and files', 'commit', 'repos/toyshop/.git:refs/heads/main (moved from ', (ws: string) => expect(execFileSync('git', ['log', '--format=%s', 'main'], { cwd: join(ws, 'repos', 'toyshop'), encoding: 'utf8' })).not.toMatch(/fix it myself/)],
     ['a background helper’s later write is caught by the workspace check', 'helper', 'platform/features/TOY-001/LOOPS.json (created; a Mycelink-managed file)', (ws: string) => expect(existsSync(join(ws, 'platform', 'features', 'TOY-001', 'LOOPS.json'))).toBe(false)],
   ])('%s', async (_label, kind, line, check) => {
     const fake = hostPlan({ forgeries: [kind] });
@@ -70,6 +69,35 @@ describe('a controller that changes the workspace itself, outside the fence', ()
     expect(r.sessions[0].violation.summary.some((l: string) => l.startsWith(line)), JSON.stringify(r.sessions[0].violation.summary)).toBe(true);
     expect(r.sessions[0].violation.verified).toBe(true);
     check(r.workspace);
+    recovered(r, fake);
+  }, 900_000);
+
+  it('a commit on main in the product repository goes back, branch, index and files', async () => {
+    const fake = hostPlan({ forgeries: ['commit'] });
+    const r = await run(fake);
+    expect(shape(r), found(r)).toEqual([
+      [1, 'task', 'controller-violation', null, true],
+      [2, 'corrective', 'exit', 1, false],
+    ]);
+    const git = (args: string[]) => execFileSync('git', args, { cwd: join(r.workspace, 'repos', 'toyshop'), encoding: 'utf8' }).trim();
+    const { violation } = r.sessions[0];
+    const { rollback } = r.sessions[0].controller_txn;
+    // Found as what it is — the branch moved, by its ref however git stores it — from the session's head onto a
+    // commit of the controller's own, and moved back.
+    const main = rollback.refs.find((x: any) => x.git === 'repos/toyshop/.git' && x.ref === 'refs/heads/main');
+    expect(main, JSON.stringify(violation.summary)).toMatchObject({ from: expect.stringMatching(/^[0-9a-f]{40}$/), to: expect.stringMatching(/^[0-9a-f]{40}$/) });
+    expect(git(['log', '-1', '--format=%P %s', main.from])).toBe(`${main.to} fix it myself`);
+    // With the index and the file it changed: each named, each restored, the rollback verified.
+    expect([...violation.summary].sort()).toEqual([
+      "repos/toyshop/.git/index (modified; a product repository's Git state)",
+      `repos/toyshop/.git:refs/heads/main (moved from ${main.to.slice(0, 12)} to ${main.from.slice(0, 12)}; a product repository's ref)`,
+      "repos/toyshop/mod-a/src/stock.mjs (modified; a product repository's file)",
+    ].sort());
+    expect(violation.verified).toBe(true);
+    expect(rollback.restored).toEqual(expect.arrayContaining(['repos/toyshop/.git/index', 'repos/toyshop/mod-a/src/stock.mjs']));
+    // Nothing keeps it: main, delivered, holds Mycelink's work alone.
+    expect(git(['branch', '--contains', main.from])).toBe('');
+    expect(git(['log', '--format=%s', 'main'])).not.toMatch(/fix it myself/);
     recovered(r, fake);
   }, 900_000);
 

@@ -210,6 +210,56 @@ describe('who changed what in a controller session', () => {
     expect(g(w.repo, ['branch', '--contains', forged])).toBe('');
   });
 
+  it('a controller stopped between its git add and its git commit: no commit to find — the file and the index go back exactly, the branch never moved', async () => {
+    // What a check landing mid-command leaves (CI 38510332461): the session stopped after the add, before the commit.
+    const w = workspace();
+    const before = g(w.repo, ['rev-parse', 'main']);
+    const index = readFileSync(join(w.repo, '.git', 'index'));
+    const txn = begin(w);
+    await later();
+    writeFileSync(join(w.repo, 'src', 'a.js'), 'export const a = 2;\n');
+    g(w.repo, ['add', '-A']);
+    const r = settleTransaction({ txn });
+    expect(r).toMatchObject({ violation: true, mode: 'selective' });
+    expect(kinds(r)).toEqual([
+      ['repos/x/.git/index', 'modified', 'git'],
+      ['repos/x/src/a.js', 'modified', 'product'],
+    ]);
+    expect(r.rollback).toMatchObject({ verified: true, refs: [] });
+    expect(r.rollback.restored).toEqual(expect.arrayContaining(['repos/x/.git/index', 'repos/x/src/a.js']));
+    expect(readFileSync(join(w.repo, '.git', 'index')).equals(index)).toBe(true);
+    expect(readFileSync(join(w.repo, 'src', 'a.js'), 'utf8')).toBe('export const a = 1;\n');
+    expect(g(w.repo, ['rev-parse', 'main'])).toBe(before);
+    expect(g(w.repo, ['status', '--porcelain'])).toBe('');
+  });
+
+  it('a commit whose branch git keeps in packed-refs alone is the same commit: named by its ref, it goes back with the index and the file', async () => {
+    const w = workspace();
+    // Before the session and after it, the branch is in packed-refs only: no loose ref file names either commit.
+    g(w.repo, ['pack-refs', '--all']);
+    const before = g(w.repo, ['rev-parse', 'main']);
+    const txn = begin(w);
+    await later();
+    writeFileSync(join(w.repo, 'src', 'a.js'), 'export const a = 2;\n');
+    g(w.repo, ['add', '-A']);
+    g(w.repo, ['commit', '-q', '-m', 'fix it myself']);
+    const forged = g(w.repo, ['rev-parse', 'main']);
+    g(w.repo, ['pack-refs', '--all']);
+    expect(existsSync(join(w.repo, '.git', 'refs', 'heads', 'main'))).toBe(false);
+    const r = settleTransaction({ txn });
+    expect(r).toMatchObject({ violation: true, mode: 'selective' });
+    expect(kinds(r)).toEqual([
+      ['repos/x/.git/index', 'modified', 'git'],
+      ['repos/x/.git:refs/heads/main', 'ref', 'git-ref'],
+      ['repos/x/src/a.js', 'modified', 'product'],
+    ]);
+    expect(r.summary).toContain(`repos/x/.git:refs/heads/main (moved from ${before.slice(0, 12)} to ${forged.slice(0, 12)}; a product repository's ref)`);
+    expect(r.rollback).toMatchObject({ verified: true, refs: [{ git: 'repos/x/.git', ref: 'refs/heads/main', from: forged, to: before }] });
+    expect(g(w.repo, ['rev-parse', 'main'])).toBe(before);
+    expect(g(w.repo, ['branch', '--contains', forged])).toBe('');
+    expect(g(w.repo, ['status', '--porcelain'])).toBe('');
+  });
+
   it('a check while a core git command is still running judges nothing of what that command is writing: a worktree it is checking out is the core’s until it is done', async () => {
     const w = workspace();
     const txn = begin(w);
