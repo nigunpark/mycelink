@@ -385,6 +385,12 @@ function wrapped(name: (typeof FUNCTIONS)[number]): Fn {
         for (let p = dirname(targets[0] as string); inside(p, first) && p !== targets[0]; p = dirname(p)) states.unshift({ path: p, state: stateOf(p, r) });
       }
       if (name === 'cpSync') for (const p of walk(targets[0] as string)) states.push({ path: p, state: stateOf(p, r) });
+      // A directory renamed into place moves what is in it: those are this call's too (a result slot into its quarantine,
+      // whose removal can fail on Windows while another handle holds a file, leaving them where the rename put them).
+      if (name === 'renameSync') {
+        const to = targets.find((p) => p === pathOf(args[1]));
+        if (to !== undefined && states.find((s) => s.path === to)?.state.t === 'd') for (const p of walk(to)) states.push({ path: p, state: stateOf(p, r) });
+      }
       done(r, seq, name, states);
     }
     return result;

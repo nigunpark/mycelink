@@ -100,6 +100,26 @@ describe('the provenance ledger, in process', () => {
     if (process.platform !== 'win32') expect(statesOf(records, state).at(-1).mode).toBe(0o600);
   });
 
+  it('a directory renamed into place records what moved with it: a result slot in its quarantine, attested where a failed removal leaves it', () => {
+    const d = dirs();
+    mkdirSync(join(d.work, 'slot', 'deep'), { recursive: true });
+    writeFileSync(join(d.work, 'slot', '.gitignore'), '*\n');
+    writeFileSync(join(d.work, 'slot', 'deep', 'result.json'), '{}');
+    installProvenance(['settle', 'F-1'], { MYCELINK_PROVENANCE: d.ledger });
+    mkdirSync(join(d.work, 'q'));
+    renameSync(join(d.work, 'slot'), join(d.work, 'q', 'slot'));
+    uninstallProvenance();
+    const { records, problems } = readLedger(d.ledger);
+    expect(problems).toEqual([]);
+    expect(statesOf(records, join(d.work, 'slot')).at(-1)).toEqual({ t: 'absent' });
+    expect(statesOf(records, join(d.work, 'q', 'slot')).at(-1)).toMatchObject({ t: 'd' });
+    expect(statesOf(records, join(d.work, 'q', 'slot', '.gitignore')).at(-1)).toMatchObject({ t: 'f', sha256: sha('*\n') });
+    expect(statesOf(records, join(d.work, 'q', 'slot', 'deep')).at(-1)).toMatchObject({ t: 'd' });
+    expect(statesOf(records, join(d.work, 'q', 'slot', 'deep', 'result.json')).at(-1)).toMatchObject({ t: 'f', sha256: sha('{}') });
+    // A file renamed is that file only.
+    expect(records.filter((r: any) => r.kind === 'done' && r.op === 'renameSync').flatMap((r: any) => r.states)).toHaveLength(5);
+  });
+
   it('one call is one change: a node:fs function that reaches another exported one (appendFileSync through writeFileSync; on Node 22, rmSync through its own unlinkSync and rmdirSync) records one intent and one done, and reads nothing for the process', () => {
     const d = dirs();
     installProvenance(['feature', 'init', 'F-1'], { MYCELINK_PROVENANCE: d.ledger });
