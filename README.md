@@ -1,20 +1,190 @@
 # Mycelink
 
-**Connect repositories. Coordinate agents. Ship one feature.**
+**One approved PRD → isolated Claude Code workers in their own Git worktrees →
+strict TDD → independent review of every acceptance criterion, with rework →
+one immutable candidate that pins the exact commit SHA of every repository.**
+
+[![CI](https://github.com/nigunpark/mycelink/actions/workflows/ci.yml/badge.svg)](https://github.com/nigunpark/mycelink/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![Status: public beta](https://img.shields.io/badge/status-public%20beta-orange.svg)
 
 Mycelink is a Claude Code plugin plus a deterministic controller (`mycelink`)
-that turns **one approved PRD** into dependency-aware work across **several
-independent Git repositories**: isolated worker sessions in their own
-worktrees, strict TDD gates, per-repository integration branches, **one
-immutable cross-repository candidate**, and evidence-based end-to-end
-completion.
+for features that span **several Git repositories**. Claude does the
+judgement work: it decomposes, implements and reviews. The controller does
+the bookkeeping a model cannot be trusted with: what may run next, which
+paths a worker may touch, whether a RED really failed, and which exact
+commits make up the result.
 
-Conversation history is never the source of truth. The PRD, the graph, the
-state file, the event log, recorded command evidence and Git SHAs are.
+**It is deterministic orchestration, not a smarter model and not a generic
+agent launcher.** It does not improve what Claude writes. It makes each step
+checkable and refuses to advance on a model's say-so.
+
+```bash
+claude plugin marketplace add nigunpark/mycelink
+claude plugin install mycelink@mycelink-marketplace
+```
+
+Then, inside Claude Code: `/mycelink:run FEAT-101`.
+New here? The [five-minute quickstart](#quickstart) walks through a two-repository demo.
 
 > **Status: public beta (`0.3.0-beta.1`).** Interfaces may change before 1.0.
 > Mycelink is an independent, third-party project. It is **not affiliated with
 > or endorsed by Anthropic**. Licensed under [Apache-2.0](LICENSE). No telemetry.
+
+---
+
+## How it works
+
+```mermaid
+flowchart LR
+  PRD["Approved PRD<br/>AC-1 … AC-n"] --> G["Validated graph<br/>each node owns paths<br/>in one repository"]
+  G --> C{{"mycelink controller<br/>(deterministic)"}}
+  C -- ticket --> W1["Worker A<br/>own worktree, repo A"]
+  C -- ticket --> W2["Worker B<br/>own worktree, repo B"]
+  W1 -- "RED → GREEN evidence" --> C
+  W2 -- "RED → GREEN evidence" --> C
+  C --> R["Independent reviewer<br/>read-only, per criterion"]
+  R -- "gap: rework the owning node" --> C
+  R -- PASS --> K["Immutable candidate<br/>repo A @ sha · repo B @ sha"]
+  K --> D["deliver: fast-forward + re-test<br/>never pushes"]
+```
+
+1. **Plan.** `/mycelink:prd` and `/mycelink:plan` turn a requirement into a
+   PRD with stable `AC-n` criteria and a validated graph. Each node belongs to
+   one repository and owns explicit paths.
+2. **Run.** The controller hands out one node at a time, and only when its
+   dependencies are done and no running node owns the same paths. Each worker
+   gets its own Git worktree. A worker must show a failing test (RED) that
+   fails because the behaviour is missing, then GREEN with the identical
+   command. Exit codes are recorded as evidence; a sentence saying "done"
+   is not.
+3. **Review.** A separate read-only reviewer judges every acceptance
+   criterion. A gap reopens only the node that owns that criterion, within a
+   per-criterion budget.
+4. **Bind and deliver.** One manifest binds the exact SHA of every repository
+   and the hashes of the shared contracts. Change any of them and you get a
+   new candidate id. `deliver` fast-forwards each base branch to exactly that
+   SHA and re-runs its tests. It never pushes.
+
+Conversation history is never the source of truth. The PRD, the graph, the
+state file, the event log, recorded command evidence and Git SHAs are.
+
+---
+
+## Quickstart
+
+Five minutes to start, using a demo with two tiny Node.js repositories
+(`pricing` and `storefront`) and one approved requirement. Full walkthrough:
+[`examples/quickstart/`](https://github.com/nigunpark/mycelink/tree/main/examples/quickstart).
+
+```bash
+# 1. Install (once)
+claude plugin marketplace add nigunpark/mycelink
+claude plugin install mycelink@mycelink-marketplace
+
+# 2. Create the demo workspace: three local Git repositories, no model, no network
+git clone https://github.com/nigunpark/mycelink.git
+node mycelink/examples/quickstart/setup.mjs mycelink-demo
+
+# 3. Start Claude Code there
+cd mycelink-demo && claude
+```
+
+Then paste the prompt from the walkthrough. In short: deliver
+`control/requirements/FEAT-101.md` across `pricing/` and `storefront/` with
+`/mycelink:run FEAT-101`. At the end, `control/features/FEAT-101/candidates/`
+holds one manifest binding both repositories' exact SHAs.
+
+Step 3 runs real Claude sessions (a worker per node, plus a reviewer) and
+uses your Claude plan or API credit. The run takes longer than the setup.
+To use your own repositories, see
+[Use it on your own repositories](#use-it-on-your-own-repositories).
+
+---
+
+## How it compares
+
+How the same multi-repository feature is handled. This compares process
+guarantees, not the quality of the code a model writes.
+
+| | Several Claude terminals by hand | One session prompted to use subagents | Mycelink |
+|---|---|---|---|
+| **What runs next** | you decide | the model decides | the controller, from graph dependencies, path ownership and resource capacity |
+| **Isolation** | whatever branches and folders you set up | a shared working tree unless you arrange otherwise | one Git worktree and `wip/<feature>/<node>` branch per node; writes outside it are blocked |
+| **TDD** | by instruction | by instruction | enforced: a RED must fail for the missing behaviour, GREEN re-runs the identical command, and history is checked test-first at settle |
+| **"Done" means** | you looked | the model said so | every declared evidence kind is recorded, and an independent reviewer passed every criterion |
+| **Review and rework** | you | often the same session reviewing its own work | a read-only reviewer per criterion; a gap reworks only the node that owns it, within a budget |
+| **Multi-repo result** | branches you line up yourself | branches you line up yourself | one immutable manifest of exact SHAs plus contract hashes; `candidate verify` detects drift |
+| **After an interruption** | you remember | the conversation context | state file and event log; `/mycelink:run` resumes, and stale workers are fenced off |
+| **Overhead** | lowest | low | highest: a control repository, a PRD with criteria, and more sessions per feature |
+| **Good for** | quick, small edits | exploration in one repository | features that cross repositories and need a checkable trail |
+
+---
+
+## Evidence: public-project benchmark
+
+> **Run and reported by the Mycelink maintainer (self-reported, not an
+> independent study).** Full report:
+> [`docs/evals/2026-10-12-public-project-final-matrix.md`](https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-12-public-project-final-matrix.md)
+> · harness: [`evals-public-projects/`](https://github.com/nigunpark/mycelink/tree/main/evals-public-projects)
+
+| | |
+|---|---|
+| **Change requests** | 6 PRDs on 2 frozen public projects: [Changesets](https://github.com/changesets/changesets) (3) and [Spring Petclinic Microservices](https://github.com/spring-petclinic/spring-petclinic-microservices) (3) |
+| **Arms** | 12: each PRD once normally and once with injected faults (a concurrent commit, duplicate and stale results, a late hidden defect, and an interrupt with restart) |
+| **Judged by** | hidden acceptance tests the agent never saw, plus an independent evaluator-owned verifier (scope, regression, TDD replay, orchestration, integrity, faults). Sessions ran in a bubblewrap sandbox with network only to the model API |
+| **Result** | 12 / 12 deliveries verified and bound to Mycelink's accepted candidate |
+| **Model-free CI** | the automated suite (no model usage) runs on Windows, Linux and macOS with Node 22.12 and 24 |
+
+What this does **not** show:
+
+- **These arms are multi-module, not multi-repository.** Each change spans
+  2–4 modules inside one repository. Cross-repository runs are covered by
+  model-free tests (for example `tests/fixtures/three-repo-e2e.test.ts`),
+  not yet by a public model run.
+- **Not a success rate.** Each cell reports one verified run, picked after
+  the fixes for its earlier failures: 19 of 54 with-plugin runs were
+  verified. The arms ran on five different suite commits.
+- **No uplift claim.** The final matrix has no without-plugin baseline. Cost
+  and time were not measured.
+- One arm's run record is empty; its delivery stands on the surviving
+  records. The raw run records are not published; the report lists their
+  SHA-256 hashes and the script that checks them.
+
+---
+
+## Who it is for
+
+**A good fit if you:**
+
+- use Claude Code and ship features that touch two or more repositories (or
+  clearly separated modules) that each have an automated test command;
+- want a result you can check (recorded exit codes, test-first history, exact
+  SHAs) rather than a transcript to trust;
+- are willing to approve a PRD with explicit acceptance criteria before work
+  starts.
+
+**Not a good fit if you:**
+
+- want a quick edit or a prototype; one Claude session is faster and cheaper;
+- have no automated tests, since TDD gates need a real test command;
+- need a hosted service, a non-Claude model, or unattended production
+  automation. This is a local beta.
+
+## Cost, privacy and license
+
+- **Cost.** Mycelink itself is free. Each node gets its own worker session,
+  and every review is another session, so a feature uses more model usage
+  than one session making the same change. No cost or latency figures are
+  published yet; measuring them is on the
+  [roadmap](https://github.com/nigunpark/mycelink/blob/main/docs/ROADMAP.md).
+- **Privacy.** No telemetry, no Mycelink account and no Mycelink server.
+  Mycelink runs locally and makes no network requests of its own; the only
+  traffic comes from the tools it runs (Claude Code sessions, under your
+  account, and your repositories' own build and test commands). See
+  [docs/DATA_HANDLING.md](docs/DATA_HANDLING.md).
+- **License.** [Apache-2.0](LICENSE). Contributions are welcome; see
+  [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -25,12 +195,14 @@ state file, the event log, recorded command evidence and Git SHAs are.
 - [Security model](#security-model)
 - [Requirements](#requirements)
 - [Install](#install)
-- [Quickstart](#quickstart)
+- [Use it on your own repositories](#use-it-on-your-own-repositories)
 - [Configuration](#configuration)
 - [Examples](#examples)
 - [Update and uninstall](#update-and-uninstall)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Roadmap and feedback](#roadmap-and-feedback)
 - [Contributing, support and security](#contributing-support-and-security)
 
 ---
@@ -222,7 +394,7 @@ node <install-path>/bin/mycelink.mjs --version
 
 ---
 
-## Quickstart
+## Use it on your own repositories
 
 Inside Claude Code (commands are namespaced by the plugin):
 
@@ -359,6 +531,10 @@ verification commands (argv) and a worker budget.
 
 ## Examples
 
+- [`examples/quickstart/`](https://github.com/nigunpark/mycelink/tree/main/examples/quickstart)
+  (in the repository, not the release ZIP): two zero-dependency Node.js
+  repositories, a control repository and one approved requirement, created by
+  `setup.mjs`. This is the [Quickstart](#quickstart) demo.
 - `templates/control-repo/` — a complete control repository: manifest,
   `CLAUDE.md`, hook settings example, a three-repository graph and an E2E
   scenario.
@@ -422,6 +598,12 @@ entries from its `.claude/settings.json` by hand.
   executable (for example `node script.js`) when you need such arguments.
 - **Redaction is a safety net**: keep secrets in environment variables, not in
   command arguments or graph text.
+- **More sessions, more model usage.** Every node is its own worker session
+  and every review is another; no cost or latency figures are published yet.
+- **Public model evidence is multi-module, not multi-repository.** The
+  maintainer's public-project matrix changes several modules inside one
+  repository per PRD; cross-repository flows are exercised by model-free
+  tests. See [Evidence](#evidence-public-project-benchmark).
 
 ---
 
@@ -458,6 +640,21 @@ claude plugin validate --strict .
 
 No test incurs model usage. Plugin-e2e tests use the real Claude Code CLI in
 a throwaway isolated profile and are skipped (loudly) when it is not on PATH.
+
+## Roadmap and feedback
+
+Mycelink is in public beta, and the most useful thing right now is a report
+of a real first run, good or bad.
+
+- [Roadmap](https://github.com/nigunpark/mycelink/blob/main/docs/ROADMAP.md):
+  beta feedback, real cross-repository pilots, resume and upgrade
+  compatibility, cost and failure metrics, and the criteria for 1.0.
+- [First-run feedback](https://github.com/nigunpark/mycelink/issues/new?template=first-run.yml):
+  what you tried, where it stopped, how long it took.
+- [Design partners](https://github.com/nigunpark/mycelink/blob/main/docs/DESIGN_PARTNERS.md):
+  pilot Mycelink on a real multi-repository feature with maintainer support.
+- [Discussions](https://github.com/nigunpark/mycelink/discussions): questions
+  and ideas.
 
 ## Contributing, support and security
 

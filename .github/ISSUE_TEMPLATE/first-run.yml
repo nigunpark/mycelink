@@ -1,0 +1,70 @@
+name: First-run feedback
+description: Tell us how your first Mycelink run went, good or bad. Rough notes are welcome.
+title: "First run: "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Mycelink. A report of a run that stopped helps as much as one that delivered.
+        Remove secrets, private paths and private repository names from everything you paste.
+        A reproducible defect is better filed with the **Bug report** template.
+  - type: dropdown
+    id: what
+    attributes:
+      label: What did you run?
+      options:
+        - The quickstart demo (examples/quickstart)
+        - My own repositories
+        - Something else (say below)
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: How far did it get?
+      options:
+        - Did not install
+        - Installed, but setup (init / register / doctor) failed
+        - Planning (PRD / graph) stopped
+        - Workers ran, but the run stopped before a candidate
+        - A candidate was cut, but delivery failed
+        - Delivered
+    validations:
+      required: true
+  - type: textarea
+    id: story
+    attributes:
+      label: What happened?
+      description: What you expected, what happened instead, and the first point where you were unsure what to do.
+    validations:
+      required: true
+  - type: textarea
+    id: confusing
+    attributes:
+      label: What was confusing or slow?
+      description: Docs, error messages, commands, wait times. Quote the message if one confused you.
+  - type: input
+    id: effort
+    attributes:
+      label: Roughly how long did it take, and how many repositories and nodes?
+      placeholder: "setup 10 min, run 40 min; 2 repositories, 3 nodes"
+  - type: input
+    id: versions
+    attributes:
+      label: Mycelink, Claude Code, Node.js and OS
+      placeholder: "0.3.0-beta.1, claude 2.x, node v24.x, Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `mycelink doctor --json` (optional)
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed secrets and private information from this report.
+          required: true

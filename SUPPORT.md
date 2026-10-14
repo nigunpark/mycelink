@@ -10,8 +10,10 @@ support and no service-level commitment.
 | report a reproducible bug | a [GitHub issue](https://github.com/nigunpark/mycelink/issues/new/choose) using the **Bug report** template |
 | report an incompatibility with an OS, Node.js or Claude Code version | a [GitHub issue](https://github.com/nigunpark/mycelink/issues/new/choose) using the **Compatibility** template |
 | propose a feature or adapter | a [GitHub issue](https://github.com/nigunpark/mycelink/issues/new/choose) using the **Feature request** template |
+| tell us how a first run went, good or bad | a [GitHub issue](https://github.com/nigunpark/mycelink/issues/new/choose) using the **First-run feedback** template |
+| pilot Mycelink on a real multi-repository feature | a [GitHub issue](https://github.com/nigunpark/mycelink/issues/new/choose) using the **Design partner** template |
 | report a security vulnerability | **not an issue** — [report it privately](https://github.com/nigunpark/mycelink/security/advisories/new); see [SECURITY.md](SECURITY.md) |
-| ask a usage question | [GitHub Discussions](https://github.com/nigunpark/mycelink/discussions), if enabled on the repository; otherwise an [issue](https://github.com/nigunpark/mycelink/issues) labelled `question` |
+| ask a usage question | [GitHub Discussions](https://github.com/nigunpark/mycelink/discussions), in the **Q&A** category |
 
 ## Before you ask
 

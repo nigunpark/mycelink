@@ -1,0 +1,10 @@
+{
+  "name": "pricing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mycelink quickstart demo: owns product prices.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
