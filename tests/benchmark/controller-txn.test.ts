@@ -234,6 +234,62 @@ describe('who changed what in a controller session', () => {
     expect(lightCheck({ txn, previous: check.snapshot, stream: '' }).unauthorized.map((u: any) => u.path)).toEqual(['platform/notes.txt']);
   });
 
+  // CI 38489750013 (hosted Windows): task sessions stopped for an empty `.git/worktrees`, and for `info/refs`.
+  it('what git leaves for itself is no one’s change: `worktrees` left empty after the core’s last worktree went, and `info/refs` an automatic gc wrote — housekeeping, removed, no violation', async () => {
+    const w = workspace();
+    const txn = begin(w);
+    core(w, ['init', w.platform]);
+    await later();
+    // The core's `git worktree add` and `remove` in the product repository, done; git's rmdir of `worktrees` failed.
+    const now = () => (BigInt(Date.now()) * 1_000_000n).toString();
+    const commonDir = join(w.repo, '.git');
+    for (const [kind, extra] of [['git-intent', { cwd: w.repo, all_refs: false, stash: false }], ['git-done', { exit: 0, changed: { refs: {}, files: {}, indexes: {} } }]] as const) {
+      writeFileSync(join(w.ledger, 'ledger.jsonl'), `${JSON.stringify({ kind, pid: process.pid, seq: 9002, t: now(), sub: 'worktree', common_dir: commonDir, ...extra })}\n`, { flag: 'a' });
+    }
+    mkdirSync(join(commonDir, 'worktrees'));
+    // An automatic gc in some git command: update-server-info's list of the refs.
+    writeFileSync(join(commonDir, 'info', 'refs'), `${g(w.repo, ['rev-parse', 'main'])}\trefs/heads/main\n`);
+    await later();
+    expect(lightCheck({ txn, stream: '' }).unauthorized).toEqual([]);
+    const r = settleTransaction({ txn });
+    expect(r).toMatchObject({ violation: false, unauthorized: [] });
+    expect(r.housekeeping.map((h: any) => h.path).sort()).toEqual(['repos/x/.git/info/refs', 'repos/x/.git/worktrees']);
+    expect(existsSync(join(commonDir, 'worktrees'))).toBe(false);
+    expect(existsSync(join(commonDir, 'info', 'refs'))).toBe(false);
+  });
+
+  it('an empty directory in a `.git` no core git command ran on, or one with something in it, is still the controller’s', async () => {
+    const w = workspace();
+    const txn = begin(w);
+    core(w, ['init', w.platform]);
+    await later();
+    mkdirSync(join(w.repo, '.git', 'worktrees'));
+    await later();
+    const r = settleTransaction({ txn });
+    expect(r.violation).toBe(true);
+    expect(kinds(r)).toEqual([['repos/x/.git/worktrees', 'created', 'git']]);
+    expect(existsSync(join(w.repo, '.git', 'worktrees'))).toBe(false);
+    // The core ran git there, but the directory holds a file of the controller's.
+    const v = workspace();
+    const second = begin(v);
+    core(v, ['init', v.platform]);
+    await later();
+    const now = () => (BigInt(Date.now()) * 1_000_000n).toString();
+    for (const [kind, extra] of [['git-intent', { cwd: v.repo, all_refs: false, stash: false }], ['git-done', { exit: 0, changed: { refs: {}, files: {}, indexes: {} } }]] as const) {
+      writeFileSync(join(v.ledger, 'ledger.jsonl'), `${JSON.stringify({ kind, pid: process.pid, seq: 9003, t: now(), sub: 'worktree', common_dir: join(v.repo, '.git'), ...extra })}\n`, { flag: 'a' });
+    }
+    mkdirSync(join(v.repo, '.git', 'worktrees'));
+    writeFileSync(join(v.repo, '.git', 'worktrees', 'mine'), 'mine\n');
+    await later();
+    const s = settleTransaction({ txn: second });
+    expect(s.violation).toBe(true);
+    expect(kinds(s)).toEqual([
+      ['repos/x/.git/worktrees', 'created', 'git'],
+      ['repos/x/.git/worktrees/mine', 'created', 'git'],
+    ]);
+    expect(existsSync(join(v.repo, '.git', 'worktrees'))).toBe(false);
+  });
+
   it('a helper process the controller left writing is caught by what it wrote, not by what the transcript says', async () => {
     const w = workspace();
     const txn = begin(w);

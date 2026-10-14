@@ -55,8 +55,9 @@
  *         read-only), 'symlink' (replaces the approved requirement with a symlink), 'commit' (commits a change on
  *         main in the product repository), 'helper' (starts a background process that writes LOOPS.json a moment
  *         later), 'after-settle' (a scratch file at the workspace root once its first node settled DONE),
- *         'registry' (edits repositories.yaml, then goes on through Mycelink). A kind ending in '-exit' exits 0
- *         right after; otherwise the session carries on for ten minutes (to be stopped), except 'registry'.
+ *         'registry' (edits repositories.yaml, then goes on through Mycelink). A kind ending in '-exit' makes its change
+ *         where no call shows it and exits 0 right after; otherwise the session carries on for ten minutes (to be stopped),
+ *         except 'registry'.
  *         A write the plugin's fence refuses (hooks on) changed nothing: the controller carries on through Mycelink.
  * taskRefusals: [stage per task session] — CSET-203 r10: right after the n-th task session's first worker ticket is
  *         dispatched (before any worker runs), its next request fails as Claude Code records it — in its stream and its
@@ -406,6 +407,26 @@ async function setUp() {
   return key;
 }
 
+/** git in the product repository, as the host runs it; `index`: a private index file. Its output, trimmed. */
+function gitIn(args, { input, index } = {}) {
+  const r = spawnSync('git', ['-C', repo, ...args], { env: index ? { ...env, GIT_INDEX_FILE: index } : env, input, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** A commit of `base`'s tree with `changes` (path to content), made through a private index: no checkout or index changes. */
+function commitOf(base, changes, message, parents) {
+  const index = join(dirname(planFile), `index-${process.pid}-${++toolId}`);
+  gitIn(['read-tree', base], { index });
+  for (const [path, content] of Object.entries(changes)) {
+    const blob = gitIn(['hash-object', '-w', '--stdin'], { input: content });
+    gitIn(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { index });
+  }
+  const tree = gitIn(['write-tree'], { index });
+  rmSync(index, { force: true });
+  return gitIn(['commit-tree', tree, ...parents.flatMap((p) => ['-p', p]), '-m', message]);
+}
+
 /** A call shown as the host's, run with no plugin hook before it: what the fence never saw. */
 function unhooked(command, effect) {
   const id = `toolu_fake_${++toolId}`;
@@ -423,55 +444,62 @@ async function forge(stage) {
   const kind = forgery.replace(/-exit$/, '');
   if (FORGERY_STAGE[kind] !== stage || forged) return;
   forged = true;
+  // A session that exits right after its change makes it where no call shows it: only the settlement can find it, however
+  // slowly the session ends (a check the stream wakes could otherwise stop it first, as on hosted Windows).
+  const call = forgery.endsWith('-exit') ? (_command, effect) => effect() : unhooked;
   // A model takes a moment between calls; the workspace's clock can then order its change after Mycelink's last write.
   await sleep(150);
   const feature = join(control, 'features', FEATURE);
   if (kind === 'r9') {
     // CSET-203 r9's helper: a script of its own that writes the approved criteria through a path it computes.
     const script = "import json, os\np = '/'.join(['features', 'TOY-001', 'ACCEPT' + 'ANCE.json'])\nos.makedirs(os.path.dirname(p), exist_ok=True)\njson.dump({'forged': True}, open(p, 'w'))\n";
-    unhooked(`cd ${quote(control)}; cat > gen.py <<'EOF'\n${script}EOF\npython3 gen.py`, () => {
+    call(`cd ${quote(control)}; cat > gen.py <<'EOF'\n${script}EOF\npython3 gen.py`, () => {
       writeFileSync(join(control, 'gen.py'), script);
       mkdirSync(feature, { recursive: true });
       writeFileSync(join(feature, 'ACCEPTANCE.json'), JSON.stringify({ forged: true }));
     });
   } else if (kind === 'delete') {
-    unhooked(`rm ${quote(join(feature, 'events.jsonl'))}`, () => rmSync(join(feature, 'events.jsonl')));
+    call(`rm ${quote(join(feature, 'events.jsonl'))}`, () => rmSync(join(feature, 'events.jsonl')));
   } else if (kind === 'rename') {
-    unhooked(`mv ${quote(join(feature, 'events.jsonl'))} ${quote(join(feature, 'events.jsonl.bak'))}`, () => renameSync(join(feature, 'events.jsonl'), join(feature, 'events.jsonl.bak')));
+    call(`mv ${quote(join(feature, 'events.jsonl'))} ${quote(join(feature, 'events.jsonl.bak'))}`, () => renameSync(join(feature, 'events.jsonl'), join(feature, 'events.jsonl.bak')));
   } else if (kind === 'chmod') {
-    unhooked(`chmod 444 ${quote(join(control, 'mycelink.config.json'))}`, () => chmodSync(join(control, 'mycelink.config.json'), 0o444));
+    call(`chmod 444 ${quote(join(control, 'mycelink.config.json'))}`, () => chmodSync(join(control, 'mycelink.config.json'), 0o444));
   } else if (kind === 'symlink') {
     const req = join(control, 'requirements', `${FEATURE}.md`);
-    unhooked(`ln -sf ../README.md ${quote(req)}`, () => {
+    call(`ln -sf ../README.md ${quote(req)}`, () => {
       rmSync(req);
       symlinkSync('../README.md', req);
     });
   } else if (kind === 'commit') {
-    unhooked(`cd ${quote(repo)} && echo x >> mod-a/src/stock.mjs && git add -A && git commit -qm "fix it myself"`, () => {
+    call(`cd ${quote(repo)} && echo x >> mod-a/src/stock.mjs && git add -A && git commit -qm "fix it myself"`, () => {
       appendFileSync(join(repo, 'mod-a', 'src', 'stock.mjs'), '// x\n');
       spawnSync('git', ['-C', repo, 'add', '-A'], { env });
       spawnSync('git', ['-C', repo, 'commit', '-qm', 'fix it myself'], { env });
     });
   } else if (kind === 'helper') {
     const target = join(feature, 'LOOPS.json');
-    unhooked(`nohup node -e "setTimeout(() => require('fs').writeFileSync(process.argv[1], '{}'), 300)" ${quote(target)} &`, () => {
+    call(`nohup node -e "setTimeout(() => require('fs').writeFileSync(process.argv[1], '{}'), 300)" ${quote(target)} &`, () => {
       spawn(process.execPath, ['-e', "setTimeout(() => require('fs').writeFileSync(process.argv[1], '{}'), 300)", target], { detached: false, stdio: 'ignore' });
     });
   } else if (kind === 'stash') {
     // CSET-203 r12's counterpart: the controller's own git stash in the product checkout, run where the fence never saw it.
-    unhooked(`cd ${quote(repo)} && echo x >> README.md && git stash push -q -m mine`, () => {
-      appendFileSync(join(repo, 'README.md'), 'x\n');
-      spawnSync('git', ['-C', repo, 'stash', 'push', '-q', '-m', 'mine'], { env });
+    call(`cd ${quote(repo)} && echo x >> README.md && git stash push -q -m mine`, () => {
+      // What that leaves — an entry holding the change, the checkout as it was — made through a private index, so that no
+      // check of the checkout (one the call wakes, on a slow runner) lands between the edit and the stash (CI 38489750013).
+      const head = gitIn(['rev-parse', 'HEAD']);
+      const index = commitOf(head, {}, `index on main: ${head.slice(0, 7)}`, [head]);
+      const work = commitOf(head, { 'README.md': `${readFileSync(join(repo, 'README.md'), 'utf8')}x\n` }, 'On main: mine', [head, index]);
+      gitIn(['stash', 'store', '-m', 'On main: mine', work]);
     });
   } else if (kind === 'ledger') {
     // A record forged into Mycelink's provenance ledger, to pass the controller's change off as a worker's.
     const calls = join(process.env.MYCELINK_PROVENANCE, 'calls.jsonl');
-    unhooked(`echo '{}' >> ${quote(calls)}`, () => appendFileSync(calls, '{}'));
+    call(`echo '{}' >> ${quote(calls)}`, () => appendFileSync(calls, '{}'));
   } else if (kind === 'after-settle') {
-    unhooked(`echo notes > ${quote(join(ws, 'notes.txt'))}`, () => writeFileSync(join(ws, 'notes.txt'), 'notes\n'));
+    call(`echo notes > ${quote(join(ws, 'notes.txt'))}`, () => writeFileSync(join(ws, 'notes.txt'), 'notes\n'));
   } else if (kind === 'registry') {
     // Written where no call shows it (a helper left running, say): the workspace check alone finds it.
-    unhooked('ls', () => appendFileSync(join(control, 'repositories.yaml'), '# mine\n'));
+    call('ls', () => appendFileSync(join(control, 'repositories.yaml'), '# mine\n'));
     return;
   }
   if (forgery.endsWith('-exit')) done(`Changed it myself (${kind}).`);
