@@ -10,21 +10,40 @@
  * (`/home/alice`, `C:\Users\me`), dummy credentials in the tests that check
  * their redaction, and in the benchmark fixtures hand-authored transcripts
  * with synthetic session, agent and tool-use ids
- * (tests/benchmark/fixtures/README.md).
+ * (tests/benchmark/fixtures/README.md). The files inside a fixture archive
+ * (scripts/fixture-archive.mjs) are scanned like tracked files, each named
+ * `<archive>!/<path>`.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
+// @ts-expect-error -- plain ESM script without type declarations
+import { verifyArchive } from '../../scripts/fixture-archive.mjs';
 
 const ROOT = resolve(process.cwd());
+const ARCHIVE = /^tests\/benchmark\/fixtures\/([a-z0-9-]+)\.tar$/;
+/** The text of each archived file, by `<archive>!/<path>`. */
+const archived = new Map<string, string>();
 
+/** Every tracked file; in a fixture archive's place, its files, the archive verified against its manifest first. */
 function tracked(): string[] {
   const ls = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' });
   if (ls.status !== 0) throw new Error(`git ls-files failed: ${ls.stderr}`);
-  return ls.stdout.split('\0').filter((f) => f !== '');
+  return ls.stdout
+    .split('\0')
+    .filter((f) => f !== '')
+    .flatMap((f) => {
+      const name = ARCHIVE.exec(f)?.[1];
+      if (name === undefined) return [f];
+      const { files } = verifyArchive(name, join(ROOT, 'tests', 'benchmark', 'fixtures')) as { files: { path: string; data: Buffer }[] };
+      return files.map(({ path, data }) => {
+        archived.set(`${f}!/${path}`, data.toString('utf8'));
+        return `${f}!/${path}`;
+      });
+    });
 }
-const text = (file: string): string => readFileSync(join(ROOT, file), 'utf8');
+const text = (file: string): string => archived.get(file) ?? readFileSync(join(ROOT, file), 'utf8');
 /** Every match of `pattern` in each file, as `file: match`. */
 const matches = (files: string[], pattern: RegExp, keep: (m: string, file: string) => boolean = () => true): string[] =>
   files.flatMap((file) => [...text(file).matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))].map((m) => m[0]).filter((m) => keep(m, file)).map((m) => `${file}: ${m}`));
@@ -92,7 +111,10 @@ describe('every tracked file, the tests and their fixtures included', () => {
   const fixtures = tests.filter((f) => f.startsWith('tests/benchmark/fixtures/'));
 
   it('include the benchmark fixtures the scan is for', () => {
-    expect(fixtures).toEqual(expect.arrayContaining(['tests/benchmark/fixtures/README.md', 'tests/benchmark/fixtures/transcripts/cset-202-r2-with-normal-task.jsonl', 'tests/benchmark/fixtures/pcm101-final/features/PCM-101/STATE.json']));
+    expect(fixtures).toEqual(expect.arrayContaining(['tests/benchmark/fixtures/README.md', 'tests/benchmark/fixtures/transcripts/cset-202-r2-with-normal-task.jsonl', 'tests/benchmark/fixtures/pcm101-final.tar!/features/PCM-101/STATE.json']));
+    // An archive is scanned through its files, never as one opaque blob.
+    expect(fixtures.filter((f) => f.startsWith('tests/benchmark/fixtures/cset201-final.tar!/')).length).toBeGreaterThan(0);
+    expect(fixtures.filter((f) => f.endsWith('.tar'))).toEqual([]);
   });
 
   it('name no personal home directory: only placeholder users', () => {

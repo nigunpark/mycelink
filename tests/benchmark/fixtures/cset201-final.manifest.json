@@ -1,0 +1,110 @@
+{
+  "format": "mycelink-fixture-archive/1",
+  "archive": "cset201-final.tar",
+  "bytes": 497152,
+  "sha256": "f0220d2e3513e744eb930d8ae09ca2d9dc00d0107fc76447a2b079b6fb99e4a5",
+  "files": [
+    {
+      "path": "features/CSET-201/STATE.json",
+      "bytes": 229439,
+      "sha256": "776fab5836b22e2ad86303d30525cf1b73a011e9009a107c0fea7f1d7c299dec",
+      "git_blob": "a1e223ba5d5d4e3b845804266047136541b54732"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.assemble.reasons.impl/ledger/AC-2.g0.077365a7/record.json",
+      "bytes": 7591,
+      "sha256": "e23cdcd567017aa3989fafd3282fa0ff7bbf05ba045b12be575609f482f11e68",
+      "git_blob": "dd1d2aa5c1e89f1112227adba1d678128bcf2855"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.assemble.reasons.impl/ledger/AC-2.g1.6c4300a3/record.json",
+      "bytes": 7107,
+      "sha256": "cd822224f2fe1fc03d86d5d6e3b826f745881327a27707fffb2c918a30bfa0cb",
+      "git_blob": "d447933dd6754091423b64b99ce79cc141cd14ab"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.assemble.reasons.impl/ledger/AC-2.g2.99fdf1e9/record.json",
+      "bytes": 5103,
+      "sha256": "e7967778b4cf91ac0e882e79338f148d38cabaf3687059e6a5e642d86b8b5b26",
+      "git_blob": "d4ef9ca249cf8d3c36dfb9bd2996a920e6ec39fd"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g0.b12ac763/record.json",
+      "bytes": 6386,
+      "sha256": "d0e3f44b64e3db779fb7bda2e7ef19e5b52cd8f6d14c6ad4224adb2d27f826ac",
+      "git_blob": "5dfaf64f987926d0af2c9047a23000abf4694d63"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.03fec003/record.json",
+      "bytes": 7198,
+      "sha256": "26442a86466a7598cc77e1f8140e53bc0d937d73bb89c204c9cd1bbe6334cd86",
+      "git_blob": "0cb9d3eda3d1900582192312675ef76a18bae5ea"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.24e12886/record.json",
+      "bytes": 6978,
+      "sha256": "8a54d06ddc6eec6c4d0ddec73bdf251225da582974b4ada537019a07be1f5ee8",
+      "git_blob": "a155453f86db29cf0ab107d6fb392d3857584292"
+    },
+    {
+      "path": "features/CSET-201/evidence/CSET-201.cli.explain.impl/ledger/AC-3.g1.24e12886/reproof/packages/cli/src/commands/status/__tests__/status.test.ts",
+      "bytes": 22505,
+      "sha256": "e1638ee7bdcd45bb2890cdddaa08f128d09e7f7bdd58045d5421cf48d863852c",
+      "git_blob": "2c4b73901b098f1fb108dfd39fe616ff9f334d15"
+    },
+    {
+      "path": "features/CSET-201/reviews/CSET-201-R001.json",
+      "bytes": 16907,
+      "sha256": "f602e4e37ea14978a31f5989e0997f140c731145be6e2514a9866c67f1ea8482",
+      "git_blob": "8b2d83cb4a7b427693b568395418536656abbef7"
+    },
+    {
+      "path": "features/CSET-201/reviews/CSET-201-R002.json",
+      "bytes": 14650,
+      "sha256": "2e0bef4ff58b97d3cbd03c032d55a9b962c69b24e4b3277357af6e06233bcd98",
+      "git_blob": "d66bacb5325b4a11c624588104daff2cf6e6ac57"
+    },
+    {
+      "path": "features/CSET-201/reviews/CSET-201-R003.json",
+      "bytes": 18347,
+      "sha256": "9f7eec11dfe6054e848636a229ddecd66639a5a0f55daf16d7a0e2e189b0a7ed",
+      "git_blob": "5821c839c536a16ac1b90e1b0a09f00dc44147cd"
+    },
+    {
+      "path": "repo/518ffa27ad8a9e34a0827f6177fdce597d8977fd/index.test.ts",
+      "bytes": 49403,
+      "sha256": "31b64368fb2c55f9a2ead879287364ab4cb911290c6d2f5d27024f80502a0b89",
+      "git_blob": "dde6ab58921bce3670e2e463c814cac958395912"
+    },
+    {
+      "path": "repo/518ffa27ad8a9e34a0827f6177fdce597d8977fd/status.test.ts",
+      "bytes": 17864,
+      "sha256": "1f4e962617dd5fcbd11722b7f2e62f72b50af031b76ff3ddcf17255e0e9fd034",
+      "git_blob": "156612f415537ec685c834db2605b7c682b559cb"
+    },
+    {
+      "path": "repo/ancestry.txt",
+      "bytes": 1640,
+      "sha256": "318f1055804911f0d9e9d608cb380eafe51132f61ec3872024cde54bbc5b73da",
+      "git_blob": "1b950f363962a26a6c4e91059a99478c87a3763d"
+    },
+    {
+      "path": "repo/blobs.json",
+      "bytes": 4496,
+      "sha256": "bb926875cee1920a05a9f928a1af7c096fa70b12856b3ca0a96600332ff0b98a",
+      "git_blob": "4aaeb87da15e2e94464ecbbaa0d9a2c0877f2e32"
+    },
+    {
+      "path": "repo/d56cd1f0925418ee33649e3628d07c568aeb29ee/index.test.ts",
+      "bytes": 50246,
+      "sha256": "fe1a6794c6c98cff1089672b2551fed095c67404f5a9be6ebd70a481182b26b4",
+      "git_blob": "9e217cb340ddc5485ee6cf0e537760a5394c4afd"
+    },
+    {
+      "path": "repo/d56cd1f0925418ee33649e3628d07c568aeb29ee/status.test.ts",
+      "bytes": 17864,
+      "sha256": "1f4e962617dd5fcbd11722b7f2e62f72b50af031b76ff3ddcf17255e0e9fd034",
+      "git_blob": "156612f415537ec685c834db2605b7c682b559cb"
+    }
+  ]
+}

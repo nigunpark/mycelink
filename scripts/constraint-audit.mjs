@@ -17,7 +17,9 @@
  *    run history's totals.
  * Hand-authored, and checked: each inventory entry's fields, classification,
  * status and scope, its anchor (a file that exists and holds the quoted text)
- * and its tests (files that exist); every id appears in the document. The
+ * and its tests (files that exist); every id appears in the document; each
+ * run's evidence exists (a file, or `<archive>.tar!/<path>`, a file a fixture
+ * archive holds: scripts/fixture-archive.mjs). The
  * cross-case policy section is checked by tests/security/worker-freedom-envelope.test.ts.
  * Neither file may hold an absolute path, a session/tool/request id or a
  * credential-looking string.
@@ -26,6 +28,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { verifyArchive } from './fixture-archive.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RECORD = join(ROOT, 'docs', 'evals', 'constraint-audit.json');
@@ -125,6 +128,14 @@ function summary(record) {
   };
 }
 
+/** A file, or `tests/benchmark/fixtures/<name>.tar!/<path>`: a file the verified archive holds. */
+function evidenceExists(ref) {
+  const [file, member] = ref.split('!/');
+  if (member === undefined) return existsSync(join(ROOT, file));
+  const name = /^tests\/benchmark\/fixtures\/([a-z0-9-]+)\.tar$/.exec(file)?.[1];
+  return name !== undefined && existsSync(join(ROOT, file)) && verifyArchive(name).files.some((f) => f.path === member);
+}
+
 function problems(record, docText) {
   const out = [];
   const ids = new Set();
@@ -143,7 +154,7 @@ function problems(record, docText) {
     if (!docText.includes(e.id)) out.push(`${at}: not in docs/CONSTRAINT_FREEDOM_AUDIT.md`);
   }
   for (const r of record.history ?? []) {
-    for (const t of r.evidence ?? []) if (!existsSync(join(ROOT, t))) out.push(`history ${r.run}: no evidence file ${t}`);
+    for (const t of r.evidence ?? []) if (!evidenceExists(t)) out.push(`history ${r.run}: no evidence file ${t}`);
     if (!docText.includes(`| ${r.run} |`)) out.push(`history ${r.run}: not in the document's table`);
   }
   for (const [name, text] of [['constraint-audit.json', JSON.stringify(record)], ['CONSTRAINT_FREEDOM_AUDIT.md', docText]]) {

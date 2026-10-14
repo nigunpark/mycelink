@@ -1,0 +1,116 @@
+{
+  "format": "mycelink-fixture-archive/1",
+  "archive": "pcm101-final.tar",
+  "bytes": 244224,
+  "sha256": "7119886faa6d0aff33fce9d06a4b507bf57647e4dbb316eb52bb659e3e58457d",
+  "files": [
+    {
+      "path": "features/PCM-101/ACCEPTANCE.json",
+      "bytes": 3560,
+      "sha256": "f788cf1c25d64de71e21ffd27a8aa727e5483e1f26a176ab2b80572e2d3795e2",
+      "git_blob": "4c6a685137559f1c63e78a085e9714cee13e85d6"
+    },
+    {
+      "path": "features/PCM-101/PORTFOLIO-GRAPH.yaml",
+      "bytes": 7394,
+      "sha256": "be206f2bd89e2b56d870b5bd5cc5829f2417bed26c3d7d2e764e43b9e93fdb43",
+      "git_blob": "3d52b050a6285532ffe3982680928ba65152dba1"
+    },
+    {
+      "path": "features/PCM-101/STATE.json",
+      "bytes": 40712,
+      "sha256": "f66a2d19d8768ed586e7153aa2b6f6692d2646f6b65fe9f6f85e17360b848946",
+      "git_blob": "e7ad07561107b664a9929fa1c5b892a0238c738f"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/green.af3ecdc3f6080ada.log",
+      "bytes": 29956,
+      "sha256": "af3ecdc3f6080adaedfb30fe96695671cdbad32256684f5ba76d7b68b0c46912",
+      "git_blob": "87e49bb4414388fede4db753049b5f82e02dcbdf"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/green.results.9d62308d2180db7c.json",
+      "bytes": 7597,
+      "sha256": "9d62308d2180db7c3be5aa782af0fccf6615ade00b1a7feb9fd1b54ab0fe747a",
+      "git_blob": "70564876eed22f9df1fe9e3c33a30b322df14a0d"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/red.e99e87e71644a6f5.log",
+      "bytes": 33660,
+      "sha256": "e99e87e71644a6f50db5d73303f999ec299854237d41731164e7a67715789fca",
+      "git_blob": "226d67f8067048de61cd62d2848fbd2115c88af6"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/red.results.eda1f1d31e373fa2.json",
+      "bytes": 7773,
+      "sha256": "eda1f1d31e373fa2cf7b20d14dd26341af01847e029c08dbcf5b7077f4fd8258",
+      "git_blob": "fe3e2a3affee279a24bf29ea4181f72718878da5"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.gateway.vetname.impl/tdd-history.c23f3f35d9eaffa6.json",
+      "bytes": 3466,
+      "sha256": "c23f3f35d9eaffa6a88618ebe07dad89b2827f66755b6c3b10b8717eaee9528a",
+      "git_blob": "17b06f65f634de09f243f6ed7c079fb204af6c68"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/green.aae3c9b8f99d95ea.log",
+      "bytes": 26084,
+      "sha256": "aae3c9b8f99d95ea31acf23537796bc90c9a8009acf979bb33d3b404a10fd9dd",
+      "git_blob": "a6cdfa4b61414a1667ac70c9be971274f38be784"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/green.results.b084901187e53a8c.json",
+      "bytes": 4527,
+      "sha256": "b084901187e53a8c93f135b8f00c86ffab8c6589defea87a4b379bdc7e472ffa",
+      "git_blob": "fe33df927f43bd0410b4020bb81e5da48c9efb4b"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/red.681682cb9ed8d3fb.log",
+      "bytes": 40192,
+      "sha256": "681682cb9ed8d3fb6b534f9f0e2528435749be6c6b46948d253080d33b75b6f3",
+      "git_blob": "ed944127cd47bccff02dc502e16a246d29b434bd"
+    },
+    {
+      "path": "features/PCM-101/evidence/PCM-101.visits.vet.impl/red.results.76917774e9033852.json",
+      "bytes": 5077,
+      "sha256": "76917774e90338521f80e18dc0a35166ab7d54e564977eda1f97065f1832378e",
+      "git_blob": "46e553a5efbbf0c7205588534d2d4a66487d84ad"
+    },
+    {
+      "path": "features/PCM-101/sessions/PCM-101.gateway.vetname.impl/result.4d95ebee-0bf5-408f-8ec1-1001ca50844d.2409f4318b73129888cc7c758ec3c7b6.json",
+      "bytes": 2273,
+      "sha256": "ba5f57ef0321328f8c42f17964165da86db8b55c76a0b76319b33a13eb84d8fc",
+      "git_blob": "0cc40f152326fe0d05ac7a0177c0a3987af6dd66"
+    },
+    {
+      "path": "features/PCM-101/sessions/PCM-101.visits.vet.impl/result.46b82f93-0b80-4604-ac8b-cc6746291835.44aab2cb3d10075f0730c6706abefa68.json",
+      "bytes": 2888,
+      "sha256": "5b8e57b67ba550881ff4e91734b7c8a95df3bfaf88a58ab0f36d0936b18ee0aa",
+      "git_blob": "f5388f3586eff10afbb4460aa67bc9e3fbf290d4"
+    },
+    {
+      "path": "repo/gateway/spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/ApiGatewayControllerTest.java",
+      "bytes": 3596,
+      "sha256": "db6d79b846a8b6ae2932376675fe27cfc1da4a26889f59f09ce2495c2c12afa7",
+      "git_blob": "c65114efa7bc860f3f1973adb3e50ea1587d2a77"
+    },
+    {
+      "path": "repo/gateway/spring-petclinic-api-gateway/src/test/java/org/springframework/samples/petclinic/api/boundary/web/OwnerDetailsVetNameTest.java",
+      "bytes": 4533,
+      "sha256": "5e6df94dd8f376f329dc1609e6d7ca539fab165e1b85c493e5f792d55154eb5b",
+      "git_blob": "b69d2b527e51c6e8e58ad8c580213fe277ae37fb"
+    },
+    {
+      "path": "repo/visits/spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitResourceTest.java",
+      "bytes": 2197,
+      "sha256": "99bc97c08399cd183a8927031231a2cb20f1a1a24c5247a7607e91a1add0a8ec",
+      "git_blob": "05cb4fc4d0b7a844166c0137758585529a0e259e"
+    },
+    {
+      "path": "repo/visits/spring-petclinic-visits-service/src/test/java/org/springframework/samples/petclinic/visits/web/VisitVetTest.java",
+      "bytes": 4653,
+      "sha256": "993b5c09eba8aa6de2026a4c928103bb95d69213b033d1ce6a2c87a5910308aa",
+      "git_blob": "2f96f149c5fd55f2a58da62ab61362cca045ab4f"
+    }
+  ]
+}
