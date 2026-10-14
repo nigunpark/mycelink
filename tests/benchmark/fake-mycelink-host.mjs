@@ -471,11 +471,22 @@ async function forge(stage) {
       symlinkSync('../README.md', req);
     });
   } else if (kind === 'commit') {
-    call(`cd ${quote(repo)} && echo x >> mod-a/src/stock.mjs && git add -A && git commit -qm "fix it myself"`, () => {
-      appendFileSync(join(repo, 'mod-a', 'src', 'stock.mjs'), '// x\n');
-      spawnSync('git', ['-C', repo, 'add', '-A'], { env });
-      spawnSync('git', ['-C', repo, 'commit', '-qm', 'fix it myself'], { env });
-    });
+    // The commit lands whole, its branch first, and only then does the call show: a check overlapping `git add` and
+    // `git commit` stopped the session between the two, and no commit was there to find (CI 38510332461). Made aside —
+    // objects and a private index, nothing a check sees — the branch moves, the first change a check can see, so a
+    // session stopped for any of it is stopped for the commit; the index and the file follow it at once.
+    const head = gitIn(['rev-parse', 'HEAD']);
+    const file = join(repo, 'mod-a', 'src', 'stock.mjs');
+    const content = `${readFileSync(file, 'utf8')}// x\n`;
+    const commit = commitOf(head, { 'mod-a/src/stock.mjs': content }, 'fix it myself', [head]);
+    const index = join(dirname(planFile), `index-${process.pid}-${++toolId}`);
+    gitIn(['read-tree', commit], { index });
+    const staged = readFileSync(index);
+    rmSync(index, { force: true });
+    gitIn(['update-ref', '-m', 'commit: fix it myself', 'HEAD', commit, head]);
+    writeFileSync(join(repo, '.git', 'index'), staged);
+    writeFileSync(file, content);
+    call(`cd ${quote(repo)} && echo x >> mod-a/src/stock.mjs && git add -A && git commit -qm "fix it myself"`, () => {});
   } else if (kind === 'helper') {
     const target = join(feature, 'LOOPS.json');
     call(`nohup node -e "setTimeout(() => require('fs').writeFileSync(process.argv[1], '{}'), 300)" ${quote(target)} &`, () => {
