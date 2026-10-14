@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { hostPlan, run, failingOf, shape, recovered, useRollbackFixture } from './rollback-fixture.js';
+import { hostPlan, run, failingOf, shape, found, recovered, useRollbackFixture } from './rollback-fixture.js';
 
 useRollbackFixture();
 
@@ -28,7 +28,7 @@ describe('CSET-203 r12: a module-worker’s own stash, through the plugin’s ho
   ])('the worker sets its production draft aside with git stash, re-proves RED, %s — authorised, on record; the session goes on and delivers C001', async (_label, leave) => {
     const fake = hostPlan({ hooks: true, workerStash: { 'mod-a': { leave } } });
     const r = await run(fake);
-    expect(shape(r)).toEqual([[1, 'task', 'exit', null, false]]);
+    expect(shape(r), found(r)).toEqual([[1, 'task', 'exit', null, false]]);
     const [first] = r.sessions;
     expect(first.controller_txn).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
     expect(first.controller_txn.authorized['worker-git']).toBe(1);
@@ -47,7 +47,7 @@ describe('CSET-203 r12: a module-worker’s own stash, through the plugin’s ho
   it('a record the controller forges into Mycelink’s provenance ledger is a violation: stopped at once, the session rolled back whole, a corrective session completes C001', async () => {
     const fake = hostPlan({ forgeries: ['ledger'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
@@ -59,7 +59,7 @@ describe('CSET-203 r12: a module-worker’s own stash, through the plugin’s ho
   it('the controller’s own stash in the product checkout is still the controller’s: rolled back, a corrective session completes C001', async () => {
     const fake = hostPlan({ hooks: true, workerStash: { 'mod-a': {} }, forgeries: ['stash'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
@@ -80,7 +80,7 @@ describe('CSET-202 final: a host waiting on its background workers while they st
   it('both workers push, run the red gate, commit and pop while the host waits — no check stops the session, no violation, C001 delivered', async () => {
     const fake = hostPlan(CSET202);
     const r = await run(fake);
-    expect(shape(r)).toEqual([[1, 'task', 'exit', null, false]]);
+    expect(shape(r), found(r)).toEqual([[1, 'task', 'exit', null, false]]);
     const [first] = r.sessions;
     expect(first.controller_txn.stopped_for).toBeUndefined();
     expect(first.controller_txn).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
@@ -107,7 +107,7 @@ describe('CSET-202 final: a host waiting on its background workers while they st
   it('a restart and a compaction: the task session exits once mod-a settles; the fresh session’s mod-b worker stashes beside a compaction while the host waits — no violation, C001', async () => {
     const fake = hostPlan({ ...CSET202, taskExits: ['settled-one'], compact: true });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'exit', null, false],
       [2, 'resume', 'exit', null, false],
     ]);
@@ -137,7 +137,7 @@ describe('corrective sessions are bounded', () => {
   it('the same violation again ends the task: no third session, the run fails on both', async () => {
     const fake = hostPlan({ forgeries: ['r9', 'r9'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'controller-violation', 1, true],
     ]);
@@ -154,7 +154,7 @@ describe('corrective sessions are bounded', () => {
   it('an independent second violation gets a second corrective session, which completes it: both recovered', async () => {
     const fake = hostPlan({ forgeries: ['r9', 'commit'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'controller-violation', 1, true],
       [3, 'corrective', 'exit', 2, false],
