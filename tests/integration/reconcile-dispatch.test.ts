@@ -7,14 +7,13 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
-import { commitAll } from '../helpers/git-fixture.js';
 import { FEATURE_ID, type Portfolio } from '../helpers/portfolio-fixture.js';
 import { fakeAgent } from '../helpers/host-agent.js';
-import { CORE, WORK, cli, dispatch, hostGraph, hostPortfolio, settle } from '../helpers/host-loop.js';
+import { CORE, WORK, cli, dispatch, hostPortfolio, settle } from '../helpers/host-loop.js';
 import { loadState, mutateState } from '../../src/state/feature-state.js';
 import { listLeases } from '../../src/resources/leases.js';
 import { recordSpawn } from '../../src/sessions/registry.js';
@@ -134,35 +133,30 @@ describe('reconcile host dispatch', () => {
 
 describe('an interrupted settle is recoverable', () => {
   it('a settle killed mid-verification leaves a marker reconcile clears; settling again completes', async () => {
-    // A verifier that is slow only when SLOW=1, so the first settle can be
-    // caught mid-verification and killed.
-    const graph = hostGraph() as { nodes: { id: string; verification_commands: unknown[] }[] };
-    graph.nodes.find((n) => n.id === CORE)!.verification_commands = [{ id: 'targeted', command: ['node', 'tests/slow-run.mjs'] }];
-    const p = await hostPortfolio(graph);
-    writeFileSync(
-      join(p.core, 'tests', 'slow-run.mjs'),
-      "if (process.env.SLOW === '1') await new Promise((r) => setTimeout(r, 60000));\nawait import('./run.mjs');\n",
-    );
-    commitAll(p.core, 'slow wrapper');
-
+    const p = await hostPortfolio();
     const t = (await dispatch(p)).ticket!;
     fakeAgent(t, WORK[CORE]!, p.control);
 
-    const child = spawn(process.execPath, [p.mycelink, 'settle', FEATURE_ID, CORE, '--capability', t.capability, '--control-root', p.control], {
-      env: { ...process.env, SLOW: '1' },
-      stdio: 'ignore',
+    // Killed at the boundary itself, never after a guessed wait: MYCELINK_CRASH_AT ends the settling process the
+    // moment its fresh verification has run the targeted verifiers, before the regression. A fixed sleep after the
+    // marker fell inside the capture on a slow runner (CI 38510332461), before any result was the controller's.
+    const child = spawn(process.execPath, [p.mycelink, 'settle', FEATURE_ID, CORE, '--capability', t.capability, '--control-root', p.control, '--json'], {
+      env: { ...process.env, MYCELINK_CRASH_AT: 'fresh-targeted' },
+      stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     });
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && !loadState(p.featureDir)!.data.nodes[CORE]!.claim?.settling) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    const marker = loadState(p.featureDir)!.data.nodes[CORE]!.claim?.settling;
-    expect(marker).toMatchObject({ pid: child.pid, host: hostname() });
-    // Give the settle time to enter fresh verification, then kill it hard.
-    await new Promise((r) => setTimeout(r, 1500));
-    child.kill('SIGKILL');
-    await new Promise((r) => child.once('exit', r));
+    let printed = '';
+    child.stdout.on('data', (chunk) => (printed += chunk));
+    await new Promise((r) => child.once('close', r));
+    // It died there: no report, its marker left naming it, the result captured, the targeted run recorded, not the regression.
+    expect(printed).toBe('');
+    const killed = loadState(p.featureDir)!.data.nodes[CORE]!;
+    expect(killed.claim?.settling).toMatchObject({ pid: child.pid, host: hostname() });
+    expect(killed.claim).toMatchObject({ result_captured_sha256: expect.stringMatching(/^[0-9a-f]{64}$/), capture_pending: null });
+    expect(killed.last_settlement).toMatchObject({ outcome: 'PENDING' });
+    const evidence = readdirSync(join(p.featureDir, 'evidence', CORE));
+    expect(evidence.some((n) => n.startsWith('fresh-targeted.'))).toBe(true);
+    expect(evidence.some((n) => n.startsWith('fresh-regression.'))).toBe(false);
 
     const rec = await reconcile(p);
     expect(rec.interrupted_settles).toEqual([CORE]);
@@ -171,13 +165,27 @@ describe('an interrupted settle is recoverable', () => {
     // dispatch (or dispatch --resume) finishes this settlement itself.
     expect(rec.pending_dispatches).toEqual([expect.objectContaining({ node_id: CORE, result_present: true, settlement: 'held' })]);
 
-    // The result was already captured by the killed settle or is still in
-    // the slot; either way the same capability settles the node now.
+    // The same capability settles the node now, from the result the killed settle captured.
     const done = await cli(p, ['settle', FEATURE_ID, CORE, '--capability', t.capability, '--json']);
-    const report = JSON.parse(done.out) as { outcome: string; detail: string };
+    const report = JSON.parse(done.out) as { outcome: string; detail: string; idempotent: boolean };
     expect(`${report.outcome}: ${report.detail}`).toMatch(/^DONE/);
-    const copies = readdirSync(join(p.featureDir, 'sessions', CORE)).filter((f) => /^result\..*\.json$/.test(f));
-    expect(copies.length).toBe(1);
+    expect(report.idempotent).toBe(false);
+    // Settled once: nothing left settling, one copy of the result, one attempt, one settlement, the usage counted once.
+    const once = () => {
+      const rt = loadState(p.featureDir)!.data.nodes[CORE]!;
+      expect(rt).toMatchObject({ state: 'DONE', last_settlement: { outcome: 'DONE' } });
+      expect(rt.claim?.settling ?? null).toBeNull();
+      expect(rt.usage).toMatchObject({ sessions: 1, model_turns: 3, input_tokens: 300, output_tokens: 150 });
+      expect(readdirSync(join(p.featureDir, 'sessions', CORE)).filter((f) => /^result\..*\.json$/.test(f)).length).toBe(1);
+      const lines = (file: string) => readFileSync(join(p.featureDir, file), 'utf8').split('\n').filter((l) => l.includes(`"node_id":"${CORE}"`));
+      expect(lines('RUNS.jsonl').length).toBe(1);
+      expect(lines('events.jsonl').filter((l) => l.includes('"type":"node.settled"')).length).toBe(1);
+    };
+    once();
+    // Presented again, the capability is answered from the receipt: nothing is settled twice.
+    const replay = await cli(p, ['settle', FEATURE_ID, CORE, '--capability', t.capability, '--json']);
+    expect(JSON.parse(replay.out)).toMatchObject({ outcome: 'DONE', idempotent: true });
+    once();
     expect(readFileSync(join(p.featureDir, 'STATE.json'), 'utf8')).not.toContain(t.capability);
   });
 });
