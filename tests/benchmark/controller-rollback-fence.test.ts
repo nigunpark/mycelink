@@ -44,7 +44,8 @@ describe('a controller that changes the workspace itself, outside the fence', ()
 
   it('the same, when the session ends on its own: the violation is found after it', async () => {
     const fake = hostPlan({ forgeries: ['r9-exit'] });
-    const r = await run(fake);
+    // No periodic check in the session's last moments: the settlement finds it.
+    const r = await run(fake, { lightCheckMs: 600_000 });
     expect(shape(r), found(r)).toEqual([
       [1, 'task', 'exit', null, true],
       [2, 'corrective', 'exit', 1, false],

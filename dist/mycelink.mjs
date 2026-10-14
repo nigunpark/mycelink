@@ -16066,6 +16066,10 @@ function wrapped(name) {
         for (let p = dirname3(targets[0]); inside(p, first) && p !== targets[0]; p = dirname3(p)) states.unshift({ path: p, state: stateOf(p, r) });
       }
       if (name === "cpSync") for (const p of walk(targets[0])) states.push({ path: p, state: stateOf(p, r) });
+      if (name === "renameSync") {
+        const to = targets.find((p) => p === pathOf(args[1]));
+        if (to !== void 0 && states.find((s) => s.path === to)?.state.t === "d") for (const p of walk(to)) states.push({ path: p, state: stateOf(p, r) });
+      }
       done(r, seq, name, states);
     }
     return result;

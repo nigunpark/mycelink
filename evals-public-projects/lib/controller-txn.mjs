@@ -582,7 +582,10 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
     const own = ownOf(key);
     const adm = adminOf(key);
     const repo = repoOf(key);
-    const gitLock = /(?:^|\/)\.git\/(?:.*\/)?[^/]*\.lock$/.test(key);
+    // A lock, or what git derives for itself: `info/refs`, update-server-info's list of the refs, which a repack or an
+    // automatic gc in any git command rewrites (CI 38489750013: a task session stopped for it). Neither is a ref,
+    // an object or a file anything is built from.
+    const gitLock = /(?:^|\/)\.git\/(?:.*\/)?[^/]*\.lock$/.test(key) || /(?:^|\/)\.git\/info\/refs$/.test(key);
     const by = attested(key, post_);
     const dirty = repo !== null ? checkedOut.get(repo) : undefined;
     const h = harnessOf(key);
@@ -692,6 +695,11 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
     else if (inside.length > 0 && inside.every((x) => x.verdict === 'authorized' || x.worktree)) {
       const w = inside.find((x) => x.worktree);
       Object.assign(d, { category: w.category, worktree: w.worktree, container: true });
+    }
+    // ... and one left empty inside a `.git` the core ran git on: git removes `worktrees` with the last worktree, but on
+    // Windows that rmdir fails while another handle holds the directory, and git leaves it (CI 38489750013).
+    else if (d.change === 'created' && inside.length === 0 && gitDirOf(d.key) !== null && L.git.some((g) => g.common === gitDirOf(d.key)) && !Object.keys(post.entries).some((k) => under(k, d.key) && k !== d.key)) {
+      Object.assign(d, { verdict: 'housekeeping', by: 'git', category: 'git', inert: true, container: true });
     }
   }
   // Targets: the state the core last attested in the session, else the state before it.
