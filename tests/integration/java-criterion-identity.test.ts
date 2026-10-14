@@ -30,6 +30,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
+import { fixtureTree } from '../helpers/fixture-archive.js';
 import { commitAll, git, makeGitRepo, writeFiles } from '../helpers/git-fixture.js';
 import { declaredAt, judgeCriteria, type JudgeCriteriaArgs } from '../../src/engine/criteria.js';
 import { completionStanding } from '../../src/engine/criterion-coverage.js';
@@ -41,7 +42,8 @@ import type { TddPolicy } from '../../src/engine/tdd-history.js';
 
 afterAll(() => cleanupTmpRoots());
 
-const FIXTURE = join(__dirname, '..', 'benchmark', 'fixtures', 'pcm101-final');
+/** The run's tree, archived as tests/benchmark/fixtures/pcm101-final.tar. */
+const FIXTURE = fixtureTree('pcm101-final');
 const FEATURE = 'PCM-101';
 const VISITS = 'PCM-101.visits.vet.impl';
 const GATEWAY = 'PCM-101.gateway.vetname.impl';
