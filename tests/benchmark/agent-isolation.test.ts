@@ -118,16 +118,16 @@ describe('the model proxy', () => {
 });
 
 describe('survivors', () => {
-  it.runIf(process.platform === 'linux')('finds and kills what a session left in its process group', async () => {
-    const leader = spawn('/bin/sh', ['-c', '/usr/bin/sleep 61.25 & exit 0'], { detached: true, stdio: 'ignore' });
+  it.runIf(process.platform === 'linux' || process.platform === 'darwin')('finds and kills what a session left in its process group', async () => {
+    const leader = spawn('/bin/sh', ['-c', '/bin/sleep 61.25 & exit 0'], { detached: true, stdio: 'ignore' });
     await new Promise((r) => leader.on('exit', r));
     // Under load the forked child may not have exec'd sleep yet: wait until it has.
     let before: any[] = [];
-    for (let i = 0; i < 100 && !before.some((p: any) => p.cmd.startsWith('/usr/bin/sleep')); i++) {
+    for (let i = 0; i < 100 && !before.some((p: any) => p.cmd.startsWith('/bin/sleep')); i++) {
       await new Promise((r) => setTimeout(r, 20));
       before = processGroupMembers(leader.pid);
     }
-    expect(before.map((p: any) => p.cmd)).toEqual(['/usr/bin/sleep 61.25']);
+    expect(before.map((p: any) => p.cmd)).toEqual(['/bin/sleep 61.25']);
     expect(reapSurvivors({ pgid: leader.pid }).length).toBe(1);
     await new Promise((r) => setTimeout(r, 200));
     expect(processGroupMembers(leader.pid)).toEqual([]);

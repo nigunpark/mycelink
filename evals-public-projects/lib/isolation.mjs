@@ -175,9 +175,29 @@ export function sessionSandbox({ workspace, home, artifactDir, loadPlugin, claud
   };
 }
 
-/** Live members of process group `pgid` (Linux), zombies aside. */
+/**
+ * The live members of process group `pgid` in the output of
+ * `ps -A -o pid=,pgid=,stat=,command=` (macOS), zombies and processes
+ * already exiting (BSD state Z, E) aside.
+ */
+export function psGroupMembers(text, pgid) {
+  const out = [];
+  for (const line of String(text).split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(line);
+    if (m === null || Number(m[2]) !== pgid || /[ZE]/.test(m[3])) continue;
+    out.push({ pid: Number(m[1]), cmd: m[4].trim().slice(0, 200) });
+  }
+  return out;
+}
+
+/** Live members of process group `pgid` (Linux, from /proc; macOS, from ps), zombies aside. */
 export function processGroupMembers(pgid) {
-  if (process.platform !== 'linux' || !pgid) return [];
+  if (!pgid) return [];
+  if (process.platform === 'darwin') {
+    const r = spawnSync('ps', ['-A', '-o', 'pid=,pgid=,stat=,command='], { encoding: 'utf8', timeout: 10_000, maxBuffer: 32 * 1024 * 1024 });
+    return r.status === 0 ? psGroupMembers(r.stdout, pgid) : [];
+  }
+  if (process.platform !== 'linux') return [];
   const out = [];
   for (const name of readdirSync('/proc')) {
     if (!/^\d+$/.test(name)) continue;
@@ -194,7 +214,7 @@ export function processGroupMembers(pgid) {
 
 /**
  * Processes a session left behind — in its PID namespace when confined,
- * in its process group otherwise (Linux) — killed, and named.
+ * in its process group otherwise (Linux, macOS) — killed, and named.
  */
 export function reapSurvivors({ ns = null, pgid = null, graceMs = 1000 }) {
   const scan = () => (ns ? processesIn(ns) : processGroupMembers(pgid));

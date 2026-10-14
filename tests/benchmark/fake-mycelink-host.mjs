@@ -25,12 +25,15 @@
  *         — deliver the new candidate, and finish once `feature verify
  *         --delivered` passes. The n-th rework session waits to be
  *         interrupted at reworkStalls[n]. A stall is 'start' (before
- *         anything), 'red' (after the first worker's test commit) or 'green'
- *         (after its production commit). A dispatch an ended session left
+ *         anything), 'red' (in the first worker's test commit: once the
+ *         commit has landed, before the call's PostToolUse hook and result)
+ *         or 'green' (the same in its production commit) — so the interrupt
+ *         its commit triggers lands there, with no child process running,
+ *         whatever the platform's timing. A dispatch an ended session left
  *         is reconciled and resumed, its worker carrying on from the gate
  *         its pack names. With `reworkDirect` the session instead reverts
- *         the reported commit on main itself (the fourth pilot) and carries
- *         on for ten minutes; with `reworkNoop` it only reads the feature's
+ *         the reported commit on main itself (the fourth pilot) and waits to
+ *         be stopped; with `reworkNoop` it only reads the feature's
  *         status and exits 0. `reworkDirect` may be a list, one entry per
  *         rework session (a corrective session included). With
  *         `reworkVia: 'command'` the session invokes the plugin's
@@ -42,7 +45,7 @@
  *         CSET-203 r4's corrective controller did: 'setup' (once the control plane is set up) or 'settled-one'
  *         (after its first node settles DONE). A continuation's prompt is a task session's too.
  * taskTakeover: [bool per task session] — CSET-202 r2's controller: while the first worker runs (after its
- *         RED commit) the session writes that worker's result slot itself, then carries on for ten minutes.
+ *         RED commit) the session writes that worker's result slot itself, then waits to be stopped.
  * reviews: as the PCM-103 controller did, the task reworks a module's node
  *         after it settles, once per review in order (a module's first
  *         worker writes its `draft`; each review's worker its tests, then
@@ -56,8 +59,7 @@
  *         main in the product repository), 'helper' (starts a background process that writes LOOPS.json a moment
  *         later), 'after-settle' (a scratch file at the workspace root once its first node settled DONE),
  *         'registry' (edits repositories.yaml, then goes on through Mycelink). A kind ending in '-exit' makes its change
- *         where no call shows it and exits 0 right after; otherwise the session carries on for ten minutes (to be stopped),
- *         except 'registry'.
+ *         where no call shows it and exits 0 right after; otherwise the session waits to be stopped, except 'registry'.
  *         A write the plugin's fence refuses (hooks on) changed nothing: the controller carries on through Mycelink.
  * taskRefusals: [stage per task session] — CSET-203 r10: right after the n-th task session's first worker ticket is
  *         dispatched (before any worker runs), its next request fails as Claude Code records it — in its stream and its
@@ -90,8 +92,19 @@
  * and git command is shown as a Bash tool call (settles included, which the
  * harness replays), as a host transcript shows it: the worker's inside an
  * Agent call, carrying its `parent_tool_use_id`.
+ *
+ * Nothing here waits without a bound, as Claude Code bounds it: a hook past
+ * its declared `timeout` (60 s when it declares none) and a Bash call past
+ * the Bash tool's (2 minutes; `bashTimeoutMs`) are killed — and the session
+ * fails on it, saying so (exit 87, 88). A session waiting to be stopped (a
+ * stall, a change of its own the harness must find) waits `stopWaitMs` (2
+ * minutes) at most, then fails (exit 86): it never carries on as if it had
+ * been stopped. Every session writes what it does through to
+ * host-trace.jsonl beside the plan's log — its start, each call and child
+ * process, where it waits, how it ended — so a session killed mid-call, or a
+ * test that timed out, leaves where it stood.
  */
-import { execSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -203,6 +216,63 @@ function runReviewer(ticket, host, { gaps = {}, model = 'stand-in-reviewer' } = 
 const planFile = process.env.FAKE_CLAUDE_PLAN ?? process.argv[2];
 const given = process.argv.slice(process.env.FAKE_CLAUDE_PLAN ? 2 : 3);
 const plan = JSON.parse(readFileSync(planFile, 'utf8'));
+
+// ---- what this session does, written through as it happens: a session killed mid-call, or a test that timed out, leaves
+// where it stood — what it ran, which child process it waited on, where it waited to be stopped, how it ended.
+// Claude Code names this session's own records under its HOME by it; each trace line too (a pid names no session: every
+// sandboxed session has the same).
+const SESSION = `fake-${process.pid}-${Date.now()}`;
+const TRACE = join(dirname(plan.log), 'host-trace.jsonl');
+function trace(ev, data = {}) {
+  try {
+    appendFileSync(TRACE, `${JSON.stringify({ t: new Date().toISOString(), session: SESSION, pid: process.pid, ev, ...data })}\n`);
+  } catch {
+    // the trace never decides anything
+  }
+}
+process.on('exit', (code) => trace('exit', { code }));
+process.on('uncaughtExceptionMonitor', (error) => trace('error', { message: String(error?.stack ?? error).slice(0, 2000) }));
+
+/** Claude Code's bound on a Bash call (the tool's default, 2 minutes): a command past it is killed and shown timed out. */
+const BASH_TIMEOUT_MS = plan.bashTimeoutMs ?? 120_000;
+/** Claude Code's bound on a hook that declares no `timeout` of its own. */
+const HOOK_TIMEOUT_S = 60;
+/** How long a session waits to be stopped (the evaluator's interrupt, the harness's controller check) at most. */
+const STOP_WAIT_MS = plan.stopWaitMs ?? 120_000;
+/** How this stand-in fails when what it waits on does not answer: nothing stopped it, a hook or a call ran past its bound. */
+const UNANSWERED = { stop: 86, hook: 87, call: 88, child: 89 };
+
+/** What this session waited on did not answer within its bound: said on stderr and in the trace, and the session fails. */
+function unanswered(ev, code, message, data = {}) {
+  trace(ev, data);
+  process.stderr.write(`fake-mycelink-host: ${message}\n`);
+  process.exit(code);
+}
+
+/**
+ * One child process, bounded: killed past `timeoutMs` (spawnSync then closes the pipes, so a grandchild holding them holds
+ * nothing here). Its start and end are traced; `timedOut` says it was killed for the bound.
+ */
+function runChild(label, file, args, options, timeoutMs) {
+  const t0 = Date.now();
+  trace('child', { label });
+  const r = spawnSync(file, args, { ...options, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  const timedOut = r.error?.code === 'ETIMEDOUT';
+  trace('child-end', { label, ms: Date.now() - t0, status: r.status, signal: r.signal, ...(timedOut ? { timed_out: true } : r.error ? { error: String(r.error.code ?? r.error.message) } : {}) });
+  return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error, timedOut };
+}
+
+/**
+ * Where this session waits to be stopped — by the evaluator's interrupt, or the harness's controller check — parked, no
+ * child process running, so the stop lands here whatever the platform's timing. Bounded: a session nothing stopped fails,
+ * saying so; it never carries on as if it had been stopped.
+ */
+function awaitStop(where) {
+  trace('await-stop', { where });
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, STOP_WAIT_MS);
+  unanswered('stop-unanswered', UNANSWERED.stop, `waited ${STOP_WAIT_MS} ms at ${where} to be stopped; nothing stopped this session`, { where, waited_ms: STOP_WAIT_MS });
+}
+
 const prompt = readFileSync(0, 'utf8');
 const ws = process.cwd();
 const control = join(ws, 'platform');
@@ -218,7 +288,6 @@ const env = { ...process.env, CLAUDE_PID: String(process.pid), MYCELINK_FAKE_CLA
 
 appendFileSync(plan.log, `${JSON.stringify({ argv: given, prompt_sha256: createHash('sha256').update(prompt).digest('hex'), prompt_head: prompt.slice(0, 40), prompt })}\n`);
 // Claude Code's own records of this session under its HOME, as 2.1.290 keeps them: what Mycelink reads a provider failure from.
-const SESSION = `fake-${process.pid}-${Date.now()}`;
 const projects = join(process.env.HOME ?? process.env.USERPROFILE ?? ws, '.claude', 'projects', ws.replace(/[^A-Za-z0-9]/g, '-'));
 const sessionTranscript = join(projects, `${SESSION}.jsonl`);
 const record = (file, entry) => {
@@ -236,7 +305,18 @@ let parentType = null;
 /** The running module-worker subagent's own id (Claude Code's agent id, not its Agent call's) and its transcript. */
 let parentAgent = null;
 let parentTranscript = null;
-/** One Bash tool call: shown, run, and its output shown as the tool result. */
+/**
+ * One of the plugin's hooks, as Claude Code runs it: its payload on stdin, killed past its declared `timeout` — and then
+ * the session fails, saying which hook did not answer (a hook Claude Code cancelled decided nothing).
+ */
+function runHook(event, h, payload) {
+  const argv = h.command.replace('${CLAUDE_PLUGIN_ROOT}', pluginDir).match(/"[^"]*"|\S+/g).map((a) => a.replace(/^"|"$/g, ''));
+  const timeoutS = Number.isFinite(h.timeout) && h.timeout > 0 ? h.timeout : HOOK_TIMEOUT_S;
+  const r = runChild(`hook ${event}${payload.tool_name ? ` ${payload.tool_name}` : ''}`, argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), { input: JSON.stringify(payload), env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8', windowsHide: true }, timeoutS * 1000);
+  if (r.timedOut) unanswered('hook-timeout', UNANSWERED.hook, `the ${event} hook \`${h.command}\` ran past its ${timeoutS} s timeout`, { event, tool: payload.tool_name ?? null, timeout_ms: timeoutS * 1000 });
+  return r;
+}
+
 /**
  * The plugin's PreToolUse hooks, as Claude Code runs them before a tool call:
  * the block reason when one refuses it (exit 2), else null. A subagent's call
@@ -249,9 +329,8 @@ function preToolUse(tool, input, toolUseId = null) {
   for (const m of JSON.parse(readFileSync(hooksFile, 'utf8')).hooks?.PreToolUse ?? []) {
     if (!new RegExp('^(?:' + m.matcher + ')$').test(tool)) continue;
     for (const h of m.hooks) {
-      const argv = h.command.replace('${CLAUDE_PLUGIN_ROOT}', pluginDir).match(/"[^"]*"|\S+/g).map((a) => a.replace(/^"|"$/g, ''));
       const payload = { session_id: SESSION, transcript_path: sessionTranscript, cwd: ws, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, ...(toolUseId !== null ? { tool_use_id: toolUseId } : {}), ...(parent ? { agent_id: parentAgent ?? parent, agent_type: parentType ?? 'mycelink:module-worker' } : {}) };
-      const r = spawnSync(argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), { input: JSON.stringify(payload), env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8', windowsHide: true });
+      const r = runHook('PreToolUse', h, payload);
       if (r.status === 2) return (r.stderr || 'Blocked').trim();
     }
   }
@@ -264,16 +343,19 @@ function afterHooks(event, payload) {
   if (plan.hooks === false || !existsSync(hooksFile)) return;
   for (const m of JSON.parse(readFileSync(hooksFile, 'utf8')).hooks?.[event] ?? []) {
     if (m.matcher && !new RegExp('^(?:' + m.matcher + ')$').test(payload.tool_name ?? '')) continue;
-    for (const h of m.hooks) {
-      const argv = h.command.replace('${CLAUDE_PLUGIN_ROOT}', pluginDir).match(/"[^"]*"|\S+/g).map((a) => a.replace(/^"|"$/g, ''));
-      spawnSync(argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), { input: JSON.stringify({ session_id: SESSION, transcript_path: sessionTranscript, cwd: ws, hook_event_name: event, ...payload }), env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8', windowsHide: true });
-    }
+    for (const h of m.hooks) runHook(event, h, { session_id: SESSION, transcript_path: sessionTranscript, cwd: ws, hook_event_name: event, ...payload });
   }
 }
 const who = () => (parent ? { agent_id: parentAgent ?? parent, agent_type: parentType ?? 'mycelink:module-worker' } : {});
 
-function bash(command, run) {
+/**
+ * One Bash tool call: shown, run (its children bounded by the Bash timeout: one past it is shown timed out and the
+ * session fails), and its output shown as the tool result. `stallAfter`: the stall stage this call is, when the session
+ * stalls there — once its effect has landed, before its PostToolUse hook and its result.
+ */
+function bash(command, run, { stallAfter = null } = {}) {
   const id = `toolu_fake_${++toolId}`;
+  trace('call', { id, command: command.slice(0, 300), ...(parent ? { parent } : {}) });
   const call = { type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } };
   // The subagent's own transcript shows its call, as Claude Code writes it before the call runs.
   if (parentTranscript) record(parentTranscript, { type: 'assistant', isSidechain: true, agentId: parentAgent, message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } });
@@ -291,6 +373,12 @@ function bash(command, run) {
     afterHooks('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id, ...who() });
     throw error;
   }
+  if (r?.timedOut) {
+    // As Claude Code shows a call past the Bash timeout; nothing this session does next could rest on it.
+    emit({ type: 'user', parent_tool_use_id: parent, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: `Command timed out after ${BASH_TIMEOUT_MS} ms` }] } });
+    unanswered('call-timeout', UNANSWERED.call, `\`${command.slice(0, 200)}\` ran past the ${BASH_TIMEOUT_MS} ms Bash timeout`, { id, timeout_ms: BASH_TIMEOUT_MS });
+  }
+  if (stallAfter !== null && stallAt === stallAfter) awaitStop(stallAfter);
   afterHooks(r?.status ? 'PostToolUseFailure' : 'PostToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id, ...who() });
   emit({ type: 'user', parent_tool_use_id: parent, message: { content: [{ type: 'tool_result', tool_use_id: id, content: `${r?.stdout ?? ''}${r?.stderr ?? ''}`.slice(0, 4000) }] } });
   return r;
@@ -298,19 +386,20 @@ function bash(command, run) {
 const quote = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`);
 
 function mycelink(args, { allowFail = false } = {}) {
-  const r = bash(`node ${quote(bin)} ${args.map(quote).join(' ')}`, () => spawnSync(process.execPath, [bin, ...args], { cwd: ws, env, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 }));
+  const r = bash(`node ${quote(bin)} ${args.map(quote).join(' ')}`, () => runChild(`mycelink ${args.slice(0, 2).join(' ')}`, process.execPath, [bin, ...args], { cwd: ws, env, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 }, BASH_TIMEOUT_MS));
   if (r.status !== 0 && !allowFail) throw new Error(`mycelink ${args.join(' ')} exited ${r.status}\n${r.stdout}\n${r.stderr}`);
   return r;
 }
 const json = (args) => JSON.parse(mycelink(args).stdout);
 
-function git(cwd, args, { allowFail = false } = {}) {
-  const r = bash(`git -C ${quote(cwd)} ${args.map(quote).join(' ')}`, () => spawnSync('git', ['-C', cwd, ...args], { env, encoding: 'utf8', windowsHide: true }));
+function git(cwd, args, { allowFail = false, stallAfter = null } = {}) {
+  const r = bash(`git -C ${quote(cwd)} ${args.map(quote).join(' ')}`, () => runChild(`git ${args[0]}`, 'git', ['-C', cwd, ...args], { env, encoding: 'utf8', windowsHide: true }, BASH_TIMEOUT_MS), { stallAfter });
   if (r.status !== 0 && !allowFail) throw new Error(`git ${args.join(' ')} exited ${r.status}: ${r.stderr}`);
   return r.stdout.trim();
 }
 
 function done(text) {
+  trace('done', { text: text.slice(0, 300) });
   emit({ type: 'result', subtype: 'success', is_error: false, num_turns: 9, total_cost_usd: 0, result: text });
   process.exit(0);
 }
@@ -409,7 +498,8 @@ async function setUp() {
 
 /** git in the product repository, as the host runs it; `index`: a private index file. Its output, trimmed. */
 function gitIn(args, { input, index } = {}) {
-  const r = spawnSync('git', ['-C', repo, ...args], { env: index ? { ...env, GIT_INDEX_FILE: index } : env, input, encoding: 'utf8' });
+  const r = runChild(`git ${args[0]}`, 'git', ['-C', repo, ...args], { env: index ? { ...env, GIT_INDEX_FILE: index } : env, input, encoding: 'utf8', windowsHide: true }, BASH_TIMEOUT_MS);
+  if (r.timedOut) unanswered('child-timeout', UNANSWERED.child, `git ${args.join(' ')} ran past ${BASH_TIMEOUT_MS} ms`, { label: `git ${args[0]}`, timeout_ms: BASH_TIMEOUT_MS });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
   return r.stdout.trim();
 }
@@ -514,7 +604,7 @@ async function forge(stage) {
     return;
   }
   if (forgery.endsWith('-exit')) done(`Changed it myself (${kind}).`);
-  await sleep(600_000);
+  awaitStop(`its own change (${kind})`);
 }
 
 /** Test names a JS test file declares (`test('x')` / `it('x')`), in order. */
@@ -545,8 +635,8 @@ function packOf(ticket) {
 
 /** Where this session waits to be interrupted: taskStalls[n] / reworkStalls[n] for the n-th task / rework session. */
 let stallAt = null;
-const stall = async (stage) => {
-  if (stallAt === stage) await sleep(600_000);
+const stall = (stage) => {
+  if (stallAt === stage) awaitStop(stage);
 };
 
 /**
@@ -628,11 +718,10 @@ async function worker(ticket) {
     const line = ticket.gate_commands.find((g) => g.gate === name)?.command;
     if (!line) throw new Error(`no ${name} gate for ${ticket.node_id}`);
     const r = bash(line, () => {
-      try {
-        return { stdout: execSync(line, { cwd: control, env, encoding: 'utf8', stdio: 'pipe' }), stderr: '' };
-      } catch (error) {
-        throw new Error(`${name} gate of ${ticket.node_id} failed: ${error.stdout}${error.stderr}`);
-      }
+      const x = runChild(`gate ${name}`, line, [], { cwd: control, env, encoding: 'utf8', shell: true, windowsHide: true, maxBuffer: 64 << 20 }, BASH_TIMEOUT_MS);
+      if (x.timedOut) return x;
+      if (x.status !== 0) throw new Error(`${name} gate of ${ticket.node_id} failed: ${x.stdout}${x.stderr}`);
+      return { stdout: x.stdout, stderr: '' };
     });
     const sha = /sha256 ([0-9a-f]{64})/.exec(r?.stdout ?? '')?.[1];
     if (sha) printed[name] = sha;
@@ -650,10 +739,10 @@ async function worker(ticket) {
     }
     return changed;
   };
-  const commit = (paths, message) => {
+  const commit = (paths, message, stage = null) => {
     if (paths.length === 0) return;
     git(wt, ['add', '--', ...paths]);
-    git(wt, ['commit', '-q', '--no-verify', '-m', message]);
+    git(wt, ['commit', '-q', '--no-verify', '-m', message], { stallAfter: stage });
   };
   const commands = [];
   const changed = [];
@@ -673,13 +762,13 @@ async function worker(ticket) {
     if (!red) throw new Error(`no red gate for ${ticket.node_id}`);
     const drafts = Object.keys(impl);
     const r = bash(`cd ${quote(wt)} && git stash push -q -- ${drafts.map(quote).join(' ')} && ${red}`, () => {
-      const pushed = spawnSync('git', ['-C', wt, 'stash', 'push', '-q', '--', ...drafts], { env, encoding: 'utf8', windowsHide: true });
+      const pushed = runChild('git stash', 'git', ['-C', wt, 'stash', 'push', '-q', '--', ...drafts], { env, encoding: 'utf8', windowsHide: true }, BASH_TIMEOUT_MS);
+      if (pushed.timedOut) return pushed;
       if (pushed.status !== 0) throw new Error(`git stash push in ${wt}: ${pushed.stderr}`);
-      try {
-        return { status: 0, stdout: execSync(red, { cwd: control, env, encoding: 'utf8', stdio: 'pipe' }), stderr: '' };
-      } catch (error) {
-        throw new Error(`red gate of ${ticket.node_id} failed: ${error.stdout}${error.stderr}`);
-      }
+      const x = runChild('gate red', red, [], { cwd: control, env, encoding: 'utf8', shell: true, windowsHide: true, maxBuffer: 64 << 20 }, BASH_TIMEOUT_MS);
+      if (x.timedOut) return x;
+      if (x.status !== 0) throw new Error(`red gate of ${ticket.node_id} failed: ${x.stdout}${x.stderr}`);
+      return { status: 0, stdout: x.stdout, stderr: '' };
     });
     const sha = /sha256 ([0-9a-f]{64})/.exec(r?.stdout ?? '')?.[1];
     if (sha) printed.red = sha;
@@ -693,18 +782,19 @@ async function worker(ticket) {
     // One call commits the test and pops the draft back.
     bash(`cd ${quote(wt)} && git add ${written.map(quote).join(' ')} && git commit -qm ${quote(`test: ${ticket.node_id}`)} && git stash pop -q && git status --short`, () => {
       for (const args of [['add', '--', ...written], ['commit', '-q', '--no-verify', '-m', `test: ${ticket.node_id}`], ['stash', 'pop', '-q']]) {
-        const x = spawnSync('git', ['-C', wt, ...args], { env, encoding: 'utf8', windowsHide: true });
+        const x = runChild(`git ${args[0]}`, 'git', ['-C', wt, ...args], { env, encoding: 'utf8', windowsHide: true }, BASH_TIMEOUT_MS);
+        if (x.timedOut) return x;
         if (x.status !== 0) throw new Error(`git ${args[0]} in ${wt}: ${x.stderr}`);
       }
       return { status: 0, stdout: '', stderr: '' };
     });
     appendFileSync(plan.log, `${JSON.stringify({ stash: { node: ticket.node_id, shape: 'cset202', entries: git(wt, ['stash', 'list']).split(/\r?\n/).filter(Boolean).length } })}\n`);
     changed.push(...written);
-    await stall('red');
+    stall('red');
   } else if (next === 0) {
     const written = write(tests);
     commands.push(gate('red'));
-    commit(written, `test: ${ticket.node_id}${pack?.rework ? ' regression' : ''}`);
+    commit(written, `test: ${ticket.node_id}${pack?.rework ? ' regression' : ''}`, 'red');
     if (stashing) {
       // ... popped back after the test commit, set aside again while the RED is repaired (r12), then its own entry back — or left.
       git(wt, ['stash', 'pop', '-q']);
@@ -714,7 +804,6 @@ async function worker(ticket) {
       appendFileSync(plan.log, `${JSON.stringify({ stash: { node: ticket.node_id, left: Boolean(stashing.leave), entries: git(wt, ['stash', 'list']).split(/\r?\n/).filter(Boolean).length } })}\n`);
     }
     changed.push(...written);
-    await stall('red');
     if (takeover && !tookOver) {
       // CSET-202 r2's controller, while its worker runs: it writes the worker's result itself (the plugin's fence refuses), then carries on.
       tookOver = true;
@@ -730,7 +819,7 @@ async function worker(ticket) {
           `${JSON.stringify({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: id, ...(blocked !== null ? { is_error: true } : {}), content: blocked ?? 'written' }] } })}\n`,
       );
       parent = worker;
-      if (blocked === null) await sleep(600_000);
+      if (blocked === null) awaitStop('the worker’s result it wrote itself');
     }
   }
   if (next <= 1) {
@@ -738,9 +827,8 @@ async function worker(ticket) {
     // The draft it popped back is already in the worktree: its production change all the same.
     if (stashing && next === 0) for (const path of Object.keys(impl)) if (!production.includes(path)) production.push(path);
     commands.push(gate('green'));
-    commit(production, `feat: ${ticket.node_id}${pack?.rework ? ' fix' : ''}`);
+    commit(production, `feat: ${ticket.node_id}${pack?.rework ? ' fix' : ''}`, 'green');
     changed.push(...production);
-    await stall('green');
   }
   commands.push(gate('regression'));
   const result = {
@@ -786,7 +874,7 @@ const reviewHost = {
 /** An acceptance-review ticket: the reviewer subagent writes its verdict, then the host runs the ticket's settle line. */
 let reviewTickets = 0;
 async function acceptanceReview(ticket) {
-  const line = (l) => bash(l, () => spawnSync(l, { cwd: ws, env, shell: true, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 }));
+  const line = (l) => bash(l, () => runChild('review line', l, [], { cwd: ws, env, shell: true, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 }, BASH_TIMEOUT_MS));
   // CSET-203 r13: how the n-th reviewer ticket of the run (every session's) is fulfilled, when the plan says.
   let lifecycle = null;
   if (plan.reviewerLifecycle) {
@@ -895,6 +983,10 @@ async function slowReviewer(ticket, line) {
     '});',
   ].join('\n');
   const child = spawn(process.execPath, ['-e', completer, own, sessionTranscript, SESSION, agentId, agent, description, answer, String(plan.slowReviewerMs ?? 6000), marker], { stdio: 'ignore', windowsHide: true });
+  trace('child', { label: 'slow reviewer', child: child.pid });
+  // It never outlives this session, however this session ends.
+  const reap = () => child.exitCode === null && child.signalCode === null && child.kill('SIGKILL');
+  process.on('exit', reap);
   const seen = { review_id: ticket.review_id, agent_id: agentId, early: null, awaits: [], fail_safe: false, ingest: null, settle: null };
   // Asked while it runs: from then on the background reviewer may finish.
   const go = () => {
@@ -915,7 +1007,21 @@ async function slowReviewer(ticket, line) {
     }
   } finally {
     go();
-    await new Promise((r) => (child.exitCode !== null ? r() : (child.on('exit', r), child.on('error', r))));
+    // Its end, bounded: it ends at once after the go, or at its own fail-safe; one that does not is killed, and the session fails on it.
+    const bound = Number(plan.slowReviewerMs ?? 6000) + 150_000;
+    const ended = await new Promise((r) => {
+      if (child.exitCode !== null || child.signalCode !== null) return r(true);
+      const t = setTimeout(() => r(false), bound);
+      const end = () => (clearTimeout(t), r(true));
+      child.once('exit', end);
+      child.once('error', end);
+    });
+    process.off('exit', reap);
+    trace('child-end', { label: 'slow reviewer', ended });
+    if (!ended) {
+      reap();
+      unanswered('child-timeout', UNANSWERED.child, `the slow reviewer did not end within ${bound} ms`, { label: 'slow reviewer', timeout_ms: bound });
+    }
   }
   seen.fail_safe = existsSync(`${marker}.failsafe`);
   // Claude Code's stream records its end, as it did r13's.
@@ -1033,8 +1139,9 @@ let compacted = false;
 // What the n-th task session changes itself, outside Mycelink (forgeries[n]); done once.
 const forgery = qa ? null : ((plan.forgeries ?? [])[sessionsLike(false) - 1] ?? null);
 let forged = false;
+trace('start', { kind: qa ? 'rework' : 'task', stall: stallAt });
 if (qa) {
-  await stall('start');
+  stall('start');
   if (plan.reworkNoop) {
     // Looks at the feature and ends, as if the report needed nothing.
     mycelink(['feature', 'status', FEATURE, '--control-root', control, '--json']);
@@ -1043,11 +1150,8 @@ if (qa) {
   const direct = Array.isArray(plan.reworkDirect) ? plan.reworkDirect[sessionsLike(true) - 1] : plan.reworkDirect;
   if (direct) {
     // The fourth pilot's controller: it repaired main itself, never through Mycelink, then carried on.
-    const reverted = bash(`git -C ${quote(repo)} revert --no-edit ${qa[1]}`, () => spawnSync('git', ['-C', repo, 'revert', '--no-edit', qa[1]], { env, encoding: 'utf8', windowsHide: true }));
-    if (!/^Blocked: /.test(reverted.stderr ?? '')) {
-      await sleep(600_000);
-      done('Reverted the defect on main.');
-    }
+    const reverted = bash(`git -C ${quote(repo)} revert --no-edit ${qa[1]}`, () => runChild('git revert', 'git', ['-C', repo, 'revert', '--no-edit', qa[1]], { env, encoding: 'utf8', windowsHide: true }, BASH_TIMEOUT_MS));
+    if (!/^Blocked: /.test(reverted.stderr ?? '')) awaitStop('its own revert of main');
   }
   if (plan.reworkVia === 'command') {
     // /mycelink:rework, as its command file gives it: key, status, one attribution-and-rework step, then the host loop.
@@ -1079,7 +1183,7 @@ if (qa) {
   const delivery = await settleAndDeliver(key);
   done(`Reworked ${owners.map((o) => o.node_id).join(', ') || 'the reopened nodes'}; ${delivery.candidate_id} delivered.`);
 } else {
-  await stall('start');
+  stall('start');
   const key = await setUp();
   presentLateTicket();
   if (exitAt === 'setup') done('Set up the control plane; stopping here.');
