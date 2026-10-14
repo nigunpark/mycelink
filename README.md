@@ -73,27 +73,41 @@ state file, the event log, recorded command evidence and Git SHAs are.
 
 ## Quickstart
 
-Five minutes to start, using a demo with two tiny Node.js repositories
-(`pricing` and `storefront`) and one approved requirement. Full walkthrough:
+Five minutes to start, using a demo with two independent Git repositories,
+`orders-api` (publishes order-status payloads) and `orders-web` (renders
+them), and one approved PRD, ORD-101, that needs both to change together
+behind a shared contract. Full walkthrough:
 [`examples/quickstart/`](https://github.com/nigunpark/mycelink/tree/main/examples/quickstart).
 
 ```bash
-# 1. Install (once)
-claude plugin marketplace add nigunpark/mycelink
-claude plugin install mycelink@mycelink-marketplace
-
-# 2. Create the demo workspace: three local Git repositories, no model, no network
+# 1. Create the demo workspace: three local Git repositories, no model, no network
 git clone https://github.com/nigunpark/mycelink.git
-node mycelink/examples/quickstart/setup.mjs mycelink-demo
+cd mycelink
+node examples/quickstart/setup.mjs --out ../mycelink-quickstart
 
-# 3. Start Claude Code there
-cd mycelink-demo && claude
+# 2. Optional, no model: check the demo, then watch a scripted run of the whole feature
+node examples/quickstart/verify-demo.mjs
+node examples/quickstart/walkthrough.mjs
+
+# 3. Run it for real: start Claude Code in the control repository with this clone's plugin
+cd ../mycelink-quickstart/control
+claude --plugin-dir ../../mycelink
 ```
 
-Then paste the prompt from the walkthrough. In short: deliver
-`control/requirements/FEAT-101.md` across `pricing/` and `storefront/` with
-`/mycelink:run FEAT-101`. At the end, `control/features/FEAT-101/candidates/`
-holds one manifest binding both repositories' exact SHAs.
+Then, inside Claude Code: `/mycelink:run ORD-101`. The API node runs first in
+its own worktree, the web node once the API node is DONE, then the
+independent review, the candidate and the delivery. At the end,
+`control/features/ORD-101/candidates/` holds the manifest that binds both
+repositories' exact SHAs, and `main` in each repository is fast-forwarded to
+exactly those SHAs. Nothing is pushed. With the plugin already installed,
+pass `--mycelink <plugin-install-path>/bin/mycelink.mjs` to `setup.mjs` and
+start plain `claude`.
+
+After the clone, steps 1 and 2 start no model and use no network. Step 2's
+walkthrough runs the real controller, Git and gates with a scripted worker
+and reviewer, including a review gap planted on purpose and its rework.
+[Its sample output](https://github.com/nigunpark/mycelink/blob/main/examples/quickstart/SAMPLE-OUTPUT.md)
+is a deterministic scripted walkthrough, **not a model run**.
 
 Step 3 runs real Claude sessions (a worker per node, plus a reviewer) and
 uses your Claude plan or API credit. The run takes longer than the setup.
@@ -532,9 +546,11 @@ verification commands (argv) and a worker budget.
 ## Examples
 
 - [`examples/quickstart/`](https://github.com/nigunpark/mycelink/tree/main/examples/quickstart)
-  (in the repository, not the release ZIP): two zero-dependency Node.js
-  repositories, a control repository and one approved requirement, created by
-  `setup.mjs`. This is the [Quickstart](#quickstart) demo.
+  (in the repository, not the release ZIP): `orders-api` and `orders-web`,
+  two independent Git repositories, a control repository and the approved
+  PRD ORD-101, created by `setup.mjs`; a model-free verifier; and a scripted,
+  model-free walkthrough of the whole feature, review gap and rework
+  included. This is the [Quickstart](#quickstart) demo.
 - `templates/control-repo/` — a complete control repository: manifest,
   `CLAUDE.md`, hook settings example, a three-repository graph and an E2E
   scenario.

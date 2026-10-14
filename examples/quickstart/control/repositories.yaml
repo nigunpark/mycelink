@@ -1,0 +1,34 @@
+# The quickstart portfolio: two independent Git repositories, siblings of
+# this control repository. Every command is an argv array (no shell); each
+# one was run against the baselines setup.mjs commits.
+schema_version: 1
+repositories:
+  - name: api
+    path: ../orders-api
+    base_branch: main
+    role: service
+    description: Publishes order-status payloads (produces the contract).
+    baseline_failures: []
+    commands:
+      test: [node, --test]
+    modules:
+      - id: orders
+        path: orders
+        test: [node, --test, --test-reporter=spec, --test-reporter-destination=stdout, --test-reporter=junit, '--test-reporter-destination=${REPORT}', '${MODULE_PATH}/test/**/*.test.mjs']
+        report: { format: junit-xml }
+        timeout_seconds: 120
+
+  - name: web
+    path: ../orders-web
+    base_branch: main
+    role: client
+    description: Renders order-status payloads (consumes the contract).
+    baseline_failures: []
+    commands:
+      test: [node, --test]
+    modules:
+      - id: ui
+        path: ui
+        test: [node, --test, --test-reporter=spec, --test-reporter-destination=stdout, --test-reporter=junit, '--test-reporter-destination=${REPORT}', '${MODULE_PATH}/test/**/*.test.mjs']
+        report: { format: junit-xml }
+        timeout_seconds: 120

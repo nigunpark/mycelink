@@ -1,90 +1,66 @@
 /**
- * The README's quickstart works as far as it can without a model.
- *
- * examples/quickstart/setup.mjs creates the demo workspace; everything the
- * controller does before the first worker (init, the controller key,
- * registering both repositories, audit, doctor, the acceptance manifest cut
- * from the requirement) runs here against the committed runtime. The
- * model-driven run is not part of this check.
+ * The public quickstart (examples/quickstart) keeps working and keeps saying
+ * what it does: its own model-free verifier passes every check — separate
+ * repositories, the published baseline SHAs, baselines that pass their tests
+ * and do not hold the feature, a graph that validates and initialises with
+ * the API node alone READY, an acceptance manifest equal to what Mycelink
+ * cuts from the PRD, setup's refusals, and documented commands that exist.
+ * The root README's Quickstart gives the same commands and says the sample
+ * output is scripted. It lives in the repository only: the release ZIP never
+ * carries it.
  */
-import { afterAll, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
-import { git } from '../helpers/git-fixture.js';
-
-afterAll(() => cleanupTmpRoots());
 
 const ROOT = resolve(process.cwd());
-const EXAMPLE = join(ROOT, 'examples', 'quickstart');
-const LAUNCHER = join(ROOT, 'bin', 'mycelink.mjs');
-
-function run(cwd: string, args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync(process.execPath, args, { cwd, encoding: 'utf8', windowsHide: true });
-  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
-}
-const mycelink = (cwd: string, ...args: string[]) => run(cwd, [LAUNCHER, ...args]);
+const QUICKSTART = join(ROOT, 'examples', 'quickstart');
 
 describe('examples/quickstart', () => {
-  const demo = join(makeTmpDir('qs-'), 'demo');
-
-  it('setup.mjs creates three repositories with one commit on main, and refuses an existing directory', () => {
-    const setup = run(ROOT, [join(EXAMPLE, 'setup.mjs'), demo]);
-    expect(setup.stderr).toBe('');
-    expect(setup.status).toBe(0);
-    for (const repo of ['pricing', 'storefront', 'control']) {
-      const dir = join(demo, repo);
-      expect(git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
-      expect(git(dir, ['rev-list', '--count', 'HEAD'])).toBe('1');
-      expect(git(dir, ['status', '--porcelain'])).toBe('');
+  it('verify-demo.mjs passes every check', () => {
+    const r = spawnSync(process.execPath, [join(QUICKSTART, 'verify-demo.mjs'), '--json'], { cwd: ROOT, encoding: 'utf8', windowsHide: true, timeout: 240_000 });
+    let report: { ok: boolean; results: { name: string; ok: boolean; detail?: string }[] };
+    try {
+      report = JSON.parse(r.stdout) as typeof report;
+    } catch {
+      throw new Error(`verify-demo printed no report (exit ${r.status}):\n${r.stdout}${r.stderr}`);
     }
-    expect(existsSync(join(demo, 'control', 'requirements', 'FEAT-101.md'))).toBe(true);
-    expect(run(ROOT, [join(EXAMPLE, 'setup.mjs'), demo]).status).toBe(2);
+    expect(report.results.filter((x) => !x.ok)).toEqual([]);
+    expect(report.results.length).toBeGreaterThanOrEqual(20);
+    expect(r.status).toBe(0);
+  }, 300_000);
+
+  it('starts every process through one argv-only spawn, never a shell', () => {
+    const scripts = ['setup.mjs', 'walkthrough.mjs', 'verify-demo.mjs', 'lib/quickstart.mjs', 'acceptance/probe.mjs'];
+    const spawning = scripts.filter((file) => readFileSync(join(QUICKSTART, file), 'utf8').includes('node:child_process'));
+    expect(spawning).toEqual(['lib/quickstart.mjs']);
+    const lib = readFileSync(join(QUICKSTART, 'lib', 'quickstart.mjs'), 'utf8');
+    expect(lib).toMatch(/^import \{ spawnSync \} from 'node:child_process';$/m);
+    expect(lib).toMatch(/shell: false/);
+    expect(lib).not.toMatch(/shell:\s*true/);
   });
 
-  it('both demo repositories pass their own tests before the feature', () => {
-    for (const repo of ['pricing', 'storefront']) {
-      const r = run(join(demo, repo), ['--test']);
-      expect(r.status, `${repo}: ${r.stdout}${r.stderr}`).toBe(0);
-    }
-  });
-
-  it('the controller sets up the control repository, registers both repositories and cuts AC-1..AC-4', () => {
-    const control = join(demo, 'control');
-    expect(mycelink(demo, 'init', 'control').status).toBe(0);
-    const opened = mycelink(demo, 'controller', 'open', '--control-root', 'control', '--json');
-    expect(opened.status).toBe(0);
-    const key = (JSON.parse(opened.stdout) as { authority: string }).authority;
-    for (const name of ['pricing', 'storefront']) {
-      const reg = mycelink(demo, 'repo', 'register', '--control-root', 'control', '--authority', key, '--name', name, '--path', `../${name}`, '--base-branch', 'main', '--', 'node', '--test');
-      expect(reg.status, reg.stderr).toBe(0);
-    }
-    expect(mycelink(demo, 'repo', 'audit', '--control-root', 'control').status).toBe(0);
-    git(control, ['add', '-A']);
-    git(control, ['commit', '-q', '-m', 'mycelink control plane']);
-
-    const doctor = mycelink(demo, 'doctor', '--control-root', 'control', '--json');
-    const report = JSON.parse(doctor.stdout) as { ok: boolean; checks: { name: string; ok: boolean }[] };
-    const check = (name: string) => report.checks.find((c) => c.name === name)?.ok;
-    expect(check('repo:pricing')).toBe(true);
-    expect(check('repo:storefront')).toBe(true);
-    expect(check('control repo is a git repository')).toBe(true);
-    expect(report.ok, doctor.stdout).toBe(true);
-
-    const acceptance = mycelink(control, 'feature', 'acceptance', 'FEAT-101', '--source', 'requirements/FEAT-101.md', '--kind', 'AC-4=compatibility', '--json', '--authority', key);
-    expect(acceptance.status, acceptance.stderr).toBe(0);
-    const criteria = (JSON.parse(acceptance.stdout) as { criteria: { id: string; kind: string }[] }).criteria;
-    expect(criteria.map((c) => `${c.id}:${c.kind}`)).toEqual(['AC-1:new-behavior', 'AC-2:new-behavior', 'AC-3:new-behavior', 'AC-4:compatibility']);
-  });
-
-  it('the README and the walkthrough give the commands this test runs', () => {
+  it("the root README's Quickstart gives the demo's own commands and labels the sample as scripted", () => {
     const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
-    const walkthrough = readFileSync(join(EXAMPLE, 'README.md'), 'utf8');
-    for (const text of [readme, walkthrough]) {
-      expect(text).toContain('node mycelink/examples/quickstart/setup.mjs mycelink-demo');
-      expect(text).toContain('/mycelink:run FEAT-101');
+    const section = /^## Quickstart\n([\s\S]*?)^---$/m.exec(readme)?.[1] ?? '';
+    const walkthrough = readFileSync(join(QUICKSTART, 'README.md'), 'utf8');
+    for (const text of [section, walkthrough]) {
+      expect(text).toContain('node examples/quickstart/setup.mjs --out ../mycelink-quickstart');
+      expect(text).toContain('/mycelink:run ORD-101');
     }
-    expect(walkthrough).toContain('control/requirements/FEAT-101.md');
+    const scripts = [...section.matchAll(/node examples\/quickstart\/([\w/.-]+\.mjs)/g)].map((m) => m[1]);
+    expect(new Set(scripts)).toEqual(new Set(['setup.mjs', 'verify-demo.mjs', 'walkthrough.mjs']));
+    const setupHelp = spawnSync(process.execPath, [join(QUICKSTART, 'setup.mjs'), '--help'], { encoding: 'utf8', windowsHide: true }).stdout;
+    const flags = [...section.matchAll(/setup\.mjs[^\n]*/g)].flatMap((m) => m[0].match(/--[a-z]+/g) ?? []);
+    for (const flag of new Set(flags)) expect(setupHelp, flag).toContain(flag);
+    expect(section).toMatch(/SAMPLE-OUTPUT\.md\)\s+is a deterministic scripted walkthrough, \*\*not a model run\*\*/);
+    expect(section).not.toMatch(/FEAT-101|pricing|storefront|mycelink-demo/);
+  });
+
+  it('is not part of the release ZIP', () => {
+    const pkg = readFileSync(join(ROOT, 'scripts', 'package.mjs'), 'utf8');
+    const dirs = /const INCLUDE_DIRS = \[([^\]]*)\]/.exec(pkg)?.[1] ?? '';
+    expect(dirs).not.toContain('examples');
   });
 });

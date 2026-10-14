@@ -25,9 +25,10 @@ memory. **Do not post until every item under "Before posting" is ticked.**
 
 ### The quickstart, run by a person
 
-The model-free part of the quickstart is checked by
-`tests/release/quickstart.test.ts`. The model-driven part has not been run
-for this launch yet.
+The model-free part of the quickstart (setup, `verify-demo.mjs` and the
+scripted `walkthrough.mjs`) is checked by `tests/release/quickstart.test.ts`
+and `tests/fixtures/quickstart-walkthrough.test.ts`. The model-driven part
+has not been run for this launch yet.
 
 - [ ] On a clean machine (or a fresh user account) with a current Claude Code,
       follow [the quickstart](../../examples/quickstart/README.md) exactly as
@@ -37,6 +38,9 @@ for this launch yet.
       come from one run.
 - [ ] Fix any step that needed knowledge the walkthrough does not give.
 - [ ] Repeat on a second OS, if possible.
+- [ ] Any recording or screenshot of the scripted walkthrough follows
+      [RECORDING.md](../../examples/quickstart/RECORDING.md) and says it is
+      scripted, not a model run.
 
 ### The claims
 

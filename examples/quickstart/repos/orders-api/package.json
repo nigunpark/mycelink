@@ -1,0 +1,13 @@
+{
+  "name": "orders-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mycelink quickstart: the API that publishes order-status payloads.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

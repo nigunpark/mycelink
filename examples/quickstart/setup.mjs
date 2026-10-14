@@ -1,66 +1,92 @@
 #!/usr/bin/env node
 /**
- * Mycelink quickstart: create the demo workspace.
+ * Create the Mycelink quickstart workspace.
  *
- *   node setup.mjs <new-directory>
+ *   node examples/quickstart/setup.mjs --out <dir> [--mycelink <plugin>/bin/mycelink.mjs] [--force]
  *
- * Creates three Git repositories, each with one commit on `main`:
+ * <dir>/orders-api   Git repository: the API (publishes order-status payloads)
+ * <dir>/orders-web   Git repository: the web client (renders them)
+ * <dir>/control      Git repository: Mycelink's control repository with the
+ *                    approved ORD-101 PRD, acceptance manifest and graph
  *
- *   <dir>/pricing      a tiny zero-dependency Node library (node --test)
- *   <dir>/storefront   a second one that renders what pricing computes
- *   <dir>/control      the coordination (control) repository, holding only
- *                      the approved requirement requirements/FEAT-101.md
- *
- * It runs `git` (argv only, no shell) and nothing else: no Mycelink command,
- * no model, no network. The directory must not exist yet.
+ * Refuses a non-empty <dir> unless an earlier run of this script made it and
+ * --force is given, and refuses a <dir> inside any Git work tree. Writes no
+ * global Git configuration, opens no controller key, starts no model, and
+ * uses no network.
  */
-import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { CHECKOUT_LAUNCHER, FEATURE_ID, HERE, QuickstartError, REPOS, createWorkspace, run } from './lib/quickstart.mjs';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const target = process.argv[2];
-if (!target) {
-  process.stderr.write('usage: node setup.mjs <new-directory>\n');
-  process.exit(2);
-}
-const root = resolve(target);
-if (existsSync(root)) {
-  process.stderr.write(`${root} already exists; choose a new directory.\n`);
-  process.exit(2);
-}
+const USAGE = `Usage: node examples/quickstart/setup.mjs --out <dir> [--mycelink <path to bin/mycelink.mjs>] [--force]
 
-// The seed commits carry a fixed identity, so setup works before you configure Git.
-const SEED = ['-c', 'user.name=Mycelink Quickstart', '-c', 'user.email=quickstart@example.invalid', '-c', 'commit.gpgsign=false'];
-function git(cwd, ...args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  if (r.status !== 0) {
-    process.stderr.write(`git ${args.join(' ')} failed in ${cwd}:\n${r.stderr || r.error?.message || ''}\n`);
-    process.exit(1);
+  --out <dir>        where to create orders-api/, orders-web/ and control/ (default: <temp>/mycelink-quickstart)
+  --mycelink <path>  the Mycelink launcher whose hooks the control repository uses
+                     (default: this checkout's bin/mycelink.mjs)
+  --force            replace a directory an earlier run of this script created`;
+
+function parse(argv) {
+  const opts = { out: join(tmpdir(), 'mycelink-quickstart'), mycelink: CHECKOUT_LAUNCHER, force: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--help' || a === '-h') return { help: true };
+    if (a === '--force') opts.force = true;
+    else if (a === '--out' || a === '--mycelink') {
+      const v = argv[++i];
+      if (v === undefined || v.startsWith('--')) throw new QuickstartError(`${a} needs a value.\n\n${USAGE}`);
+      opts[a.slice(2)] = v;
+    } else throw new QuickstartError(`Unknown argument ${JSON.stringify(a)}.\n\n${USAGE}`);
   }
-}
-function seed(dir, message) {
-  git(dir, 'init', '--quiet', '--initial-branch=main');
-  git(dir, 'add', '-A');
-  git(dir, ...SEED, 'commit', '--quiet', '-m', message);
+  return opts;
 }
 
-for (const name of ['pricing', 'storefront']) {
-  cpSync(join(here, 'repos', name), join(root, name), { recursive: true });
-  seed(join(root, name), `${name}: initial version`);
+function baselineTests(dir) {
+  const r = run([process.execPath, '--test', '--test-reporter=spec'], { cwd: dir });
+  const pass = /^ℹ pass (\d+)/m.exec(r.stdout)?.[1] ?? '?';
+  const fail = /^ℹ fail (\d+)/m.exec(r.stdout)?.[1] ?? '?';
+  return { code: r.code, pass, fail, out: `${r.stdout}${r.stderr}` };
 }
-mkdirSync(join(root, 'control', 'requirements'), { recursive: true });
-cpSync(join(here, 'requirements', 'FEAT-101.md'), join(root, 'control', 'requirements', 'FEAT-101.md'));
-seed(join(root, 'control'), 'requirement FEAT-101 approved');
 
-process.stdout.write(
-  [
-    `Created ${root}`,
-    '  pricing/     storefront/     control/requirements/FEAT-101.md',
-    '',
-    'Next: start Claude Code in that directory and paste the prompt from',
-    'examples/quickstart/README.md (step 3).',
-    '',
-  ].join('\n'),
-);
+function main() {
+  const opts = parse(process.argv.slice(2));
+  if (opts.help) {
+    process.stdout.write(`${USAGE}\n`);
+    return 0;
+  }
+  const started = Date.now();
+  const ws = createWorkspace({ out: opts.out, launcher: opts.mycelink, force: opts.force, log: (m) => process.stdout.write(`  ${m}\n`) });
+  for (const [name, dir] of Object.entries(ws.repos)) {
+    const t = baselineTests(dir);
+    if (t.code !== 0) throw new QuickstartError(`the ${REPOS[name]} baseline tests failed:\n${t.out}`);
+    process.stdout.write(`  ${REPOS[name]} baseline tests: ${t.pass} passed, ${t.fail} failed\n`);
+  }
+  const seconds = ((Date.now() - started) / 1000).toFixed(1);
+  const pluginDir = resolve(ws.launcher, '..', '..');
+  const rel = (p) => relative(process.cwd(), p) || '.';
+  process.stdout.write(
+    [
+      '',
+      `Quickstart workspace ready in ${seconds}s (${ws.cliVersion}): ${ws.root}`,
+      `  api      ${ws.repos.api}  main ${ws.baseline.api}`,
+      `  web      ${ws.repos.web}  main ${ws.baseline.web}`,
+      `  control  ${ws.control}  main ${ws.controlSha}`,
+      '',
+      'Next, run the feature with Claude Code (this uses your model quota):',
+      `  cd "${ws.control}"`,
+      `  claude --plugin-dir "${pluginDir}"`,
+      `  > /mycelink:run ${FEATURE_ID}`,
+      '',
+      'Or watch the scripted, model-free walkthrough of the same feature:',
+      `  node "${rel(join(HERE, 'walkthrough.mjs'))}"`,
+      '',
+    ].join('\n'),
+  );
+  return 0;
+}
+
+try {
+  process.exitCode = main();
+} catch (err) {
+  process.stderr.write(`setup: ${err instanceof QuickstartError ? err.message : err.stack ?? err}\n`);
+  process.exitCode = 1;
+}

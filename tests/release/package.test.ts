@@ -111,7 +111,7 @@ describe('npm run package', () => {
     ]) {
       expect(names, required).toContain(required);
     }
-    const forbidden = /^(tests|src|node_modules|scripts|artifacts|evals-[^/]+|\.git|\.github|\.claude\/)|\.map$|\.ts$|PUBLIC_RELEASE_TASK|PUBLIC-READINESS|DESIGN\.md|implementation\//;
+    const forbidden = /^(tests|src|node_modules|scripts|artifacts|examples|evals-[^/]+|\.git|\.github|\.claude\/)|\.map$|\.ts$|PUBLIC_RELEASE_TASK|PUBLIC-READINESS|DESIGN\.md|implementation\//;
     expect(names.filter((n) => forbidden.test(n))).toEqual([]);
   });
 
