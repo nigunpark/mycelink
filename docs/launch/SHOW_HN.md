@@ -52,12 +52,16 @@ https://github.com/nigunpark/mycelink
 > (concurrent commits, duplicate and stale results, a late hidden defect,
 > an interrupt). All 12 deliveries passed hidden acceptance tests and an
 > independent verifier. But: I ran it myself; those changes are multi-module
-> inside one repo each, not cross-repo (cross-repo is covered by model-free
-> tests so far); each cell is one verified run picked after fixes (19 of 54
+> inside one repo each, not cross-repo; each cell is one verified run picked after fixes (19 of 54
 > runs verified overall), so it's not a success rate; and there's no
 > without-plugin baseline or cost measurement. The report, with every
 > caveat:
 > https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-12-public-project-final-matrix.md
+>
+> Across separate repos I have one real run so far: the quickstart's two
+> tiny repos, with Claude Opus 5.5, delivered and verified in about 17
+> minutes; Claude Code put it at $5.55 at list prices. One run, no baseline:
+> https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md
 >
 > There's a five-minute quickstart with two tiny repos:
 > https://github.com/nigunpark/mycelink/tree/main/examples/quickstart
@@ -73,9 +77,10 @@ https://github.com/nigunpark/mycelink
   without a matching RED, refuses writes outside a worktree, and binds exact
   SHAs. Instructions alone don't guarantee any of that. Whether it produces
   better code is unmeasured.
-- **"How much does it cost?"** More than a single session; there are no
-  published numbers yet. Give the numbers from your own quickstart run here
-  only if you have them, and say that they come from one run.
+- **"How much does it cost?"** More than a single session. The only
+  published figure is one maintainer run of the quickstart: about 17 minutes,
+  six subagent sessions, $5.55 at list prices as Claude Code reported it. Say
+  that it is one run on two tiny repositories, not an estimate.
 - **"Does it work with other models?"** It drives Claude Code. Other models
   are not planned.
 - **"Is the benchmark independent?"** No. The verifier is independent of the
@@ -84,5 +89,6 @@ https://github.com/nigunpark/mycelink
   and the script that checks them.
 - **"Why multi-module evidence for a multi-repo tool?"** Public multi-repo
   projects with a shared change and hidden tests are harder to set up.
-  Cross-repo model pilots are first on the roadmap, and design partners are
-  welcome.
+  The quickstart's two-repo run is the only cross-repo model run so far;
+  external cross-repo pilots are first on the roadmap, and design partners
+  are welcome.

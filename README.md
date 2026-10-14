@@ -1,3 +1,5 @@
+<p align="center"><img src="https://github.com/nigunpark/mycelink/blob/main/docs/assets/social-preview.png?raw=true" width="100%" alt="Mycelink: one PRD, isolated workers, one verified delivery. Multi-repo changes with enforced TDD, independent review, restart-safe recovery and exact delivered SHAs."></p>
+
 # Mycelink
 
 **One approved PRD → isolated Claude Code workers in their own Git worktrees →
@@ -26,6 +28,15 @@ claude plugin install mycelink@mycelink-marketplace
 
 Then, inside Claude Code: `/mycelink:run FEAT-101`.
 New here? The [five-minute quickstart](#quickstart) walks through a two-repository demo.
+
+<p align="center"><a href="https://github.com/nigunpark/mycelink/blob/main/examples/quickstart/SAMPLE-OUTPUT.md"><picture><source media="(prefers-reduced-motion: reduce)" srcset="https://github.com/nigunpark/mycelink/blob/main/docs/assets/quickstart-demo-static.png?raw=true"><img src="https://github.com/nigunpark/mycelink/blob/main/docs/assets/quickstart-demo.gif?raw=true" width="960" alt="Scripted walkthrough, no model: the Mycelink controller runs the quickstart feature ORD-101 across two Git repositories. Each node goes RED, GREEN and DONE in its own worktree; the review finds a planted gap on AC-4, the web node is reworked, the second review passes, candidate ORD-101-C001 binds both SHAs and is delivered without a push."></picture></a></p>
+
+<sub>**Scripted walkthrough, no model** (about a minute, looping): the real controller, Git and gates
+on the [quickstart](#quickstart)'s two repositories, with a scripted worker and reviewer and an
+AC-4 review gap planted on purpose. Its output is
+[SAMPLE-OUTPUT.md](https://github.com/nigunpark/mycelink/blob/main/examples/quickstart/SAMPLE-OUTPUT.md).
+A real Claude Code run of the same demo, with its own SHAs, is
+[reported separately](https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md).</sub>
 
 > **Status: public beta (`0.3.0-beta.1`).** Interfaces may change before 1.0.
 > Mycelink is an independent, third-party project. It is **not affiliated with
@@ -111,6 +122,12 @@ is a deterministic scripted walkthrough, **not a model run**.
 
 Step 3 runs real Claude sessions (a worker per node, plus a reviewer) and
 uses your Claude plan or API credit. The run takes longer than the setup.
+One maintainer run of exactly this demo, with Claude Opus 5.5, delivered both
+repositories and passed every check afterwards; it took about 17 minutes and
+six subagent sessions, and Claude Code reported $5.55 at API list prices.
+That is one run, not an average:
+[the report](https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md)
+has its SHAs, sessions, recovery and limits.
 To use your own repositories, see
 [Use it on your own repositories](#use-it-on-your-own-repositories).
 
@@ -135,7 +152,29 @@ guarantees, not the quality of the code a model writes.
 
 ---
 
-## Evidence: public-project benchmark
+## Evidence
+
+Everything below was run and reported by the Mycelink maintainer
+(self-reported, not an independent study), and none of it has a
+without-plugin baseline.
+
+### A real run across two independent repositories
+
+> **One maintainer-run demo, not a benchmark.** Full report:
+> [`docs/evals/2026-10-15-public-two-repo-demo.md`](https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md)
+
+| | |
+|---|---|
+| **What ran** | `/mycelink:run ORD-101` from the [quickstart](#quickstart), in Claude Code 2.1.290 with Claude Opus 5.5, on Windows: two independent Git repositories, `orders-api` and `orders-web`, behind one shared contract |
+| **Result** | candidate ORD-101-C001 delivered: `orders-api` at `27bde55218f7`, `orders-web` at `9197a9f4af69`. Checked afterwards: `feature verify --delivered` and `candidate verify` ok, an acceptance probe outside both repositories 4/4 (0/4 on the baselines), 8/8 and 11/11 tests, clean trees, nothing pushed |
+| **What happened** | 6 subagent sessions: 3 workers, 3 reviewers. Both nodes settled first time. The first reviewer returned no usable verdict and Mycelink started a fresh one, which challenged AC-4 for non-string statuses; a test-only rework of the web node added the missing proof; the next review passed all four criteria |
+| **Time and cost** | about 16 min 47 s wall-clock; $5.55 at API list prices and 104 232 output tokens, as Claude Code reported them. Mycelink itself records 0 tokens, because it does not import subagent usage |
+
+It is one run on a small prepared feature, on one OS. It shows that the whole
+cycle can complete with a real model across separate repositories; it is not a
+success rate or a cost estimate.
+
+### Public-project benchmark
 
 > **Run and reported by the Mycelink maintainer (self-reported, not an
 > independent study).** Full report:
@@ -153,9 +192,10 @@ guarantees, not the quality of the code a model writes.
 What this does **not** show:
 
 - **These arms are multi-module, not multi-repository.** Each change spans
-  2–4 modules inside one repository. Cross-repository runs are covered by
-  model-free tests (for example `tests/fixtures/three-repo-e2e.test.ts`),
-  not yet by a public model run.
+  2–4 modules inside one repository. Across separate repositories there is
+  the one demo run above, plus model-free tests (for example
+  `tests/fixtures/three-repo-e2e.test.ts`); no external team has piloted
+  Mycelink on its own repositories yet.
 - **Not a success rate.** Each cell reports one verified run, picked after
   the fixes for its earlier failures: 19 of 54 with-plugin runs were
   verified. The arms ran on five different suite commits.
@@ -189,8 +229,11 @@ What this does **not** show:
 
 - **Cost.** Mycelink itself is free. Each node gets its own worker session,
   and every review is another session, so a feature uses more model usage
-  than one session making the same change. No cost or latency figures are
-  published yet; measuring them is on the
+  than one session making the same change. The only published figures are
+  from one run of the two-repository demo (about 17 minutes, $5.55 at API
+  list prices, as Claude Code reported them; see
+  [Evidence](#a-real-run-across-two-independent-repositories)). Measuring cost
+  and time over repeated runs is on the
   [roadmap](https://github.com/nigunpark/mycelink/blob/main/docs/ROADMAP.md).
 - **Privacy.** No telemetry, no Mycelink account and no Mycelink server.
   Mycelink runs locally and makes no network requests of its own; the only
@@ -615,11 +658,13 @@ entries from its `.claude/settings.json` by hand.
 - **Redaction is a safety net**: keep secrets in environment variables, not in
   command arguments or graph text.
 - **More sessions, more model usage.** Every node is its own worker session
-  and every review is another; no cost or latency figures are published yet.
-- **Public model evidence is multi-module, not multi-repository.** The
-  maintainer's public-project matrix changes several modules inside one
-  repository per PRD; cross-repository flows are exercised by model-free
-  tests. See [Evidence](#evidence-public-project-benchmark).
+  and every review is another. The only published cost and time come from one
+  demo run, not from repeated measurement.
+- **Little public model evidence across repositories.** The maintainer's
+  public-project matrix changes several modules inside one repository per
+  PRD. Across separate repositories there is one maintainer-run demo on two
+  small repositories and the model-free tests; no external pilot yet. See
+  [Evidence](#evidence).
 
 ---
 

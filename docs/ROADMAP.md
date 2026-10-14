@@ -20,9 +20,16 @@ or [become a design partner](DESIGN_PARTNERS.md).
   ([report](evals/2026-10-12-public-project-final-matrix.md)). Those changes
   are multi-module inside one repository, one verified run per cell, with no
   baseline and no cost measurement.
-- **Not shown yet:** a public model run across separate repositories, a
-  success rate over repeated runs, uplift over plain Claude Code, cost, and
-  upgrading a feature in flight from one release to the next.
+- **Shown once across separate repositories, by the maintainer:** a real
+  Claude Code run of the [quickstart](../examples/quickstart/)'s two
+  independent repositories delivered one candidate, verified afterwards, in
+  about 17 minutes and $5.55 at list prices as Claude Code reported them
+  ([report](evals/2026-10-15-public-two-repo-demo.md)). One run on a small
+  prepared feature, with no baseline.
+- **Not shown yet:** a pilot by an external team on its own separate
+  repositories, a success rate over repeated runs, uplift over plain Claude
+  Code, cost over repeated runs, and upgrading a feature in flight from one
+  release to the next.
 
 ## 1. Beta feedback
 
@@ -35,6 +42,11 @@ or [become a design partner](DESIGN_PARTNERS.md).
 
 ## 2. Real cross-repository pilots
 
+- [x] A public model demo across two independent repositories: done once by
+      the maintainer on the quickstart
+      ([report](evals/2026-10-15-public-two-repo-demo.md)).
+- [ ] An external design partner's pilot on their own separate repositories:
+      none yet.
 - Run features that span **separate** repositories (not modules of one
   repository) with design partners, on their own code and test suites.
 - Publish what happened, including the runs that failed, with the same

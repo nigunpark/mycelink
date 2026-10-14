@@ -44,6 +44,12 @@ apart. Never cross-post the same text to several at once.
 > no baseline and no cost numbers. Full report:
 > https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-12-public-project-final-matrix.md
 >
+> **Across separate repos:** one real run so far, of the quickstart's two
+> tiny repos with Claude Opus 5.5: delivered and verified in about 17
+> minutes, $5.55 at list prices as Claude Code reported it. One run, mine, no
+> baseline:
+> https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md
+>
 > **Try it:** a five-minute quickstart with two tiny repos:
 > https://github.com/nigunpark/mycelink/tree/main/examples/quickstart
 >

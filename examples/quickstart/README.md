@@ -32,9 +32,10 @@ not know, or none at all (AC-4).
 **Cost.** Steps 1–3 start no model, use no network and cost nothing. Step 4
 is a real run: a host session plus at least three subagent sessions (two
 module-workers and one acceptance reviewer, and more if the review finds a
-gap). It uses your Claude plan's quota or API credits. Mycelink's maintainers
-have not published a measured cost or duration for this demo; budget roughly
-15–45 minutes of wall-clock time.
+gap). It uses your Claude plan's quota or API credits. One maintainer run with
+Claude Opus 5.5 took about 17 minutes and six subagent sessions, and Claude Code
+reported $5.55 at API list prices ([the report](../../docs/evals/2026-10-15-public-two-repo-demo.md));
+that is one run, not an average, so budget roughly 15–45 minutes.
 
 ## 1. Create the workspace (seconds)
 
@@ -139,6 +140,17 @@ git -C ../mycelink-quickstart/orders-web log --oneline main
 four on the baselines and passes all four on a correct delivery. A model's
 own implementation may differ from the scripted one; the probe judges
 behaviour, not code.
+
+### What a real run looked like
+
+[A maintainer's run of this step](../../docs/evals/2026-10-15-public-two-repo-demo.md)
+with Claude Code 2.1.290 and Claude Opus 5.5 delivered candidate ORD-101-C001
+(`orders-api` `27bde55218f7`, `orders-web` `9197a9f4af69`): the checks above
+all passed, the probe 4/4. Unlike the scripted walkthrough, its first
+reviewer returned no usable verdict and was replaced automatically, and the
+review gap was a real one (AC-4 for non-string statuses), closed by a
+test-only rework. It is one self-reported run, with no baseline; your SHAs,
+sessions, time and cost will differ.
 
 ### If something stops
 

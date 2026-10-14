@@ -5,7 +5,8 @@
  * what GitHub shows beside it: relative links and their #anchors, and links
  * into this repository written as absolute GitHub URLs (shipped files must
  * use those for anything the ZIP leaves out), which must name a path that
- * exists on the branch being tested, or an issue form that exists.
+ * exists on the branch being tested, or an issue form that exists. Inline HTML
+ * (an image's src and srcset, a link's href) is held to the same rules.
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -41,8 +42,9 @@ function anchors(file: string): Set<string> {
 /** Each link in `file` that does not resolve, as `file -> target`. */
 function brokenLinks(file: string): string[] {
   const broken: string[] = [];
-  for (const m of withoutCode(readFileSync(join(ROOT, file), 'utf8')).matchAll(/\]\(([^)\s]+)\)/g)) {
-    const target = m[1] as string;
+  const text = withoutCode(readFileSync(join(ROOT, file), 'utf8'));
+  const targets = [...text.matchAll(/\]\(([^)\s]+)\)/g), ...text.matchAll(/\s(?:src|srcset|href)="([^"\s]+)"/g)].map((m) => m[1] as string);
+  for (const target of targets) {
     const form = ISSUE_FORM.exec(target);
     const repoPath = REPO_PATH.exec(target);
     if (form) {
@@ -67,6 +69,15 @@ describe('Markdown links', () => {
 
   it('cover the public documentation', () => {
     expect(files).toEqual(expect.arrayContaining(['README.md', 'CONTRIBUTING.md', 'docs/ROADMAP.md', 'examples/quickstart/README.md']));
+  });
+
+  it("check the README's inline HTML images", () => {
+    const readme = withoutCode(readFileSync(join(ROOT, 'README.md'), 'utf8'));
+    expect([...readme.matchAll(/\ssrc(?:set)?="([^"\s]+)"/g)].map((m) => REPO_PATH.exec(m[1] as string)?.[1])).toEqual([
+      'docs/assets/social-preview.png',
+      'docs/assets/quickstart-demo-static.png',
+      'docs/assets/quickstart-demo.gif',
+    ]);
   });
 
   it('all resolve: relative paths, their anchors, and this repository’s GitHub URLs', () => {

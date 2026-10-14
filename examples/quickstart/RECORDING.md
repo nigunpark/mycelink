@@ -41,3 +41,18 @@ asciinema, any screen recorder and the same `node` command work.
 
 End card: `node examples/quickstart/setup.mjs --out ../mycelink-quickstart`,
 then `/mycelink:run ORD-101` in Claude Code for a real run (uses model quota).
+
+## The README animation
+
+`docs/assets/quickstart-demo.gif` (and its still, `quickstart-demo-static.png`,
+for readers who prefer reduced motion) follows this storyboard without a
+screen recorder. `node scripts/quickstart-demo-gif.mjs` turns
+[SAMPLE-OUTPUT.md](SAMPLE-OUTPUT.md) into one local HTML page per scene,
+renders each with a headless Chrome, Chromium or Edge, and joins them with
+ffmpeg (`--browser` and `--ffmpeg` name them; `--frames <dir>` keeps the
+PNGs). Every frame carries the label `SCRIPTED WALKTHROUGH · NO MODEL`, shows
+the sample's lines verbatim, and nothing else; the same browser, fonts and
+ffmpeg give the same bytes. `tests/release/quickstart-demo-gif.test.ts` holds
+the committed GIF to the generator's plan. Regenerate it whenever the sample
+changes. A real model run is never shown in it; it is reported in
+[its own report](../../docs/evals/2026-10-15-public-two-repo-demo.md).

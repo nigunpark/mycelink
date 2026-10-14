@@ -54,7 +54,10 @@ Keep the caveat post in the thread. Do not post the first post on its own.
 > I've published a self-run evaluation on two public projects, Changesets
 > and Spring Petclinic Microservices, with every caveat spelled out: the
 > changes were multi-module within one repository, there is no baseline
-> comparison, and cost was not measured.
+> comparison, and cost was not measured. Across separate repositories, one
+> real run of the two-repository quickstart delivered and verified; it is a
+> single run, reported with its time and cost:
+> https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md
 >
 > I'm looking for design partners who ship features across repositories and
 > would pilot it on real work:
