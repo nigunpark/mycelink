@@ -33,6 +33,7 @@ import {
 } from '../../src/engine/review-lineage.js';
 import { reproductionSha256 } from '../../src/engine/review-challenge.js';
 import type { LineageEventBody, ReviewLineage } from '../../src/model/types.js';
+import { fixtureTree } from '../helpers/fixture-archive.js';
 
 const R11 = join(__dirname, '..', 'benchmark', 'fixtures', 'cset203-r11');
 const receipt = (rel: string): Record<string, any> => JSON.parse(readFileSync(join(R11, ...rel.split('/')), 'utf8')) as Record<string, any>;
@@ -216,7 +217,8 @@ describe('progress and the global ceilings', () => {
 
 // ---- CSET-201 final: the per-criterion count is a budget, not a cap ------------------------------------------------
 
-const C201 = join(__dirname, '..', 'benchmark', 'fixtures', 'cset201-final');
+/** The run's tree, archived as tests/benchmark/fixtures/cset201-final.tar. */
+const C201 = fixtureTree('cset201-final');
 const c201 = (rel: string): Record<string, any> => JSON.parse(readFileSync(join(C201, ...rel.split('/')), 'utf8')) as Record<string, any>;
 const c201Gap = (review: string, criterion: string): string => (c201(`features/CSET-201/reviews/CSET-201-${review}.json`)['gaps'] as { criterion: string; reproduction: string }[]).find((g) => g.criterion === criterion)!.reproduction;
 const C201_R001_AC2 = c201Gap('R001', 'AC-2');
