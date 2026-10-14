@@ -1323,7 +1323,7 @@ export function sessionEnv({ home, base = process.env, extra = {} }) {
 /** Kill a session and everything it started (its process group; the tree on Windows). */
 function killTree(child) {
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', timeout: 30_000 });
     return;
   }
   try {
@@ -1334,35 +1334,103 @@ function killTree(child) {
 }
 
 /**
- * One session. `poll()` runs every `pollMs` while it lives and may return
- * 'interrupt' or 'controller-violation', which stop it so; the deadline
- * ends it as 'budget'. Resolves when the session and its output are done
- * (a straggler holding the pipes is cut off).
+ * One session, started and then supervised (superviseSession) to its end;
+ * `log` hears what happens to its process.
  */
-function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoPath, deadline, pollMs, poll, onText }) {
+function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoPath, deadline, pollMs, poll, onText, log = () => {} }) {
+  const out = createWriteStream(transcriptPath);
+  const err = createWriteStream(stderrPath);
+  const confined = isolation?.kind === 'bubblewrap';
+  let child;
+  let tracker = null;
+  try {
+    child = startConfined(isolation, { ...spec, ...(confined ? { infoPath } : {}) }, { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    if (confined) tracker = trackNamespace(infoPath);
+  } catch (error) {
+    out.end();
+    err.end();
+    return Promise.resolve({ exit_code: null, signal: null, ended_by: 'spawn-error', duration_ms: 0, result: null, confined, survivors: [], error: String(error?.message ?? error) });
+  }
+  return superviseSession({
+    child,
+    out,
+    err,
+    prompt,
+    deadline,
+    pollMs,
+    poll,
+    onText,
+    confined,
+    kill: () => killTree(child),
+    // Nothing a session started may outlive it: what did (in its PID namespace, or its process group) is killed and named.
+    reap: () => reapSurvivors(confined ? { ns: tracker?.stop() ?? null } : { pgid: child.pid }),
+    log,
+  });
+}
+
+/** How often a stopped session is killed again while no exit is reported for it, and how long it is waited for at most. */
+export const SESSION_STOP_RETRY_MS = 2_000;
+export const SESSION_STOP_GRACE_MS = 15_000;
+/** How long a session whose output ended (its stdout and stderr closed) may take to be reported exited. */
+export const SESSION_EXIT_GRACE_MS = 10_000;
+/** How long a session's output may still drain after its exit; a straggler holding the pipes is then cut off. */
+export const SESSION_DRAIN_MS = 5_000;
+
+/**
+ * A started session (`child`, its stdio piped) to its end: the prompt on its
+ * stdin, its stdout into `out` (and line by line to `onText`), its stderr into
+ * `err`. `poll()` runs every `pollMs` while it lives and may return
+ * 'interrupt' or 'controller-violation', which stop it so (`kill()`); the
+ * deadline ends it as 'budget'. Resolves when the session and its output are
+ * done, once `reap()` has named and killed whatever it left — and never
+ * waits on its process without a bound: a straggler holding the pipes is cut
+ * off `drainMs` after the exit; a stopped session is killed again every
+ * `stopRetryMs` while no exit is reported for it and waited for `stopGraceMs`
+ * at most; one whose output ended is taken as exited `exitGraceMs` later.
+ * An exit the platform never reported (an event loop can lose a child's exit
+ * notification) is said so (`exit_unreported`), its code unknown. `log`
+ * hears each step.
+ */
+export function superviseSession({
+  child,
+  out,
+  err,
+  prompt,
+  deadline,
+  pollMs,
+  poll,
+  onText,
+  confined = false,
+  kill,
+  reap = () => [],
+  log = () => {},
+  stopRetryMs = SESSION_STOP_RETRY_MS,
+  stopGraceMs = SESSION_STOP_GRACE_MS,
+  exitGraceMs = SESSION_EXIT_GRACE_MS,
+  drainMs = SESSION_DRAIN_MS,
+}) {
   return new Promise((done) => {
     const started = Date.now();
-    const out = createWriteStream(transcriptPath);
-    const err = createWriteStream(stderrPath);
-    const confined = isolation?.kind === 'bubblewrap';
-    let child;
-    let tracker = null;
-    try {
-      child = startConfined(isolation, { ...spec, ...(confined ? { infoPath } : {}) }, { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
-      if (confined) tracker = trackNamespace(infoPath);
-    } catch (error) {
-      out.end();
-      err.end();
-      done({ exit_code: null, signal: null, ended_by: 'spawn-error', duration_ms: 0, result: null, confined, survivors: [], error: String(error?.message ?? error) });
-      return;
-    }
     let endedBy = null;
+    let stoppedAt = null;
+    let killedAt = null;
     let result = null;
     let spawnError = null;
     let pending = '';
     let finished = false;
     // Set once the process has exited on its own: its streams may still be draining, but nothing stops it any more.
     let exited = false;
+    // When its stdout and its stderr had both ended; and why it ended with no exit reported for it, if it did.
+    const open = new Set(['stdout', 'stderr']);
+    let outputEnded = null;
+    let unreported = null;
+    log(`started (pid ${child.pid})`);
+    for (const name of open) {
+      child[name].on('end', () => {
+        open.delete(name);
+        if (open.size === 0 && outputEnded === null) outputEnded = Date.now();
+      });
+    }
     child.stdout.on('data', (chunk) => {
       out.write(chunk);
       pending += chunk.toString('utf8');
@@ -1385,13 +1453,40 @@ function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoP
     const stop = (why) => {
       if (endedBy !== null) return;
       endedBy = why;
-      killTree(child);
+      stoppedAt = killedAt = Date.now();
+      log(`stopping (${why})`);
+      kill();
+    };
+    // No exit was reported for it, however it ended: its output is cut off, and it ends with what is known of it.
+    const abandon = (why) => {
+      unreported = why;
+      log(why);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      finish(null, null);
     };
     const timer = setInterval(() => {
-      // A session already being stopped, or already ended on its own (its output still draining), is never polled
-      // again: no fault fires into it, and a violation it left is the settlement's to find after it.
-      if (endedBy !== null || exited) return;
-      if (Date.now() >= deadline) return stop('budget');
+      // A session already ended on its own is never polled again (its output drains, bounded by its exit's timer).
+      if (finished || exited) return;
+      const now = Date.now();
+      if (endedBy !== null) {
+        // Being stopped: never polled again (no fault fires into it, a violation it left is the settlement's to find
+        // after it), killed again until its exit is reported, and waited for no longer than the grace.
+        if (now - stoppedAt >= stopGraceMs) return abandon(`no exit was reported ${stopGraceMs} ms after it was stopped (${endedBy})`);
+        if (now - killedAt >= stopRetryMs) {
+          killedAt = now;
+          log(`no exit reported since it was stopped (${endedBy}): killed again`);
+          kill();
+        }
+        return;
+      }
+      if (outputEnded !== null) {
+        // Its output ended: never polled again, and taken as exited (killed, whatever is left of it) past the grace.
+        if (now - outputEnded < exitGraceMs) return;
+        kill();
+        return abandon(`its output ended ${exitGraceMs} ms ago and no exit was reported`);
+      }
+      if (now >= deadline) return stop('budget');
       const action = poll();
       if (action === 'interrupt' || action === 'controller-violation') stop(action);
     }, pollMs);
@@ -1402,16 +1497,18 @@ function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoP
       if (pending) onText(pending);
       out.end();
       err.end();
-      // Nothing a session started may outlive it: what did (in its PID namespace, or its process group) is killed and named.
-      const survivors = reapSurvivors(confined ? { ns: tracker?.stop() ?? null } : { pgid: child.pid });
-      killTree(child);
+      const survivors = reap();
+      kill();
+      const endedAs = endedBy ?? (spawnError ? 'spawn-error' : 'exit');
+      log(`ended (${endedAs}${unreported === null ? `, ${signal ?? code}` : ', no exit reported'}; ${survivors.length} survivor(s))`);
       done({
         exit_code: code,
         signal: signal ?? null,
-        ended_by: endedBy ?? (spawnError ? 'spawn-error' : 'exit'),
+        ended_by: endedAs,
         duration_ms: Date.now() - started,
         confined,
         survivors,
+        ...(unreported !== null ? { exit_unreported: unreported } : {}),
         result: result && {
           subtype: result.subtype ?? null,
           is_error: result.is_error ?? null,
@@ -1433,11 +1530,13 @@ function runSession({ isolation, spec, prompt, transcriptPath, stderrPath, infoP
     child.on('close', finish);
     child.on('exit', (code, signal) => {
       exited = true;
+      log(`exited (${signal ?? code})`);
       const t = setTimeout(() => {
+        if (!finished) log(`its output was still open ${drainMs} ms after its exit: cut off`);
         child.stdout.destroy();
         child.stderr.destroy();
         finish(code, signal);
-      }, 5000);
+      }, drainMs);
       t.unref();
     });
   });
@@ -1887,6 +1986,7 @@ export async function runArm({
       onText: (t) => {
         entry.text += t;
       },
+      log: (line) => log(`session ${n}: ${line}`),
     });
     running = null;
     const done = { index: n, purpose, phase, resumes, ...(corrects !== undefined ? { corrects } : {}), ...(continuation ? { continuation: true } : {}), ...(provider_recovery ? { provider_recovery: true } : {}), prompt_sha256: sha256Hex(text), transcript: transcriptPath, started_at: startedAt, ended_at: new Date().toISOString(), ...s };
