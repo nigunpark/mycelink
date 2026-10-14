@@ -76,7 +76,7 @@ const WHY = [
 /** Git with no system or global configuration: what a fresh Windows install defaults to, whatever this machine has set. */
 function gitEnv(home: string): NodeJS.ProcessEnv {
   const global = join(home, 'gitconfig');
-  if (!existsSync(global)) writeFileSync(global, '');
+  writeFileSync(global, '');
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: global, GIT_TERMINAL_PROMPT: '0' };
 }
