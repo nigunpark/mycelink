@@ -133,5 +133,13 @@ export const callsOf = (transcript: string) => {
   return events.filter((e) => e.type === 'assistant').flatMap((e) => e.message.content.filter((c: any) => c.type === 'tool_use').map((c: any) => ({ ...c, parent: e.parent_tool_use_id })));
 };
 export const failingOf = (v: any) => Object.entries(v.sections).flatMap(([name, s]: [string, any]) => (s?.checks ?? []).filter((c: any) => !c.ok && c.severity !== 'warning').map((c: any) => `${name}:${c.id}`));
-/** On a session-shape mismatch, what each session's checks found: its stop, its violation, what its settlement could not attribute. */
-export const checksFound = (run: any) => JSON.stringify(run.sessions.map((s: any) => ({ ended_by: s.ended_by, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null, housekeeping: s.controller_txn?.housekeeping ?? null })));
+/**
+ * On a session-shape mismatch, what each session's checks found (its stop, its violation, what its settlement could not
+ * attribute), and how each phase and fault ended (a rework phase starts only on a late defect QA reported).
+ */
+export const checksFound = (run: any) =>
+  JSON.stringify({
+    sessions: run.sessions.map((s: any) => ({ ended_by: s.ended_by, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null, housekeeping: s.controller_txn?.housekeeping ?? null })),
+    phases: (run.phases ?? []).map((p: any) => ({ phase: p.phase, ended_by: p.ended_by, mycelink: p.mycelink })),
+    faults: (run.faults ?? []).map((f: any) => ({ kind: f.kind, applied: f.applied, detail: f.detail ?? null, reported: f.reported ?? null, already_failing: f.already_failing ?? null })),
+  });

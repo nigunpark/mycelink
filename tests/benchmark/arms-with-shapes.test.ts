@@ -71,7 +71,7 @@ describe('fault-injected arm', () => {
       const fake = hostPlan({ taskStalls: ['red'] });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count: 1, phase: 'task' }), requireMycelink: true, requireTdd: true });
       // On a mismatch, what each session's checks found.
-      const found = JSON.stringify(run.sessions.map((s: any) => ({ violation: s.violation?.summary ?? null, stopped_for: s.controller_txn?.stopped_for ?? null })));
+      const found = checksFound(run);
       expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), found).toEqual([
         [1, 'task', 'task', 'interrupt'],
         [2, 'resume', 'task', 'exit'],
@@ -195,7 +195,7 @@ describe('fault-injected arm', () => {
       writeFileSync(fake.file, JSON.stringify(plan));
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count: 1, phase: 'task' }), requireMycelink: true, requireTdd: true });
       // On a mismatch, what each session's checks found.
-      const found = JSON.stringify(run.sessions.map((s: any) => ({ violation: s.violation?.summary ?? null, stopped_for: s.controller_txn?.stopped_for ?? null })));
+      const found = checksFound(run);
       expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), found).toEqual([
         [1, 'task', 'task', 'interrupt'],
         [2, 'resume', 'task', 'exit'],
