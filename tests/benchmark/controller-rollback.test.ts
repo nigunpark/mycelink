@@ -30,7 +30,7 @@ describe('CSET-203 r12: a module-worker’s own stash, through the plugin’s ho
     const r = await run(fake);
     expect(shape(r), found(r)).toEqual([[1, 'task', 'exit', null, false]]);
     const [first] = r.sessions;
-    expect(first.controller_txn).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
+    expect(first.controller_txn, found(r)).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
     expect(first.controller_txn.authorized['worker-git']).toBe(1);
     expect(first.controller_txn.worker_git).toEqual([expect.objectContaining({ path: 'repos/toyshop/.git:refs/stash', workers: [expect.objectContaining({ node_id: 'TOY-001.mod-a.impl' })] })]);
     expect(first.controller_txn.calls).toMatchObject({ intact: true });
@@ -83,7 +83,7 @@ describe('CSET-202 final: a host waiting on its background workers while they st
     expect(shape(r), found(r)).toEqual([[1, 'task', 'exit', null, false]]);
     const [first] = r.sessions;
     expect(first.controller_txn.stopped_for).toBeUndefined();
-    expect(first.controller_txn).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
+    expect(first.controller_txn, found(r)).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
     expect(first.controller_txn.authorized['worker-git']).toBe(1);
     // Each push and pop, the worker's own, by the call that made it.
     expect(transitionsOf(first)).toEqual([
@@ -113,7 +113,7 @@ describe('CSET-202 final: a host waiting on its background workers while they st
     ]);
     for (const s of r.sessions) {
       expect(s.controller_txn.stopped_for, `session ${s.index}`).toBeUndefined();
-      expect(s.controller_txn, `session ${s.index}`).toMatchObject({ violation: false, mode: 'none', unauthorized: [] });
+      expect(s.controller_txn, `session ${s.index} ${found(r)}`).toMatchObject({ violation: false, mode: 'none', unauthorized: [] });
     }
     expect(transitionsOf(r.sessions[0])).toEqual([
       ['TOY-001.mod-a.impl', 1, 0],

@@ -90,7 +90,7 @@ describe('fault-injected arm', () => {
       expect(result).toMatchObject({ is_error: true, content: expect.stringMatching(/^Blocked: /) });
       expect(run.sessions[1].controller_edits).toEqual([]);
       expect(run.sessions[1].fence_blocks).toBe(1);
-      expect(run.sessions[1].controller_txn).toMatchObject({ violation: false, mode: 'none' });
+      expect(run.sessions[1].controller_txn, checksFound(run)).toMatchObject({ violation: false, mode: 'none' });
       expect(run.mycelink).toMatchObject({ complete: true, candidate: 'TOY-001-C002' });
       expect(run.controller).toMatchObject({ ok: true, failures: [], recovered: [] });
       expect(run.ok).toBe(true);
