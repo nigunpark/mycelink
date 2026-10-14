@@ -6,8 +6,9 @@
  * Rendering needs a browser and ffmpeg, so CI checks the plan and the committed files, not a fresh render.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { readCommittedAsset } from '../helpers/committed-asset.js';
 // @ts-expect-error -- plain ESM script without type declarations
 import { CHIPS, GIF, HEIGHT, LABEL, STILL, WIDTH, demoScenes, frameHtml, sampleLines } from '../../scripts/quickstart-demo-gif.mjs';
 
@@ -91,16 +92,15 @@ describe('docs/assets/quickstart-demo.gif', () => {
   });
 
   it('is the committed render of that plan: size, frames, delays, under 5 MB, looping', () => {
-    const file = join(ASSETS, GIF);
-    expect(statSync(file).size).toBeLessThanOrEqual(5 * 1024 * 1024);
-    const gif = readGif(readFileSync(file));
+    // Bounded and parsed from the one descriptor that was opened, never a path checked and then read again.
+    const gif = readGif(readCommittedAsset(join(ASSETS, GIF), 5 * 1024 * 1024));
     expect([gif.width, gif.height]).toEqual([WIDTH, HEIGHT]);
     expect(gif.loops).toBe(true);
     expect(gif.delays).toEqual(scenes.map((s) => Math.round(s.ms / 10)));
   });
 
   it('has a still for readers who prefer no motion, at the same size', () => {
-    const png = readFileSync(join(ASSETS, STILL));
+    const png = readCommittedAsset(join(ASSETS, STILL), 5 * 1024 * 1024);
     expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
     expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([WIDTH, HEIGHT]);
   });

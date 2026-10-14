@@ -8,7 +8,8 @@
  * baseline SHAs are the same on every machine.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -128,26 +129,141 @@ function existingAncestor(dir) {
   return d;
 }
 
-/** Refuse anything but a fresh directory, or one an earlier setup made (with `force`). */
+/** Where ownership and permission bits apply. Windows has neither; its temp directory is the user's own. */
+const POSIX = typeof process.getuid === 'function';
+
+/**
+ * setup's output when no --out is given: a new directory under the OS temp directory, its name unique and created
+ * exclusively (mkdtemp), mode 0700 where modes apply. No one can have made it, or a link by its name, first.
+ */
+export function freshTempOutput() {
+  return mkdtempSync(join(tmpdir(), 'mycelink-quickstart-'));
+}
+
+/** The lookup of `path` without following a final link, or null when nothing is there. */
+function lookup(path) {
+  try {
+    return lstatSync(path, { bigint: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/** Two lookups name one file. Node 22.12 on Windows leaves a path lookup's `dev` at 0; the file id still tells files apart. */
+function sameFile(a, b) {
+  return a.ino === b.ino && (a.dev === b.dev || a.dev === 0n || b.dev === 0n);
+}
+
+/**
+ * Why someone else could write into, rename or replace a directory, or null (POSIX only). The output directory must
+ * be the user's own and writable by no one else. A directory above it may also belong to root, and may be writable
+ * by others when it is sticky (like /tmp), where only an entry's owner may rename or remove it. Group write counts
+ * only for a group other than the user's own primary group: with user private groups (umask 002) that group is the
+ * user alone.
+ */
+function foreignControl(st, { output }) {
+  if (!POSIX) return null;
+  const uid = BigInt(process.getuid());
+  if (st.uid !== uid && (output || st.uid !== 0n)) return `belongs to uid ${st.uid}, not to you (uid ${uid})`;
+  const othersWrite = (st.mode & 0o002n) !== 0n || ((st.mode & 0o020n) !== 0n && st.gid !== BigInt(process.getgid()));
+  if (othersWrite && (output || (st.mode & 0o1000n) === 0n)) return 'is writable by other users';
+  return null;
+}
+
+/** Refuse a location under a directory that would let someone else rename the workspace away and put theirs in its place. */
+function refuseForeignAncestors(root) {
+  if (!POSIX) return;
+  for (let d = realpathSync.native(existingAncestor(dirname(root))); ; d = dirname(d)) {
+    const why = foreignControl(statSync(d, { bigint: true }), { output: false });
+    if (why !== null) throw new QuickstartError(`${root} lies under ${d}, which ${why}. Nothing was changed; choose an --out under directories only you control.`);
+    if (dirname(d) === d) return;
+  }
+}
+
+/** Refuse an output that is a link, not a directory, or (POSIX) a directory someone else controls. */
+function refuseUnclaimable(root, st) {
+  if (st.isSymbolicLink()) throw new QuickstartError(`${root} is a symbolic link or junction. Setup writes only into a real directory; nothing was changed. Choose another --out.`);
+  if (!st.isDirectory()) throw new QuickstartError(`${root} exists and is not a directory.`);
+  const why = foreignControl(st, { output: true });
+  if (why !== null) throw new QuickstartError(`${root} ${why}. Nothing was changed; choose another --out, or make it yours and writable by you alone.`);
+}
+
+function changedWhileClaimed(root) {
+  return new QuickstartError(`${root} changed while setup was claiming it: it is no longer the directory setup checked. Nothing more was written; choose another --out.`);
+}
+
+/**
+ * Write the marker as a new file (O_CREAT|O_EXCL: never through an existing name or a final link) through its own
+ * descriptor, then confirm the directory is still the one checked (`dir`) and the marker the file written. A
+ * directory replaced by a link between the check and the write is refused, and O_EXCL leaves any file reached through
+ * that link untouched.
+ */
+function writeMarker(root, dir) {
+  const path = join(root, MARKER);
+  let fd;
+  try {
+    fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+  } catch (err) {
+    if (err.code === 'EEXIST' || err.code === 'ELOOP') throw changedWhileClaimed(root);
+    throw err;
+  }
+  let written;
+  try {
+    writeFileSync(fd, JSON.stringify({ schema: 'mycelink-quickstart/1', feature_id: FEATURE_ID, repositories: { ...REPOS }, control: CONTROL }, null, 2) + '\n');
+    written = fstatSync(fd, { bigint: true });
+  } finally {
+    closeSync(fd);
+  }
+  const now = lookup(root);
+  const marker = lookup(path);
+  if (now === null || now.isSymbolicLink() || !sameFile(now, dir) || marker === null || marker.isSymbolicLink() || !marker.isFile() || marker.ino !== written.ino) {
+    throw changedWhileClaimed(root);
+  }
+}
+
+/**
+ * Refuse anything but a fresh directory, or one an earlier setup made (with `force`). A missing directory is created
+ * here, exclusively; an existing one must be a real directory, not a link or junction, and (POSIX) the user's own,
+ * writable by no one else, under directories no one else can rename it in. The marker is written last, as a new
+ * file, and the directory confirmed unchanged.
+ */
 export function prepareOutput(out, { force = false } = {}) {
   const root = resolve(out);
   const inside = run(['git', 'rev-parse', '--show-toplevel'], { cwd: existingAncestor(root) });
   if (inside.code === 0) {
     throw new QuickstartError(`${root} is inside the Git work tree ${inside.stdout.trim()}. The quickstart's repositories must be independent: choose an output directory outside any repository (for example under your temp directory).`);
   }
-  if (existsSync(root)) {
-    if (!statSync(root).isDirectory()) throw new QuickstartError(`${root} exists and is not a directory.`);
+  refuseForeignAncestors(root);
+  let dir = lookup(root);
+  if (dir !== null) {
+    refuseUnclaimable(root, dir);
     const entries = readdirSync(root);
     if (entries.length > 0) {
       if (!entries.includes(MARKER)) throw new QuickstartError(`${root} is not empty and was not created by the quickstart (no ${MARKER}). Nothing was changed; choose another --out.`);
       if (!force) throw new QuickstartError(`${root} holds an earlier quickstart. Re-run with --force to delete and recreate it, or choose another --out.`);
       rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+      dir = null;
     }
   }
-  mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, MARKER), JSON.stringify({ schema: 'mycelink-quickstart/1', feature_id: FEATURE_ID, repositories: { ...REPOS }, control: CONTROL }, null, 2) + '\n');
+  if (dir === null) {
+    // Missing parents writable by no one else; the directory itself only if nothing (not even a link) took its name.
+    mkdirSync(dirname(root), { recursive: true, mode: 0o755 });
+    try {
+      mkdirSync(root, { mode: 0o700 });
+    } catch (err) {
+      if (err.code === 'EEXIST') throw new QuickstartError(`${root} appeared while setup was creating it. Nothing was written into it; choose another --out.`);
+      throw err;
+    }
+    dir = lookup(root);
+    if (dir === null) throw changedWhileClaimed(root);
+    refuseUnclaimable(root, dir);
+  }
+  writeMarker(root, dir);
   // The long form of the path, as Git reports it (a Windows temp directory may be an 8.3 alias such as RUNNER~1).
-  return realpathSync.native(root);
+  const real = realpathSync.native(root);
+  if (!sameFile(statSync(real, { bigint: true }), dir)) throw changedWhileClaimed(root);
+  return real;
 }
 
 function initRepo(dir) {

@@ -9,24 +9,26 @@
  * <dir>/control      Git repository: Mycelink's control repository with the
  *                    approved ORD-101 PRD, acceptance manifest and graph
  *
- * Refuses a non-empty <dir> unless an earlier run of this script made it and
- * --force is given, and refuses a <dir> inside any Git work tree. Writes no
+ * Without --out, <dir> is a new directory of its own under the OS temp
+ * directory. Refuses a non-empty <dir> unless an earlier run of this script
+ * made it and --force is given, a <dir> that is a symbolic link or junction or
+ * that someone else controls, and a <dir> inside any Git work tree. Writes no
  * global Git configuration, opens no controller key, starts no model, and
  * uses no network.
  */
+import { rmdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
-import { CHECKOUT_LAUNCHER, FEATURE_ID, HERE, QuickstartError, REPOS, createWorkspace, run } from './lib/quickstart.mjs';
+import { CHECKOUT_LAUNCHER, FEATURE_ID, HERE, QuickstartError, REPOS, createWorkspace, freshTempOutput, run } from './lib/quickstart.mjs';
 
 const USAGE = `Usage: node examples/quickstart/setup.mjs --out <dir> [--mycelink <path to bin/mycelink.mjs>] [--force]
 
-  --out <dir>        where to create orders-api/, orders-web/ and control/ (default: <temp>/mycelink-quickstart)
+  --out <dir>        where to create orders-api/, orders-web/ and control/ (default: a new <temp>/mycelink-quickstart-XXXXXX)
   --mycelink <path>  the Mycelink launcher whose hooks the control repository uses
                      (default: this checkout's bin/mycelink.mjs)
   --force            replace a directory an earlier run of this script created`;
 
 function parse(argv) {
-  const opts = { out: join(tmpdir(), 'mycelink-quickstart'), mycelink: CHECKOUT_LAUNCHER, force: false };
+  const opts = { out: null, mycelink: CHECKOUT_LAUNCHER, force: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') return { help: true };
@@ -54,7 +56,21 @@ function main() {
     return 0;
   }
   const started = Date.now();
-  const ws = createWorkspace({ out: opts.out, launcher: opts.mycelink, force: opts.force, log: (m) => process.stdout.write(`  ${m}\n`) });
+  // Never a fixed name under a shared temp directory, which anyone could have made (or linked) first: a fresh one.
+  const out = opts.out ?? freshTempOutput();
+  let ws;
+  try {
+    ws = createWorkspace({ out, launcher: opts.mycelink, force: opts.force, log: (m) => process.stdout.write(`  ${m}\n`) });
+  } catch (err) {
+    if (opts.out === null) {
+      try {
+        rmdirSync(out);
+      } catch {
+        // not empty: setup got as far as writing into it; leave it to be read
+      }
+    }
+    throw err;
+  }
   for (const [name, dir] of Object.entries(ws.repos)) {
     const t = baselineTests(dir);
     if (t.code !== 0) throw new QuickstartError(`the ${REPOS[name]} baseline tests failed:\n${t.out}`);
