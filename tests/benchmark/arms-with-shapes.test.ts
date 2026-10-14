@@ -11,7 +11,7 @@ import { ISOLATED } from './isolation-fixture.js';
 import { TOY } from './toy-fixture.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { casePrompt } from '../../evals-public-projects/lib/cases.mjs';
-import { qaPrompt, toy, project, prd, arm, FAKE_HOST, testOf, hostPlan, DEFAULT_SHAPE, callsOf, failingOf, useArmsFixture } from './arms-fixture.js';
+import { qaPrompt, toy, project, prd, arm, FAKE_HOST, testOf, hostPlan, DEFAULT_SHAPE, callsOf, failingOf, checksFound, useArmsFixture } from './arms-fixture.js';
 
 useArmsFixture();
 
@@ -20,7 +20,7 @@ describe('fault-injected arm', () => {
     it('works every fault of the plan: teammate commit, replayed settles, late defect, an interrupt 2 s into the rework, and a Mycelink rework that delivers C002', async () => {
       const fake = hostPlan({ reworkStalls: ['start'] });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'elapsed-seconds', seconds: 2, phase: 'rework' }), requireMycelink: true, requireTdd: true });
-      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by])).toEqual([
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.phase, s.ended_by]), checksFound(run)).toEqual([
         [1, 'task', 'task', 'exit'],
         [2, 'rework', 'rework', 'interrupt'],
         [3, 'rework-resume', 'rework', 'exit'],

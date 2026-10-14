@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { TOY } from './toy-fixture.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { casePrompt } from '../../evals-public-projects/lib/cases.mjs';
-import { qaPrompt, project, prd, fakePlan, arm, FAKE_HOST, hostPlan, DEFAULT_SHAPE, LATE_ONLY, useArmsFixture } from './arms-fixture.js';
+import { qaPrompt, project, prd, fakePlan, arm, FAKE_HOST, hostPlan, DEFAULT_SHAPE, LATE_ONLY, checksFound, useArmsFixture } from './arms-fixture.js';
 
 useArmsFixture();
 
@@ -45,7 +45,7 @@ describe('fault-injected arm', () => {
     it('a rework session that exits 0 without C002 and its delivery stays an explicit controller failure', async () => {
       const fake = hostPlan({ reworkNoop: true });
       const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: LATE_ONLY, requireMycelink: true });
-      expect(run.sessions.map((s: any) => [s.purpose, s.ended_by, s.exit_code])).toEqual([
+      expect(run.sessions.map((s: any) => [s.purpose, s.ended_by, s.exit_code]), checksFound(run)).toEqual([
         ['task', 'exit', 0],
         ['rework', 'exit', 0],
       ]);
@@ -63,7 +63,7 @@ describe('fault-injected arm', () => {
       for (const [stage, count] of [['red', 1], ['green', 2]] as const) {
         const fake = hostPlan({ reworkStalls: [stage] });
         const run = await arm('with', fake, { claude: [process.execPath, FAKE_HOST], faultPlan: DEFAULT_SHAPE({ on: 'commits', count, phase: 'rework' }), requireMycelink: true, requireTdd: true });
-        expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by]), stage).toEqual([
+        expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by]), `${stage} ${checksFound(run)}`).toEqual([
           [1, 'task', 'exit'],
           [2, 'rework', 'interrupt'],
           [3, 'rework-resume', 'exit'],

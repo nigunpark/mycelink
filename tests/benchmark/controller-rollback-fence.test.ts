@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { hostPlan, run, shape, recovered, useRollbackFixture } from './rollback-fixture.js';
+import { hostPlan, run, shape, found, recovered, useRollbackFixture } from './rollback-fixture.js';
 
 useRollbackFixture();
 
@@ -19,7 +19,7 @@ describe('a controller that changes the workspace itself, outside the fence', ()
   it('CSET-203 r9: a helper script writes ACCEPTANCE.json through a path it computes — both rolled back, Mycelink’s init kept; the corrective session completes C001 and recovers the key', async () => {
     const fake = hostPlan({ forgeries: ['r9'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
@@ -45,7 +45,7 @@ describe('a controller that changes the workspace itself, outside the fence', ()
   it('the same, when the session ends on its own: the violation is found after it', async () => {
     const fake = hostPlan({ forgeries: ['r9-exit'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'exit', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
@@ -62,7 +62,7 @@ describe('a controller that changes the workspace itself, outside the fence', ()
   ])('%s', async (_label, kind, line, check) => {
     const fake = hostPlan({ forgeries: [kind] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
@@ -75,7 +75,7 @@ describe('a controller that changes the workspace itself, outside the fence', ()
   it('a module-worker’s settle that completed meanwhile stays: only the controller’s own change goes back', async () => {
     const fake = hostPlan({ forgeries: ['after-settle'] });
     const r = await run(fake);
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
@@ -94,7 +94,7 @@ describe('a controller that changes the workspace itself, outside the fence', ()
     const fake = hostPlan({ forgeries: ['registry'], taskStalls: ['red'] });
     // Checked seldom enough that Mycelink's next step reads the change before a second check sees it persist.
     const r = await run(fake, { lightCheckMs: 5000 });
-    expect(shape(r)).toEqual([
+    expect(shape(r), found(r)).toEqual([
       [1, 'task', 'controller-violation', null, true],
       [2, 'corrective', 'exit', 1, false],
     ]);
