@@ -134,4 +134,4 @@ export const callsOf = (transcript: string) => {
 };
 export const failingOf = (v: any) => Object.entries(v.sections).flatMap(([name, s]: [string, any]) => (s?.checks ?? []).filter((c: any) => !c.ok && c.severity !== 'warning').map((c: any) => `${name}:${c.id}`));
 /** On a session-shape mismatch, what each session's checks found: its stop, its violation, what its settlement could not attribute. */
-export const checksFound = (run: any) => JSON.stringify(run.sessions.map((s: any) => ({ ended_by: s.ended_by, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null })));
+export const checksFound = (run: any) => JSON.stringify(run.sessions.map((s: any) => ({ ended_by: s.ended_by, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null, housekeeping: s.controller_txn?.housekeeping ?? null })));
