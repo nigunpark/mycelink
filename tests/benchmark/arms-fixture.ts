@@ -109,7 +109,7 @@ export function armDiagnostics(fake: { dir: string }, outDir: string): string {
   }
   const host = join(fake.dir, 'host-trace.jsonl');
   const events = existsSync(host) ? readFileSync(host, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
-  const brief = (e: any) => `${e.t?.slice(11, 23)} ${e.ev}${e.label ? ` ${e.label}` : ''}${e.command ? ` ${String(e.command).slice(0, 120)}` : ''}${e.where ? ` at ${e.where}` : ''}${e.code !== undefined ? ` ${e.code}` : ''}${e.ms !== undefined ? ` ${e.ms} ms` : ''}${e.timed_out ? ' TIMED OUT' : ''}${e.message ? ` ${String(e.message).split('\n')[0]}` : ''}`;
+  const brief = (e: any) => `${e.t?.slice(11, 23)} ${e.ev}${e.label ? ` ${e.label}` : ''}${e.command ? ` ${String(e.command).slice(0, 120)}` : ''}${e.where ? ` at ${e.where}` : ''}${e.code !== undefined ? ` ${e.code}` : ''}${e.ms !== undefined ? ` ${e.ms} ms` : ''}${e.timed_out ? ` TIMED OUT (${e.signal ?? `status ${e.status}`})` : ''}${e.input_bytes !== undefined ? ` (its ${e.input_bytes}-byte payload on a file)` : ''}${e.message ? ` ${String(e.message).split('\n')[0]}` : ''}`;
   const sessions = [...new Set(events.map((e: any) => e.session))].map((session) => {
     const mine = events.filter((e: any) => e.session === session);
     const anomalies = mine.filter((e: any) => /unanswered|timeout|^error$/.test(e.ev));

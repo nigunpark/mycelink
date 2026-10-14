@@ -9,7 +9,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { REPO_ROOT } from '../helpers/global-setup.js';
@@ -128,7 +128,7 @@ afterAll(() => cleanupTmpRoots());
  * The stand-in host run on its own, as a with-arm session runs it: a workspace for its cwd, a plugin directory
  * (`bin`, `hooks`), its plan, a task prompt on stdin. Resolves to its exit, stderr, wall-clock and trace.
  */
-async function standIn({ plan = {}, bin = 'process.exit(0);\n', hooks = null as any, timeoutMs = 60_000 }) {
+async function standIn({ plan = {}, bin = 'process.exit(0);\n', hooks = null as any, files = {} as Record<string, string>, timeoutMs = 60_000 }) {
   const root = makeTmpDir('bench-standin-');
   const ws = join(root, 'workspace');
   const plugin = join(root, 'plugin');
@@ -137,6 +137,11 @@ async function standIn({ plan = {}, bin = 'process.exit(0);\n', hooks = null as 
   writeFileSync(join(plugin, 'bin', 'mycelink.mjs'), bin);
   writeFileSync(join(plugin, 'hang.mjs'), 'setInterval(() => {}, 1000);\n');
   if (hooks) writeFileSync(join(plugin, 'hooks', 'hooks.json'), JSON.stringify(hooks));
+  // More of its world, by path from the root: a control plane already set up, a plugin script.
+  for (const [path, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body);
+  }
   const log = join(root, 'log.jsonl');
   writeFileSync(log, '');
   const file = join(root, 'plan.json');
@@ -159,7 +164,7 @@ async function standIn({ plan = {}, bin = 'process.exit(0);\n', hooks = null as 
   });
   const traceFile = join(root, 'host-trace.jsonl');
   const trace = existsSync(traceFile) ? readFileSync(traceFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
-  return { code, stderr, ms: Date.now() - t0, trace };
+  return { code, stderr, ms: Date.now() - t0, trace, root };
 }
 
 describe('the stand-in host waits on nothing without a bound, and says what did not answer', () => {
@@ -186,5 +191,94 @@ describe('the stand-in host waits on nothing without a bound, and says what did 
     expect(r.ms).toBeLessThan(30_000);
     expect(r.stderr).toMatch(/ran past the 1500 ms Bash timeout/);
     expect(r.trace.find((e: any) => e.ev === 'call-timeout')).toMatchObject({ timeout_ms: 1500 });
+  }, 60_000);
+});
+
+/**
+ * A hook's payload, as the stand-in host hands it over: CI 38618387236's PCM-103 shape (macOS, Node 22.12.0) failed on
+ * a PostToolUse Agent hook killed at its 15 s timeout, on a runner running nothing else. The hook's own work takes a
+ * quarter of a second there. Its payload (the worker's prompt, 15 KiB) went to its stdin through spawnSync's `input`:
+ * a socketpair of 8 KiB on macOS under Node 22's libuv (64 KiB under Node 24's, so one write there), which macOS can
+ * leave with every byte delivered and never its end — the hook waits for EOF until it is killed. Only the Agent
+ * payloads exceed 8 KiB; the run hung forever before the hooks were bounded (CI 38533631962). Handed over as a finished
+ * file, a payload has no end the host must deliver while the hook runs: the hook's bound is its own run, whatever the
+ * payload's size, and a hook that still does not end is killed at it.
+ */
+describe('the stand-in host hands each hook its payload whole, so the hook’s bound is its own run', () => {
+  const PROMPT = 256 * 1024;
+  /** Reads its stdin in `chunk`-byte reads, `pause` ms apart; says what it read, and how; then ends, or hangs. */
+  const PROBE = String.raw`import { appendFileSync, fstatSync, readSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const [chunk, pause, then] = process.argv.slice(2);
+const out = join(dirname(fileURLToPath(import.meta.url)), 'probe.jsonl');
+const say = (o) => appendFileSync(out, JSON.stringify(o) + '\n');
+const st = fstatSync(0);
+const parts = [];
+const buf = Buffer.alloc(Number(chunk));
+const t0 = Date.now();
+try {
+  for (;;) {
+    let n = 0;
+    try { n = readSync(0, buf, 0, buf.length, null); } catch (e) { if (e.code !== 'EOF') throw e; }
+    if (n === 0) break;
+    parts.push(Buffer.from(buf.subarray(0, n)));
+    if (Number(pause) > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
+  }
+} catch (e) {
+  say({ file: st.isFile(), read: Buffer.concat(parts).length, error: String(e.code ?? e.message) });
+  process.exit(1);
+}
+const bytes = Buffer.concat(parts);
+const p = JSON.parse(bytes.toString('utf8'));
+say({ file: st.isFile(), size: st.isFile() ? st.size : null, read: bytes.length, tool: p.tool_name ?? null, prompt: p.tool_input?.prompt?.length ?? null, ms: Date.now() - t0 });
+if (then === 'hang') setInterval(() => {}, 1000);
+`;
+  /** A Mycelink that has set up its control plane and dispatches one worker ticket with a 256 KiB prompt. */
+  const BIN = String.raw`const a = process.argv.slice(2);
+if (a[0] === 'controller') process.stdout.write(JSON.stringify({ authority: 'stand-in-key' }));
+else if (a[0] === 'dispatch') process.stdout.write(JSON.stringify({ status: 'DISPATCHED', ticket: { kind: 'module-worker', agent: 'mycelink:module-worker', node_id: 'TOY-001.mod-a.impl', capability: 'stand-in', worktree: process.cwd(), gate_commands: [], prompt: 'p'.repeat(${PROMPT}) } }));
+`;
+  const SET_UP = { 'workspace/platform/mycelink.config.json': '{}\n', 'workspace/platform/repositories.yaml': 'toyshop\n', 'workspace/platform/features/TOY-001/STATE.json': '{}\n', 'plugin/probe.mjs': PROBE };
+  const agentHook = (args: string, timeout: number) => ({ hooks: { PreToolUse: [{ matcher: 'Agent', hooks: [{ type: 'command', command: `node "\${CLAUDE_PLUGIN_ROOT}/probe.mjs" ${args}`, timeout }] }] } });
+  const probed = (root: string) => readFileSync(join(root, 'plugin', 'probe.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const hookEnd = (trace: any[]) => trace.find((e: any) => e.ev === 'child-end' && e.label === 'hook PreToolUse Agent');
+
+  it('a hook reads its payload from a finished file holding all of it: no stream the host must still end while the hook runs', async () => {
+    const r = await standIn({ bin: BIN, hooks: agentHook('65536 0 exit', 15), files: SET_UP });
+    expect(probed(r.root), r.stderr).toEqual([{ file: true, size: expect.any(Number), read: expect.any(Number), tool: 'Agent', prompt: PROMPT, ms: expect.any(Number) }]);
+    const [p] = probed(r.root);
+    expect(p.read).toBe(p.size);
+    expect(p.read).toBeGreaterThan(PROMPT);
+    expect(hookEnd(r.trace)).toMatchObject({ status: 0 });
+    expect(hookEnd(r.trace).timed_out).toBeUndefined();
+    expect(r.trace.some((e: any) => e.ev === 'hook-timeout')).toBe(false);
+  }, 60_000);
+
+  it('a slow hook that keeps reading is let finish within its declared timeout, and its session goes on past it', async () => {
+    const r = await standIn({ bin: BIN, hooks: agentHook('16384 120 exit', 10), files: SET_UP });
+    const [p] = probed(r.root);
+    expect(p, r.stderr).toMatchObject({ file: true, tool: 'Agent', prompt: PROMPT });
+    expect(p.read).toBe(p.size);
+    expect(p.ms).toBeGreaterThanOrEqual(1500);
+    expect(hookEnd(r.trace)).toMatchObject({ status: 0 });
+    expect(hookEnd(r.trace).ms).toBeGreaterThanOrEqual(1500);
+    expect(r.trace.some((e: any) => e.ev === 'hook-timeout')).toBe(false);
+    expect(r.code).not.toBe(87);
+    // Past the hook: the session ran the worker the ticket names (which this stand-in Mycelink gives no gates).
+    expect(r.trace.slice(r.trace.indexOf(hookEnd(r.trace)) + 1).map((e: any) => e.ev)).toContain('error');
+  }, 60_000);
+
+  it('a hook that has all of its payload and still does not end is killed at its timeout, and the session fails saying so', async () => {
+    const r = await standIn({ bin: BIN, hooks: agentHook('65536 0 hang', 2), files: SET_UP });
+    expect(r.code, r.stderr).toBe(87);
+    expect(r.ms).toBeLessThan(30_000);
+    expect(r.stderr).toMatch(/the PreToolUse hook .*probe\.mjs.* ran past its 2 s timeout/);
+    const [p] = probed(r.root);
+    expect(p).toMatchObject({ file: true, tool: 'Agent', prompt: PROMPT });
+    expect(p.read).toBe(p.size);
+    expect(hookEnd(r.trace)).toMatchObject({ timed_out: true });
+    // What did not answer, and that it had everything it was given: its payload's size.
+    expect(r.trace.find((e: any) => e.ev === 'hook-timeout')).toMatchObject({ event: 'PreToolUse', tool: 'Agent', timeout_ms: 2000, input_bytes: p.size });
   }, 60_000);
 });

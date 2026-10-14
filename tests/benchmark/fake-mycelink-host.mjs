@@ -106,7 +106,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 // Pipes are asynchronous on macOS and Windows (synchronous on Linux): a stand-in that exits right after its last
@@ -252,11 +252,29 @@ function unanswered(ev, code, message, data = {}) {
 /**
  * One child process, bounded: killed past `timeoutMs` (spawnSync then closes the pipes, so a grandchild holding them holds
  * nothing here). Its start and end are traced; `timedOut` says it was killed for the bound.
+ *
+ * Its `input` (a hook's payload) is its stdin as a finished file, written whole before it starts — never spawnSync's
+ * `input`, a stream the host writes and must end while the child runs. On macOS that stream is a socketpair (8 KiB under
+ * Node 22's libuv), and a payload longer than one write can reach the child whole and its end never (CI 38618387236: a
+ * 15 KiB Agent payload, its hook waiting for EOF until its timeout). A file has its end: the bound is the child's own run.
  */
-function runChild(label, file, args, options, timeoutMs) {
+let inputs = 0;
+function runChild(label, file, args, { input, ...options }, timeoutMs) {
+  let stdin = null;
+  if (input !== undefined) {
+    stdin = join(dirname(TRACE), `stdin-${SESSION}-${++inputs}`);
+    writeFileSync(stdin, input, { flag: 'wx', mode: 0o600 });
+  }
+  const fd = stdin === null ? null : openSync(stdin, 'r');
   const t0 = Date.now();
   trace('child', { label });
-  const r = spawnSync(file, args, { ...options, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  let r;
+  try {
+    r = spawnSync(file, args, { ...options, ...(fd !== null ? { stdio: [fd, 'pipe', 'pipe'] } : {}), timeout: timeoutMs, killSignal: 'SIGKILL' });
+  } finally {
+    if (fd !== null) closeSync(fd);
+    if (stdin !== null) rmSync(stdin, { force: true });
+  }
   const timedOut = r.error?.code === 'ETIMEDOUT';
   trace('child-end', { label, ms: Date.now() - t0, status: r.status, signal: r.signal, ...(timedOut ? { timed_out: true } : r.error ? { error: String(r.error.code ?? r.error.message) } : {}) });
   return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error, timedOut };
@@ -312,8 +330,10 @@ let parentTranscript = null;
 function runHook(event, h, payload) {
   const argv = h.command.replace('${CLAUDE_PLUGIN_ROOT}', pluginDir).match(/"[^"]*"|\S+/g).map((a) => a.replace(/^"|"$/g, ''));
   const timeoutS = Number.isFinite(h.timeout) && h.timeout > 0 ? h.timeout : HOOK_TIMEOUT_S;
-  const r = runChild(`hook ${event}${payload.tool_name ? ` ${payload.tool_name}` : ''}`, argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), { input: JSON.stringify(payload), env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8', windowsHide: true }, timeoutS * 1000);
-  if (r.timedOut) unanswered('hook-timeout', UNANSWERED.hook, `the ${event} hook \`${h.command}\` ran past its ${timeoutS} s timeout`, { event, tool: payload.tool_name ?? null, timeout_ms: timeoutS * 1000 });
+  const input = JSON.stringify(payload);
+  const r = runChild(`hook ${event}${payload.tool_name ? ` ${payload.tool_name}` : ''}`, argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), { input, env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8', windowsHide: true }, timeoutS * 1000);
+  // It had all of its payload from the start (a finished file): what ran past the bound is the hook itself.
+  if (r.timedOut) unanswered('hook-timeout', UNANSWERED.hook, `the ${event} hook \`${h.command}\` ran past its ${timeoutS} s timeout`, { event, tool: payload.tool_name ?? null, timeout_ms: timeoutS * 1000, input_bytes: Buffer.byteLength(input) });
   return r;
 }
 
