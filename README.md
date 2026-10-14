@@ -359,6 +359,14 @@ verification commands (argv) and a worker budget.
 
 ## Examples
 
+- `examples/quickstart/` (in the repository, not the release ZIP) — a
+  five-minute demo: one PRD that changes an API repository and a web
+  repository together. `node examples/quickstart/setup.mjs --out
+  ../mycelink-quickstart` creates the two independent Git repositories and
+  their control repository with no model and no network;
+  `node examples/quickstart/walkthrough.mjs` runs the feature end to end
+  with a scripted worker and reviewer; `/mycelink:run ORD-101` runs it for
+  real. See its README.
 - `templates/control-repo/` — a complete control repository: manifest,
   `CLAUDE.md`, hook settings example, a three-repository graph and an E2E
   scenario.
