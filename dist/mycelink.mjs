@@ -15361,7 +15361,7 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync43, lstatSync as lstatSync17, mkdirSync as mkdirSync25, readFileSync as readFileSync38, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
+import { existsSync as existsSync43, lstatSync as lstatSync18, mkdirSync as mkdirSync25, readFileSync as readFileSync38, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
 import { createHash as createHash39 } from "node:crypto";
 import { dirname as dirname20, join as join54, resolve as resolve26 } from "node:path";
 
@@ -15545,8 +15545,8 @@ import {
   closeSync as closeSync7,
   constants as constants4,
   existsSync as existsSync14,
-  fstatSync as fstatSync4,
-  lstatSync as lstatSync5,
+  fstatSync as fstatSync5,
+  lstatSync as lstatSync6,
   mkdirSync as mkdirSync6,
   openSync as openSync7,
   readFileSync as readFileSync11,
@@ -16671,6 +16671,21 @@ function retrySync(fn, attempts = 6, baseDelayMs = 10) {
     }
   }
   throw lastError;
+}
+function retryWithinSync(fn, options) {
+  const started = performance.now();
+  let delay = options.baseDelayMs ?? 10;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn(attempt);
+    } catch (err) {
+      const code = err?.code;
+      const left = options.budgetMs - (performance.now() - started);
+      if (code === void 0 || !options.codes.has(code) || left <= 0) throw err;
+      sleepSync(Math.min(delay, left));
+      delay = Math.min(delay * 2, options.maxDelayMs ?? 250);
+    }
+  }
 }
 function bestEffortSync(fn, attempts = 3) {
   for (let i = 0; i < attempts; i++) {
@@ -19360,15 +19375,17 @@ function claimMismatch(record, claimed) {
 // src/engine/reproduction-capsule.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash as createHash9 } from "node:crypto";
-import { closeSync as closeSync6, constants as constants3, existsSync as existsSync11, fstatSync as fstatSync3, lstatSync as lstatSync4, mkdirSync as mkdirSync5, openSync as openSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync6, writeFileSync as writeFileSync3 } from "node:fs";
+import { closeSync as closeSync6, constants as constants3, existsSync as existsSync11, fstatSync as fstatSync4, lstatSync as lstatSync5, mkdirSync as mkdirSync5, openSync as openSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync6, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname6, join as join14, relative as relative4, sep as sep4 } from "node:path";
 
 // src/state/atomic-json.ts
 import {
   closeSync as closeSync5,
   existsSync as existsSync10,
+  fstatSync as fstatSync3,
   fsyncSync,
   linkSync,
+  lstatSync as lstatSync4,
   mkdirSync as mkdirSync4,
   openSync as openSync5,
   readFileSync as readFileSync7,
@@ -19589,25 +19606,69 @@ function reapStaleTemps(file, now3 = Date.now()) {
   }
   return reaped;
 }
+var REPLACE_RETRY_MS = 5e3;
+var REPLACE_REFUSED = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
 function writeTextAtomic(file, text) {
+  replaceAtomic(file, text);
+}
+function replaceAtomic(file, text, stillCurrent) {
   const dir = dirname5(file);
   mkdirSync4(dir, { recursive: true });
   const tmp = file + tempSuffix();
+  let made = null;
   retrySync(() => {
     const fd = openSync5(tmp, "wx");
     try {
       writeAll(fd, typeof text === "string" ? Buffer.from(text, "utf8") : text);
       fsyncSync(fd);
+      made = fstatSync3(fd, { bigint: true });
     } finally {
       closeSync5(fd);
     }
   });
+  if (process.platform !== "win32") {
+    try {
+      retrySync(() => renameSync(tmp, file));
+    } catch (err) {
+      rmSync5(tmp, { force: true });
+      throw err;
+    }
+    return;
+  }
+  const started = performance.now();
+  let attempts = 0;
   try {
-    retrySync(() => renameSync(tmp, file));
+    retryWithinSync(
+      (attempt) => {
+        attempts = attempt;
+        if (attempt > 1) {
+          if (!isSameFile(tmp, made)) {
+            throw Object.assign(new Error(`ATOMIC_TEMP_CHANGED: ${tmp} is no longer the temp this write synced; ${file} was left as it was`), { code: "ATOMIC_TEMP_CHANGED", path: tmp, dest: file });
+          }
+          stillCurrent?.();
+        }
+        renameSync(tmp, file);
+      },
+      { codes: REPLACE_REFUSED, budgetMs: REPLACE_RETRY_MS }
+    );
   } catch (err) {
-    rmSync5(tmp, { force: true });
+    const removed = isSameFile(tmp, made) && bestEffortSync(() => rmSync5(tmp, { force: true }));
+    const e = err;
+    if (attempts > 1 && e.syscall === "rename" && REPLACE_REFUSED.has(e.code ?? "")) {
+      e.message += ` (the replace was refused ${attempts} times over ${Math.round(performance.now() - started)} ms; ${removed ? "the temp was removed" : `${tmp} is left for the stale-temp reaper`})`;
+    }
     throw err;
   }
+}
+function isSameFile(path, made) {
+  let now3;
+  try {
+    now3 = lstatSync4(path, { bigint: true });
+  } catch {
+    return false;
+  }
+  const sameDev = now3.dev === made?.dev || now3.dev === 0n || made?.dev === 0n;
+  return made !== null && now3.isFile() && sameDev && now3.ino === made.ino && now3.size === made.size;
 }
 function createExclusive(file, content) {
   const bytes2 = typeof content === "string" ? Buffer.from(content, "utf8") : content;
@@ -19663,7 +19724,11 @@ function writeDocAtomic(file, data, revision) {
     revision: revision ?? (current ? current.revision + 1 : 1),
     data
   };
-  writeTextAtomic(file, JSON.stringify(next, null, 2) + "\n");
+  const base = current?.revision ?? 0;
+  replaceAtomic(file, JSON.stringify(next, null, 2) + "\n", () => {
+    const now3 = readDoc(file)?.revision ?? 0;
+    if (now3 !== base) throw new CasConflictError(file, base, now3);
+  });
   return next;
 }
 function casUpdate(file, expectedRevision, mutate) {
@@ -19724,13 +19789,13 @@ function readNoFollow(file, max) {
     const code = err.code;
     if (code === "ELOOP" || code === "EMLINK") return { problem: "link" };
     try {
-      return lstatSync4(file).isSymbolicLink() ? { problem: "link" } : { problem: "missing" };
+      return lstatSync5(file).isSymbolicLink() ? { problem: "link" } : { problem: "missing" };
     } catch {
       return { problem: "missing" };
     }
   }
   try {
-    const opened = fstatSync3(fd, { bigint: true });
+    const opened = fstatSync4(fd, { bigint: true });
     if (!opened.isFile()) return { problem: "not-file" };
     if (opened.nlink !== 1n || !namesOpenedFile(file, opened)) return { problem: "link" };
     if (opened.size > BigInt(max)) return { problem: "too-large" };
@@ -19744,7 +19809,7 @@ function linkOnTheWay(root, rel) {
   for (const segment2 of rel.split("/")) {
     at = join14(at, segment2);
     try {
-      if (lstatSync4(at).isSymbolicLink()) return slash3(relative4(root, at));
+      if (lstatSync5(at).isSymbolicLink()) return slash3(relative4(root, at));
     } catch {
       return null;
     }
@@ -21646,7 +21711,7 @@ function ensureScratchIgnored(controlRoot) {
   const nonblock = constants4.O_NONBLOCK ?? 0;
   const isLink3 = () => {
     try {
-      return lstatSync5(file).isSymbolicLink();
+      return lstatSync6(file).isSymbolicLink();
     } catch {
       return false;
     }
@@ -21669,7 +21734,7 @@ function ensureScratchIgnored(controlRoot) {
     }
   }
   try {
-    const opened = fstatSync4(fd, { bigint: true });
+    const opened = fstatSync5(fd, { bigint: true });
     if (!opened.isFile()) refuse2("it is not a regular file");
     if (opened.nlink !== 1n) refuse2("it has more than one name (hard link)");
     if (!namesOpenedFile(file, opened)) refuse2(isLink3() ? "it is a link" : "it was replaced while it was opened");
@@ -24647,11 +24712,11 @@ function readChallengeReceipt(controlRoot, receiptPath) {
 
 // src/engine/review-transport.ts
 import { createHash as createHash19 } from "node:crypto";
-import { closeSync as closeSync9, lstatSync as lstatSync7, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync3 } from "node:fs";
+import { closeSync as closeSync9, lstatSync as lstatSync8, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync3 } from "node:fs";
 import { basename as basename4, dirname as dirname10, isAbsolute as isAbsolute6, join as join24 } from "node:path";
 
 // src/engine/provider-interrupt.ts
-import { closeSync as closeSync8, existsSync as existsSync19, lstatSync as lstatSync6, readdirSync as readdirSync5, readFileSync as readFileSync17, readSync as readSync2 } from "node:fs";
+import { closeSync as closeSync8, existsSync as existsSync19, lstatSync as lstatSync7, readdirSync as readdirSync5, readFileSync as readFileSync17, readSync as readSync2 } from "node:fs";
 import { basename as basename3, dirname as dirname9, isAbsolute as isAbsolute5, join as join23 } from "node:path";
 
 // src/sessions/provider-failure.ts
@@ -24843,7 +24908,7 @@ function subagentTranscript(l) {
   const dir = join23(dirname9(l.transcript_path), l.session_id, "subagents");
   let names2 = [];
   try {
-    if (!lstatSync6(dir).isDirectory()) return null;
+    if (!lstatSync7(dir).isDirectory()) return null;
     names2 = readdirSync5(dir).filter((n) => /^agent-[A-Za-z0-9_-]{1,64}\.meta\.json$/.test(n));
   } catch {
     return null;
@@ -25147,7 +25212,7 @@ function readRegular2(file, max) {
 }
 var isDirectoryNoLink = (dir) => {
   try {
-    const st = lstatSync7(dir);
+    const st = lstatSync8(dir);
     return st.isDirectory() && !st.isSymbolicLink();
   } catch {
     return false;
@@ -25228,7 +25293,7 @@ function launchOf2(file, open) {
 }
 var fileKind = (f) => {
   try {
-    return lstatSync7(f).isFile() ? "file" : "other";
+    return lstatSync8(f).isFile() ? "file" : "other";
   } catch {
     return "missing";
   }
@@ -26249,13 +26314,13 @@ function listLeases(featureDir, now3 = Date.now()) {
 
 // src/evidence/runner.ts
 import { createHash as createHash21 } from "node:crypto";
-import { lstatSync as lstatSync10, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync3, readdirSync as readdirSync8, rmSync as rmSync8 } from "node:fs";
+import { lstatSync as lstatSync11, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync3, readdirSync as readdirSync8, rmSync as rmSync8 } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join28, resolve as resolve11 } from "node:path";
 
 // src/evidence/store.ts
 import { createHash as createHash20 } from "node:crypto";
-import { closeSync as closeSync10, constants as constants5, fstatSync as fstatSync5, lstatSync as lstatSync8, mkdirSync as mkdirSync9, openSync as openSync8, readFileSync as readFileSync18 } from "node:fs";
+import { closeSync as closeSync10, constants as constants5, fstatSync as fstatSync6, lstatSync as lstatSync9, mkdirSync as mkdirSync9, openSync as openSync8, readFileSync as readFileSync18 } from "node:fs";
 import { basename as basename5, join as join26 } from "node:path";
 var MAX_ALTERNATES = 32;
 var MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
@@ -26280,13 +26345,13 @@ function artifactState(file, sha) {
   } catch (err) {
     if (err.code !== "ENOENT") return "other";
     try {
-      return lstatSync8(file).isFile() ? "linked" : "other";
+      return lstatSync9(file).isFile() ? "linked" : "other";
     } catch {
       return "missing";
     }
   }
   try {
-    const st = fstatSync5(fd, { bigint: true });
+    const st = fstatSync6(fd, { bigint: true });
     if (st.isFile() && st.nlink > 1n) return "linked";
     if (!st.isFile() || st.nlink !== 1n || st.size > BigInt(MAX_ARTIFACT_BYTES) || !namesOpenedFile(file, st)) return "other";
     return sha25612(readFileSync18(fd)) === sha ? "same" : "other";
@@ -26337,7 +26402,7 @@ function keepExactCopy(source, expected, dir) {
 }
 
 // src/evidence/junit-attribution.ts
-import { lstatSync as lstatSync9, readdirSync as readdirSync7 } from "node:fs";
+import { lstatSync as lstatSync10, readdirSync as readdirSync7 } from "node:fs";
 import { isAbsolute as isAbsolute7, join as join27, relative as relative5, resolve as resolve10 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var MAX_SCOPE_ENTRIES = 5e4;
@@ -26362,7 +26427,7 @@ function testFiles(root, scope) {
       const full = join27(dir, name);
       let st;
       try {
-        st = lstatSync9(full);
+        st = lstatSync10(full);
       } catch {
         continue;
       }
@@ -26644,7 +26709,7 @@ function clearReportDir(cwd, dir) {
   if (!isInsideReal(cwd, dir)) throw new Error(`REPORT_DIR_OUTSIDE: ${dir} is not inside ${cwd}`);
   let st;
   try {
-    st = lstatSync10(dir);
+    st = lstatSync11(dir);
   } catch {
     return;
   }
@@ -26697,7 +26762,7 @@ function safeHead(cwd) {
 // src/git/candidate.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash22 } from "node:crypto";
-import { existsSync as existsSync21, lstatSync as lstatSync11, mkdirSync as mkdirSync12, readFileSync as readFileSync19, readdirSync as readdirSync9, readlinkSync as readlinkSync2 } from "node:fs";
+import { existsSync as existsSync21, lstatSync as lstatSync12, mkdirSync as mkdirSync12, readFileSync as readFileSync19, readdirSync as readdirSync9, readlinkSync as readlinkSync2 } from "node:fs";
 import { basename as basename6, join as join30, relative as relative6, resolve as resolve13 } from "node:path";
 
 // src/git/integrate.ts
@@ -26918,7 +26983,7 @@ function controlInputs(controlRepo, featureId) {
     const full = join30(control, ...path.split("/"));
     let st;
     try {
-      st = lstatSync11(full);
+      st = lstatSync12(full);
     } catch {
       continue;
     }
@@ -27718,8 +27783,8 @@ import {
   closeSync as closeSync11,
   constants as constants6,
   existsSync as existsSync23,
-  fstatSync as fstatSync6,
-  lstatSync as lstatSync12,
+  fstatSync as fstatSync7,
+  lstatSync as lstatSync13,
   mkdirSync as mkdirSync15,
   mkdtempSync as mkdtempSync5,
   openSync as openSync9,
@@ -28044,7 +28109,7 @@ function loadPromptPack(file, expected, env = process.env) {
   }
   let raw;
   try {
-    const st = fstatSync6(fd);
+    const st = fstatSync7(fd);
     if (!st.isFile()) fail("context pack is not a regular file");
     if (st.size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${st.size} bytes`);
     raw = readBounded(fd, MAX_PROMPT_PACK_BYTES + 1);
@@ -28694,7 +28759,7 @@ function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   assertResultFile(resultFile);
   const dir = join34(cwd, WORKER_RESULT_DIR);
   if (existsSync23(dir) || isLink(dir)) {
-    const st = lstatSync12(dir);
+    const st = lstatSync13(dir);
     if (st.isSymbolicLink()) removeLink(dir);
     else if (!st.isDirectory()) rmSync11(dir, { force: true });
   }
@@ -28711,7 +28776,7 @@ function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
 }
 function isLink(path) {
   try {
-    return lstatSync12(path).isSymbolicLink();
+    return lstatSync13(path).isSymbolicLink();
   } catch {
     return false;
   }
@@ -28747,7 +28812,7 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
   const capturedDir = join34(quarantine, "slot");
   const captured = join34(quarantine, WORKER_RESULT_FILE);
   try {
-    const dirSt = lstatSync12(capturedDir);
+    const dirSt = lstatSync13(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
@@ -28772,8 +28837,8 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
     return notRegular();
   }
   try {
-    const st = fstatSync6(fd, { bigint: true });
-    if (lstatSync12(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
+    const st = fstatSync7(fd, { bigint: true });
+    if (lstatSync13(captured).isSymbolicLink() || !st.isFile() || st.nlink !== 1n) return notRegular();
     if (st.size > BigInt(MAX_WORKER_RESULT_BYTES)) {
       return fail(`RESULT_TOO_LARGE: ${st.size} bytes (limit ${MAX_WORKER_RESULT_BYTES})`);
     }
@@ -28806,7 +28871,7 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
 function removeTree(path) {
   let st;
   try {
-    st = lstatSync12(path);
+    st = lstatSync13(path);
   } catch {
     return;
   }
@@ -28848,7 +28913,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { closeSync as closeSync13, constants as fsConstants, fstatSync as fstatSync7, lstatSync as lstatSync15, openSync as openSync11, unlinkSync as unlinkSync3 } from "node:fs";
+import { closeSync as closeSync13, constants as fsConstants, fstatSync as fstatSync8, lstatSync as lstatSync16, openSync as openSync11, unlinkSync as unlinkSync3 } from "node:fs";
 
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
@@ -29822,7 +29887,7 @@ function evidenceReuse(uses, traced) {
 
 // src/engine/evidence-integrity.ts
 import { createHash as createHash30 } from "node:crypto";
-import { lstatSync as lstatSync13, mkdirSync as mkdirSync17, readFileSync as readFileSync25, readdirSync as readdirSync13, rmSync as rmSync12 } from "node:fs";
+import { lstatSync as lstatSync14, mkdirSync as mkdirSync17, readFileSync as readFileSync25, readdirSync as readdirSync13, rmSync as rmSync12 } from "node:fs";
 import { basename as basename9, dirname as dirname13, join as join39 } from "node:path";
 var REPAIR_SCHEMA = "mycelink-evidence-repair/1";
 var REPAIRED_DIR = "repaired";
@@ -30377,7 +30442,7 @@ function reapEvidenceTemps(controlRoot, featureId, now3 = Date.now()) {
       const file = join39(dir, name);
       let st;
       try {
-        st = lstatSync13(file);
+        st = lstatSync14(file);
       } catch {
         continue;
       }
@@ -30967,7 +31032,7 @@ import { basename as basename12, isAbsolute as isAbsolute11, join as join44 } fr
 import { createHash as createHash32 } from "node:crypto";
 
 // src/hooks/fence.ts
-import { existsSync as existsSync30, lstatSync as lstatSync14, readFileSync as readFileSync28, readdirSync as readdirSync17, realpathSync as realpathSync4, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync30, lstatSync as lstatSync15, readFileSync as readFileSync28, readdirSync as readdirSync17, realpathSync as realpathSync4, statSync as statSync4 } from "node:fs";
 import { basename as basename11, dirname as dirname15, isAbsolute as isAbsolute10, join as join43, resolve as resolve19 } from "node:path";
 
 // src/security/shell.ts
@@ -32199,7 +32264,7 @@ function reviewerDecision(input) {
 }
 function heldVerdict(dir) {
   try {
-    if (!lstatSync14(join43(dir, "verdict.json")).isFile()) return { transport: "unknown", agent_id: "" };
+    if (!lstatSync15(join43(dir, "verdict.json")).isFile()) return { transport: "unknown", agent_id: "" };
   } catch {
     return null;
   }
@@ -32714,7 +32779,7 @@ var NotSchedulableError = class extends Error {
 var HOST_WORKER_AGENT = "mycelink:module-worker";
 function resultInSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   try {
-    return lstatSync15(join45(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync15(join45(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
+    return lstatSync16(join45(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync16(join45(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
   } catch {
     return false;
   }
@@ -36284,7 +36349,7 @@ var Orchestrator = class _Orchestrator {
     if (!realDirectory(dirname16(slot))) return null;
     let st;
     try {
-      st = lstatSync15(slot);
+      st = lstatSync16(slot);
     } catch {
       return null;
     }
@@ -37529,7 +37594,7 @@ var Orchestrator = class _Orchestrator {
   /** The generation's verdict file is there (the reviewer's Write, or a final answer ingested before). */
   slotHolds(open) {
     try {
-      return lstatSync15(join45(this.controlRoot, ...open.slot.split("/"))).isFile();
+      return lstatSync16(join45(this.controlRoot, ...open.slot.split("/"))).isFile();
     } catch {
       return false;
     }
@@ -38550,7 +38615,7 @@ var Orchestrator = class _Orchestrator {
     const slot = join45(safe3.dir, VERDICT_FILE);
     let st = null;
     try {
-      st = lstatSync15(slot);
+      st = lstatSync16(slot);
     } catch {
       st = null;
     }
@@ -41512,12 +41577,12 @@ var Orchestrator = class _Orchestrator {
 };
 function slotTouched(cwd, resultFile) {
   try {
-    if (!lstatSync15(join45(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+    if (!lstatSync16(join45(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
   } catch {
     return false;
   }
   try {
-    lstatSync15(join45(cwd, WORKER_RESULT_DIR, resultFile));
+    lstatSync16(join45(cwd, WORKER_RESULT_DIR, resultFile));
     return true;
   } catch {
     return false;
@@ -41525,7 +41590,7 @@ function slotTouched(cwd, resultFile) {
 }
 function realDirectory(path) {
   try {
-    const st = lstatSync15(path);
+    const st = lstatSync16(path);
     return st.isDirectory() && !st.isSymbolicLink();
   } catch {
     return false;
@@ -41626,8 +41691,8 @@ function readControllerCopy(file, sha25617, nodeId, claimId, dispatchId) {
     return null;
   }
   try {
-    const st = fstatSync7(fd);
-    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync15(file).isSymbolicLink()) return null;
+    const st = fstatSync8(fd);
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync16(file).isSymbolicLink()) return null;
     const bytes2 = readFileSync30(fd);
     if (sha25617 !== null && createHash33("sha256").update(bytes2).digest("hex") !== sha25617) return null;
     const parsed = JSON.parse(bytes2.toString("utf8"));
@@ -42145,7 +42210,7 @@ import { dirname as dirname19, join as join49, posix as posix3, relative as rela
 import { createHash as createHash36 } from "node:crypto";
 
 // src/hooks/worker-calls.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync35, lstatSync as lstatSync16, mkdirSync as mkdirSync22, readFileSync as readFileSync32, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync35, lstatSync as lstatSync17, mkdirSync as mkdirSync22, readFileSync as readFileSync32, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
 import { createHash as createHash34, randomBytes as randomBytes7 } from "node:crypto";
 import { dirname as dirname18, isAbsolute as isAbsolute13, join as join46, resolve as resolve22 } from "node:path";
 var CALLS_SCHEMA = "mycelink-calls/1";
@@ -42184,7 +42249,7 @@ function looseRefs(dir, prefix, out) {
     const p = join46(dir, name);
     let st;
     try {
-      st = lstatSync16(p);
+      st = lstatSync17(p);
     } catch {
       continue;
     }
@@ -44354,7 +44419,7 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
 // src/cli/cli.ts
 function isLink2(path) {
   try {
-    return lstatSync17(path).isSymbolicLink();
+    return lstatSync18(path).isSymbolicLink();
   } catch {
     return false;
   }

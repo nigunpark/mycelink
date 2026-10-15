@@ -33,6 +33,31 @@ export function retrySync<T>(fn: () => T, attempts = 6, baseDelayMs = 10): T {
 }
 
 /**
+ * Run `fn` until it succeeds, fails with a code not in `codes`, or `budgetMs`
+ * has passed since the first try; the last failure is thrown. The waits back
+ * off from `baseDelayMs`, doubling up to `maxDelayMs`, and the last one ends
+ * at the budget. `fn` is given the attempt number, from 1.
+ */
+export function retryWithinSync<T>(
+  fn: (attempt: number) => T,
+  options: { codes: ReadonlySet<string>; budgetMs: number; baseDelayMs?: number; maxDelayMs?: number },
+): T {
+  const started = performance.now();
+  let delay = options.baseDelayMs ?? 10;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn(attempt);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      const left = options.budgetMs - (performance.now() - started);
+      if (code === undefined || !options.codes.has(code) || left <= 0) throw err;
+      sleepSync(Math.min(delay, left));
+      delay = Math.min(delay * 2, options.maxDelayMs ?? 250);
+    }
+  }
+}
+
+/**
  * Run `fn`, swallowing a transient failure entirely.
  *
  * Only for operations whose failure costs durability rather than
