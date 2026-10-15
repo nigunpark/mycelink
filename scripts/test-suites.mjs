@@ -21,7 +21,7 @@
  * The real-model pilot is never here (vitest.pilot.config.ts, opt-in); the
  * benchmark's recorded fixture projects are data, never suites.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -130,7 +130,64 @@ export function selection(spec) {
   return { suite, label: `${suite} ${i}/${n}`, files: shardsOf(suite, n)[i - 1].files, maxWorkers, timeoutMs };
 }
 
-/** Run one selection as its own Vitest process; returns its exit status. */
+/**
+ * What runs below a suite's Vitest, said while it runs (CI 38635817750). A Vitest worker blocked in a synchronous child
+ * process cannot time out its own test: two macOS jobs ran to their 60-minute bound and were cancelled with nothing said
+ * but an orphan `git`. Every WATCH_MS this runner lists each process below Vitest alive at least that long (its pid,
+ * parent, age and command) and, when the job is cancelled (SIGINT, SIGTERM), every process below Vitest, before it passes
+ * the signal on. It only reports: nothing is killed or retried for it.
+ */
+export const WATCH_MS = 5 * 60_000;
+
+/** "[[dd-]hh:]mm:ss" (ps's etime) in milliseconds. */
+export function etimeMs(text) {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text);
+  if (m === null) return 0;
+  return (((Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0)) * 60 + Number(m[3])) * 60 + Number(m[4])) * 1000;
+}
+
+/** Every process of the machine: `{ pid, ppid, ageMs, command }`; empty when they cannot be listed. */
+export function processTable() {
+  if (process.platform === 'win32') {
+    const script = "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { @($_.ProcessId, $_.ParentProcessId, [long]((Get-Date) - $_.CreationDate).TotalMilliseconds, $_.CommandLine) -join [char]9 }";
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 60_000, maxBuffer: 64 << 20 });
+    return String(r.stdout ?? '')
+      .split(/\r?\n/)
+      .map((l) => l.split('\t'))
+      .filter((f) => f.length >= 4 && /^\d+$/.test(f[0]))
+      .map(([pid, ppid, age, ...command]) => ({ pid: Number(pid), ppid: Number(ppid), ageMs: Number(age) || 0, command: command.join('\t') }));
+  }
+  const r = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,etime=,args='], { encoding: 'utf8', timeout: 60_000, maxBuffer: 64 << 20 });
+  return String(r.stdout ?? '')
+    .split('\n')
+    .map((l) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(l))
+    .filter((m) => m !== null)
+    .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), ageMs: etimeMs(m[3]), command: m[4] }));
+}
+
+/** The processes below `root` (a pid) in `table`, each after its parent, with its depth. */
+export function descendants(table, root) {
+  const out = [];
+  const seen = new Set([root]);
+  const visit = (pid, depth) => {
+    for (const p of table.filter((x) => x.ppid === pid && !seen.has(x.pid))) {
+      seen.add(p.pid);
+      out.push({ ...p, depth });
+      visit(p.pid, depth + 1);
+    }
+  };
+  visit(root, 1);
+  return out;
+}
+
+/** The processes below `root` alive at least `minAgeMs`, one line each (indented by depth), or null when there are none. */
+export function describeProcesses(table, root, minAgeMs = 0) {
+  const old = descendants(table, root).filter((p) => p.ageMs >= minAgeMs);
+  if (old.length === 0) return null;
+  return old.map((p) => `${'  '.repeat(p.depth)}pid ${p.pid} (parent ${p.ppid}), ${Math.round(p.ageMs / 1000)} s: ${p.command.replace(/\s+/g, ' ').slice(0, 400)}`).join('\n');
+}
+
+/** Run one selection as its own Vitest process; resolves to its exit status. */
 function runSelection({ label, files, maxWorkers, timeoutMs }) {
   // Vitest takes file arguments as filters that match by substring: each must name exactly one collected file.
   const all = collectedFiles();
@@ -145,15 +202,40 @@ function runSelection({ label, files, maxWorkers, timeoutMs }) {
   process.stdout.write(`\n== ${label}: ${files.length} file(s), at most ${maxWorkers} at once${timeoutMs ? `, ${timeoutMs / 1000} s a test` : ''}\n`);
   const vitest = join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
   const bound = timeoutMs ? [`--testTimeout=${timeoutMs}`, `--hookTimeout=${timeoutMs}`] : [];
-  const r = spawnSync(process.execPath, [vitest, 'run', ...files, `--maxWorkers=${maxWorkers}`, ...bound], { cwd: ROOT, stdio: 'inherit' });
-  return r.status ?? 1;
+  const child = spawn(process.execPath, [vitest, 'run', ...files, `--maxWorkers=${maxWorkers}`, ...bound], { cwd: ROOT, stdio: 'inherit' });
+  const t0 = Date.now();
+  const report = (why, minAgeMs) => {
+    const listed = describeProcesses(processTable(), child.pid, minAgeMs);
+    const which = minAgeMs > 0 ? ` alive ${minAgeMs / 1000} s or more` : '';
+    process.stdout.write(`\n== ${label}: ${why} after ${Math.round((Date.now() - t0) / 1000)} s; ${listed === null ? `no process below Vitest${which}` : `below Vitest (pid ${child.pid})${which}:\n${listed}`}\n`);
+  };
+  const watch = setInterval(() => report('still running', WATCH_MS), WATCH_MS);
+  const onSignal = (signal) => {
+    report(signal, 0);
+    child.kill(signal);
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  return new Promise((resolve) => {
+    const done = (code) => {
+      clearInterval(watch);
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+      resolve(code);
+    };
+    child.on('error', (error) => {
+      process.stderr.write(`${label}: ${error.message}\n`);
+      done(1);
+    });
+    child.on('exit', (code) => done(code ?? 1));
+  });
 }
 
-function runAll(specs) {
+async function runAll(specs) {
   const failed = [];
   for (const spec of specs) {
     const sel = selection(spec);
-    if (runSelection(sel) !== 0) failed.push(sel.label);
+    if ((await runSelection(sel)) !== 0) failed.push(sel.label);
   }
   process.stdout.write(failed.length === 0 ? `\n== passed: ${specs.join(', ')}\n` : `\n== FAILED: ${failed.join(', ')}\n`);
   return failed.length === 0 ? 0 : 1;
@@ -194,10 +276,15 @@ function main(argv) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  try {
-    process.exitCode = main(process.argv.slice(2));
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 2;
-  }
+  Promise.resolve()
+    .then(() => main(process.argv.slice(2)))
+    .then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (error) => {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 2;
+      },
+    );
 }
