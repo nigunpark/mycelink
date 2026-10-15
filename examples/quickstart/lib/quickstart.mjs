@@ -61,12 +61,37 @@ export function fixedDateEnv() {
   return { GIT_AUTHOR_DATE: FIXED_DATE, GIT_COMMITTER_DATE: FIXED_DATE };
 }
 
-/** Run argv without a shell. Never throws for a non-zero exit; the caller decides. */
+/**
+ * Run argv without a shell. Never throws for a non-zero exit; the caller decides. `input`, when given, is the command's
+ * stdin as a finished file (a fresh private directory, the file 0600), never a stream written while it runs: on macOS
+ * with Node 22 a child can wait for such a stream's end forever (Mycelink's src/util/child-stdin.ts).
+ */
 export function run(argv, { cwd, env, input, timeoutMs = 120_000 } = {}) {
   const [cmd, ...args] = argv;
-  const r = spawnSync(cmd, args, { cwd, env: env ?? cleanEnv(), input, encoding: 'utf8', shell: false, windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+  const options = { cwd, env: env ?? cleanEnv(), encoding: 'utf8', shell: false, windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 };
+  const r = input === undefined ? spawnSync(cmd, args, options) : withInputFile(input, (fd) => spawnSync(cmd, args, { ...options, stdio: [fd, 'pipe', 'pipe'] }));
   if (r.error) return { code: 127, stdout: r.stdout ?? '', stderr: `${r.stderr ?? ''}${r.error.message}` };
   return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+/** `use(fd)` with `input` written whole to a private file opened for reading; the file is removed afterwards. */
+function withInputFile(input, use) {
+  const dir = mkdtempSync(join(tmpdir(), 'mycelink-quickstart-stdin-'));
+  let fd = null;
+  try {
+    const file = join(dir, 'input');
+    writeFileSync(file, input, { flag: 'wx', mode: 0o600 });
+    fd = openSync(file, 'r');
+    return use(fd);
+  } finally {
+    if (fd !== null) closeSync(fd);
+    try {
+      // Windows can refuse an unlink for a moment (a scanner, a handle still closing); never a failure of the command.
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // left in the temporary directory, private
+    }
+  }
 }
 
 /** Run argv and fail loudly on a non-zero exit. */

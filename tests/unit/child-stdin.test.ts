@@ -28,6 +28,8 @@ import { collectCapsuleFiles } from '../../src/engine/reproduction-capsule.js';
 import { runCommandSync } from '../../src/security/exec.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { safeGit } from '../../evals-public-projects/lib/git.mjs';
+// @ts-expect-error -- plain ESM module without type declarations
+import { run as quickstartRun } from '../../examples/quickstart/lib/quickstart.mjs';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -183,5 +185,16 @@ describe("the benchmark harness's git", () => {
     expectFileStdin(gitChildren('check-ignore'), input);
     expect(r.code).toBe(0);
     expect(String(r.stdout).split('\0').filter(Boolean)).toEqual(['dist/x.js']);
+  });
+});
+
+describe("the quickstart's commands", () => {
+  // Found by the same fault injection: the walkthrough hands the fence its reviewer's write through run()'s input.
+  it('read what they are given from a file holding exactly it', () => {
+    const echo = "const fs = require('fs'); process.stdout.write(JSON.stringify({ file: fs.fstatSync(0).isFile(), text: fs.readFileSync(0, 'utf8') }));";
+    const r = quickstartRun([process.execPath, '-e', echo], { cwd: ownTmp, env: { ...process.env }, input: '{"hook_event_name":"PreToolUse"}\n' });
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ file: true, text: '{"hook_event_name":"PreToolUse"}\n' });
+    expect(readdirSync(ownTmp).filter((n) => n.startsWith('mycelink-quickstart-stdin-'))).toEqual([]);
   });
 });
