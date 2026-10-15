@@ -48,6 +48,7 @@ import { asController } from '../helpers/authority.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { attestRollbacks, beginTransaction, lightCheck, resumeTransaction, settleTransaction } from '../../evals-public-projects/lib/controller-txn.mjs';
 import { escapeRegExp } from '../helpers/regex.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -104,7 +105,7 @@ function session(s: Shop, from: { home: string } | null = null) {
   let n = 0;
   const parents = new Map<string, string | null>();
   const hook = (event: string, payload: Record<string, unknown>) => {
-    const r = spawnSync(process.execPath, [LAUNCHER, 'hook', event], { input: JSON.stringify({ session_id: session, transcript_path: transcript, cwd: s.root, ...payload }), encoding: 'utf8', env, cwd: s.root, windowsHide: true });
+    const r = runWithInput(process.execPath, [LAUNCHER, 'hook', event], { input: JSON.stringify({ session_id: session, transcript_path: transcript, cwd: s.root, ...payload }), encoding: 'utf8', env, cwd: s.root, windowsHide: true });
     return { code: r.status ?? -1, stderr: r.stderr ?? '' };
   };
   const who = (a: Agent | null) => (a === null ? {} : { agent_id: a.agent, agent_type: WORKER });

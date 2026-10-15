@@ -45,12 +45,12 @@
  * An id or hash no registry holds, or an archive that does not hash as sealed,
  * fails closed.
  */
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import type { CapsuleRegistryEntry, ClaimVerification, NodeRuntime } from '../model/types.js';
 import { runGit } from '../git/git.js';
+import { childProblem, runWithInput } from '../util/child-stdin.js';
 import { matchGlob } from '../git/worktree.js';
 import { stableStringify } from '../graph/validate.js';
 import { RED_VALID_CATEGORIES } from '../evidence/red-classify.js';
@@ -290,10 +290,11 @@ function changedPaths(worktree: string): string[] {
 
 /** A worktree file's blob id, as `git add` would name it. */
 function blobOf(worktree: string, path: string, bytes: Buffer): string {
-  const proc = spawnSync('git', ['hash-object', '--path', path, '--stdin'], { cwd: worktree, input: bytes, encoding: 'utf8', windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-  const blob = (proc.stdout ?? '').trim();
+  // The bytes read, as a finished file; the child bounded (util/child-stdin.ts).
+  const proc = runWithInput('git', ['hash-object', '--path', path, '--stdin'], { cwd: worktree, input: bytes, encoding: 'utf8', windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  const blob = String(proc.stdout ?? '').trim();
   if (proc.status === 0 && /^[0-9a-f]{40,64}$/.test(blob)) return blob;
-  throw new Error(`git hash-object failed for ${path} in ${worktree}: ${(proc.stderr ?? '').trim().slice(0, 300)}`);
+  throw new Error(`${childProblem(`git hash-object for ${path}`, proc)} in ${worktree}`);
 }
 
 /** The blob of `path` at `rev`, or null when the revision has no such file. */

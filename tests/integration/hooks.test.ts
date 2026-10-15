@@ -6,7 +6,6 @@
  * asserted in theory.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
@@ -26,6 +25,7 @@ import { readEvents } from '../../src/state/event-log.js';
 import { featurePaths } from '../../src/workspace/paths.js';
 import { asController } from '../helpers/authority.js';
 import { controllerArgv } from '../helpers/authority.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -43,7 +43,7 @@ function runHookProcess(
   payload: Record<string, unknown>,
   env: Record<string, string> = {},
 ): HookResult {
-  const proc = spawnSync(process.execPath, [LAUNCHER, 'hook', event, '--control-root', p.control], {
+  const proc = runWithInput(process.execPath, [LAUNCHER, 'hook', event, '--control-root', p.control], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
     env: { ...process.env, MYCELINK_CONTROL_ROOT: p.control, ...env },
@@ -483,7 +483,7 @@ describe('hook enforcement', () => {
   });
 
   it('a hook outside any control repository is a silent no-op', () => {
-    const proc = spawnSync(
+    const proc = runWithInput(
       process.execPath,
       [LAUNCHER, 'hook', 'session-start', '--control-root', join(p.root, 'nowhere')],
       { input: '{}', encoding: 'utf8', windowsHide: true },
@@ -493,7 +493,7 @@ describe('hook enforcement', () => {
   });
 
   it('malformed stdin never breaks the session', () => {
-    const proc = spawnSync(
+    const proc = runWithInput(
       process.execPath,
       [LAUNCHER, 'hook', 'pre-tool-use', '--control-root', p.control],
       { input: 'not json at all', encoding: 'utf8', windowsHide: true },

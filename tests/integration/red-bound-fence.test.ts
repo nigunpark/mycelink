@@ -15,6 +15,7 @@ import { git } from '../helpers/git-fixture.js';
 import { CLI, CLI_COMPAT_TESTS, CLI_SRC, CLI_TESTS, CLI_TRUNCATED_IMPL, CLI_TRUNCATED_RED, VER_FEATURE, verCli, verState, type Ver } from '../helpers/version-fixture.js';
 import { commit, runGate, writeFiles, type ShopTicket } from '../helpers/shop-worker.js';
 import { GAP_AC1, GAP_AC3, GAP_AC5, dispatch, repairArp, reviewed } from '../helpers/cset203-rework.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -23,7 +24,7 @@ const WORKER = 'mycelink:module-worker';
 
 /** One tool call of the cli's module-worker through the shipped launcher's fence: null when allowed, else the reason. */
 function fence(s: Ver, tool: string, input: Record<string, unknown>): string | null {
-  const r = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
+  const r = runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
     input: JSON.stringify({ session_id: 'host-session', agent_id: 'a1b2c3d4e5f60718', agent_type: WORKER, cwd: s.control, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }),
     encoding: 'utf8',
     windowsHide: true,
@@ -97,7 +98,7 @@ describe("a module-worker's RED-bound test file after production began", () => {
 
   it('the controller is fenced out of worktrees as before, and a worker of another feature path is not judged by this node', async () => {
     const { s, t } = await cliTicket();
-    const r = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
+    const r = runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
       input: JSON.stringify({ session_id: 'host-session', cwd: s.control, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: editOf(t, CLI_TESTS) }),
       encoding: 'utf8',
       windowsHide: true,

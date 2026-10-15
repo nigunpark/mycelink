@@ -70,6 +70,7 @@ import {
 } from '../helpers/version-fixture.js';
 import { commit, fulfil, packOf, runGate, writeFiles, type CriterionItem, type ShopTicket } from '../helpers/shop-worker.js';
 import { REVIEWER, reviewPacket, verdictFor, type ReviewTicket, type VerdictOverride } from '../helpers/review-agent.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -100,7 +101,7 @@ function runLine(line: string, cwd: string): { code: number; out: Record<string,
 /** The stand-in reviewer subagent: its one write is the verdict, a Write the plugin's fence (the shipped launcher's hook) lets through and attests. */
 function review(ticket: ReviewTicket, control: string, verdict: Record<string, unknown>): void {
   const content = JSON.stringify(verdict, null, 2);
-  const hook = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
+  const hook = runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
     input: JSON.stringify({ session_id: 'host-session', agent_id: 'a5e7c0ffee000004', agent_type: REVIEWER, cwd: control, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: ticket.result_slot, content } }),
     encoding: 'utf8',
     windowsHide: true,

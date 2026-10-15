@@ -70,6 +70,7 @@ import { REVIEWER, refinementFor, reviewPacket, verdictFor, type ReviewTicket } 
 import { ARP_CRITERIA, CLI_CRITERIA, GAP_AC3, GAP_AC5, carriedItems, commitCompat, dispatch, repairArp, settle, status, tddClaim, writeResult } from '../helpers/cset203-rework.js';
 import { AC1_REFINED, GAP_AC1_HOLDS, checkLine, writeChallenge } from '../helpers/cset203-challenge.js';
 import { agentToolCall, claudeSession, finishAgent, launchAgent, type ClaudeSession, type LaunchedAgent } from '../helpers/claude-session.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -96,7 +97,7 @@ function runLine(line: string, cwd: string): { code: number; out: Record<string,
 
 /** The reviewer's Write of its verdict, through the shipped fence as the subagent it is (which attests it), then the write. */
 function writeAsReviewer(host: ClaudeSession, a: LaunchedAgent, ticket: ReviewTicket, content: string): void {
-  const hook = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
+  const hook = runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
     input: JSON.stringify({ session_id: host.sessionId, transcript_path: host.transcript, agent_id: a.agentId, agent_type: REVIEWER, cwd: host.cwd, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_use_id: `toolu_write_${a.agentId}`, tool_input: { file_path: ticket.result_slot, content } }),
     encoding: 'utf8',
     windowsHide: true,

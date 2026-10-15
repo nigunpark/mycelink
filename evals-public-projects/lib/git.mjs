@@ -14,7 +14,7 @@
  * program are refused by `unsafeGitConfig` before any git runs in them.
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { configKeys, gitDirs, pathKey, readEntry, unsafeGitConfig } from '../../evals-multimodule/_lib/acceptance/lib/git-safe.mjs';
@@ -102,26 +102,56 @@ export function mycelinkEnv(extra = {}) {
   return hardenedGitEnv({ PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}`, TZ: 'UTC', NO_COLOR: '1', ...extra });
 }
 
+/** How long a git fed its input may run (the product's bound for the same, src/util/child-stdin.ts). */
+const INPUT_TIMEOUT_MS = 120_000;
+
 /**
- * Run git hardened (see above); blind to replace refs and grafts.
+ * spawnSync with `input` as the child's stdin, a finished file: never spawnSync's `input`, a stream written while the
+ * child runs, whose end a child on macOS (Node 22) can wait for forever, the caller blocked with it (CI 38635817750).
+ * Bounded: killed past INPUT_TIMEOUT_MS. The file and its private directory are removed once the child has ended.
+ */
+function spawnWithInput(file, args, input, options) {
+  const dir = mkdtempSync(join(tmpdir(), 'bench-git-stdin-'));
+  let fd = null;
+  try {
+    const path = join(dir, 'input');
+    writeFileSync(path, input, { flag: 'wx', mode: 0o600 });
+    fd = openSync(path, 'r');
+    return spawnSync(file, args, { ...options, stdio: [fd, 'pipe', 'pipe'], timeout: INPUT_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  } finally {
+    if (fd !== null) closeSync(fd);
+    try {
+      // Windows can refuse an unlink for a moment (a scanner, a handle still closing): tried again, and a directory still
+      // refused is left, private; the child's result stands either way.
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // left in the temporary directory
+    }
+  }
+}
+
+/**
+ * Run git hardened (see above); blind to replace refs and grafts. `input`, when given, is its stdin as a finished file,
+ * the child bounded (spawnWithInput).
  *
  * Note: stdout is trimmed unless `encoding: 'buffer'` is passed; read
  * porcelain output (whose first column may be a space) as a buffer.
  */
 export function safeGit(cwd, args, { input, encoding = 'utf8', env = {} } = {}) {
-  const r = spawnSync('git', [...hardenedGitConfig().flatMap(([k, v]) => ['-c', `${k}=${v}`]), ...args], {
+  const argv = [...hardenedGitConfig().flatMap(([k, v]) => ['-c', `${k}=${v}`]), ...args];
+  const options = {
     cwd,
-    input,
     encoding: encoding === 'buffer' ? undefined : encoding,
     maxBuffer: 256 * 1024 * 1024,
     windowsHide: true,
     env: hardenedGitEnv({ GIT_ATTR_SOURCE: EMPTY_TREE, ...env }),
-  });
+  };
+  const r = input === undefined ? spawnSync('git', argv, options) : spawnWithInput('git', argv, input, options);
   const text = (v) => (v === undefined || v === null ? '' : Buffer.isBuffer(v) ? v : String(v));
   return {
     code: r.status ?? -1,
     stdout: encoding === 'buffer' ? r.stdout : text(r.stdout).trim(),
-    stderr: String(r.stderr ?? '').trim(),
+    stderr: `${r.error?.code === 'ETIMEDOUT' ? `killed past its ${INPUT_TIMEOUT_MS} ms bound (${Buffer.byteLength(input ?? '')} bytes of input) ` : ''}${String(r.stderr ?? '').trim()}`,
     error: r.error,
   };
 }

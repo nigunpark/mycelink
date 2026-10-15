@@ -8,7 +8,6 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
 import { validateGraph, hashGraph } from '../../src/graph/validate.js';
@@ -28,6 +27,7 @@ import {
 } from '../helpers/portfolio-fixture.js';
 import type { PortfolioGraph } from '../../src/model/types.js';
 import { controllerArgv } from '../helpers/authority.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -104,7 +104,7 @@ describe('hooks treat payload text as data', () => {
   const io: CliIo = { out: () => undefined, err: () => undefined };
 
   function hook(event: string, payload: Record<string, unknown>, env: Record<string, string> = {}) {
-    const proc = spawnSync(process.execPath, [launcher, 'hook', event, '--control-root', p.control], {
+    const proc = runWithInput(process.execPath, [launcher, 'hook', event, '--control-root', p.control], {
       input: JSON.stringify(payload),
       encoding: 'utf8',
       env: { ...process.env, MYCELINK_CONTROL_ROOT: p.control, ...env },

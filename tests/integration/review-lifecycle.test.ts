@@ -27,13 +27,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { cleanupTmpRoots } from '../helpers/tmp.js';
+import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { ARP_GAPPY_IMPL, ARP_JOURNAL_TEST, ARP_RED, ARP_ROLLBACK_TEST, ARP_SRC, ARP_TESTS, CLI_AC5, CLI_FAILURE_TEST, CLI_FULL_WORK, CLI_RECOVERY_TEST, VER_FEATURE, commitVerControl, createVer, verCli, verState, type Ver } from '../helpers/version-fixture.js';
 import { fulfil, type CriterionItem, type ShopTicket } from '../helpers/shop-worker.js';
 import { REVIEWER, reviewPacket, verdictFor, type ReviewTicket } from '../helpers/review-agent.js';
 import { agentEntry, agentToolCall, claudeSession, finishAgent, hostToolHook, launchAgent, notifyQueued, type ClaudeSession, type LaunchedAgent } from '../helpers/claude-session.js';
 import { processIdentity } from '../../src/util/process-identity.js';
 import { mutateState } from '../../src/state/feature-state.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -343,16 +344,20 @@ describe("the plugin's own records of a reviewer's launch", () => {
     const toolUseId = 'toolu_r13_host_process_launch';
     const input = { subagent_type: REVIEWER, description: `acceptance review ${t.review_id}`, prompt: t.prompt };
     const hookPayload = (event: string, extra: Record<string, unknown>): string => JSON.stringify({ session_id: host.sessionId, transcript_path: host.transcript, cwd: host.cwd, hook_event_name: event, tool_name: 'Agent', tool_input: input, tool_use_id: toolUseId, ...extra });
-    // The host session's process runs the hook as Claude Code does (its own pid as CLAUDE_PID), then ends.
-    const host_ = `const { spawnSync } = require('node:child_process'); const r = spawnSync(process.execPath, [process.argv[1], 'hook', 'controller-fence'], { input: process.argv[2], env: { ...process.env, CLAUDE_PID: String(process.pid) }, encoding: 'utf8', windowsHide: true }); process.stdout.write(JSON.stringify({ pid: process.pid, status: r.status, err: r.stderr }));`;
-    const ran = spawnSync(process.execPath, ['-e', host_, launcher, hookPayload('PreToolUse', {})], { cwd: host.cwd, encoding: 'utf8', windowsHide: true });
+    // The host session's process runs the hook as Claude Code does (its own pid as CLAUDE_PID), then ends. The hook's
+    // payload is its stdin as a finished file, both children bounded (src/util/child-stdin.ts).
+    const payload = join(makeTmpDir('r13-host-payload-'), 'payload.json');
+    writeFileSync(payload, hookPayload('PreToolUse', {}));
+    const host_ = `const { openSync, closeSync } = require('node:fs'); const { spawnSync } = require('node:child_process'); const fd = openSync(process.argv[2], 'r'); const r = spawnSync(process.execPath, [process.argv[1], 'hook', 'controller-fence'], { stdio: [fd, 'pipe', 'pipe'], timeout: 60000, killSignal: 'SIGKILL', env: { ...process.env, CLAUDE_PID: String(process.pid) }, encoding: 'utf8', windowsHide: true }); closeSync(fd); process.stdout.write(JSON.stringify({ pid: process.pid, status: r.status, signal: r.signal, err: r.stderr }));`;
+    const ran = spawnSync(process.execPath, ['-e', host_, launcher, payload], { cwd: host.cwd, encoding: 'utf8', windowsHide: true, timeout: 120_000, killSignal: 'SIGKILL' });
+    expect(ran.status, `the host process: ${ran.error?.message ?? ran.signal ?? ''} ${ran.stderr}`).toBe(0);
     const hostRun = JSON.parse(ran.stdout) as { pid: number; status: number; err: string };
     expect(hostRun.status, hostRun.err).toBe(0);
     const { agent: a } = await launchAgent(host, input, { hook: false, toolUseId });
     const launch = JSON.parse(readFileSync(launchFile(t, a), 'utf8')) as Record<string, any>;
     expect(launch['holder']).toMatchObject({ pid: hostRun.pid, host: hostname(), platform: process.platform });
     // The Agent call returned (a background agent): the plugin binds the task it started to the launch.
-    const post = spawnSync(process.execPath, [launcher, 'hook', 'tool-end'], { input: hookPayload('PostToolUse', { tool_response: { isAsync: true, status: 'async_launched', agentId: a.agentId, prompt: t.prompt, outputFile: '/tmp/x.output' } }), cwd: host.cwd, encoding: 'utf8', windowsHide: true });
+    const post = runWithInput(process.execPath, [launcher, 'hook', 'tool-end'], { input: hookPayload('PostToolUse', { tool_response: { isAsync: true, status: 'async_launched', agentId: a.agentId, prompt: t.prompt, outputFile: '/tmp/x.output' } }), cwd: host.cwd, encoding: 'utf8', windowsHide: true });
     expect(post.status).toBe(0);
     const bound = JSON.parse(readFileSync(join(slotDir(t), `agent-${toolUseId}.json`), 'utf8')) as Record<string, any>;
     expect(bound).toEqual(expect.objectContaining({ schema: 'mycelink-agent-task/1', tool_use_id: toolUseId, session_id: host.sessionId, agent_id: a.agentId, status: 'async_launched', async: true }));

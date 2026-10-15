@@ -22,13 +22,13 @@
  *    Mycelink workspace the hook does nothing.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { ERRORS, SHOP_FEATURE, createShop, moduleVerifier, shopCli, shopGraph, type Shop } from '../helpers/shop-fixture.js';
 import type { ShopTicket } from '../helpers/shop-worker.js';
 import { fenceDecision } from '../../src/hooks/fence.js';
+import { runWithInput } from '../../src/util/child-stdin.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -53,7 +53,7 @@ function fence(tool: string, input: Record<string, unknown>, who: { agent_id?: s
   const env = { ...process.env, CLAUDE_PROJECT_DIR: ws };
   delete env['MYCELINK_CONTROL_ROOT'];
   delete env['MYCELINK_NODE_ID'];
-  const r = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], { input: JSON.stringify(payload), encoding: 'utf8', env, cwd, windowsHide: true });
+  const r = runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], { input: JSON.stringify(payload), encoding: 'utf8', env, cwd, windowsHide: true });
   return { code: r.status ?? -1, stderr: r.stderr ?? '' };
 }
 const bash = (command: string, who: { agent_id?: string; agent_type?: string } = {}, cwd = ws) => fence('Bash', { command }, who, cwd);
@@ -136,7 +136,7 @@ describe('what the controller may do', () => {
       const env = { ...process.env, CLAUDE_PROJECT_DIR: cwd };
       delete env['MYCELINK_CONTROL_ROOT'];
       delete env['MYCELINK_NODE_ID'];
-      return spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], { input, encoding: 'utf8', env, cwd, windowsHide: true });
+      return runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], { input, encoding: 'utf8', env, cwd, windowsHide: true });
     };
     for (const input of ['{not json', '[]', JSON.stringify({ cwd: ws, tool_input: { command: 'true' } })]) {
       const r = raw(input, ws);

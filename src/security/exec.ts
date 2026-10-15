@@ -28,6 +28,7 @@
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { delimiter, extname, isAbsolute, join, win32 } from 'node:path';
+import { runWithInput } from '../util/child-stdin.js';
 
 export type CommandPolicyCode =
   | 'EMPTY_COMMAND'
@@ -216,6 +217,7 @@ export interface RunOptions {
   /** Run with exactly `env`, inheriting nothing from this process (worktree setup). */
   cleanEnv?: boolean;
   maxBuffer?: number;
+  /** The command's stdin, given as a finished file (util/child-stdin.ts), never a stream written while it runs. */
   input?: string;
 }
 
@@ -238,8 +240,14 @@ function spawnOptions(plan: CommandPlan, env: NodeJS.ProcessEnv, options: RunOpt
     maxBuffer: options.maxBuffer ?? 32 * 1024 * 1024,
     env,
     shell: false,
-    ...(options.input !== undefined ? { input: options.input } : {}),
   };
+}
+
+/** Options for a command with input: spawnOptions, its input the child's stdin as a finished file. */
+function inputOptions(plan: CommandPlan, env: NodeJS.ProcessEnv, options: RunOptions & { input: string }) {
+  const { timeout, ...rest } = spawnOptions(plan, env, options);
+  // Killed past its bound as a command without input is (spawnSync's SIGTERM).
+  return { ...rest, input: options.input, timeoutMs: timeout, killSignal: 'SIGTERM' as const };
 }
 
 function toRunResult(proc: SpawnSyncReturns<string>, plan: CommandPlan): RunResult {
@@ -262,6 +270,7 @@ function toRunResult(proc: SpawnSyncReturns<string>, plan: CommandPlan): RunResu
 export function runCommandSync(argv: readonly string[], options: RunOptions): RunResult {
   const env = options.cleanEnv === true ? { ...(options.env ?? {}) } : { ...process.env, ...(options.env ?? {}) };
   const plan = planCommand(argv, { env });
+  if (options.input !== undefined) return toRunResult(runWithInput(plan.file, plan.args, inputOptions(plan, env, { ...options, input: options.input })), plan);
   return toRunResult(spawnSync(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
 }
 
@@ -272,5 +281,6 @@ export function runCommandSync(argv: readonly string[], options: RunOptions): Ru
 export function runShellScriptSync(script: string, options: RunOptions & ShellPlanOptions): RunResult {
   const env = { ...process.env, ...(options.env ?? {}) };
   const plan = planShellScript(script, { allowShell: options.allowShell ?? false });
+  if (options.input !== undefined) return toRunResult(runWithInput(plan.file, plan.args, inputOptions(plan, env, { ...options, input: options.input })), plan);
   return toRunResult(spawnSync(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
 }

@@ -11,6 +11,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { runWithInput } from '../../src/util/child-stdin.js';
 import {
   claudeAvailable,
   claudeVersion,
@@ -225,12 +226,12 @@ describeIfClaude('isolated plugin harness', () => {
       { tool_name: 'Write', tool_input: { file_path: join(unrelated, 'a.txt'), content: 'x' } },
       { tool_name: 'Bash', tool_input: { command: "sed -i 's/a/b/' a.txt > out.txt" } },
     ]) {
-      const proc = spawnSync(process.execPath, [join(installPath, 'bin', 'mycelink.mjs'), 'hook', 'controller-fence'], {
+      const proc = runWithInput(process.execPath, [join(installPath, 'bin', 'mycelink.mjs'), 'hook', 'controller-fence'], {
         cwd: unrelated,
         input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd: unrelated, ...tool }),
         encoding: 'utf8',
         env: { ...profile.env, CLAUDE_PROJECT_DIR: unrelated },
-        timeout: 60_000,
+        timeoutMs: 60_000,
         windowsHide: true,
       });
       expect({ tool: tool.tool_name, code: proc.status, err: proc.stderr }).toEqual({ tool: tool.tool_name, code: 0, err: '' });
@@ -239,7 +240,7 @@ describeIfClaude('isolated plugin harness', () => {
       ['tool-end', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_1' }],
       ['subagent-end', { hook_event_name: 'SubagentStop', agent_id: 'a1', agent_type: 'mycelink:module-worker' }],
     ] as const) {
-      const proc = spawnSync(process.execPath, [join(installPath, 'bin', 'mycelink.mjs'), 'hook', event], { cwd: unrelated, input: JSON.stringify({ cwd: unrelated, ...payload }), encoding: 'utf8', env: { ...profile.env, CLAUDE_PROJECT_DIR: unrelated }, timeout: 60_000, windowsHide: true });
+      const proc = runWithInput(process.execPath, [join(installPath, 'bin', 'mycelink.mjs'), 'hook', event], { cwd: unrelated, input: JSON.stringify({ cwd: unrelated, ...payload }), encoding: 'utf8', env: { ...profile.env, CLAUDE_PROJECT_DIR: unrelated }, timeoutMs: 60_000, windowsHide: true });
       expect({ event, code: proc.status, out: proc.stdout, err: proc.stderr }).toEqual({ event, code: 0, out: '', err: '' });
     }
   });
