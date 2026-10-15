@@ -60,6 +60,7 @@ import { commit, fulfil, runGate, writeFiles, type ShopTicket } from '../helpers
 import { REVIEWER, reviewPacket, verdictFor, type ReviewTicket } from '../helpers/review-agent.js';
 import { ARP_CRITERIA, CLI_CRITERIA, GAP_AC1, GAP_AC3, GAP_AC5, carriedItems, commitCompat, dispatch, repairArp, status, tddClaim, writeResult } from '../helpers/cset203-rework.js';
 import { TRUNCATION_MARK, VERDICT_LIMITS } from '../../src/engine/acceptance-review.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -90,10 +91,8 @@ function runLine(line: string, cwd: string): { code: number; out: Record<string,
 /** The stand-in reviewer subagent: reads what it likes; its one write, the verdict, through the shipped fence that attests it. */
 function review(ticket: ReviewTicket, control: string, verdict: unknown): void {
   const content = JSON.stringify(verdict, null, 2);
-  const hook = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
+  const hook = runLauncher([LAUNCHER, 'hook', 'controller-fence'], {
     input: JSON.stringify({ session_id: 'host-session', agent_id: 'a5e7c0ffee000005', agent_type: REVIEWER, cwd: control, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: ticket.result_slot, content } }),
-    encoding: 'utf8',
-    windowsHide: true,
   });
   if (hook.status !== 0) throw new Error(`the fence refused the verdict: ${hook.stderr}`);
   mkdirSync(dirname(ticket.result_slot), { recursive: true });

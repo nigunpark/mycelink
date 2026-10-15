@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { hostPlan, run, failingOf, shape, found, recovered, useRollbackFixture } from './rollback-fixture.js';
+import { hostPlan, run, failingOf, shape, found, hostErrors, recovered, useRollbackFixture } from './rollback-fixture.js';
 
 useRollbackFixture();
 
@@ -76,6 +76,15 @@ describe('CSET-202 final: a host waiting on its background workers while they st
   // its test commit — its entry live for checks of the workspace to see twice.
   const CSET202 = { hooks: true, asyncWorkers: true, hostWait: 'sleep 100; echo waiting', workerStash: { 'mod-a': { shape: 'cset202' }, 'mod-b': { shape: 'cset202' } } };
   const transitionsOf = (s: any) => s.controller_txn.worker_git.flatMap((g: any) => g.transitions.map((t: any) => [t.node_id, t.added.length, t.removed.length]));
+  // On a mismatch: every transition of each stash the settlement followed, whoever it was attributed to (the core's too).
+  const chainOf = (s: any) => {
+    try {
+      const deltas = JSON.parse(readFileSync(join(s.controller_txn.dir, 'classification.json'), 'utf8')).deltas.filter((d: any) => d.kind === 'stash');
+      return JSON.stringify(deltas.map((d: any) => ({ path: d.path, by: d.by, transitions: d.transitions.map((t: any) => ({ by: t.by, node: t.worker?.node_id ?? null, added: t.added.length, removed: t.removed.length, from_pos: t.from_pos, to_pos: t.to_pos, at: t.at, calls: t.calls, reason: t.reason })) })));
+    } catch (error) {
+      return `no classification: ${String(error)}`;
+    }
+  };
 
   it('both workers push, run the red gate, commit and pop while the host waits — no check stops the session, no violation, C001 delivered', async () => {
     const fake = hostPlan(CSET202);
@@ -85,8 +94,10 @@ describe('CSET-202 final: a host waiting on its background workers while they st
     expect(first.controller_txn.stopped_for).toBeUndefined();
     expect(first.controller_txn, found(r)).toMatchObject({ violation: false, mode: 'none', unauthorized: [], ambiguous: [] });
     expect(first.controller_txn.authorized['worker-git']).toBe(1);
+    // The session ended as it should, not mid-worker: CI 38635817750's stand-in exited 1 between mod-b's push and its pop.
+    expect(first.exit_code, hostErrors(fake)).toBe(0);
     // Each push and pop, the worker's own, by the call that made it.
-    expect(transitionsOf(first)).toEqual([
+    expect(transitionsOf(first), chainOf(first)).toEqual([
       ['TOY-001.mod-a.impl', 1, 0],
       ['TOY-001.mod-a.impl', 0, 1],
       ['TOY-001.mod-b.impl', 1, 0],
@@ -112,14 +123,15 @@ describe('CSET-202 final: a host waiting on its background workers while they st
       [2, 'resume', 'exit', null, false],
     ]);
     for (const s of r.sessions) {
+      expect(s.exit_code, `session ${s.index} ${hostErrors(fake)}`).toBe(0);
       expect(s.controller_txn.stopped_for, `session ${s.index}`).toBeUndefined();
       expect(s.controller_txn, `session ${s.index} ${found(r)}`).toMatchObject({ violation: false, mode: 'none', unauthorized: [] });
     }
-    expect(transitionsOf(r.sessions[0])).toEqual([
+    expect(transitionsOf(r.sessions[0]), chainOf(r.sessions[0])).toEqual([
       ['TOY-001.mod-a.impl', 1, 0],
       ['TOY-001.mod-a.impl', 0, 1],
     ]);
-    expect(transitionsOf(r.sessions[1])).toEqual([
+    expect(transitionsOf(r.sessions[1]), chainOf(r.sessions[1])).toEqual([
       ['TOY-001.mod-b.impl', 1, 0],
       ['TOY-001.mod-b.impl', 0, 1],
     ]);

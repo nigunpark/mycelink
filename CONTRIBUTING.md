@@ -7,6 +7,38 @@ By contributing you agree that your contribution is licensed under the
 [Apache License 2.0](LICENSE) (inbound = outbound, as described in section 5
 of the license). Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Ways to help, no code needed
+
+- **Try the quickstart and report how it went.** The
+  [first-run feedback](https://github.com/nigunpark/mycelink/issues/new?template=first-run.yml)
+  form takes a few minutes. Runs that stopped are the most useful.
+- **Report compatibility** with your OS, Node.js, Git or Claude Code version
+  (the **Compatibility** template).
+- **Pilot a real multi-repository feature** as a
+  [design partner](https://github.com/nigunpark/mycelink/blob/main/docs/DESIGN_PARTNERS.md).
+- **Answer questions** in [Discussions](https://github.com/nigunpark/mycelink/discussions).
+
+## Good first contributions
+
+These are scoped, real gaps, not known bugs. Comment on an issue or open one
+before starting, so work is not duplicated.
+
+- **A quickstart in another toolchain.** `examples/quickstart/` uses two
+  zero-dependency Node.js repositories. A variant using, for example,
+  `pytest`, or a project that needs `--worktree-setup`, with its own
+  `setup.mjs` and a model-free check like `tests/release/quickstart.test.ts`.
+- **A troubleshooting entry** for a refusal you hit whose fix was not obvious:
+  the exact message, the cause and the fix, in the README's *Troubleshooting*
+  table.
+- **A plan-source adapter** (GitHub Issues, Linear, Jira, ...) that produces a
+  *draft* graph only, following the contract in
+  [docs/ADAPTERS.md](docs/ADAPTERS.md). This is larger and starts with a
+  feature issue.
+
+Documentation-only pull requests are welcome. They need no tests, but the
+release tests (`npm run test:release`) must stay green: they check the
+README's required sections and the links in shipped files.
+
 ## Before you start
 
 - **Bugs:** open an issue with the bug template. Include `mycelink doctor

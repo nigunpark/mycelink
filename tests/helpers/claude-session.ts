@@ -14,12 +14,12 @@
  * its completion arrives in the session as a task notification carrying its
  * final answer. Nothing here is Mycelink's: the controller reads it.
  */
-import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { main, type CliIo } from '../../src/cli/cli.js';
 import { makeTmpDir } from './tmp.js';
+import { runLauncher } from './launcher-process.js';
 
 export const VERSION = '2.1.290';
 export const MODEL = 'claude-stand-in-5';
@@ -77,7 +77,7 @@ export function agentEntry(s: ClaudeSession, a: LaunchedAgent, entry: Record<str
 export async function hostToolHook(s: ClaudeSession, tool: string, input: Record<string, unknown>, toolUseId: string, launcher?: string): Promise<{ code: number; err: string }> {
   const stdin = JSON.stringify({ session_id: s.sessionId, transcript_path: s.transcript, cwd: s.cwd, permission_mode: 'dontAsk', hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, tool_use_id: toolUseId });
   if (launcher !== undefined) {
-    const r = spawnSync(process.execPath, [launcher, 'hook', 'controller-fence'], { input: stdin, cwd: s.cwd, encoding: 'utf8', windowsHide: true });
+    const r = runLauncher([launcher, 'hook', 'controller-fence'], { input: stdin, cwd: s.cwd });
     return { code: r.status ?? 1, err: r.stderr };
   }
   let err = '';

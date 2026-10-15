@@ -9,12 +9,12 @@
  * `npm test` any more (CI 38347201692).
  */
 import { describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 // @ts-expect-error -- plain ESM script without type declarations
-import { CI_GROUPS, DEFAULT_WEIGHT, SUITES, collectedFiles, selection, shardsOf } from '../../scripts/test-suites.mjs';
+import { CI_GROUPS, DEFAULT_WEIGHT, SUITES, collectedFiles, descendants, describeProcesses, etimeMs, processTable, selection, shardsOf } from '../../scripts/test-suites.mjs';
 
 const ROOT = resolve(process.cwd());
 const workflow = (f: string) => YAML.parse(readFileSync(join(ROOT, '.github', 'workflows', f), 'utf8')) as { jobs: Record<string, any> };
@@ -107,5 +107,36 @@ describe('the CI groups', () => {
     for (const [script, suite] of [['test:unit', 'unit'], ['test:integration', 'integration'], ['test:security', 'security'], ['test:fixture', 'fixtures'], ['test:release', 'release'], ['test:plugin', 'plugin-e2e'], ['test:benchmark', 'benchmark']]) {
       expect(scripts[script!], script).toBe(`node scripts/test-suites.mjs run ${suite}`);
     }
+  });
+});
+
+describe('a suite that does not end', () => {
+  // CI 38635817750: a Vitest worker blocked in a synchronous child times out nothing of its own; the runner says what runs.
+  it('is described by what runs below its Vitest: each process under its parent, with its age and command', async () => {
+    const holder = spawn(process.execPath, ['-e', "require('node:child_process').spawnSync(process.execPath, ['-e', 'setInterval(() => {}, 1000) /* the stuck child */'], { stdio: 'ignore' })"], { stdio: 'ignore', windowsHide: true });
+    try {
+      let listed: string | null = null;
+      for (let i = 0; i < 100 && !(listed ?? '').includes('the stuck child'); i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        listed = describeProcesses(processTable(), holder.pid, 0);
+      }
+      expect(listed, 'no stuck child listed').toMatch(/^ {2}pid \d+ \(parent \d+\), \d+ s: .*setInterval\(\(\) => \{\}, 1000\) \/\* the stuck child \*\//m);
+      // Only what has run at least as long as asked.
+      expect(describeProcesses(processTable(), holder.pid, 24 * 3600_000)).toBeNull();
+    } finally {
+      const table = processTable();
+      for (const p of descendants(table, holder.pid)) {
+        try {
+          process.kill(p.pid, 'SIGKILL');
+        } catch {
+          // gone
+        }
+      }
+      holder.kill('SIGKILL');
+    }
+  }, 60_000);
+
+  it("reads ps's elapsed times", () => {
+    expect([etimeMs('00:07'), etimeMs('12:34'), etimeMs('01:02:03'), etimeMs('2-00:00:01'), etimeMs('nonsense')]).toEqual([7000, 754_000, 3_723_000, 172_801_000, 0]);
   });
 });

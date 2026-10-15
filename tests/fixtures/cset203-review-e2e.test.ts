@@ -65,6 +65,7 @@ import {
 import { commit, packOf, runGate, writeFiles, type ShopTicket } from '../helpers/shop-worker.js';
 import { fulfil } from '../helpers/shop-worker.js';
 import { REVIEWER, reviewPacket, verdictFor, type ReviewTicket } from '../helpers/review-agent.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -107,10 +108,8 @@ function review(ticket: ReviewTicket, control: string, gaps: Parameters<typeof v
   const impl = readFileSync(join(checkout, ARP_SRC), 'utf8');
   const verdict = verdictFor(packet, gaps, 'stand-in-reviewer');
   const content = JSON.stringify(verdict, null, 2);
-  const hook = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], {
+  const hook = runLauncher([LAUNCHER, 'hook', 'controller-fence'], {
     input: JSON.stringify({ session_id: 'host-session', agent_id: 'a5e7c0ffee000001', agent_type: REVIEWER, cwd: control, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: ticket.result_slot, content } }),
-    encoding: 'utf8',
-    windowsHide: true,
   });
   if (hook.status !== 0) throw new Error(`the fence refused the verdict: ${hook.stderr}`);
   mkdirSync(dirname(ticket.result_slot), { recursive: true });

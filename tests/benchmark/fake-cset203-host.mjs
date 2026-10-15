@@ -71,7 +71,7 @@
  * a result in its old slot, and logs the answer ({ late }).
  */
 import { execSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -341,6 +341,44 @@ let toolId = 0;
 let parent = null;
 /** The subagent type of the running Agent call: a module-worker, or the acceptance reviewer. */
 let parentType = null;
+/**
+ * A hook run as Claude Code runs it, its payload on stdin — as a finished file written whole before it starts, never
+ * spawnSync's `input`: on macOS that is an 8 KiB socketpair under Node 22, and a payload longer than one write can reach
+ * the hook whole and its end never (CI 38618387236), the hook waiting for EOF.
+ */
+let hookInputs = 0;
+
+/**
+ * A finished payload file, removed once its child has ended. Windows can refuse the unlink for a moment (a scanner, a
+ * handle still closing: EPERM, EBUSY); that is tried again, and a file still refused is left to its directory's own
+ * cleanup. Never a failure of the session: in CI 38635817750 one refusal, thrown out of a hook call, ended the session
+ * mid-worker (exit 1), the worker's stash entry never popped.
+ */
+function removeInput(file) {
+  for (let i = 0; i < 6; i++) {
+    try {
+      rmSync(file, { force: true });
+      return;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(error?.code) || i === 5) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (i + 1));
+    }
+  }
+  // left to the plan directory
+}
+
+function runHookChild(file, args, payload, options) {
+  const stdin = join(dirname(plan.log), `hook-stdin-${process.pid}-${++hookInputs}`);
+  writeFileSync(stdin, JSON.stringify(payload), { flag: 'wx', mode: 0o600 });
+  const fd = openSync(stdin, 'r');
+  try {
+    return spawnSync(file, args, { ...options, stdio: [fd, 'pipe', 'pipe'] });
+  } finally {
+    closeSync(fd);
+    removeInput(stdin);
+  }
+}
+
 /** The plugin's PreToolUse hooks, as Claude Code runs them: the block reason (exit 2), else null. */
 function preToolUse(tool, input, toolUseId = null) {
   const hooksFile = join(pluginDir, 'hooks', 'hooks.json');
@@ -350,7 +388,7 @@ function preToolUse(tool, input, toolUseId = null) {
     for (const h of m.hooks) {
       const argv = h.command.split('${CLAUDE_PLUGIN_ROOT}').join(pluginDir).match(/"[^"]*"|\S+/g).map((a) => a.replace(/^"|"$/g, ''));
       const payload = { session_id: SESSION, transcript_path: sessionTranscript, cwd: ws, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, ...(toolUseId !== null ? { tool_use_id: toolUseId } : {}), ...(parent ? { agent_id: parent, agent_type: parentType ?? 'mycelink:module-worker' } : {}) };
-      const r = spawnSync(argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), { input: JSON.stringify(payload), env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8' });
+      const r = runHookChild(argv[0] === 'node' ? process.execPath : argv[0], argv.slice(1), payload, { env: { ...env, CLAUDE_PROJECT_DIR: ws }, encoding: 'utf8' });
       if (r.status === 2) return (r.stderr || 'Blocked').trim();
     }
   }

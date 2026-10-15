@@ -56,6 +56,7 @@ import {
 import { commit, packOf, runGate, writeFiles, type ShopTicket } from '../helpers/shop-worker.js';
 import { REVIEWER, reviewPacket, verdictFor, type ReviewTicket } from '../helpers/review-agent.js';
 import { GAP_AC1, GAP_AC3, GAP_AC5, carriedItems, commitCompat, dispatch, repairArp, reviewed, status, tddClaim, writeResult } from '../helpers/cset203-rework.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -80,7 +81,7 @@ function runLine(line: string, cwd: string): { code: number; out: Record<string,
 
 /** One tool call through the shipped launcher's fence, as `who` (the controller: no agent): null when allowed, else the reason. */
 function fence(cwd: string, tool: string, input: Record<string, unknown>, who: Record<string, string> = {}): string | null {
-  const r = spawnSync(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], { input: JSON.stringify({ session_id: 'host-session', cwd, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, ...who }), encoding: 'utf8', windowsHide: true });
+  const r = runLauncher([LAUNCHER, 'hook', 'controller-fence'], { input: JSON.stringify({ session_id: 'host-session', cwd, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, ...who }) });
   return r.status === 0 ? null : r.stderr.trim();
 }
 

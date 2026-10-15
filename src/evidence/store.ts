@@ -60,17 +60,21 @@ export function artifactAt(file: string, sha: string): 'missing' | 'same' | 'oth
   return at === 'linked' ? 'other' : at;
 }
 
-/** As artifactAt, telling apart a file with more than one name ('linked'): an artifact still being linked into place has two for a moment. */
+/**
+ * As artifactAt, telling apart a name still in flux ('linked'): an artifact still being linked into place has two names
+ * for a moment, and one a racing writer links into place between this look and its check is there only for the second.
+ */
 function artifactState(file: string, sha: string): 'missing' | 'same' | 'other' | 'linked' {
   let fd: number;
   try {
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return 'other';
-    // Nothing there, or a dangling link (which fails the open the same way): told apart without following it.
+    // Nothing there, or a dangling link (which fails the open the same way): told apart without following it. A regular
+    // file there now was linked into place after the open looked (CI 38672044889: a writer of the same bytes took it
+    // for something else and wrote a -1 alternate): looked at again, as one still being linked.
     try {
-      lstatSync(file);
-      return 'other';
+      return lstatSync(file).isFile() ? 'linked' : 'other';
     } catch {
       return 'missing';
     }
