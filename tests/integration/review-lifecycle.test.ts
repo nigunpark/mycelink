@@ -34,7 +34,7 @@ import { REVIEWER, reviewPacket, verdictFor, type ReviewTicket } from '../helper
 import { agentEntry, agentToolCall, claudeSession, finishAgent, hostToolHook, launchAgent, notifyQueued, type ClaudeSession, type LaunchedAgent } from '../helpers/claude-session.js';
 import { processIdentity } from '../../src/util/process-identity.js';
 import { mutateState } from '../../src/state/feature-state.js';
-import { runWithInput } from '../../src/util/child-stdin.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -357,7 +357,7 @@ describe("the plugin's own records of a reviewer's launch", () => {
     const launch = JSON.parse(readFileSync(launchFile(t, a), 'utf8')) as Record<string, any>;
     expect(launch['holder']).toMatchObject({ pid: hostRun.pid, host: hostname(), platform: process.platform });
     // The Agent call returned (a background agent): the plugin binds the task it started to the launch.
-    const post = runWithInput(process.execPath, [launcher, 'hook', 'tool-end'], { input: hookPayload('PostToolUse', { tool_response: { isAsync: true, status: 'async_launched', agentId: a.agentId, prompt: t.prompt, outputFile: '/tmp/x.output' } }), cwd: host.cwd, encoding: 'utf8', windowsHide: true });
+    const post = runLauncher([launcher, 'hook', 'tool-end'], { input: hookPayload('PostToolUse', { tool_response: { isAsync: true, status: 'async_launched', agentId: a.agentId, prompt: t.prompt, outputFile: '/tmp/x.output' } }), cwd: host.cwd });
     expect(post.status).toBe(0);
     const bound = JSON.parse(readFileSync(join(slotDir(t), `agent-${toolUseId}.json`), 'utf8')) as Record<string, any>;
     expect(bound).toEqual(expect.objectContaining({ schema: 'mycelink-agent-task/1', tool_use_id: toolUseId, session_id: host.sessionId, agent_id: a.agentId, status: 'async_launched', async: true }));

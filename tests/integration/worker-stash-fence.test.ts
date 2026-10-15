@@ -20,7 +20,7 @@ import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { git } from '../helpers/git-fixture.js';
 import { ERRORS, READ, SHOP_FEATURE, createShop, moduleVerifier, shopCli, shopGraph, type Shop } from '../helpers/shop-fixture.js';
 import type { ShopTicket } from '../helpers/shop-worker.js';
-import { runWithInput } from '../../src/util/child-stdin.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -53,7 +53,7 @@ function fence(tool: string, input: Record<string, unknown>, who: Record<string,
   delete env['MYCELINK_NODE_ID'];
   delete env['MYCELINK_PROVENANCE'];
   const payload = { session_id: SESSION, transcript_path: transcript, cwd: s.root, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, tool_use_id: id, ...who };
-  const r = runWithInput(process.execPath, [LAUNCHER, 'hook', 'controller-fence'], { input: JSON.stringify(payload), encoding: 'utf8', env: env as NodeJS.ProcessEnv, cwd: s.root, windowsHide: true });
+  const r = runLauncher([LAUNCHER, 'hook', 'controller-fence'], { input: JSON.stringify(payload), env: env as NodeJS.ProcessEnv, cwd: s.root });
   return { code: r.status ?? -1, stderr: r.stderr ?? '' };
 }
 const worker = { agent_id: AGENT, agent_type: WORKER };

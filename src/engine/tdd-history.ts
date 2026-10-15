@@ -31,7 +31,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAncestor, resolveRef, runGit } from '../git/git.js';
-import { childProblem, runWithInput } from '../util/child-stdin.js';
+import { spawnSync } from 'node:child_process';
+import { INPUT_CHILD_TIMEOUT_MS, childProblem, withStdinFile } from '../util/child-stdin.js';
 import { matchGlob } from '../git/worktree.js';
 import { priorTestChanges, testsInDelta, type TestRef } from './test-declarations.js';
 import type { TestIdentity } from '../evidence/test-identity.js';
@@ -183,14 +184,20 @@ function hashWorkingFiles(worktree: string, paths: readonly string[]): Map<strin
   const hashes = new Map<string, string>();
   if (paths.length === 0) return hashes;
   // Its paths as a finished file, the child bounded (util/child-stdin.ts: a stream's end can be lost on macOS).
-  const proc = runWithInput('git', ['hash-object', '--stdin-paths'], {
-    cwd: worktree,
-    input: paths.join('\n') + '\n',
-    encoding: 'utf8',
-    windowsHide: true,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  });
-  if (proc.status !== 0) throw new Error(`${childProblem('git hash-object --stdin-paths', proc)} in ${worktree}`);
+  const input = paths.join('\n') + '\n';
+  const proc = withStdinFile(input, (stdin) =>
+    spawnSync('git', ['hash-object', '--stdin-paths'], {
+      cwd: worktree,
+      stdio: [stdin, 'pipe', 'pipe'],
+      encoding: 'utf8',
+      shell: false,
+      windowsHide: true,
+      timeout: INPUT_CHILD_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    }),
+  );
+  if (proc.status !== 0) throw new Error(`${childProblem('git hash-object --stdin-paths', proc, Buffer.byteLength(input))} in ${worktree}`);
   const lines = String(proc.stdout ?? '').split(/\r?\n/).filter((l) => l.trim() !== '');
   paths.forEach((p, i) => hashes.set(p, (lines[i] as string).trim()));
   return hashes;
@@ -417,14 +424,20 @@ function readBlobs(repo: string, shas: readonly string[]): Map<string, string> {
   const unique = [...new Set(shas)];
   const contents = new Map<string, string>();
   if (unique.length === 0) return contents;
-  const proc = runWithInput('git', ['cat-file', '--batch'], {
-    cwd: repo,
-    input: unique.join('\n') + '\n',
-    windowsHide: true,
-    maxBuffer: 256 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  });
-  if (proc.status !== 0) throw new Error(`${childProblem('git cat-file --batch', proc)} in ${repo}`);
+  const input = unique.join('\n') + '\n';
+  const proc = withStdinFile(input, (stdin) =>
+    spawnSync('git', ['cat-file', '--batch'], {
+      cwd: repo,
+      stdio: [stdin, 'pipe', 'pipe'],
+      shell: false,
+      windowsHide: true,
+      timeout: INPUT_CHILD_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: 256 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    }),
+  );
+  if (proc.status !== 0) throw new Error(`${childProblem('git cat-file --batch', proc, Buffer.byteLength(input))} in ${repo}`);
   const buf = proc.stdout as Buffer;
   let at = 0;
   for (const sha of unique) {

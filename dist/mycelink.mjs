@@ -16641,12 +16641,11 @@ function verifyChangedPaths(worktree, base, fence) {
 }
 
 // src/security/exec.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync3 } from "node:child_process";
 import { existsSync as existsSync5, statSync } from "node:fs";
 import { delimiter, extname, isAbsolute as isAbsolute3, join as join9, win32 } from "node:path";
 
 // src/util/child-stdin.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
 import { closeSync as closeSync3, mkdtempSync, openSync as openSync3, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join8 } from "node:path";
@@ -16688,19 +16687,15 @@ function bestEffortSync(fn, attempts = 3) {
 
 // src/util/child-stdin.ts
 var INPUT_CHILD_TIMEOUT_MS = 12e4;
-function runWithInput(file, args, options) {
-  const { input, timeoutMs = INPUT_CHILD_TIMEOUT_MS, killSignal = "SIGKILL", ...rest } = options;
+function withStdinFile(input, use) {
   const bytes2 = typeof input === "string" ? Buffer.from(input, "utf8") : input;
   const dir = mkdtempSync(join8(tmpdir(), "mycelink-stdin-"));
-  const t0 = Date.now();
   let fd = null;
   try {
     const path = join8(dir, "input");
     writeFileSync(path, bytes2, { flag: "wx", mode: 384 });
     fd = openSync3(path, "r");
-    const r = spawnSync3(file, args, { ...rest, stdio: [fd, "pipe", "pipe"], timeout: timeoutMs, killSignal });
-    const timedOut = r.error?.code === "ETIMEDOUT";
-    return Object.assign(r, { timedOut, input_bytes: bytes2.length, ms: Date.now() - t0 });
+    return use(fd);
   } finally {
     if (fd !== null) closeSync3(fd);
     removeScratch(dir);
@@ -16712,10 +16707,11 @@ function removeScratch(dir) {
   } catch {
   }
 }
-function childProblem(label, r) {
-  const how = r.timedOut ? `killed after ${r.ms} ms, past its bound` : r.error !== void 0 ? `failed to run (${String(r.error.code ?? r.error.message)})` : r.signal !== null ? `ended by ${r.signal}` : `exited ${r.status}`;
+function childProblem(label, r, inputBytes) {
+  const code = r.error?.code;
+  const how = code === "ETIMEDOUT" ? "killed past its bound" : r.error !== void 0 ? `failed to run (${String(code ?? r.error.message)})` : r.signal !== null ? `ended by ${r.signal}` : `exited ${r.status}`;
   const stderr = String(r.stderr ?? "").trim().slice(0, 300);
-  return `${label} ${how} (${r.input_bytes} bytes of input)${stderr !== "" ? `: ${stderr}` : ""}`;
+  return `${label} ${how} (${inputBytes} bytes of input)${stderr !== "" ? `: ${stderr}` : ""}`;
 }
 
 // src/security/exec.ts
@@ -16834,7 +16830,7 @@ function planShellScript(script, options = {}) {
   }
   return { file: "/bin/sh", args: ["-c", script], shell: false, windowsVerbatimArguments: false, display: script };
 }
-function spawnOptions(plan, env, options) {
+function spawnOptions(plan, env, options, stdin = null) {
   return {
     cwd: options.cwd,
     encoding: "utf8",
@@ -16843,12 +16839,9 @@ function spawnOptions(plan, env, options) {
     windowsVerbatimArguments: plan.windowsVerbatimArguments,
     maxBuffer: options.maxBuffer ?? 32 * 1024 * 1024,
     env,
-    shell: false
+    shell: false,
+    stdio: stdin === null ? "pipe" : [stdin, "pipe", "pipe"]
   };
-}
-function inputOptions(plan, env, options) {
-  const { timeout, ...rest } = spawnOptions(plan, env, options);
-  return { ...rest, input: options.input, timeoutMs: timeout, killSignal: "SIGTERM" };
 }
 function toRunResult(proc, plan) {
   const timedOut = proc.error !== void 0 && proc.error.code === "ETIMEDOUT";
@@ -16865,14 +16858,14 @@ function toRunResult(proc, plan) {
 function runCommandSync(argv, options) {
   const env = options.cleanEnv === true ? { ...options.env ?? {} } : { ...process.env, ...options.env ?? {} };
   const plan = planCommand(argv, { env });
-  if (options.input !== void 0) return toRunResult(runWithInput(plan.file, plan.args, inputOptions(plan, env, { ...options, input: options.input })), plan);
-  return toRunResult(spawnSync4(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
+  if (options.input !== void 0) return toRunResult(withStdinFile(options.input, (stdin) => spawnSync3(plan.file, plan.args, spawnOptions(plan, env, options, stdin))), plan);
+  return toRunResult(spawnSync3(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
 }
 function runShellScriptSync(script, options) {
   const env = { ...process.env, ...options.env ?? {} };
   const plan = planShellScript(script, { allowShell: options.allowShell ?? false });
-  if (options.input !== void 0) return toRunResult(runWithInput(plan.file, plan.args, inputOptions(plan, env, { ...options, input: options.input })), plan);
-  return toRunResult(spawnSync4(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
+  if (options.input !== void 0) return toRunResult(withStdinFile(options.input, (stdin) => spawnSync3(plan.file, plan.args, spawnOptions(plan, env, options, stdin))), plan);
+  return toRunResult(spawnSync3(plan.file, plan.args, spawnOptions(plan, env, options)), plan);
 }
 
 // src/security/redact.ts
@@ -18836,6 +18829,7 @@ function testLine(t) {
 import { createHash as createHash8 } from "node:crypto";
 import { existsSync as existsSync8, readFileSync as readFileSync5 } from "node:fs";
 import { join as join12 } from "node:path";
+import { spawnSync as spawnSync4 } from "node:child_process";
 var COMPATIBILITY_TRAILER = "Mycelink-Compatibility";
 var JS_TEST_EXTENSIONS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
 var DEFAULT_TEST_PATHS = Object.freeze([
@@ -18919,14 +18913,21 @@ function workingTreeChanges(worktree) {
 function hashWorkingFiles(worktree, paths) {
   const hashes = /* @__PURE__ */ new Map();
   if (paths.length === 0) return hashes;
-  const proc = runWithInput("git", ["hash-object", "--stdin-paths"], {
-    cwd: worktree,
-    input: paths.join("\n") + "\n",
-    encoding: "utf8",
-    windowsHide: true,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
-  });
-  if (proc.status !== 0) throw new Error(`${childProblem("git hash-object --stdin-paths", proc)} in ${worktree}`);
+  const input = paths.join("\n") + "\n";
+  const proc = withStdinFile(
+    input,
+    (stdin) => spawnSync4("git", ["hash-object", "--stdin-paths"], {
+      cwd: worktree,
+      stdio: [stdin, "pipe", "pipe"],
+      encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+      timeout: INPUT_CHILD_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+    })
+  );
+  if (proc.status !== 0) throw new Error(`${childProblem("git hash-object --stdin-paths", proc, Buffer.byteLength(input))} in ${worktree}`);
   const lines = String(proc.stdout ?? "").split(/\r?\n/).filter((l) => l.trim() !== "");
   paths.forEach((p, i) => hashes.set(p, lines[i].trim()));
   return hashes;
@@ -19019,14 +19020,21 @@ function readBlobs(repo, shas) {
   const unique = [...new Set(shas)];
   const contents = /* @__PURE__ */ new Map();
   if (unique.length === 0) return contents;
-  const proc = runWithInput("git", ["cat-file", "--batch"], {
-    cwd: repo,
-    input: unique.join("\n") + "\n",
-    windowsHide: true,
-    maxBuffer: 256 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
-  });
-  if (proc.status !== 0) throw new Error(`${childProblem("git cat-file --batch", proc)} in ${repo}`);
+  const input = unique.join("\n") + "\n";
+  const proc = withStdinFile(
+    input,
+    (stdin) => spawnSync4("git", ["cat-file", "--batch"], {
+      cwd: repo,
+      stdio: [stdin, "pipe", "pipe"],
+      shell: false,
+      windowsHide: true,
+      timeout: INPUT_CHILD_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      maxBuffer: 256 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+    })
+  );
+  if (proc.status !== 0) throw new Error(`${childProblem("git cat-file --batch", proc, Buffer.byteLength(input))} in ${repo}`);
   const buf = proc.stdout;
   let at = 0;
   for (const sha of unique) {
@@ -19350,6 +19358,7 @@ function claimMismatch(record, claimed) {
 }
 
 // src/engine/reproduction-capsule.ts
+import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash as createHash9 } from "node:crypto";
 import { closeSync as closeSync6, constants as constants3, existsSync as existsSync11, fstatSync as fstatSync3, lstatSync as lstatSync4, mkdirSync as mkdirSync5, openSync as openSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync6, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname6, join as join14, relative as relative4, sep as sep4 } from "node:path";
@@ -19753,10 +19762,13 @@ function changedPaths(worktree) {
   return [...paths].sort();
 }
 function blobOf(worktree, path, bytes2) {
-  const proc = runWithInput("git", ["hash-object", "--path", path, "--stdin"], { cwd: worktree, input: bytes2, encoding: "utf8", windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  const proc = withStdinFile(
+    bytes2,
+    (stdin) => spawnSync5("git", ["hash-object", "--path", path, "--stdin"], { cwd: worktree, stdio: [stdin, "pipe", "pipe"], encoding: "utf8", shell: false, windowsHide: true, timeout: INPUT_CHILD_TIMEOUT_MS, killSignal: "SIGKILL", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } })
+  );
   const blob = String(proc.stdout ?? "").trim();
   if (proc.status === 0 && /^[0-9a-f]{40,64}$/.test(blob)) return blob;
-  throw new Error(`${childProblem(`git hash-object for ${path}`, proc)} in ${worktree}`);
+  throw new Error(`${childProblem(`git hash-object for ${path}`, proc, bytes2.length)} in ${worktree}`);
 }
 function blobAt(repo, rev, path) {
   const r = runGit(repo, ["rev-parse", "--verify", "--quiet", `${rev}:${path}`], { allowFail: true });
@@ -21823,13 +21835,13 @@ function assertClaimCapability(nodeId, runtime, raw) {
 }
 
 // src/util/process-identity.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 import { readFileSync as readFileSync12 } from "node:fs";
 import { hostname as hostname2 } from "node:os";
 var clockTicks = null;
 function linuxClockTicks() {
   if (clockTicks === null) {
-    const r = spawnSync5("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5e3 });
+    const r = spawnSync6("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5e3 });
     const n = Number((r.stdout ?? "").trim());
     clockTicks = Number.isInteger(n) && n > 0 ? n : 100;
   }
@@ -21873,7 +21885,7 @@ function linuxInfo(pid) {
   };
 }
 function darwinInfo(pid) {
-  const r = spawnSync5("ps", ["-o", "ppid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1e4 });
+  const r = spawnSync6("ps", ["-o", "ppid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1e4 });
   const line = (r.stdout ?? "").trim();
   if (r.status !== 0 || line === "") return null;
   const parts = line.split(/\s+/);
@@ -21890,7 +21902,7 @@ function darwinInfo(pid) {
 }
 function windowsSnapshot() {
   const script = "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
-  const r = spawnSync5("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+  const r = spawnSync6("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8",
     timeout: 6e4,
     windowsHide: true,

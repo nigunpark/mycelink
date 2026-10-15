@@ -18,14 +18,16 @@
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { fstatSync, readdirSync, readSync, writeFileSync, mkdirSync } from 'node:fs';
+import { fstatSync, readFileSync, readdirSync, readSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { commitAll, git, makeGitRepo, writeFiles } from '../helpers/git-fixture.js';
 import { DEFAULT_TDD_POLICY, redBinding, redDeclaredTests } from '../../src/engine/tdd-history.js';
 import { collectCapsuleFiles } from '../../src/engine/reproduction-capsule.js';
-import { runCommandSync } from '../../src/security/exec.js';
+import { CommandPolicyError, runCommandSync, runShellScriptSync } from '../../src/security/exec.js';
+import * as childStdin from '../../src/util/child-stdin.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { safeGit } from '../../evals-public-projects/lib/git.mjs';
 // @ts-expect-error -- plain ESM module without type declarations
@@ -196,5 +198,65 @@ describe("the quickstart's commands", () => {
     expect(r.code, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toEqual({ file: true, text: '{"hook_event_name":"PreToolUse"}\n' });
     expect(readdirSync(ownTmp).filter((n) => n.startsWith('mycelink-quickstart-stdin-'))).toEqual([]);
+  });
+});
+
+// CodeQL #86/#87 on 80900c8: a generic runWithInput(file, args, options) was a new way to run any command, one the
+// command policy did not stand in front of. The finished-file stdin is now only that: a file. Whoever runs a child names
+// it (a git command) or has its policy plan it (security/exec.ts).
+describe('who may run a command with input', () => {
+  it('the stdin module runs nothing: it hands over a file, never a command', () => {
+    expect(Object.keys(childStdin).sort()).toEqual(['INPUT_CHILD_TIMEOUT_MS', 'childProblem', 'withStdinFile']);
+    const source = readFileSync(join(process.cwd(), 'src', 'util', 'child-stdin.ts'), 'utf8');
+    expect(source).not.toMatch(/^import (?!type )[^;]*from 'node:child_process'/m);
+    expect(source).not.toMatch(/\b(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(/);
+    const seenBefore = seen.length;
+    expect(childStdin.withStdinFile('x', (fd) => fstatSync(fd).isFile())).toBe(true);
+    expect(seen.length).toBe(seenBefore);
+    expect(scratchLeft()).toEqual([]);
+  });
+
+  it.each([
+    [['--help'], 'OPTION_AS_EXECUTABLE'],
+    [[''], 'EMPTY_EXECUTABLE'],
+    [['node\u0000evil'], 'NUL_BYTE'],
+    [['node\nevil'], 'CONTROL_CHARACTER'],
+    [[], 'EMPTY_COMMAND'],
+  ])('an argv the command policy refuses (%j) is refused with input too: nothing runs, no input file is made', (argv, code) => {
+    expect(() => runCommandSync(argv as string[], { cwd: ownTmp, input: 'payload\n' })).toThrow(expect.objectContaining({ name: 'CommandPolicyError', code }));
+    expect(seen).toEqual([]);
+    expect(scratchLeft()).toEqual([]);
+  });
+
+  it('a shell script with input is refused unless the shell is allowed: nothing runs, no input file is made', () => {
+    expect(() => runShellScriptSync('cat; echo pwned', { cwd: ownTmp, input: 'payload\n' })).toThrow(CommandPolicyError);
+    expect(seen).toEqual([]);
+    expect(scratchLeft()).toEqual([]);
+  });
+
+  it('shell syntax in an argv with input reaches the command as literal arguments, never a shell', () => {
+    const hostile = ['$(echo pwned > pwned)', '`echo pwned > pwned`', '; echo pwned > pwned', '| echo pwned > pwned', '&& echo pwned > pwned', '%PATH%'];
+    const r = runCommandSync([process.execPath, '-e', "process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), stdin: require('fs').readFileSync(0, 'utf8') }))", ...hostile], { cwd: ownTmp, input: 'payload\n', timeoutMs: 60_000 });
+    expect(r.exitCode, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ argv: hostile, stdin: 'payload\n' });
+    expect(readdirSync(ownTmp).filter((n) => n === 'pwned')).toEqual([]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.argv[0]).toBe(process.execPath);
+  });
+
+  it.runIf(process.platform === 'win32')('a batch file with input still refuses a cmd.exe metacharacter: nothing runs', () => {
+    const bat = join(ownTmp, 'tool.cmd');
+    writeFileSync(bat, '@echo off\r\necho ran\r\n');
+    expect(() => runCommandSync([bat, '&echo pwned'], { cwd: ownTmp, input: 'payload\n' })).toThrow(expect.objectContaining({ code: 'BATCH_METACHARACTER' }));
+    expect(seen).toEqual([]);
+    expect(scratchLeft()).toEqual([]);
+  });
+
+  it("the tests' launcher runner runs the plugin's launcher only, by its absolute path", () => {
+    for (const argv of [[process.execPath, '-e', '1'], ['/bin/sh', '-c', 'echo pwned'], ['bin/mycelink.mjs', 'hook', 'session-start'], [join(ownTmp, 'mycelink.mjs')], []]) {
+      expect(() => runLauncher(argv, { input: '{}' }), JSON.stringify(argv)).toThrow(/runs only a bin\/mycelink\.mjs launcher/);
+    }
+    expect(seen).toEqual([]);
+    expect(scratchLeft()).toEqual([]);
   });
 });

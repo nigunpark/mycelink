@@ -106,18 +106,18 @@ export function mycelinkEnv(extra = {}) {
 const INPUT_TIMEOUT_MS = 120_000;
 
 /**
- * spawnSync with `input` as the child's stdin, a finished file: never spawnSync's `input`, a stream written while the
+ * git (always git, never a shell) with `input` as its stdin, a finished file: never spawnSync's `input`, a stream written while the
  * child runs, whose end a child on macOS (Node 22) can wait for forever, the caller blocked with it (CI 38635817750).
  * Bounded: killed past INPUT_TIMEOUT_MS. The file and its private directory are removed once the child has ended.
  */
-function spawnWithInput(file, args, input, options) {
+function gitWithInput(args, input, options) {
   const dir = mkdtempSync(join(tmpdir(), 'bench-git-stdin-'));
   let fd = null;
   try {
     const path = join(dir, 'input');
     writeFileSync(path, input, { flag: 'wx', mode: 0o600 });
     fd = openSync(path, 'r');
-    return spawnSync(file, args, { ...options, stdio: [fd, 'pipe', 'pipe'], timeout: INPUT_TIMEOUT_MS, killSignal: 'SIGKILL' });
+    return spawnSync('git', args, { ...options, stdio: [fd, 'pipe', 'pipe'], shell: false, timeout: INPUT_TIMEOUT_MS, killSignal: 'SIGKILL' });
   } finally {
     if (fd !== null) closeSync(fd);
     try {
@@ -132,7 +132,7 @@ function spawnWithInput(file, args, input, options) {
 
 /**
  * Run git hardened (see above); blind to replace refs and grafts. `input`, when given, is its stdin as a finished file,
- * the child bounded (spawnWithInput).
+ * the child bounded (gitWithInput).
  *
  * Note: stdout is trimmed unless `encoding: 'buffer'` is passed; read
  * porcelain output (whose first column may be a space) as a buffer.
@@ -144,9 +144,10 @@ export function safeGit(cwd, args, { input, encoding = 'utf8', env = {} } = {}) 
     encoding: encoding === 'buffer' ? undefined : encoding,
     maxBuffer: 256 * 1024 * 1024,
     windowsHide: true,
+    shell: false,
     env: hardenedGitEnv({ GIT_ATTR_SOURCE: EMPTY_TREE, ...env }),
   };
-  const r = input === undefined ? spawnSync('git', argv, options) : spawnWithInput('git', argv, input, options);
+  const r = input === undefined ? spawnSync('git', argv, options) : gitWithInput(argv, input, options);
   const text = (v) => (v === undefined || v === null ? '' : Buffer.isBuffer(v) ? v : String(v));
   return {
     code: r.status ?? -1,

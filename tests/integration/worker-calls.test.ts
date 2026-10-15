@@ -27,7 +27,7 @@ import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { git } from '../helpers/git-fixture.js';
 import { ERRORS, SHOP_FEATURE, createShop, moduleVerifier, shopCli, shopGraph, type Shop } from '../helpers/shop-fixture.js';
 import type { ShopTicket } from '../helpers/shop-worker.js';
-import { runWithInput } from '../../src/util/child-stdin.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -61,7 +61,7 @@ function hook(event: string, payload: Record<string, unknown>, env: Record<strin
   const e: Record<string, string | undefined> = { ...process.env, CLAUDE_PROJECT_DIR: s.root, MYCELINK_PROVENANCE: ledger, ...env };
   delete e['MYCELINK_CONTROL_ROOT'];
   delete e['MYCELINK_NODE_ID'];
-  const r = runWithInput(process.execPath, [LAUNCHER, 'hook', event], { input: JSON.stringify({ session_id: SESSION, transcript_path: transcript, cwd: s.root, ...payload }), encoding: 'utf8', env: e as NodeJS.ProcessEnv, cwd: s.root, windowsHide: true });
+  const r = runLauncher([LAUNCHER, 'hook', event], { input: JSON.stringify({ session_id: SESSION, transcript_path: transcript, cwd: s.root, ...payload }), env: e as NodeJS.ProcessEnv, cwd: s.root });
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 const pre = (tool: string, input: Record<string, unknown>, id: string, who: Record<string, string> = {}, env: Record<string, string | undefined> = {}) => hook('controller-fence', { hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, tool_use_id: id, ...who }, env);
@@ -158,7 +158,7 @@ describe('every Bash call is recorded before and after it runs, with the shared 
     const before = calls().length;
     expect(pre('Bash', { command: 'git status' }, 'toolu_n1', {}, { MYCELINK_PROVENANCE: undefined }).code).toBe(0);
     const outside = makeTmpDir('calls-outside-');
-    const r = runWithInput(process.execPath, [LAUNCHER, 'hook', 'tool-end'], { input: JSON.stringify({ session_id: SESSION, transcript_path: transcript, cwd: outside, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_n2' }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: outside, MYCELINK_PROVENANCE: ledger }, cwd: outside, windowsHide: true });
+    const r = runLauncher([LAUNCHER, 'hook', 'tool-end'], { input: JSON.stringify({ session_id: SESSION, transcript_path: transcript, cwd: outside, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_n2' }), env: { ...process.env, CLAUDE_PROJECT_DIR: outside, MYCELINK_PROVENANCE: ledger }, cwd: outside });
     expect(r.status).toBe(0);
     expect(calls().length).toBe(before);
     rmSync(outside, { recursive: true, force: true });
