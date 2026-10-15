@@ -23,7 +23,6 @@
  *    and refused as outside its worktree. Only a worker's call is a worker's.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
@@ -32,17 +31,16 @@ import { FEATURE_ID, commitControl, createPortfolio, portfolioGraph, writePrd, t
 import { main, type CliIo } from '../../src/cli/cli.js';
 import { mutateState } from '../../src/state/feature-state.js';
 import { asController } from '../helpers/authority.js';
+import { runLauncher } from '../helpers/launcher-process.js';
 
 afterAll(() => cleanupTmpRoots());
 
 const LAUNCHER = resolve(process.cwd(), 'bin', 'mycelink.mjs');
 
 function hook(p: Portfolio, payload: Record<string, unknown>, env: Record<string, string> = {}): { code: number; stderr: string } {
-  const r = spawnSync(process.execPath, [LAUNCHER, 'hook', 'pre-tool-use', '--control-root', p.control], {
+  const r = runLauncher([LAUNCHER, 'hook', 'pre-tool-use', '--control-root', p.control], {
     input: JSON.stringify({ hook_event_name: 'PreToolUse', ...payload }),
-    encoding: 'utf8',
     env: { ...process.env, MYCELINK_CONTROL_ROOT: p.control, ...env },
-    windowsHide: true,
   });
   return { code: r.status ?? -1, stderr: r.stderr ?? '' };
 }

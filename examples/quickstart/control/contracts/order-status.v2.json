@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contracts/order-status.v2.json",
+  "title": "Order-status payload, contract version 2",
+  "description": "Published by orders-api (module orders), rendered by orders-web (module ui). ORD-101.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "status"],
+  "properties": {
+    "version": { "const": 2 },
+    "id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["placed", "shipped", "delivered", "delayed"] },
+    "eta": { "type": "string", "pattern": "^\d{4}-\d{2}-\d{2}$" }
+  },
+  "if": { "properties": { "status": { "const": "delayed" } } },
+  "then": { "required": ["eta"] },
+  "else": { "not": { "required": ["eta"] } }
+}

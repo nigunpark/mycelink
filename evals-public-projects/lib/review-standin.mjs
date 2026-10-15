@@ -12,8 +12,9 @@
  * mycelink:acceptance-reviewer), then the file.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 export const REVIEWER = 'mycelink:acceptance-reviewer';
 
@@ -119,7 +120,28 @@ export function writeVerdict(ticket, { bin, cwd, env = {}, gaps = {}, model = 's
   const verdict = verdictFor(JSON.parse(readFileSync(ticket.packet_path, 'utf8')), gaps, model);
   const content = JSON.stringify(verdict, null, 2);
   const payload = { session_id: sessionId, agent_id: agentId, agent_type: REVIEWER, cwd, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: ticket.result_slot, content } };
-  const hook = spawnSync(process.execPath, [bin, 'hook', 'controller-fence'], { input: JSON.stringify(payload), encoding: 'utf8', windowsHide: true, env: { ...process.env, ...env } });
+  // The payload on the hook's stdin as a finished file, never spawnSync's `input`: on macOS that is an 8 KiB socketpair
+  // under Node 22, and a payload longer than one write can reach the hook whole and its end never (CI 38618387236).
+  const scratch = mkdtempSync(join(tmpdir(), 'mycelink-hook-stdin-'));
+  let hook;
+  try {
+    const stdin = join(scratch, 'payload.json');
+    writeFileSync(stdin, JSON.stringify(payload), { flag: 'wx', mode: 0o600 });
+    const fd = openSync(stdin, 'r');
+    try {
+      hook = spawnSync(process.execPath, [bin, 'hook', 'controller-fence'], { stdio: [fd, 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true, env: { ...process.env, ...env } });
+    } finally {
+      closeSync(fd);
+    }
+  } finally {
+    try {
+      // Windows can refuse an unlink for a moment (CI 38635817750): tried again, and still refused, left (private); never a
+      // failure of the reviewer's verdict.
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // left in the temporary directory
+    }
+  }
   if (hook.status !== 0) throw new Error(`the fence refused the stand-in reviewer's verdict (exit ${hook.status}): ${hook.stderr}`);
   mkdirSync(dirname(ticket.result_slot), { recursive: true });
   writeFileSync(ticket.result_slot, content);

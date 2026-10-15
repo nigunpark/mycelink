@@ -1,0 +1,60 @@
+name: Design partner
+description: Offer to pilot Mycelink on a real feature that spans several repositories. See docs/DESIGN_PARTNERS.md.
+title: "Design partner: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for offering a pilot. Describe the shape of the work, not your code.
+        Leave out private repository names and anything confidential. What a pilot involves: docs/DESIGN_PARTNERS.md.
+  - type: textarea
+    id: feature
+    attributes:
+      label: The feature you have in mind
+      description: One or two sentences on what changes, in general terms.
+    validations:
+      required: true
+  - type: textarea
+    id: repositories
+    attributes:
+      label: The repositories involved
+      description: How many, what role each plays (library, service, client...), languages and build tools, and each one's test command.
+      placeholder: |
+        3 repositories: a TypeScript library (npm test), a Python service (pytest), a web client (npm test)
+    validations:
+      required: true
+  - type: dropdown
+    id: claude
+    attributes:
+      label: How do you use Claude Code today?
+      options:
+        - Daily
+        - Occasionally
+        - Not yet
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: What would make the pilot a success for you?
+  - type: dropdown
+    id: sharing
+    attributes:
+      label: What can be shared afterwards?
+      options:
+        - A public write-up naming my project
+        - An anonymised write-up
+        - Only aggregate numbers
+        - Nothing public; feedback to the maintainers only
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I read docs/DESIGN_PARTNERS.md and understand that model usage runs on my own Claude plan or API account.
+          required: true
+        - label: This issue contains no confidential information.
+          required: true
