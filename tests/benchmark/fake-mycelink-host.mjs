@@ -107,7 +107,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 // Pipes are asynchronous on macOS and Windows (synchronous on Linux): a stand-in that exits right after its last
 // line would drop what was still buffered, cutting its own stream mid-line. Write through, as a real CLI does.
@@ -273,11 +273,30 @@ function runChild(label, file, args, { input, ...options }, timeoutMs) {
     r = spawnSync(file, args, { ...options, ...(fd !== null ? { stdio: [fd, 'pipe', 'pipe'] } : {}), timeout: timeoutMs, killSignal: 'SIGKILL' });
   } finally {
     if (fd !== null) closeSync(fd);
-    if (stdin !== null) rmSync(stdin, { force: true });
+    if (stdin !== null) removeInput(stdin);
   }
   const timedOut = r.error?.code === 'ETIMEDOUT';
   trace('child-end', { label, ms: Date.now() - t0, status: r.status, signal: r.signal, ...(timedOut ? { timed_out: true } : r.error ? { error: String(r.error.code ?? r.error.message) } : {}) });
   return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error, timedOut };
+}
+
+/**
+ * A finished payload file, removed once its child has ended. Windows can refuse the unlink for a moment (a scanner, a
+ * handle still closing: EPERM, EBUSY); that is tried again, and a file still refused is left to its directory's own
+ * cleanup. Never a failure of the session: in CI 38635817750 one refusal, thrown out of a hook call, ended the session
+ * mid-worker (exit 1), the worker's stash entry never popped.
+ */
+function removeInput(file) {
+  for (let i = 0; i < 6; i++) {
+    try {
+      rmSync(file, { force: true });
+      return;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(error?.code) || i === 5) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (i + 1));
+    }
+  }
+  trace('input-left', { file: basename(file) });
 }
 
 /**

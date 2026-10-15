@@ -134,7 +134,13 @@ export function writeVerdict(ticket, { bin, cwd, env = {}, gaps = {}, model = 's
       closeSync(fd);
     }
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    try {
+      // Windows can refuse an unlink for a moment (CI 38635817750): tried again, and still refused, left (private); never a
+      // failure of the reviewer's verdict.
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // left in the temporary directory
+    }
   }
   if (hook.status !== 0) throw new Error(`the fence refused the stand-in reviewer's verdict (exit ${hook.status}): ${hook.stderr}`);
   mkdirSync(dirname(ticket.result_slot), { recursive: true });

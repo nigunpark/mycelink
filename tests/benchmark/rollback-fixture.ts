@@ -73,7 +73,17 @@ export const run = (fake: { dir: string; file: string }, options: { lightCheckMs
 export const failingOf = (v: any) => Object.entries(v.sections).flatMap(([name, s]: [string, any]) => (s?.checks ?? []).filter((c: any) => !c.ok && c.severity !== 'warning').map((c: any) => `${name}:${c.id}`));
 export const shape = (r: any) => r.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, s.corrects ?? null, Boolean(s.violation)]);
 /** On a shape mismatch, what each session's checks found: its stop, its violation, what its settlement could not attribute. */
-export const found = (r: any) => JSON.stringify(r.sessions.map((s: any) => ({ ended_by: s.ended_by, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null, housekeeping: s.controller_txn?.housekeeping ?? null })));
+export const found = (r: any) => JSON.stringify(r.sessions.map((s: any) => ({ ended_by: s.ended_by, exit_code: s.exit_code, stopped_for: s.controller_txn?.stopped_for ?? null, violation: s.violation?.summary ?? null, unauthorized: s.controller_txn?.unauthorized ?? null, ambiguous: s.controller_txn?.ambiguous ?? null, housekeeping: s.controller_txn?.housekeeping ?? null })));
+
+/** What the stand-in's own trace says ended it, or went wrong: its errors, its exits, a bound it ran past, an input it left. */
+export function hostErrors(fake: { dir: string }): string {
+  try {
+    const lines = readFileSync(join(fake.dir, 'host-trace.jsonl'), 'utf8').split('\n').filter(Boolean);
+    return lines.filter((l) => /"ev":"(error|exit|done|input-left|hook-timeout|call-timeout|child-timeout|stop-unanswered)"/.test(l)).map((l) => l.slice(0, 1500)).join('\n');
+  } catch (error) {
+    return `no host trace: ${String(error)}`;
+  }
+}
 
 /** The corrective session completed the feature through Mycelink, the violation recovered and on the record. */
 export function recovered(r: any, fake: ReturnType<typeof hostPlan>, sessions = 2) {

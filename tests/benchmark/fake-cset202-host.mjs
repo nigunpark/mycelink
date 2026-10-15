@@ -179,6 +179,26 @@ let parentType = null;
  * the hook whole and its end never (CI 38618387236), the hook waiting for EOF.
  */
 let hookInputs = 0;
+
+/**
+ * A finished payload file, removed once its child has ended. Windows can refuse the unlink for a moment (a scanner, a
+ * handle still closing: EPERM, EBUSY); that is tried again, and a file still refused is left to its directory's own
+ * cleanup. Never a failure of the session: in CI 38635817750 one refusal, thrown out of a hook call, ended the session
+ * mid-worker (exit 1), the worker's stash entry never popped.
+ */
+function removeInput(file) {
+  for (let i = 0; i < 6; i++) {
+    try {
+      rmSync(file, { force: true });
+      return;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(error?.code) || i === 5) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (i + 1));
+    }
+  }
+  // left to the plan directory
+}
+
 function runHookChild(file, args, payload, options) {
   const stdin = join(dirname(plan.log), `hook-stdin-${process.pid}-${++hookInputs}`);
   writeFileSync(stdin, JSON.stringify(payload), { flag: 'wx', mode: 0o600 });
@@ -187,7 +207,7 @@ function runHookChild(file, args, payload, options) {
     return spawnSync(file, args, { ...options, stdio: [fd, 'pipe', 'pipe'] });
   } finally {
     closeSync(fd);
-    rmSync(stdin, { force: true });
+    removeInput(stdin);
   }
 }
 
