@@ -17,7 +17,12 @@
  *   core         what Mycelink's core left exactly as its ledger records it
  *                (a file's bytes, mode, target or absence; a ref, an index or
  *                a Git metadata file a core git command changed), or was
- *                changing when its process ended (an intent with no done)
+ *                changing when its process ended (an intent with no done);
+ *                and, in a check while the session runs, what lies below the
+ *                root of a call that moves or removes a whole tree while its
+ *                process is still inside it (a result slot being renamed
+ *                into its quarantine: the done that names its files comes
+ *                after the call) — never by a path's name
  *   worker       a module-worker's worktree, its admin files and its branch
  *                (`.mycelink/worktrees/<name>`), unless the controller reached
  *                into it (`reached`: then it is contaminated, for the caller
@@ -105,6 +110,9 @@ const INPUTS = new Set(['requirements', 'repositories.yaml', 'mycelink.config.js
 
 // ---- paths -----------------------------------------------------------------------
 
+/** The core's node:fs calls that move or remove a whole tree below the paths their intent names. */
+const TREE_CALLS = new Set(['renameSync', 'cpSync', 'rmSync']);
+
 /** A key (workspace-relative, '/'-separated) for an absolute path inside the workspace, however it is spelled; null outside it. */
 const keyOf = workspaceKey;
 const under = (key, root) => root === '' || key === root || key.startsWith(`${root}/`);
@@ -163,7 +171,8 @@ export function sessionLedger({ ledgerDir, mark }) {
  * touched each path and Git directory; and what each core process read
  * before a change (CSET-203 r12: what a change may rest on) — the paths and
  * their last read, the git commands that changed nothing and those that did,
- * each process's first and last record.
+ * each process's first and last record; and the calls still in flight that
+ * move or remove a whole tree (`inFlight`).
  */
 function ledgerIndex(records, workspace) {
   const files = new Map();
@@ -172,6 +181,11 @@ function ledgerIndex(records, workspace) {
     if (key !== null && (touched.get(key) ?? -1n) < at) touched.set(key, at);
   };
   const open = new Map();
+  /** Each open intent: `{ pid, op, paths, at }` (`at`: its place among the records). */
+  const openIntents = new Map();
+  /** Each process's last record (its place), and the processes that announced themselves in the session ('proc'). */
+  const lastOf = new Map();
+  const announced = new Set();
   const recursive = [];
   const git = [];
   const gitOpen = new Map();
@@ -185,8 +199,10 @@ function ledgerIndex(records, workspace) {
   /** Each process: `{ first, last, group, sub }` (ns). */
   const procs = new Map();
   const t = (r) => BigInt(r.t ?? '0');
-  for (const r of records) {
+  for (const [at, r] of records.entries()) {
     if (Number.isInteger(r.pid)) {
+      lastOf.set(r.pid, at);
+      if (r.kind === 'proc') announced.add(r.pid);
       const p = procs.get(r.pid) ?? { first: t(r), last: t(r), group: null, sub: null };
       if (t(r) < p.first) p.first = t(r);
       if (t(r) > p.last) p.last = t(r);
@@ -209,7 +225,9 @@ function ledgerIndex(records, workspace) {
         open.set(`${r.pid}:${r.seq}:${p}`, p);
         touch(keyOf(workspace, p), t(r));
       }
+      openIntents.set(`${r.pid}:${r.seq}`, { pid: r.pid, op: r.op, paths: r.paths ?? [], at });
     } else if (r.kind === 'done') {
+      openIntents.delete(`${r.pid}:${r.seq}`);
       for (const s of r.states ?? []) touch(keyOf(workspace, s.path), t(r));
       for (const s of r.states ?? []) {
         open.delete(`${r.pid}:${r.seq}:${s.path}`);
@@ -236,7 +254,19 @@ function ledgerIndex(records, workspace) {
   }
   const pending = new Set([...open.values()].map((p) => keyOf(workspace, p)).filter((k) => k !== null));
   const gitPending = new Set([...gitOpen.values()].filter(Boolean).map((p) => keyOf(workspace, p)).filter((k) => k !== null));
-  return { files, pending, recursive, git, gitPending, writes, touched, worktreeOps: worktreeOps.filter((k) => k !== null), reads, gitOps, procs };
+  // A call that moves or removes a whole tree (a result slot renamed into its quarantine) names only the tree's root in
+  // its intent; what it moved under that root is named by its done, after the call (provenance.ts walks it). While
+  // that call is still the last thing its process recorded — a process that announced itself in this session's ledger,
+  // the same process (a pid used again announces itself again), still inside the call — what lies under the root is
+  // the call's, in flight. Once the process records anything else, nothing of that call is; and a settlement, run when
+  // the session and everything it started are gone, sees none in flight (classifyTransaction reads this only with asOf).
+  const inFlight = [];
+  for (const o of openIntents.values()) {
+    if (!TREE_CALLS.has(o.op) || !announced.has(o.pid) || lastOf.get(o.pid) !== o.at) continue;
+    const roots = o.paths.map((p) => keyOf(workspace, p)).filter((k) => k !== null && k !== '');
+    if (roots.length > 0) inFlight.push({ pid: o.pid, op: o.op, roots });
+  }
+  return { files, pending, inFlight, recursive, git, gitPending, writes, touched, worktreeOps: worktreeOps.filter((k) => k !== null), reads, gitOps, procs };
 }
 
 /** Paths of a product checkout that differ from its HEAD and index, as Git sees them (nothing run but status, hardened). */
@@ -479,6 +509,8 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
   };
   const harnessEntry = (state) => (state.t === 'absent' ? null : { t: state.t, mode: state.mode, ...(state.t === 'f' ? { sha256: state.sha256 } : {}), ...(state.t === 'l' ? { target: relKey(Buffer.from(state.target, 'utf8')) } : {}) });
   const concurrent = (key) => asOf !== null && (L.touched.get(key) ?? -1n) >= asOf;
+  // Below the root of a core call still moving or removing a tree (a check while the session runs only): never by name.
+  const inFlight = (key) => asOf !== null && L.inFlight.some((c) => c.roots.some((root) => key !== root && under(key, root)));
   // By workspace key, never by path text: the ledger names the real place (macOS /private/var, Windows' long form of an
   // 8.3 name), the harness the workspace as it was handed over.
   const sameKey = (abs, key) => key !== null && keyOf(workspace, resolve(abs)) === key;
@@ -502,6 +534,7 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
     if (!entry && L.recursive.some((r) => under(key, r.key))) return 'core';
     if (L.pending.has(key)) return 'core-interrupted';
     if (concurrent(key)) return 'core-concurrent';
+    if (inFlight(key)) return 'core-in-flight';
     const gf = coreGitFile(abs);
     if (gf && sameAs(gf, entry)) return 'core';
     if (entry?.t === 'f' && /\/index$/.test(key)) {
@@ -560,7 +593,7 @@ export function classifyTransaction({ txn, post, reached = [], controls = [], re
   const entryDeltas = [...diff.entries];
   const listed = new Set(diff.entries.map((e) => e.key));
   for (const [key, records] of L.files) {
-    if (listed.has(key) || key === '' || L.pending.has(key) || concurrent(key) || isRefFile(key) || insideExcluded(key) || /\/index$/.test(key)) continue;
+    if (listed.has(key) || key === '' || L.pending.has(key) || concurrent(key) || inFlight(key) || isRefFile(key) || insideExcluded(key) || /\/index$/.test(key)) continue;
     if (workerOf(key) !== null || ownOf(key) !== null || adminOf(key) !== null) continue;
     const last = records.at(-1).state;
     const now = post.entries[key] ?? null;

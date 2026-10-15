@@ -5,14 +5,62 @@
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { makeTmpDir } from '../helpers/tmp.js';
+import { REPO_ROOT } from '../helpers/global-setup.js';
 import { TOY } from './toy-fixture.js';
 // @ts-expect-error -- plain ESM module without type declarations
 import { CORRECTIVE_PROMPT, TASK_CORRECTIVE_PROMPT, correctivePrompt, taskCorrectivePrompt } from '../../evals-public-projects/lib/faults.mjs';
 import { sha, arm, FAKE_HOST, hostPlan, LATE_ONLY, callsOf, failingOf, checksFound, useArmsFixture } from './arms-fixture.js';
 
 useArmsFixture();
+
+const SETTLE_PAUSE = join(REPO_ROOT, 'tests', 'benchmark', 'settle-pause-preload.mjs');
+
+/**
+ * Hold the rework session's settle of `node` inside its slot's move into the
+ * quarantine (settle-pause-preload.mjs) until `count` light checks of that
+ * session have started since it was held; then release it. Armed once the
+ * harness starts session 2, so the task session settles untouched. `done()`
+ * (after the run) stops watching and tells what happened: a session stopped
+ * meanwhile killed the held settle, unreleased.
+ */
+function holdSettle({ trace, hold, checks, node, count = 3 }: { trace: string; hold: string; checks: string; node: string; count?: number }) {
+  const read = (f: string) => (existsSync(f) ? readFileSync(f, 'utf8') : '');
+  const state = { paused: null as any, checks: 0, released: false, expired: false };
+  const tick = setInterval(() => {
+    if (!existsSync(join(hold, 'arm')) && /session 2 \(/.test(read(trace))) writeFileSync(join(hold, 'arm'), node);
+    if (state.paused === null && existsSync(join(hold, 'paused'))) state.paused = JSON.parse(read(join(hold, 'paused')));
+    if (state.paused === null || state.released) return;
+    state.checks = read(checks).split('\n').filter(Boolean).filter((l) => JSON.parse(l).started_ms > state.paused.at).length;
+    if (state.checks >= count) {
+      writeFileSync(join(hold, 'release'), '');
+      state.released = true;
+    }
+  }, 25);
+  return {
+    done: () => {
+      clearInterval(tick);
+      return { ...state, expired: existsSync(join(hold, 'expired')) };
+    },
+  };
+}
+
+/** Every result quarantine left below `dir`. */
+function quarantinesUnder(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      if (e.name.startsWith('.result-quarantine-')) out.push(join(d, e.name));
+      else walk(join(d, e.name));
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return out;
+}
 
 describe('fault-injected arm', () => {
   describe('the with arm, model-free: a stand-in host on the sealed Mycelink', () => {
@@ -92,6 +140,50 @@ describe('fault-injected arm', () => {
       expect(run.sessions[1].fence_blocks).toBe(1);
       expect(run.sessions[1].controller_txn, checksFound(run)).toMatchObject({ violation: false, mode: 'none' });
       expect(run.mycelink).toMatchObject({ complete: true, candidate: 'TOY-001-C002' });
+      expect(run.controller).toMatchObject({ ok: true, failures: [], recovered: [] });
+      expect(run.ok).toBe(true);
+    }, 900_000);
+
+    /**
+     * CI 38690258070 (hosted Windows, Node 22): the same rework, its `settle`
+     * still inside the call that moves the worker's result slot into its
+     * quarantine — the slot moved, the recorder's `done` not yet written —
+     * while light checks walked the workspace. What that call moved was taken
+     * for the controller's (two checks running), the session was stopped, the
+     * settle killed, and the corrective session found the node still
+     * REGRESSION_VERIFIED (REWORK_IN_FLIGHT). Here the settle is held there,
+     * deterministically, until three checks have run.
+     */
+    it('a settle held inside the move of its result slot into the quarantine while checks run is no violation: what that call moves is the core’s until it is done', async () => {
+      const outDir = join(makeTmpDir('bench-a-run-'), 'run');
+      const fake = hostPlan({ reworkDirect: true, reworkVia: 'command' });
+      // Inside the stand-in's own directory, the one the session's boundary binds in (writable): the preload and the hold.
+      const hold = join(fake.dir, 'hold');
+      mkdirSync(hold);
+      const preload = join(fake.dir, 'settle-pause-preload.mjs');
+      copyFileSync(SETTLE_PAUSE, preload);
+      const held = holdSettle({ trace: join(fake.dir, 'harness-trace.log'), hold, checks: join(outDir, 'controller-txn', 'session-2', 'checks.jsonl'), node: 'TOY-001.mod-b.impl' });
+      const run = await arm('with', fake, {
+        claude: [process.execPath, FAKE_HOST],
+        faultPlan: LATE_ONLY,
+        requireMycelink: true,
+        requireTdd: true,
+        lightCheckMs: 300,
+        outDir,
+        env: { FAKE_CLAUDE_PLAN: fake.file, NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`, MYCELINK_TEST_SETTLE_PAUSE: hold },
+      });
+      const h = held.done();
+      expect(run.sessions.map((s: any) => [s.index, s.purpose, s.ended_by, s.controller_txn?.stopped_for ?? null, s.violation?.summary ?? null]), checksFound(run)).toEqual([
+        [1, 'task', 'exit', null, null],
+        [2, 'rework', 'exit', null, null],
+      ]);
+      // It was held where CI caught it, and the checks ran while it was: the moved slot in the quarantine, no done.
+      expect(h).toMatchObject({ paused: { quarantine: expect.stringMatching(/[\\/]sessions[\\/]TOY-001\.mod-b\.impl[\\/]\.result-quarantine-[^\\/]+[\\/]slot$/) }, released: true, expired: false });
+      expect(h.checks).toBeGreaterThanOrEqual(3);
+      expect(run.sessions[1].controller_txn).toMatchObject({ violation: false, mode: 'none' });
+      // The settle went on and cleaned its quarantine up; the rework reached C002 through Mycelink.
+      expect(quarantinesUnder(join(run.workspace, 'platform', 'features'))).toEqual([]);
+      expect(run.mycelink).toMatchObject({ complete: true, candidate: 'TOY-001-C002', incomplete: [] });
       expect(run.controller).toMatchObject({ ok: true, failures: [], recovered: [] });
       expect(run.ok).toBe(true);
     }, 900_000);

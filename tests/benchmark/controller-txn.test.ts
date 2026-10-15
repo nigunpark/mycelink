@@ -17,7 +17,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 // @ts-expect-error -- plain ESM module without type declarations
@@ -283,6 +283,106 @@ describe('who changed what in a controller session', () => {
     writeFileSync(join(w.platform, 'notes.txt'), 'mine\n');
     await later();
     expect(lightCheck({ txn, previous: check.snapshot, stream: '' }).unauthorized.map((u: any) => u.path)).toEqual(['platform/notes.txt']);
+  });
+
+  // CI 38690258070 (hosted Windows, Node 22): a settle's capture moves the worker's result slot into a quarantine with one
+  // rename. Its intent names the slot and its new place; what the slot held is named by the done, after the call. Checks
+  // that walked between the two took what the slot held for the controller's, and stopped the session.
+  describe('a result slot a core call is moving into its quarantine', () => {
+    const PID = 4_000_001;
+    const now = () => (BigInt(Date.now()) * 1_000_000n).toString();
+    const dirState = (p: string) => ({ t: 'd', mode: statSync(p).mode & 0o7777 });
+    const fileState = (p: string) => ({ t: 'f', sha256: createHash('sha256').update(readFileSync(p)).digest('hex'), size: statSync(p).size, mode: statSync(p).mode & 0o7777, kept: false });
+    /** As Mycelink's recorder writes them (src/state/provenance.ts), one record a line. */
+    const record = (w: ReturnType<typeof workspace>, r: Record<string, unknown>) => writeFileSync(join(w.ledger, 'ledger.jsonl'), `${JSON.stringify({ pid: PID, t: now(), ...r })}\n`, { flag: 'a' });
+
+    /** A settle under way: its quarantine made, the slot (with its result) renamed into it, the rename's done not yet written. */
+    async function moving(opts: { announced?: boolean } = {}) {
+      const w = workspace();
+      const txn = begin(w);
+      core(w, ['init', w.platform]);
+      await later();
+      const sessions = join(w.platform, 'features', 'F-1', 'sessions');
+      const node = join(sessions, 'F-1.a.impl');
+      const q = join(node, '.result-quarantine-Ab12Cd');
+      const from = join(w.base, 'worktree', '.mycelink-worker');
+      mkdirSync(from, { recursive: true });
+      writeFileSync(join(from, '.gitignore'), '*\n');
+      writeFileSync(join(from, 'result-1.json'), '{"node_id":"F-1.a.impl"}\n');
+      if (opts.announced !== false) record(w, { kind: 'proc', schema: 'mycelink-provenance/1', ppid: 1, group: 'settle', sub: 'F-1' });
+      mkdirSync(q, { recursive: true });
+      record(w, { kind: 'done', seq: 1, op: 'mkdirSync', states: [join(w.platform, 'features', 'F-1'), sessions, node].map((p) => ({ path: p, state: dirState(p) })) });
+      record(w, { kind: 'done', seq: 2, op: 'mkdtempSync', states: [{ path: q, state: dirState(q) }] });
+      record(w, { kind: 'intent', seq: 3, op: 'renameSync', paths: [from, join(q, 'slot')] });
+      renameSync(from, join(q, 'slot'));
+      await later();
+      return { w, txn, q, slot: join(q, 'slot') };
+    }
+    const shown = (w: ReturnType<typeof workspace>, p: string) => p.slice(w.ws.length + 1).split('\\').join('/');
+
+    it('is the core’s in every check while that call runs; a lookalike quarantine no core call is moving is the controller’s, never excused by its name', async () => {
+      const { w, txn, q, slot } = await moving();
+      const first = lightCheck({ txn, stream: '' });
+      expect(first.unauthorized.map((u: any) => u.path)).toEqual([]);
+      expect(lightCheck({ txn, previous: first.snapshot, stream: '' }).unauthorized.map((u: any) => u.path)).toEqual([]);
+      // The controller forges one beside it, under the same name the core uses.
+      const forged = join(q, '..', '.result-quarantine-Zz99Yy', 'slot');
+      mkdirSync(forged, { recursive: true });
+      writeFileSync(join(forged, 'result-1.json'), '{"forged":true}\n');
+      await later();
+      const third = lightCheck({ txn, previous: first.snapshot, stream: '' });
+      expect(third.unauthorized.map((u: any) => u.path).sort()).toEqual(['', '/slot', '/slot/result-1.json'].map((s) => `platform/features/F-1/sessions/F-1.a.impl/.result-quarantine-Zz99Yy${s}`));
+      expect(third.unauthorized.some((u: any) => u.path.startsWith(shown(w, slot)))).toBe(false);
+    });
+
+    it('once the call is done, what it moved stands as its done attests it: a file of it changed afterwards (swapped) is the controller’s; the core’s cleanup is the core’s', async () => {
+      const { w, txn, q, slot } = await moving();
+      const moved = [slot, join(slot, '.gitignore'), join(slot, 'result-1.json')];
+      record(w, { kind: 'done', seq: 3, op: 'renameSync', states: [{ path: join(w.base, 'worktree', '.mycelink-worker'), state: { t: 'absent' } }, ...moved.map((p) => ({ path: p, state: p === slot ? dirState(p) : fileState(p) }))] });
+      await later();
+      const done = lightCheck({ txn, stream: '' });
+      expect(done.unauthorized.map((u: any) => u.path)).toEqual([]);
+      // A path swap after the call, past the racy window a check leaves to the core after its done (RACY_MS): the same
+      // name, other bytes.
+      await new Promise((r) => setTimeout(r, 150));
+      writeFileSync(join(slot, 'result-1.json'), '{"swapped":true}\n');
+      await later();
+      expect(lightCheck({ txn, previous: done.snapshot, stream: '' }).unauthorized.map((u: any) => [u.path, u.category])).toEqual([[shown(w, join(slot, 'result-1.json')), 'mycelink-state']]);
+      // The core removes its quarantine, each removal recorded: nothing left to judge.
+      [...moved.slice(1), slot, q].forEach((p, i) => {
+        const op = p === slot || p === q ? 'rmdirSync' : 'unlinkSync';
+        record(w, { kind: 'intent', seq: 10 + i, op, paths: [p] });
+        if (op === 'rmdirSync') rmdirSync(p);
+        else unlinkSync(p);
+        record(w, { kind: 'done', seq: 10 + i, op, states: [{ path: p, state: { t: 'absent' } }] });
+      });
+      await later();
+      expect(settleTransaction({ txn })).toMatchObject({ violation: false, mode: 'none', unauthorized: [] });
+    });
+
+    it.each([
+      ['its process went on (recorded something else after it)', 'went-on'],
+      ['its process never announced itself in this session', 'unannounced'],
+    ])('a call whose process is not still inside it is no longer in flight — %s: what it left under its slot is the controller’s', async (_label, how) => {
+      const { w, txn, slot } = await moving({ announced: how !== 'unannounced' });
+      if (how === 'went-on') record(w, { kind: 'reads', paths: [], git: [] });
+      const check = lightCheck({ txn, stream: '' });
+      expect(check.unauthorized.map((u: any) => u.path).sort()).toEqual([shown(w, join(slot, '.gitignore')), shown(w, join(slot, 'result-1.json'))]);
+    });
+
+    it('residue of a call its process died inside is judged at the settlement, when every process is gone: the slot the intent named is the interrupted core’s, what it held goes back', async () => {
+      const { w, txn, q, slot } = await moving();
+      const settled = settleTransaction({ txn });
+      expect(settled.violation).toBe(true);
+      expect(kinds(settled)).toEqual([
+        [shown(w, join(slot, '.gitignore')), 'created', 'mycelink-state'],
+        [shown(w, join(slot, 'result-1.json')), 'created', 'mycelink-state'],
+      ]);
+      expect(settled.authorized.find((d: any) => d.path === shown(w, slot))).toMatchObject({ by: 'core-interrupted' });
+      expect(settled.authorized.find((d: any) => d.path === shown(w, q))).toMatchObject({ by: 'core' });
+      expect(settled.rollback).toMatchObject({ verified: true, mode: 'selective' });
+      expect(existsSync(join(slot, 'result-1.json'))).toBe(false);
+    });
   });
 
   // CI 38489750013 (hosted Windows): task sessions stopped for an empty `.git/worktrees`, and for `info/refs`.

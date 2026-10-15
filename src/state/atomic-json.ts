@@ -10,8 +10,10 @@
 import {
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -20,11 +22,12 @@ import {
   rmSync,
   statSync,
   writeSync,
+  type BigIntStats,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { isPidAlive } from './process-lock.js';
-import { retrySync } from '../util/retry.js';
+import { bestEffortSync, retrySync, retryWithinSync } from '../util/retry.js';
 
 /** A versioned document. `revision` increments on every successful write. */
 export interface AtomicDoc<T> {
@@ -101,29 +104,92 @@ export function reapStaleTemps(file: string, now = Date.now()): number {
   return reaped;
 }
 
+/**
+ * How long a replace Windows refuses is retried. NTFS refuses a rename over a
+ * file while any handle on it is open, even a reader's that shares delete
+ * (every node:fs reader's): a hook or the harness reading STATE.json, a
+ * scanner, the indexer. On a loaded machine that outlasts a few tries.
+ */
+export const REPLACE_RETRY_MS = 5_000;
+
+/** What Windows answers a replace with while another handle holds the destination (EPERM, EACCES) or the temp (EBUSY). */
+const REPLACE_REFUSED: ReadonlySet<string> = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
 /** Atomically replace `file` with `text` (or bytes): a link at it is replaced, never written through. Creates parent directories. */
 export function writeTextAtomic(file: string, text: string | Uint8Array): void {
+  replaceAtomic(file, text);
+}
+
+/**
+ * Write `text` to a synced temp beside `file` and rename it over `file`.
+ * `stillCurrent` is checked before every retry of a refused replace, so a
+ * write that waited is never put over what another writer landed meanwhile.
+ */
+function replaceAtomic(file: string, text: string | Uint8Array, stillCurrent?: () => void): void {
   const dir = dirname(file);
   mkdirSync(dir, { recursive: true });
   const tmp = file + tempSuffix();
+  let made: BigIntStats | null = null;
   retrySync(() => {
     const fd = openSync(tmp, 'wx');
     try {
       writeAll(fd, typeof text === 'string' ? Buffer.from(text, 'utf8') : text);
       fsyncSync(fd);
+      made = fstatSync(fd, { bigint: true });
     } finally {
       closeSync(fd);
     }
   });
+  if (process.platform !== 'win32') {
+    try {
+      retrySync(() => renameSync(tmp, file));
+    } catch (err) {
+      rmSync(tmp, { force: true });
+      throw err;
+    }
+    return;
+  }
+  // Retrying keeps the write atomic rather than falling back to a
+  // non-atomic truncate-and-write; each retry renames the very temp this
+  // write synced, and only over what the write was made from.
+  const started = performance.now();
+  let attempts = 0;
   try {
-    // On NTFS a replace-rename can transiently fail while a scanner holds the
-    // destination. Retrying keeps the write atomic rather than falling back
-    // to a non-atomic truncate-and-write.
-    retrySync(() => renameSync(tmp, file));
+    retryWithinSync(
+      (attempt) => {
+        attempts = attempt;
+        if (attempt > 1) {
+          if (!isSameFile(tmp, made)) {
+            throw Object.assign(new Error(`ATOMIC_TEMP_CHANGED: ${tmp} is no longer the temp this write synced; ${file} was left as it was`), { code: 'ATOMIC_TEMP_CHANGED', path: tmp, dest: file });
+          }
+          stillCurrent?.();
+        }
+        renameSync(tmp, file);
+      },
+      { codes: REPLACE_REFUSED, budgetMs: REPLACE_RETRY_MS },
+    );
   } catch (err) {
-    rmSync(tmp, { force: true });
+    // Only the temp this write made is removed; anything swapped in is left to reapStaleTemps.
+    const removed = isSameFile(tmp, made) && bestEffortSync(() => rmSync(tmp, { force: true }));
+    const e = err as NodeJS.ErrnoException;
+    if (attempts > 1 && e.syscall === 'rename' && REPLACE_REFUSED.has(e.code ?? '')) {
+      e.message += ` (the replace was refused ${attempts} times over ${Math.round(performance.now() - started)} ms; ${removed ? 'the temp was removed' : `${tmp} is left for the stale-temp reaper`})`;
+    }
     throw err;
   }
+}
+
+/** Whether `path` is still the regular file `made` describes. */
+function isSameFile(path: string, made: BigIntStats | null): boolean {
+  let now: BigIntStats;
+  try {
+    now = lstatSync(path, { bigint: true });
+  } catch {
+    return false;
+  }
+  // Node 22's lstat on Windows answers dev 0; a file at the temp's name is on its volume anyway (no rename or link crosses one).
+  const sameDev = now.dev === made?.dev || now.dev === 0n || made?.dev === 0n;
+  return made !== null && now.isFile() && sameDev && now.ino === made.ino && now.size === made.size;
 }
 
 /**
@@ -195,7 +261,11 @@ export function writeDocAtomic<T>(file: string, data: T, revision?: number): Ato
     revision: revision ?? (current ? current.revision + 1 : 1),
     data,
   };
-  writeTextAtomic(file, JSON.stringify(next, null, 2) + '\n');
+  const base = current?.revision ?? 0;
+  replaceAtomic(file, JSON.stringify(next, null, 2) + '\n', () => {
+    const now = readDoc<T>(file)?.revision ?? 0;
+    if (now !== base) throw new CasConflictError(file, base, now);
+  });
   return next;
 }
 
