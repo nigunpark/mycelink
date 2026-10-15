@@ -10,6 +10,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { buildSync } from 'esbuild';
@@ -51,6 +52,36 @@ describe('immutable evidence store', () => {
     expect(artifactAt(b.file, sha('three\n'))).toBe('same');
     mkdirSync(join(dir, contentName('N.red', sha('four\n'), '.log')));
     expect(artifactAt(writeImmutable(dir, 'N.red', '.log', 'four\n').file, sha('four\n'))).toBe('same');
+  });
+
+  // CI 38672044889 (Windows, Node 24, core): one of eight writers of the same bytes wrote a -1 alternate. Its look at the
+  // name found nothing (open: ENOENT), a racing writer linked the artifact into place, and the second look (lstat, there
+  // to tell a dangling link) found a file: taken for "something else".
+  it('a racing writer of the same bytes landing between the look and its check is the same artifact, never an alternate', () => {
+    const dir = makeTmpDir('store-race-');
+    const target = join(dir, contentName('N.red', sha('raced\n'), '.log'));
+    const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
+    const open = fs.openSync;
+    let landed = false;
+    (fs as { openSync: unknown }).openSync = function (p: string, ...rest: unknown[]) {
+      if (!landed && p === target) {
+        // The look finds nothing; the racing writer's link lands right after it.
+        landed = true;
+        writeFileSync(target, 'raced\n');
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${p}'`), { code: 'ENOENT', syscall: 'open', path: p });
+      }
+      return (open as (...a: unknown[]) => number)(p, ...rest);
+    };
+    syncBuiltinESMExports();
+    try {
+      const r = writeImmutable(dir, 'N.red', '.log', 'raced\n');
+      expect(landed).toBe(true);
+      expect(r).toEqual({ file: target, sha256: sha('raced\n'), created: false });
+      expect(readdirSync(dir)).toEqual([contentName('N.red', sha('raced\n'), '.log')]);
+    } finally {
+      (fs as { openSync: unknown }).openSync = open;
+      syncBuiltinESMExports();
+    }
   });
 
   it('writers at once in separate processes each end with an intact artifact of their bytes, nothing overwritten', async () => {

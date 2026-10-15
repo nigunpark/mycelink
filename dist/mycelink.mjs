@@ -26280,8 +26280,7 @@ function artifactState(file, sha) {
   } catch (err) {
     if (err.code !== "ENOENT") return "other";
     try {
-      lstatSync8(file);
-      return "other";
+      return lstatSync8(file).isFile() ? "linked" : "other";
     } catch {
       return "missing";
     }
