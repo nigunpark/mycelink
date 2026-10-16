@@ -156,3 +156,42 @@ describe('codeql.yml', () => {
     }
   });
 });
+
+describe('dependabot.yml', () => {
+  interface Update {
+    'package-ecosystem': string;
+    directory: string;
+    schedule?: { interval?: string };
+    'open-pull-requests-limit'?: number;
+    groups?: Record<string, { 'dependency-type'?: string; patterns?: string[] }>;
+    'commit-message'?: { prefix?: string };
+    labels?: string[];
+  }
+  const path = join(ROOT, '.github', 'dependabot.yml');
+  const config = existsSync(path) ? (YAML.parse(readFileSync(path, 'utf8')) as { version: number; updates: Update[] }) : { version: 0, updates: [] };
+  const update = (ecosystem: string): Update | undefined => config.updates.find((u) => u['package-ecosystem'] === ecosystem);
+
+  it('updates npm and GitHub Actions weekly from the repository root', () => {
+    expect(config.version).toBe(2);
+    expect(config.updates.map((u) => u['package-ecosystem']).sort()).toEqual(['github-actions', 'npm']);
+    for (const u of config.updates) {
+      expect(u.directory, u['package-ecosystem']).toBe('/');
+      expect(u.schedule?.interval, u['package-ecosystem']).toBe('weekly');
+      expect(u['open-pull-requests-limit'], u['package-ecosystem']).toBe(5);
+    }
+  });
+
+  it('groups npm devDependencies into one pull request', () => {
+    const npm = update('npm');
+    expect(npm?.groups).toEqual({ 'dev-dependencies': { 'dependency-type': 'development' } });
+    expect(npm?.['commit-message']?.prefix).toBe('chore(deps)');
+    expect(npm?.labels).toEqual(['dependencies']);
+  });
+
+  it('groups every GitHub Actions update into one pull request, so a week of action bumps runs the CI matrix once', () => {
+    const actions = update('github-actions');
+    expect(actions?.groups).toEqual({ 'github-actions': { patterns: ['*'] } });
+    expect(actions?.['commit-message']?.prefix).toBe('chore(ci)');
+    expect(actions?.labels).toEqual(['dependencies', 'ci']);
+  });
+});
