@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
@@ -62,4 +64,30 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
     expect(() => o.inspectWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts']))
       .toThrow(/WSL_CLAIM_STALE/);
   });
+
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'crosses the real host claim/worktree into isolated WSL transport and sealed broker', async () => {
+      const { o } = await fixture();
+      const claimed = o.claim(CORE, { mode: 'host' });
+      const bound = o.inspectWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/publish.js']);
+      const wslPath = (path: string): string => {
+        const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u', path.replace(/\\/g, '/')],
+          { encoding: 'utf8', timeout: 10_000 });
+        expect(result.status, result.stderr).toBe(0);
+        return result.stdout.trim();
+      };
+      const sourceFile = join(bound.worktree, 'tests', 'run.mjs');
+      const digest = createHash('sha256').update(readFileSync(sourceFile)).digest('hex');
+      const script = join(process.cwd(), 'tests', 'spike', 'wsl-real-claim-boundary.py');
+      const launched = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'env',
+        'MYCELINK_LIVE_WSL_WORKER=1', 'python3', wslPath(script), '--source', wslPath(bound.worktree),
+        '--claim', bound.claim, '--generation', bound.generation, '--expected-sha256', digest],
+      { encoding: 'utf8', timeout: 45_000 });
+      expect(launched.status, launched.stderr).toBe(0);
+      expect(JSON.parse(launched.stdout)).toMatchObject({ claim: bound.claim,
+        generation: bound.generation, sealed: true, source_unchanged: true });
+      expect(o.inspectWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/publish.js']))
+        .toMatchObject({ claim: bound.claim, generation: bound.generation });
+    },
+  );
 });
