@@ -159,8 +159,9 @@ def apply(slot, destination, *, claim, generation, allowed_paths):
     root_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     open_dirs = [root_fd]
     prepared = []
+    verified = []
     try:
-        # Finish ALL validation before touching any destination inode.
+        # Validate all staged bytes before creating even a destination directory.
         for name, digest in hashes.items():
             fd = os.open(slot / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             try:
@@ -173,6 +174,8 @@ def apply(slot, destination, *, claim, generation, allowed_paths):
                     raise ValueError('staged bytes changed')
             finally:
                 os.close(fd)
+            verified.append((name, contents))
+        for name, contents in verified:
             parent_fd = root_fd
             for segment in name.split('/')[:-1]:
                 try:

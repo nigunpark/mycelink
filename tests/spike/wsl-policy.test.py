@@ -108,6 +108,25 @@ class SealedProposalTest(unittest.TestCase):
                     p.seal(report, slot, claim='c1', generation='g1', role=role,
                            allowed_paths={'allowed/file.txt'})
                 self.assertFalse(slot.exists())
+    def test_invalid_later_staged_file_creates_no_destination_directories(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            target = base / 'target'
+            target.mkdir()
+            report = base / 'report.json'
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
+                'source_files': 0, 'proposals': {'allowed/a.txt': 'A', 'z.txt': 'Z'},
+                'submission': {}}))
+            slot = base / 'sealed'
+            p = policy()
+            p.seal(report, slot, claim='c1', generation='g1', role='worker',
+                   allowed_paths={'allowed/a.txt', 'z.txt'})
+            (slot / 'z.txt').write_text('TAMPERED')
+            with self.assertRaises(ValueError):
+                p.apply(slot, target, claim='c1', generation='g1',
+                        allowed_paths={'allowed/a.txt', 'z.txt'})
+            self.assertEqual(list(target.iterdir()), [])
+
     def test_multi_file_apply_failure_does_not_leave_partial_worktree(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as temp:
