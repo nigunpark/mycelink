@@ -28942,6 +28942,29 @@ function zeroObservationUsage() {
 // src/engine/orchestrator.ts
 import { closeSync as closeSync13, constants as fsConstants, fstatSync as fstatSync8, lstatSync as lstatSync16, openSync as openSync11, unlinkSync as unlinkSync3 } from "node:fs";
 
+// src/sessions/wsl-codex-policy.ts
+function expandAllowedProposalPaths(proposals, fence) {
+  if (proposals.length > 4096) throw new Error("PROPOSAL_BUDGET_EXCEEDED");
+  const names2 = /* @__PURE__ */ new Set();
+  const folded = /* @__PURE__ */ new Set();
+  for (const name of proposals) {
+    const segments2 = name.split("/");
+    if (!/^[A-Za-z0-9_./-]{1,240}$/.test(name) || name.startsWith("/") || segments2.some((segment2) => segment2 === "" || segment2.startsWith(".") || segment2.endsWith(".") || segment2.endsWith(" ") || segment2 === "..")) {
+      throw new Error(`UNSAFE_PROPOSAL: ${name.slice(0, 80)}`);
+    }
+    if (segments2.some((segment2) => ["result.json", "verdict.json", "_receipt.json", "mycelink"].includes(segment2.toLowerCase()))) {
+      throw new Error(`RESERVED_PROPOSAL: ${name.slice(0, 80)}`);
+    }
+    if (folded.has(name.toLowerCase())) throw new Error(`ALIAS_PROPOSAL: ${name.slice(0, 80)}`);
+    folded.add(name.toLowerCase());
+    if (!fence.allowed.some((glob) => matchGlob(glob, name)) || fence.forbidden.some((glob) => matchGlob(glob, name))) {
+      throw new Error(`OWNERSHIP_VIOLATION: ${name.slice(0, 80)}`);
+    }
+    names2.add(name);
+  }
+  return [...names2].sort();
+}
+
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
 import { existsSync as existsSync24, mkdirSync as mkdirSync16, readFileSync as readFileSync21, readdirSync as readdirSync11 } from "node:fs";
@@ -32882,6 +32905,36 @@ var Orchestrator = class _Orchestrator {
   adapterReady() {
     if (this.preflightResult === null) this.preflightResult = this.preflight ? this.preflight() : { ok: true };
     return this.preflightResult;
+  }
+  /**
+   * Experimental read-only claim/policy inspection for the WSL controller.
+   * This is NOT a launch, an authorization, or a lease held across the return:
+   * the complete controller must hold the state lifecycle lock through broker
+   * consumption, apply and revocation before this can become an execution path.
+   */
+  inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths) {
+    if (this.workspace.config.provider.provider !== "codex") throw new Error("WSL_CODEX_NOT_CONFIGURED");
+    this.assertGraphUnchanged();
+    const node = this.node(nodeId);
+    return withLock(stateLockPath(this.paths.featureDir), () => {
+      const state = this.state();
+      const claim = state.nodes[nodeId]?.claim;
+      const expires = Date.parse(claim?.expires_at ?? "");
+      if (STOPPED_FEATURE_STATES.has(state.feature_state) || typeof state.superseded_by === "string" || node.repository === null || claim?.mode !== "host" || claim.claim_id !== claimId || claim.dispatch_id !== dispatchId || claim.epoch !== currentEpoch(state) || claim.lineage !== lineageOf(state, nodeId) || claim.settling !== null || claim.provider_interrupted != null || claim.evidence_correction != null || claim.challenge_conversion != null || claim.worktree === null || !existsSync32(claim.worktree) || !/^[0-9a-f]{40}$/.test(claim.base_sha ?? "") || !Number.isFinite(expires) || expires <= Date.now() || !activeLeases(state).some((lease) => lease.node_id === nodeId && lease.claim_id === claimId && lease.dispatch_id === dispatchId)) {
+        throw new Error("WSL_CLAIM_STALE: no live generation-bound host claim");
+      }
+      const allowed = expandAllowedProposalPaths(
+        proposedPaths,
+        { allowed: node.allowed_paths, forbidden: node.forbidden_paths ?? [] }
+      );
+      return {
+        claim: claimId,
+        generation: dispatchId,
+        worktree: claim.worktree,
+        base_sha: claim.base_sha,
+        allowed_paths: allowed
+      };
+    }, { timeoutMs: 2e3, pollMs: 10, purpose: "experimental WSL claim inspection" });
   }
   graph() {
     return loadGraph(this.controlRoot, this.featureId);

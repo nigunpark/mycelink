@@ -68,7 +68,7 @@ import { featurePaths, nodeEvidenceDir, type FeaturePaths } from '../workspace/p
 import { loadWorkspace, repositoryPath, type Workspace } from '../workspace/workspace.js';
 import { loadGraph } from '../workspace/workspace.js';
 import { hashGraph } from '../graph/validate.js';
-import { addUsage, loadState, mutateState, zeroUsage } from '../state/feature-state.js';
+import { addUsage, loadState, mutateState, stateLockPath, zeroUsage } from '../state/feature-state.js';
 import { BARRIER_KINDS, activeLeases, bumpEpoch, closeLeases, currentEpoch, issueLease, leaseKindFor, leaseOf, lineageOf, markStale, orchestrationOf } from '../state/orchestration.js';
 import {
   accumulateUsage,
@@ -101,6 +101,7 @@ import {
 import { statusForOutcome } from '../sessions/adapter.js';
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, unlinkSync } from 'node:fs';
 import type { PreflightResult } from '../sessions/preflight.js';
+import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import {
   acquireResource,
   listLeases,
@@ -1260,6 +1261,43 @@ export class Orchestrator {
   adapterReady(): PreflightResult {
     if (this.preflightResult === null) this.preflightResult = this.preflight ? this.preflight() : { ok: true };
     return this.preflightResult;
+  }
+
+  /**
+   * Experimental read-only claim/policy inspection for the WSL controller.
+   * This is NOT a launch, an authorization, or a lease held across the return:
+   * the complete controller must hold the state lifecycle lock through broker
+   * consumption, apply and revocation before this can become an execution path.
+   */
+  inspectWslCodexClaim(nodeId: string, claimId: string, dispatchId: string, proposedPaths: readonly string[]): {
+    claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[];
+  } {
+    if (this.workspace.config.provider.provider !== 'codex') throw new Error('WSL_CODEX_NOT_CONFIGURED');
+    this.assertGraphUnchanged();
+    const node = this.node(nodeId);
+    return withLock(stateLockPath(this.paths.featureDir), () => {
+      const state = this.state();
+      const claim = state.nodes[nodeId]?.claim;
+      const expires = Date.parse(claim?.expires_at ?? '');
+      if (STOPPED_FEATURE_STATES.has(state.feature_state) ||
+          typeof state.superseded_by === 'string' ||
+          node.repository === null || claim?.mode !== 'host' ||
+          claim.claim_id !== claimId || claim.dispatch_id !== dispatchId ||
+          claim.epoch !== currentEpoch(state) || claim.lineage !== lineageOf(state, nodeId) ||
+          claim.settling !== null || claim.provider_interrupted != null ||
+          claim.evidence_correction != null || claim.challenge_conversion != null ||
+          claim.worktree === null || !existsSync(claim.worktree) ||
+          !/^[0-9a-f]{40}$/.test(claim.base_sha ?? '') ||
+          !Number.isFinite(expires) || expires <= Date.now() ||
+          !activeLeases(state).some((lease) => lease.node_id === nodeId &&
+            lease.claim_id === claimId && lease.dispatch_id === dispatchId)) {
+        throw new Error('WSL_CLAIM_STALE: no live generation-bound host claim');
+      }
+      const allowed = expandAllowedProposalPaths(proposedPaths,
+        { allowed: node.allowed_paths, forbidden: node.forbidden_paths ?? [] });
+      return { claim: claimId, generation: dispatchId, worktree: claim.worktree,
+        base_sha: claim.base_sha as string, allowed_paths: allowed };
+    }, { timeoutMs: 2_000, pollMs: 10, purpose: 'experimental WSL claim inspection' });
   }
 
   graph(): PortfolioGraph {
