@@ -122,6 +122,35 @@ class BridgePolicyTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_partial_request_flood_has_bounded_concurrent_handlers(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda *args: (200, b'{}', 'application/json'))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            sockets = []
+            try:
+                for _ in range(24):
+                    conn = socket.socket(socket.AF_UNIX)
+                    conn.settimeout(1)
+                    conn.connect(server.server_address)
+                    sockets.append(conn)
+                    try:
+                        conn.sendall(b'POST /v1/responses HTTP/1.1\r\nHost: local\r\n')
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass  # A saturated broker may reject the socket immediately.
+                import time
+                time.sleep(0.3)
+                active = sum('process_request_thread' in t.name for t in threading.enumerate())
+                self.assertLessEqual(active, 8, f'hostile partial headers occupied {active} broker threads')
+            finally:
+                for conn in sockets:
+                    conn.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_broker_rejects_wrong_os_principal_before_upstream(self):
         bridge = load_bridge()
         with tempfile.TemporaryDirectory() as temp:

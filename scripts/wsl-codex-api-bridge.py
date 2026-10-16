@@ -25,6 +25,7 @@ MAX_BODY = 2 * 1024 * 1024
 class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     allow_reuse_address = False
+    max_handlers = 8
 
     def __init__(self, path, upstream, expected_uid, claim, generation, role, request_budget, byte_budget):
         if not 1 <= request_budget <= 256 or not 1 <= byte_budget <= 64 * MAX_BODY:
@@ -37,7 +38,35 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.request_budget = request_budget
         self.byte_budget = byte_budget
         self.budget_lock = threading.Lock()
+        self.handler_slots = threading.BoundedSemaphore(self.max_handlers)
         super().__init__(path, Request)
+
+    def get_request(self):
+        conn, address = super().get_request()
+        conn.settimeout(4)
+        return conn, address
+
+    def process_request(self, request, client_address):
+        if not self.handler_slots.acquire(blocking=False):
+            request.close()
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.handler_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.handler_slots.release()
+
+    def handle_error(self, request, client_address):
+        import sys
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
 
     def reserve_request(self, size):
         with self.budget_lock:
