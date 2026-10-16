@@ -184,22 +184,57 @@ def apply(slot, destination, *, claim, generation, allowed_paths):
                                       dir_fd=parent_fd)
                 open_dirs.append(next_fd)
                 parent_fd = next_fd
-            prepared.append((parent_fd, name.split('/')[-1], contents))
-        for parent_fd, leaf, contents in prepared:
-            temporary = '.mycelink-stage-' + secrets.token_hex(12)
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                         0o600, dir_fd=parent_fd)
             try:
-                with os.fdopen(fd, 'wb') as output:
-                    output.write(contents)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-            finally:
+                prior_fd = os.open(name.split('/')[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                   dir_fd=parent_fd)
+            except FileNotFoundError:
+                prior = None
+            else:
                 try:
-                    os.unlink(temporary, dir_fd=parent_fd)
-                except FileNotFoundError:
-                    pass
+                    prior_info = os.fstat(prior_fd)
+                    if not stat.S_ISREG(prior_info.st_mode) or prior_info.st_size > MAX_FILE:
+                        raise ValueError('existing target cannot be safely restored')
+                    with os.fdopen(os.dup(prior_fd), 'rb') as previous:
+                        prior = previous.read(MAX_FILE + 1)
+                    if len(prior) > MAX_FILE:
+                        raise ValueError('existing target grew while staging')
+                finally:
+                    os.close(prior_fd)
+            prepared.append((parent_fd, name.split('/')[-1], contents, prior))
+        replaced = []
+        try:
+            for parent_fd, leaf, contents, prior in prepared:
+                temporary = '.mycelink-stage-' + secrets.token_hex(12)
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=parent_fd)
+                try:
+                    with os.fdopen(fd, 'wb') as output:
+                        output.write(contents)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                    replaced.append((parent_fd, leaf, prior))
+                finally:
+                    try:
+                        os.unlink(temporary, dir_fd=parent_fd)
+                    except FileNotFoundError:
+                        pass
+        except OSError:
+            # Only an in-process failure can be restored here. A crash between
+            # replacements still requires a controller-owned journal/reconcile.
+            for parent_fd, leaf, prior in reversed(replaced):
+                if prior is None:
+                    os.unlink(leaf, dir_fd=parent_fd)
+                else:
+                    temporary = '.mycelink-restore-' + secrets.token_hex(12)
+                    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=parent_fd)
+                    with os.fdopen(fd, 'wb') as output:
+                        output.write(prior)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            raise
     finally:
         for fd in reversed(open_dirs):
             os.close(fd)

@@ -108,6 +108,37 @@ class SealedProposalTest(unittest.TestCase):
                     p.seal(report, slot, claim='c1', generation='g1', role=role,
                            allowed_paths={'allowed/file.txt'})
                 self.assertFalse(slot.exists())
+    def test_multi_file_apply_failure_does_not_leave_partial_worktree(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            target = base / 'target'
+            target.mkdir()
+            (target / 'a.txt').write_text('OLD_A')
+            (target / 'b.txt').write_text('OLD_B')
+            report = base / 'report.json'
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
+                'source_files': 0, 'proposals': {'a.txt': 'NEW_A', 'b.txt': 'NEW_B'},
+                'submission': {}}))
+            slot = base / 'sealed'
+            p = policy()
+            p.seal(report, slot, claim='c1', generation='g1', role='worker',
+                   allowed_paths={'a.txt', 'b.txt'})
+            original_replace = p.os.replace
+            calls = 0
+            def fail_second(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError('injected second-file apply failure')
+                return original_replace(*args, **kwargs)
+            with patch.object(p.os, 'replace', side_effect=fail_second):
+                with self.assertRaises(OSError):
+                    p.apply(slot, target, claim='c1', generation='g1',
+                            allowed_paths={'a.txt', 'b.txt'})
+            self.assertEqual((target / 'a.txt').read_text(), 'OLD_A')
+            self.assertEqual((target / 'b.txt').read_text(), 'OLD_B')
+
     def test_atomic_apply_breaks_hardlink_alias_and_rejects_symlink_parent(self):
         with tempfile.TemporaryDirectory() as temp:
             base = pathlib.Path(temp)
