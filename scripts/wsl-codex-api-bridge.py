@@ -15,6 +15,7 @@ import socket
 import socketserver
 import stat
 import struct
+import threading
 import time
 from http.server import BaseHTTPRequestHandler
 
@@ -25,13 +26,26 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, path, upstream, expected_uid, claim, generation, role):
+    def __init__(self, path, upstream, expected_uid, claim, generation, role, request_budget, byte_budget):
+        if not 1 <= request_budget <= 256 or not 1 <= byte_budget <= 64 * MAX_BODY:
+            raise ValueError('bridge requires bounded per-claim budgets')
         self.upstream = upstream
         self.expected_uid = expected_uid
         self.claim = claim
         self.generation = generation
         self.role = role
+        self.request_budget = request_budget
+        self.byte_budget = byte_budget
+        self.budget_lock = threading.Lock()
         super().__init__(path, Request)
+
+    def reserve_request(self, size):
+        with self.budget_lock:
+            if self.request_budget < 1 or self.byte_budget < size:
+                return False
+            self.request_budget -= 1
+            self.byte_budget -= size
+            return True
 
 
 class Request(BaseHTTPRequestHandler):
@@ -58,7 +72,14 @@ class Request(BaseHTTPRequestHandler):
             return self.refuse()
         if self.server.expected_uid is not None and uid != self.server.expected_uid:
             return self.refuse()
-        if self.path != '/v1/responses' or self.headers.get('Transfer-Encoding'):
+        if self.path != '/v1/responses':
+            return self.refuse()
+        # BaseHTTPRequestHandler chooses the first duplicate header; never let
+        # an ambiguous framing/authority reach the privileged upstream.
+        for name in ('Content-Length', 'Content-Type', 'Host', 'Transfer-Encoding'):
+            if len(self.headers.get_all(name, [])) > 1:
+                return self.refuse()
+        if self.headers.get('Transfer-Encoding') or self.headers.get('Proxy-Authorization'):
             return self.refuse()
         try:
             length = int(self.headers.get('Content-Length', '-1'))
@@ -68,6 +89,13 @@ class Request(BaseHTTPRequestHandler):
             return self.refuse()
         body = self.rfile.read(length)
         if len(body) != length:
+            return self.refuse()
+        try:
+            if not isinstance(json.loads(body), dict):
+                return self.refuse()
+        except (ValueError, UnicodeDecodeError):
+            return self.refuse()
+        if not self.server.reserve_request(length):
             return self.refuse()
         # No Authorization, Host, Cookie, forwarding, or caller-selected destination.
         headers = {'Content-Type': 'application/json'}
@@ -114,10 +142,12 @@ class Request(BaseHTTPRequestHandler):
     def do_PATCH(self): self.refuse()
 
 
-def make_server(path, upstream, expected_uid=None, claim=None, generation=None, role=None):
+def make_server(path, upstream, expected_uid=None, claim=None, generation=None, role=None,
+                request_budget=64, byte_budget=8 * MAX_BODY):
     if os.path.lexists(path):
         raise FileExistsError('existing bridge path refused')
-    return Bridge(path, upstream, expected_uid, claim, generation, role)
+    return Bridge(path, upstream, expected_uid, claim, generation, role,
+                  request_budget, byte_budget)
 
 
 def trusted_upstream(auth_path):

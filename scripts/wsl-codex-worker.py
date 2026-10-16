@@ -26,34 +26,49 @@ MAX_TOTAL = 32 * 1024 * 1024
 
 
 def copied_tree(source, dest):
-    """Copy bytes, not inode references; refuse links/devices and oversized input."""
+    """Copy through pinned directory handles, never path-reopen a checked parent."""
     budget = 0
     count = 0
-    for directory, dirs, files in os.walk(source, followlinks=False):
-        relative = pathlib.Path(directory).relative_to(source)
-        target = dest / relative
-        target.mkdir(mode=0o755, parents=True, exist_ok=True)
-        for entry in dirs + files:
-            item = pathlib.Path(directory) / entry
-            mode = item.lstat().st_mode
-            if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
-                raise ValueError('source contains a link or special file')
-        for entry in files:
-            item = pathlib.Path(directory) / entry
-            fd = os.open(item, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-            try:
-                info = os.fstat(fd)
-                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
-                    raise ValueError('source file is not bounded regular data')
-                budget += info.st_size
-                count += 1
-                if budget > MAX_TOTAL or count > 4096:
-                    raise ValueError('source exceeds snapshot budget')
-                with os.fdopen(os.dup(fd), 'rb') as reader, open(target / entry, 'xb') as writer:
-                    shutil.copyfileobj(reader, writer)
-                (target / entry).chmod(0o444)
-            finally:
-                os.close(fd)
+    root_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        def visit(directory_fd, target):
+            nonlocal budget, count
+            with os.scandir(directory_fd) as entries:
+                names = sorted(entry.name for entry in entries)
+            for name in names:
+                info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+                    try:
+                        child_target = target / name
+                        child_target.mkdir(mode=0o755)
+                        visit(child_fd, child_target)
+                    finally:
+                        os.close(child_fd)
+                elif stat.S_ISREG(info.st_mode):
+                    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+                    try:
+                        actual = os.fstat(fd)
+                        if not stat.S_ISREG(actual.st_mode) or actual.st_size > MAX_FILE:
+                            raise ValueError('source file is not bounded regular data')
+                        budget += actual.st_size
+                        count += 1
+                        if budget > MAX_TOTAL or count > 4096:
+                            raise ValueError('source exceeds snapshot budget')
+                        with os.fdopen(os.dup(fd), 'rb') as reader:
+                            contents = reader.read(MAX_FILE + 1)
+                        if len(contents) > MAX_FILE or budget + len(contents) - actual.st_size > MAX_TOTAL:
+                            raise ValueError('source grew while copying')
+                        with open(target / name, 'xb') as writer:
+                            writer.write(contents)
+                        (target / name).chmod(0o444)
+                    finally:
+                        os.close(fd)
+                else:
+                    raise ValueError('source contains a link or special file')
+        visit(root_fd, dest)
+    finally:
+        os.close(root_fd)
     return count
 
 

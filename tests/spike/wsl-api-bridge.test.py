@@ -70,6 +70,58 @@ class BridgePolicyTest(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+    def test_rejects_duplicate_lengths_and_non_json_before_upstream(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(body) or (200, b'OK', 'text/plain')))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                for request in (
+                    b'POST /v1/responses HTTP/1.1\r\nHost: local\r\nContent-Type: application/json\r\nContent-Length: 2\r\nContent-Length: 999\r\n\r\n{}',
+                    b'POST /v1/responses HTTP/1.1\r\nHost: local\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\nBAD',
+                ):
+                    conn = socket.socket(socket.AF_UNIX)
+                    conn.connect(server.server_address)
+                    conn.sendall(request)
+                    response = http.client.HTTPResponse(conn)
+                    response.begin()
+                    self.assertEqual(response.status, 403)
+                    response.read()
+                    conn.close()
+                self.assertEqual(calls, [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_request_budget_is_shared_across_connections(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(body) or (200, b'{}', 'application/json')),
+                request_budget=2, byte_budget=4)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                statuses = []
+                for _ in range(3):
+                    conn = UnixHTTP(server.server_address)
+                    conn.request('POST', '/v1/responses', body=b'{}', headers={'Content-Type': 'application/json'})
+                    response = conn.getresponse()
+                    statuses.append(response.status)
+                    response.read()
+                    conn.close()
+                self.assertEqual(statuses, [200, 200, 403])
+                self.assertEqual(calls, [b'{}', b'{}'])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_broker_rejects_wrong_os_principal_before_upstream(self):
         bridge = load_bridge()
         with tempfile.TemporaryDirectory() as temp:

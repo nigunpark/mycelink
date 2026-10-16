@@ -317,6 +317,41 @@ printf '%s' "$?" > /proposal/status
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+    def test_timeout_reaps_detached_worker_descendants(self):
+        import uuid
+        import time
+        marker = 'mycelink-descendant-' + uuid.uuid4().hex
+        def matching():
+            found = []
+            for entry in pathlib.Path('/proc').iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    args = (entry / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')
+                    if marker in args and 'python3 -c' in args:
+                        found.append(int(entry.name))
+                except (OSError, ValueError):
+                    pass
+            return found
+        with tempfile.TemporaryDirectory(prefix='mycelink-descendant-test-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            report = base / 'report.json'
+            program = 'setsid python3 -c "import time; time.sleep(20) # ' + marker + '" </dev/null >/dev/null 2>&1 & sleep 5'
+            try:
+                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                    '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
+                    '--role', 'worker', '--timeout-sec', '2', '--', '/bin/sh', '-c', program],
+                    text=True, capture_output=True, timeout=8)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertFalse(report.exists())
+                time.sleep(0.2)
+                self.assertEqual(matching(), [], 'detached descendant retained WSL process/channel after timeout')
+            finally:
+                for pid in matching():
+                    os.kill(pid, signal.SIGKILL)
+
     def test_interrupted_generation_writes_no_report_and_followup_runs(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-interrupt-test-') as temp:
             base = pathlib.Path(temp)
