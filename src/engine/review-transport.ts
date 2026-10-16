@@ -487,7 +487,7 @@ function sessionRecord(sessionFile: string, U: string, S: string): SessionRecord
   const use = launched === undefined ? undefined : contentOf(launched).find((b) => b['type'] === 'tool_use' && b['id'] === U);
   const resulted = entries.find((e) => e['type'] === 'user' && contentOf(e).some((b) => b['type'] === 'tool_result' && b['tool_use_id'] === U));
   const blocks = resulted === undefined ? [] : contentOf(resulted).filter((b) => b['type'] === 'tool_result' && b['tool_use_id'] === U);
-  const toolResult = ((resulted?.['toolUseResult'] ?? resulted?.['tool_use_result'] ?? {}) as Entry) ?? {};
+  const toolResult = (resulted?.['toolUseResult'] ?? resulted?.['tool_use_result'] ?? {}) as Entry;
   const resultText = blocks.map((b) => messageText(b['content']) ?? (typeof b['content'] === 'string' ? (b['content'] as string) : '')).join('\n');
   const named = typeof toolResult['agentId'] === 'string' ? (toolResult['agentId'] as string) : (/\bagentId: ([A-Za-z0-9_-]{1,64})\b/.exec(resultText)?.[1] ?? null);
   return { launched, use, resulted, toolResult, resultText, resultError: blocks.some((b) => b['is_error'] === true), named, notifications: notificationsIn(entries) };
