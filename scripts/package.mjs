@@ -45,6 +45,7 @@ const INCLUDE_FILES = [
   'bin/mycelink.mjs',
   'dist/mycelink.mjs',
   'docs/ADAPTERS.md',
+  'docs/PROVIDER_CONTRACT.md',
   'docs/DATA_HANDLING.md',
   'docs/PERMISSION_MODEL.md',
   'docs/RELEASING.md',

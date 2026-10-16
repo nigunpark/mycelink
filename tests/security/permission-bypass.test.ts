@@ -13,7 +13,7 @@ import { DEFAULT_CONFIG } from '../../src/workspace/workspace.js';
 describe('worker permission policy', () => {
   it('defaults to no bypass', () => {
     expect(DEFAULT_CONFIG.allow_dangerous_permission_bypass).toBe(false);
-    expect(DEFAULT_CONFIG.claude_extra_args).toEqual([]);
+    expect(DEFAULT_CONFIG.provider.extra_args).toEqual([]);
   });
 
   it.each([

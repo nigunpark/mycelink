@@ -21611,9 +21611,8 @@ function graphAcceptanceProblems(graph, manifest) {
 // src/workspace/workspace.ts
 var DEFAULT_CONFIG = {
   schema_version: 1,
-  claude_executable: "claude",
-  session_adapter: "claude-background",
-  claude_extra_args: [],
+  provider: { provider: "claude", executable: "claude", extra_args: [] },
+  adapter: "claude-cli",
   session_timeout_ms: 45 * 60 * 1e3,
   context_pack_max_bytes: 16384,
   hook_session_start_max_bytes: 4096,
@@ -21623,13 +21622,41 @@ var DEFAULT_CONFIG = {
   allow_dangerous_permission_bypass: false,
   acceptance_review: { required: true, max_rounds: 2 }
 };
+var NEW_CONFIG_DEFAULTS = {
+  schema_version: DEFAULT_CONFIG.schema_version,
+  provider: DEFAULT_CONFIG.provider,
+  session_timeout_ms: DEFAULT_CONFIG.session_timeout_ms,
+  context_pack_max_bytes: DEFAULT_CONFIG.context_pack_max_bytes,
+  hook_session_start_max_bytes: DEFAULT_CONFIG.hook_session_start_max_bytes,
+  hook_prompt_delta_max_bytes: DEFAULT_CONFIG.hook_prompt_delta_max_bytes,
+  brain_dir: DEFAULT_CONFIG.brain_dir,
+  allow_shell_commands: DEFAULT_CONFIG.allow_shell_commands,
+  allow_dangerous_permission_bypass: DEFAULT_CONFIG.allow_dangerous_permission_bypass,
+  acceptance_review: DEFAULT_CONFIG.acceptance_review
+};
 var WorkspaceError = class extends Error {
 };
+function normalizeConfig(parsed) {
+  const hasProviderBlock = parsed.provider !== void 0;
+  const provider = parsed.provider ?? {
+    provider: "claude",
+    executable: parsed.claude_executable ?? DEFAULT_CONFIG.provider.executable,
+    extra_args: parsed.claude_extra_args ?? DEFAULT_CONFIG.provider.extra_args
+  };
+  const adapter = hasProviderBlock ? provider.provider === "codex" ? "codex-cli" : parsed.adapter === "fake-provider" ? "fake-provider" : "claude-cli" : parsed.session_adapter === "fake-claude" ? "fake-provider" : "claude-cli";
+  const {
+    session_adapter: _legacyAdapter,
+    claude_executable: _legacyExecutable,
+    claude_extra_args: _legacyArgs,
+    ...current
+  } = parsed;
+  return { ...DEFAULT_CONFIG, ...current, provider, adapter };
+}
 function loadConfig(controlRoot) {
   const file = controlPaths(controlRoot).config;
   if (!existsSync14(file)) return { ...DEFAULT_CONFIG };
   const parsed = JSON.parse(readFileSync11(file, "utf8"));
-  return { ...DEFAULT_CONFIG, ...parsed };
+  return normalizeConfig(parsed);
 }
 function loadRepositories(controlRoot) {
   const paths = controlPaths(controlRoot);
@@ -21695,7 +21722,7 @@ function initControlRepo(controlRoot, config = {}) {
   ]) {
     mkdirSync6(dir, { recursive: true });
   }
-  createExclusive(paths.config, JSON.stringify({ ...DEFAULT_CONFIG, ...config }, null, 2) + "\n");
+  createExclusive(paths.config, JSON.stringify({ ...NEW_CONFIG_DEFAULTS, ...config }, null, 2) + "\n");
   createExclusive(join18(paths.featuresDir, ".gitkeep"), "");
   ensureScratchIgnored(paths.controlRoot);
   return paths;
@@ -43931,10 +43958,13 @@ function probe(argv, base) {
   if (version === null) return { ...base, ok: false, detail: "--version printed no version number" };
   return { ...base, ok: true, version, detail: `${base.resolved} answers --version ${version}; authentication not checked` };
 }
-function preflightAdapter(config, env = process.env) {
+function preflightAdapter(input, env = process.env) {
+  const config = normalizeConfig(input);
+  const legacyAdapter = input.session_adapter;
+  const legacyExecutable = input.claude_executable;
   const fakeOverride = env["MYCELINK_FAKE_CLAUDE"];
-  if (config.session_adapter === "fake-claude" || fakeOverride) {
-    const script = fakeOverride ?? config.claude_executable;
+  if (legacyAdapter === "fake-claude" || config.adapter === "fake-provider" || fakeOverride) {
+    const script = fakeOverride ?? legacyExecutable ?? config.provider.executable ?? "claude";
     const base2 = {
       ok: false,
       adapter: "fake-claude",
@@ -43946,7 +43976,7 @@ function preflightAdapter(config, env = process.env) {
     if (base2.resolved === null) return { ...base2, detail: `fake worker script ${script} not found` };
     return probe([process.execPath, script, "--version"], base2);
   }
-  const executable = config.claude_executable;
+  const executable = legacyExecutable ?? config.provider.executable ?? "claude";
   const resolved = resolveExecutable(executable, env);
   const base = {
     ok: false,
@@ -44532,16 +44562,19 @@ function emit2(io, args, value, human) {
 function adapterFor(controlRoot) {
   const config = loadConfig(controlRoot);
   const fakeExecutable = process.env["MYCELINK_FAKE_CLAUDE"];
-  if (config.session_adapter === "fake-claude" || fakeExecutable) {
+  if (config.adapter === "fake-provider" || fakeExecutable) {
     return new ClaudeCliAdapter({
       executable: process.execPath,
-      prefixArgs: [fakeExecutable ?? config.claude_executable],
+      prefixArgs: [fakeExecutable ?? config.provider.executable ?? "claude"],
       adapterName: "fake-claude"
     });
   }
+  if (config.adapter !== "claude-cli") {
+    throw new Error(`Session adapter ${config.adapter} is configured but not implemented.`);
+  }
   return new ClaudeCliAdapter({
-    executable: config.claude_executable,
-    extraArgs: config.claude_extra_args,
+    executable: config.provider.executable ?? "claude",
+    extraArgs: config.provider.extra_args ?? [],
     allowPermissionBypass: config.allow_dangerous_permission_bypass === true,
     adapterName: "claude-background",
     mode: "print"
@@ -44718,7 +44751,7 @@ function doctor(args, io) {
     }
   }
   const config = loadConfig(controlRoot);
-  push("session adapter", true, config.session_adapter);
+  push("session adapter", true, config.adapter);
   const adapter = preflightAdapter(config);
   checks.push({
     name: "worker adapter (standalone)",

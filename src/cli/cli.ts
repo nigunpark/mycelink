@@ -224,16 +224,19 @@ function emit(io: CliIo, args: ParsedArgs, value: unknown, human: () => string):
 function adapterFor(controlRoot: string): ClaudeCliAdapter {
   const config = loadConfig(controlRoot);
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];
-  if (config.session_adapter === 'fake-claude' || fakeExecutable) {
+  if (config.adapter === 'fake-provider' || fakeExecutable) {
     return new ClaudeCliAdapter({
       executable: process.execPath,
-      prefixArgs: [fakeExecutable ?? config.claude_executable],
+      prefixArgs: [fakeExecutable ?? config.provider.executable ?? 'claude'],
       adapterName: 'fake-claude',
     });
   }
+  if (config.adapter !== 'claude-cli') {
+    throw new Error(`Session adapter ${config.adapter} is configured but not implemented.`);
+  }
   return new ClaudeCliAdapter({
-    executable: config.claude_executable,
-    extraArgs: config.claude_extra_args,
+    executable: config.provider.executable ?? 'claude',
+    extraArgs: config.provider.extra_args ?? [],
     allowPermissionBypass: config.allow_dangerous_permission_bypass === true,
     adapterName: 'claude-background',
     mode: 'print',
@@ -439,7 +442,7 @@ function doctor(args: ParsedArgs, io: CliIo): number {
   }
 
   const config = loadConfig(controlRoot);
-  push('session adapter', true, config.session_adapter);
+  push('session adapter', true, config.adapter);
   // The standalone adapter is optional: host dispatch (the plugin's primary
   // path) never starts it. Its absence is reported, not failed.
   const adapter = preflightAdapter(config);

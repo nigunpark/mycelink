@@ -28,15 +28,13 @@ import { featurePaths, controlPaths, type FeaturePaths, type ControlPaths } from
 import { createExclusive, writeTextAtomic } from '../state/atomic-json.js';
 import { namesOpenedFile } from '../security/paths.js';
 import { AcceptanceError, graphAcceptanceProblems, loadAcceptanceManifest } from '../engine/acceptance.js';
+import type { AdapterId } from '../sessions/adapter.js';
 
 export interface MycelinkConfig {
   schema_version: 1;
-  /** Executable used by the Claude CLI session adapter. */
-  claude_executable: string;
-  /** 'claude-background' in production; 'fake-claude' in the automated suite. */
-  session_adapter: 'claude-background' | 'fake-claude';
-  /** Extra argv prepended to every worker session invocation. */
-  claude_extra_args: string[];
+  provider: ProviderConfig;
+  /** Canonical runtime identity derived from provider configuration. */
+  adapter: AdapterId;
   /** Hard ceiling on a worker session, independent of node budgets. */
   session_timeout_ms: number;
   /** Bytes allowed in a worker context pack. */
@@ -53,8 +51,8 @@ export interface MycelinkConfig {
    */
   allow_shell_commands: boolean;
   /**
-   * Allow claude_extra_args to disable Claude Code permission checks
-   * (--dangerously-skip-permissions, bypassPermissions). Off by default.
+   * Allow provider extra_args to disable a model host's permission checks.
+   * Off by default.
    */
   allow_dangerous_permission_bypass: boolean;
   /**
@@ -70,11 +68,19 @@ export interface MycelinkConfig {
   acceptance_review?: { required?: boolean; max_rounds?: number; reviewer_timeout_seconds?: number; criterion_ceiling?: number; max_review_sessions?: number; review_wall_clock_minutes?: number };
 }
 
+export interface ProviderConfig {
+  provider: 'claude' | 'codex';
+  executable?: string;
+  extra_args?: string[];
+  model?: string;
+  sandbox?: 'read-only' | 'workspace-write';
+  approval_policy?: 'untrusted' | 'on-request' | 'never';
+}
+
 export const DEFAULT_CONFIG: MycelinkConfig = {
   schema_version: 1,
-  claude_executable: 'claude',
-  session_adapter: 'claude-background',
-  claude_extra_args: [],
+  provider: { provider: 'claude', executable: 'claude', extra_args: [] },
+  adapter: 'claude-cli',
   session_timeout_ms: 45 * 60 * 1000,
   context_pack_max_bytes: 16_384,
   hook_session_start_max_bytes: 4096,
@@ -85,6 +91,19 @@ export const DEFAULT_CONFIG: MycelinkConfig = {
   acceptance_review: { required: true, max_rounds: 2 },
 };
 
+const NEW_CONFIG_DEFAULTS: Omit<MycelinkConfig, 'adapter'> = {
+  schema_version: DEFAULT_CONFIG.schema_version,
+  provider: DEFAULT_CONFIG.provider,
+  session_timeout_ms: DEFAULT_CONFIG.session_timeout_ms,
+  context_pack_max_bytes: DEFAULT_CONFIG.context_pack_max_bytes,
+  hook_session_start_max_bytes: DEFAULT_CONFIG.hook_session_start_max_bytes,
+  hook_prompt_delta_max_bytes: DEFAULT_CONFIG.hook_prompt_delta_max_bytes,
+  brain_dir: DEFAULT_CONFIG.brain_dir,
+  allow_shell_commands: DEFAULT_CONFIG.allow_shell_commands,
+  allow_dangerous_permission_bypass: DEFAULT_CONFIG.allow_dangerous_permission_bypass,
+  acceptance_review: DEFAULT_CONFIG.acceptance_review,
+};
+
 export interface Workspace {
   paths: ControlPaths;
   config: MycelinkConfig;
@@ -93,11 +112,39 @@ export interface Workspace {
 
 export class WorkspaceError extends Error {}
 
+interface LegacyProviderConfig {
+  session_adapter?: 'claude-background' | 'fake-claude';
+  claude_executable?: string;
+  claude_extra_args?: string[];
+}
+
+export type MycelinkConfigInput = Partial<MycelinkConfig> & LegacyProviderConfig;
+
+/** Normalize schema-version-1 provider settings without mutating their source file. */
+export function normalizeConfig(parsed: MycelinkConfigInput): MycelinkConfig {
+  const hasProviderBlock = parsed.provider !== undefined;
+  const provider = parsed.provider ?? {
+    provider: 'claude',
+    executable: parsed.claude_executable ?? DEFAULT_CONFIG.provider.executable,
+    extra_args: parsed.claude_extra_args ?? DEFAULT_CONFIG.provider.extra_args,
+  };
+  const adapter: AdapterId = hasProviderBlock
+    ? provider.provider === 'codex' ? 'codex-cli' : parsed.adapter === 'fake-provider' ? 'fake-provider' : 'claude-cli'
+    : parsed.session_adapter === 'fake-claude' ? 'fake-provider' : 'claude-cli';
+  const {
+    session_adapter: _legacyAdapter,
+    claude_executable: _legacyExecutable,
+    claude_extra_args: _legacyArgs,
+    ...current
+  } = parsed;
+  return { ...DEFAULT_CONFIG, ...current, provider, adapter };
+}
+
 export function loadConfig(controlRoot: string): MycelinkConfig {
   const file = controlPaths(controlRoot).config;
   if (!existsSync(file)) return { ...DEFAULT_CONFIG };
-  const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<MycelinkConfig>;
-  return { ...DEFAULT_CONFIG, ...parsed };
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) as MycelinkConfigInput;
+  return normalizeConfig(parsed);
 }
 
 export function loadRepositories(controlRoot: string): RepositoryManifest {
@@ -176,7 +223,7 @@ export function loadFeature(controlRoot: string, featureId: string): LoadedFeatu
 }
 
 /** Create the directory skeleton for a control repository. */
-export function initControlRepo(controlRoot: string, config: Partial<MycelinkConfig> = {}): ControlPaths {
+export function initControlRepo(controlRoot: string, config: Partial<Omit<MycelinkConfig, 'adapter'>> = {}): ControlPaths {
   const paths = controlPaths(controlRoot);
   for (const dir of [
     paths.controlRoot,
@@ -190,7 +237,7 @@ export function initControlRepo(controlRoot: string, config: Partial<MycelinkCon
     mkdirSync(dir, { recursive: true });
   }
   // Each created only where nothing is (exclusively, never a replace): a config the operator wrote stays theirs.
-  createExclusive(paths.config, JSON.stringify({ ...DEFAULT_CONFIG, ...config }, null, 2) + '\n');
+  createExclusive(paths.config, JSON.stringify({ ...NEW_CONFIG_DEFAULTS, ...config }, null, 2) + '\n');
   createExclusive(join(paths.featuresDir, '.gitkeep'), '');
   ensureScratchIgnored(paths.controlRoot);
   return paths;

@@ -50,7 +50,7 @@
             "output_tokens": { "type": "integer", "minimum": 0 }
           }
         },
-        "adapter": { "enum": ["fake-claude", "claude-background"] },
+        "adapter": { "enum": ["claude-cli", "codex-cli", "fake-provider", "fake-claude", "claude-background"] },
         "pid": { "type": ["integer", "null"] },
         "log_path": { "type": ["string", "null"] },
         "result_path": { "type": ["string", "null"] },

@@ -7,6 +7,11 @@
  */
 import type { UsageTotals } from '../model/types.js';
 
+export type ProviderId = 'claude' | 'codex' | 'fake';
+export type AdapterId = 'claude-cli' | 'codex-cli' | 'fake-provider';
+export type LegacyAdapterId = 'claude-background' | 'fake-claude';
+export type SessionAdapterId = AdapterId | LegacyAdapterId;
+
 export interface NodeResult {
   /** 2: each criterion an acceptance review's rework orders may be answered on its own (outcome CRITERIA). */
   schema_version: 1 | 2;
@@ -166,7 +171,7 @@ export interface SpawnRequest {
 
 export interface SessionHandle {
   session_id: string;
-  adapter: 'fake-claude' | 'claude-background';
+  adapter: SessionAdapterId;
   pid: number | null;
   node_id: string;
   claim_id: string;
@@ -187,7 +192,7 @@ export interface SessionObservation {
 }
 
 export interface SessionAdapter {
-  readonly name: 'fake-claude' | 'claude-background';
+  readonly name: SessionAdapterId;
   spawn(request: SpawnRequest): SessionHandle;
   /** Current observation without blocking. */
   poll(handle: SessionHandle): SessionObservation;

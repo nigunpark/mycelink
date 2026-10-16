@@ -10,7 +10,7 @@ import { mkdirSync } from 'node:fs';
 import { readDoc, writeDocAtomic } from '../state/atomic-json.js';
 import { withLock } from '../state/process-lock.js';
 import { validateAgainstSchema } from '../schema/registry.js';
-import type { SessionHandle, SessionObservation, SessionStatus } from './adapter.js';
+import type { SessionAdapterId, SessionHandle, SessionObservation, SessionStatus } from './adapter.js';
 
 export interface SessionRecord {
   session_id: string;
@@ -26,7 +26,7 @@ export interface SessionRecord {
   finished_at: string | null;
   turns: number;
   usage: { model_turns?: number; wall_clock_ms?: number; input_tokens?: number; output_tokens?: number };
-  adapter: 'fake-claude' | 'claude-background';
+  adapter: SessionAdapterId;
   pid: number | null;
   log_path: string | null;
   result_path: string | null;
