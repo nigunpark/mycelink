@@ -19,6 +19,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 
 BASE = pathlib.Path('/var/lib/mycelink-codex/claims')
 MAX_FILE = 2 * 1024 * 1024
@@ -120,6 +121,47 @@ def bridge_identity(path, claim, generation, role, expected_uid):
         channel.close()
 
 
+def run_bounded(command, identity, timeout_sec):
+    """Drain hostile stdio with backpressure; never accumulate output in RAM."""
+    def drop():
+        os.setgroups([])
+        os.setgid(identity.pw_gid)
+        os.setuid(identity.pw_uid)
+
+    child = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env={'PATH': '/usr/bin:/bin'}, close_fds=True, preexec_fn=drop)
+    exceeded = threading.Event()
+    def drain(stream):
+        count = 0
+        try:
+            while chunk := stream.read(64 * 1024):
+                count += len(chunk)
+                if count > MAX_FILE:
+                    exceeded.set()
+                    child.kill()
+                    break
+        finally:
+            stream.close()
+    readers = [threading.Thread(target=drain, args=(stream,), daemon=True)
+               for stream in (child.stdout, child.stderr)]
+    for reader in readers:
+        reader.start()
+    try:
+        child.wait(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait(timeout=3)
+        raise
+    finally:
+        for reader in readers:
+            reader.join(timeout=3)
+    if any(reader.is_alive() for reader in readers) or exceeded.is_set():
+        raise ValueError('isolated command exceeded stdio budget or retained a channel')
+    if child.returncode != 0:
+        raise RuntimeError(f'isolated command failed ({child.returncode})')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
@@ -162,11 +204,6 @@ def main():
         proposal.mkdir(mode=0o700)
         os.chown(proposal, identity.pw_uid, identity.pw_gid)
 
-        def drop():
-            os.setgroups([])
-            os.setgid(identity.pw_gid)
-            os.setuid(identity.pw_uid)
-
         command = [
             'bwrap', '--die-with-parent', '--unshare-all', '--new-session',
             '--ro-bind', '/usr', '/usr', '--ro-bind', '/bin', '/bin',
@@ -182,11 +219,7 @@ def main():
         command.extend(['--clearenv', '--setenv', 'HOME', '/home',
                         '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin',
                         '--chdir', '/work', '--', *args.command[1:]])
-        child = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, env={'PATH': '/usr/bin:/bin'},
-                               close_fds=True, preexec_fn=drop, timeout=args.timeout_sec)
-        if child.returncode != 0:
-            raise RuntimeError(f'isolated command failed ({child.returncode}): {child.stderr[:400]!r}')
+        run_bounded(command, identity, args.timeout_sec)
         proposals = proposals_from(proposal)
         own_slot = 'result.json' if args.role == 'worker' else 'verdict.json'
         foreign_slot = 'verdict.json' if args.role == 'worker' else 'result.json'

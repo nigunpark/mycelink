@@ -378,7 +378,7 @@ printf '%s' "$?" > /proposal/status
                 audit = [json.loads(line) for line in audit_file.read_text().splitlines()] if audit_file.exists() else []
                 self.assertEqual(proposal['status'], '0',
                     f'nonzero Codex status; events={events}, error classes={classes}, broker={audit}')
-                self.assertIn('turn.completed', events)
+                self.assertIn('turn.completed', events, f'events={events} status={proposal.get("status")} stderr={proposal.get("codex-err", "")[:300]}')
             finally:
                 os.kill(broker_pid, signal.SIGTERM)
                 os.waitpid(broker_pid, 0)
@@ -413,6 +413,19 @@ printf '%s' "$?" > /proposal/status
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+    def test_excessive_stdio_cannot_exhaust_controller_memory_or_create_report(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-stdout-budget-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            report = base / 'report.json'
+            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
+                '--role', 'worker', '--', '/bin/sh', '-c',
+                'head -c 3145728 /dev/zero'], text=True, capture_output=True, timeout=15)
+            self.assertNotEqual(run.returncode, 0, 'untrusted output exceeded the controller byte budget')
+            self.assertFalse(report.exists())
+
     def test_timeout_reaps_detached_worker_descendants(self):
         import uuid
         import time
