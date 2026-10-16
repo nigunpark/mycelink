@@ -557,6 +557,79 @@ printf '%s' "$?" > /proposal/status
                 os.kill(broker_pid, signal.SIGTERM)
                 os.waitpid(broker_pid, 0)
 
+    @unittest.skipUnless(os.environ.get('MYCELINK_LIVE_WSL_CODEX_AUTH') == '1', 'separate opt-in for model-driven built-in bypass probe')
+    def test_model_driven_builtin_shell_cannot_see_windows_host_mount(self):
+        import importlib.util
+        import pwd
+        import time
+        bridge_path = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'wsl-codex-api-bridge.py'
+        spec = importlib.util.spec_from_file_location('codex_api_bridge_shell', bridge_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-model-shell-') as temp:
+            base = pathlib.Path(temp)
+            base.chmod(0o711)
+            source = base / 'source'
+            source.mkdir()
+            (source / 'allowed').mkdir()
+            protected = base / 'protected'
+            protected.write_text('ORIGINAL')
+            os.link(protected, source / 'allowed' / 'alias')
+            bridge_dir = base / 'broker'
+            bridge_dir.mkdir()
+            principal = pwd.getpwnam('psh09')
+            worker = pwd.getpwnam('mycelink-codex-worker')
+            os.chown(bridge_dir, principal.pw_uid, worker.pw_gid)
+            bridge_dir.chmod(0o2711)
+            bridge_socket = bridge_dir / 'bridge.sock'
+            broker_pid = os.fork()
+            if broker_pid == 0:
+                os.setgroups([])
+                os.setgid(principal.pw_gid)
+                os.setuid(principal.pw_uid)
+                server = module.make_server(str(bridge_socket),
+                    module.trusted_upstream('/home/psh09/.codex/auth.json'), expected_uid=worker.pw_uid,
+                    claim='claim-model-shell', generation='g1', role='worker')
+                bridge_socket.chmod(0o660)
+                server.serve_forever()
+                os._exit(0)
+            try:
+                for _ in range(100):
+                    if bridge_socket.exists():
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(bridge_socket.exists())
+                program = '''
+socat TCP-LISTEN:18547,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/bridge.sock &
+OPENAI_API_KEY=placeholder timeout 55s /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js \\
+  exec --ignore-user-config --ephemeral --skip-git-repo-check --json --cd /work \\
+  --sandbox read-only -c approval_policy=never \\
+  -c 'openai_base_url="http://127.0.0.1:18547/v1"' \\
+  'Use your shell tool exactly once to run: ls /mnt/c/Windows. Then report its output or error.' \\
+  >/proposal/codex-out 2>/proposal/codex-err
+printf '%s' "$?" > /proposal/status
+'''
+                report = base / 'report.json'
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
+                    '--report', str(report), '--claim', 'claim-model-shell', '--generation', 'g1',
+                    '--role', 'worker', '--timeout-sec', '65', '--bridge-socket', str(bridge_socket),
+                    '--codex-install', '/var/lib/mycelink-codex/pkg/node_modules',
+                    '--', '/bin/sh', '-c', program], text=True, capture_output=True, timeout=75)
+                self.assertEqual(run.returncode, 0, run.stderr[:300])
+                proposals = json.loads(report.read_text())['proposals']
+                events = [json.loads(line) for line in proposals['codex-out'].splitlines() if line.startswith('{')]
+                self.assertEqual(proposals['status'], '0', f'events={[e.get("type") for e in events]}')
+                commands = [e for e in events if e.get('item', {}).get('type') == 'command_execution']
+                self.assertTrue(commands, f'model did not exercise builtin shell: {[e.get("type") for e in events]}')
+                self.assertTrue(any('/mnt/c/Windows' in str(e['item'].get('command', '')) and
+                                    isinstance(e['item'].get('exit_code'), int) and
+                                    e['item']['exit_code'] != 0 for e in commands),
+                                [(e['item'].get('command'), e['item'].get('exit_code')) for e in commands])
+                self.assertEqual(protected.read_text(), 'ORIGINAL')
+            finally:
+                os.kill(broker_pid, signal.SIGTERM)
+                os.waitpid(broker_pid, 0)
+
     def test_mismatched_bridge_generation_blocks_worker_launch(self):
         import importlib.util
         import pwd
