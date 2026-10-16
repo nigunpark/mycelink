@@ -36,9 +36,9 @@ class ClaimIntegration(unittest.TestCase):
         self.current = True
         self.hook = True
 
-    def launch(self, generation, command='mkdir -p /proposal/src; printf NEW > /proposal/src/a.txt; printf \'{"outcome":"DONE"}\' > /proposal/result.json'):
+    def launch(self, generation, command='mkdir -p /proposal/src; printf NEW > /proposal/src/a.txt; printf \'{"outcome":"DONE"}\' > /proposal/result.json', role='worker'):
         return subprocess.run(['python3', str(LAUNCHER), '--source', str(self.source), '--source-files', str(self.manifest),
-            '--transport-dir', str(self.transport), '--claim', 'c1', '--generation', generation, '--role', 'worker',
+            '--transport-dir', str(self.transport), '--claim', 'c1', '--generation', generation, '--role', role,
             '--', '/bin/sh', '-c', command], capture_output=True, text=True, timeout=30)
 
     def broker(self, generation='g1'):
@@ -90,6 +90,22 @@ class ClaimIntegration(unittest.TestCase):
             self.broker().consume_transport(self.transport, 'worker', expected_source_files=1,
                 expected_source_hashes={'src/a.txt': hashlib.sha256(b'CHANGED').hexdigest()})
         self.assertFalse((self.broker_root / 'worker').exists())
+
+    def test_reviewer_verdict_is_separately_launched_and_never_a_worker_proposal(self):
+        source_hashes = {'src/a.txt': hashlib.sha256(b'ORIGINAL').hexdigest()}
+        worker = self.launch('g1')
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        broker = self.broker()
+        broker.consume_transport(self.transport, 'worker', expected_source_files=1,
+            expected_source_hashes=source_hashes)
+        reviewer = self.launch('g1', 'printf \'{"verdict":"PASS"}\' > /proposal/verdict.json', role='reviewer')
+        self.assertEqual(reviewer.returncode, 0, reviewer.stderr)
+        broker.consume_transport(self.transport, 'reviewer', expected_source_files=1,
+            expected_source_hashes=source_hashes)
+        self.assertEqual((self.broker_root / 'reviewer' / 'verdict.json').read_text(), '{"verdict":"PASS"}')
+        self.assertFalse((self.broker_root / 'worker' / 'verdict.json').exists())
+        self.assertFalse((self.broker_root / 'reviewer' / 'result.json').exists())
+        self.assertFalse((self.broker_root / 'reviewer' / 'src' / 'a.txt').exists())
 
 if __name__ == '__main__':
     unittest.main()
