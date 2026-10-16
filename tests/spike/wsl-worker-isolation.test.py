@@ -74,6 +74,33 @@ class WorkerIsolationTest(unittest.TestCase):
                 identities[role] = record['proposals']['uid'].strip()
             self.assertNotEqual(identities['worker'], identities['reviewer'])
 
+    def test_role_specific_result_channels_have_distinct_principals(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-role-result-test-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            records = {}
+            for role, filename in (('worker', 'result.json'), ('reviewer', 'verdict.json')):
+                report = base / (role + '.json')
+                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                    '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
+                    '--role', role, '--', '/bin/sh', '-c',
+                    'printf \'{"decision":"OK"}\' > /proposal/' + filename],
+                    text=True, capture_output=True, timeout=10)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                records[role] = json.loads(report.read_text())
+                self.assertEqual(records[role]['submission']['decision'], 'OK')
+                self.assertEqual(records[role]['proposals'], {})
+            self.assertNotEqual(records['worker']['role'], records['reviewer']['role'])
+            wrong = base / 'wrong.json'
+            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--report', str(wrong), '--claim', 'claim-1', '--generation', 'generation-1',
+                '--role', 'worker', '--', '/bin/sh', '-c',
+                'printf \'{"decision":"FORGED"}\' > /proposal/verdict.json'],
+                text=True, capture_output=True, timeout=10)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertFalse(wrong.exists())
+
     def test_refuses_symlink_proposal_without_writing_report(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-link-test-') as temp:
             base = pathlib.Path(temp)

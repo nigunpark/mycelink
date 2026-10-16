@@ -187,8 +187,19 @@ def main():
                                close_fds=True, preexec_fn=drop, timeout=args.timeout_sec)
         if child.returncode != 0:
             raise RuntimeError(f'isolated command failed ({child.returncode}): {child.stderr[:400]!r}')
+        proposals = proposals_from(proposal)
+        own_slot = 'result.json' if args.role == 'worker' else 'verdict.json'
+        foreign_slot = 'verdict.json' if args.role == 'worker' else 'result.json'
+        if foreign_slot in proposals:
+            raise ValueError('wrong-role result channel')
+        raw_submission = proposals.pop(own_slot, None)
+        submission = None
+        if raw_submission is not None:
+            submission = json.loads(raw_submission)
+            if not isinstance(submission, dict):
+                raise ValueError('result channel requires a JSON object')
         record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
-                  'source_files': count, 'proposals': proposals_from(proposal)}
+                  'source_files': count, 'proposals': proposals, 'submission': submission}
         # A pre-existing target (including a hardlink/symlink) must not be overwritten.
         fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'w') as output:

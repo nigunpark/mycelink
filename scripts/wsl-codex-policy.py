@@ -26,7 +26,8 @@ def safe_name(path):
         path.startswith('/') or any(segment in ('', '.', '..') or segment.startswith('.') or
         segment.endswith(('.', ' ')) for segment in path.split('/'))):
         return False
-    return path.casefold() not in RESERVED | {'_receipt.json'} and 'mycelink' not in path.casefold().split('/')
+    parts = path.casefold().split('/')
+    return not any(part in RESERVED | {'_receipt.json', 'mycelink'} for part in parts)
 
 
 def seal(report_path, slot, *, claim, generation, role, allowed_paths):
@@ -65,6 +66,13 @@ def seal(report_path, slot, *, claim, generation, role, allowed_paths):
         raise ValueError('proposal outside exact allowed paths or reserved ownership slot')
     if len({name.casefold() for name in proposals}) != len(proposals):
         raise ValueError('case-aliased proposal paths')
+    submission = data.get('submission')
+    if not isinstance(submission, dict):
+        raise ValueError('missing role-owned result or verdict')
+    submission_bytes = json.dumps(submission, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    if len(submission_bytes) > MAX_FILE:
+        raise ValueError('role-owned submission exceeds budget')
+    submission_name = 'result.json' if role == 'worker' else 'verdict.json'
     temporary = pathlib.Path(tempfile.mkdtemp(prefix='sealed-', dir=parent))
     hashes = {}
     try:
@@ -78,7 +86,14 @@ def seal(report_path, slot, *, claim, generation, role, allowed_paths):
                 file.flush()
                 os.fsync(file.fileno())
             hashes[name] = hashlib.sha256(contents).hexdigest()
-        receipt = {'claim': claim, 'generation': generation, 'role': role, 'sha256': hashes}
+        submission_fd = os.open(temporary / submission_name,
+                                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(submission_fd, 'wb') as output:
+            output.write(submission_bytes)
+            output.flush()
+            os.fsync(output.fileno())
+        receipt = {'claim': claim, 'generation': generation, 'role': role, 'sha256': hashes,
+                   'submission_sha256': hashlib.sha256(submission_bytes).hexdigest()}
         (temporary / '_receipt.json').write_text(json.dumps(receipt, sort_keys=True))
         if slot.exists() or slot.is_symlink():
             raise ValueError('slot became occupied')
