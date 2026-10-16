@@ -111,6 +111,21 @@ describe('infrastructure failures do not consume node budgets', () => {
     expect(loadState(p.featureDir)!.data.usage.sessions).toBe(0);
   });
 
+  it('refuses Codex even with read-only sandbox and an apparent executable', async () => {
+    setConfig(p, {
+      provider: { provider: 'codex', executable: process.execPath, sandbox: 'read-only', approval_policy: 'never' },
+      session_adapter: 'fake-claude',
+    });
+    const r = await cli(p, ['orchestrate', 'run', FEATURE_ID, '--json']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe('');
+    expect(r.err).toMatch(/Codex worker adapter is not supported.*security fence/i);
+    const state = loadState(p.featureDir)!.data;
+    expect(state.nodes[CORE]!.claim).toBeNull();
+    expect(state.nodes[CORE]!.attempts).toBe(0);
+    expect(state.usage.sessions).toBe(0);
+  });
+
   it('a spawn failure releases the claim, refunds the attempt and stops resumably', async () => {
     commitControl(p, 'scaffold');
     const spawnFails = new FakeInProcessAdapter({
