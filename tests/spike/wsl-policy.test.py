@@ -108,6 +108,72 @@ class SealedProposalTest(unittest.TestCase):
                     p.seal(report, slot, claim='c1', generation='g1', role=role,
                            allowed_paths={'allowed/file.txt'})
                 self.assertFalse(slot.exists())
+    def test_real_process_death_after_replace_reconciles_from_durable_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            target = base / 'target'
+            target.mkdir()
+            (target / 'a.txt').write_text('OLD_A')
+            (target / 'b.txt').write_text('OLD_B')
+            report = base / 'report.json'
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
+                'source_files': 0, 'proposals': {'a.txt': 'NEW_A', 'b.txt': 'NEW_B'},
+                'submission': {}}))
+            slot = base / 'sealed'
+            p = policy()
+            p.seal(report, slot, claim='c1', generation='g1', role='worker',
+                   allowed_paths={'a.txt', 'b.txt'})
+            pid = os.fork()
+            if pid == 0:
+                original = p.os.replace
+                def die_after_first(*args, **kwargs):
+                    original(*args, **kwargs)
+                    os._exit(19)
+                p.os.replace = die_after_first
+                p.apply(slot, target, claim='c1', generation='g1', allowed_paths={'a.txt', 'b.txt'})
+                os._exit(20)
+            child, status = os.waitpid(pid, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 19)
+            self.assertEqual((target / 'a.txt').read_text(), 'NEW_A')
+            self.assertEqual(p.reconcile_apply(slot, target, claim='c1', generation='g1',
+                            allowed_paths={'a.txt', 'b.txt'}), 'restored')
+            self.assertEqual((target / 'a.txt').read_text(), 'OLD_A')
+            self.assertEqual((target / 'b.txt').read_text(), 'OLD_B')
+
+    def test_reconcile_restores_crash_after_first_file_replace(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            target = base / 'target'
+            target.mkdir()
+            (target / 'a.txt').write_text('OLD_A')
+            (target / 'b.txt').write_text('OLD_B')
+            report = base / 'report.json'
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
+                'source_files': 0, 'proposals': {'a.txt': 'NEW_A', 'b.txt': 'NEW_B'},
+                'submission': {}}))
+            slot = base / 'sealed'
+            p = policy()
+            p.seal(report, slot, claim='c1', generation='g1', role='worker',
+                   allowed_paths={'a.txt', 'b.txt'})
+            replace = p.os.replace
+            calls = 0
+            def crash_before_second(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise KeyboardInterrupt('simulated controller death')
+                return replace(*args, **kwargs)
+            with patch.object(p.os, 'replace', side_effect=crash_before_second):
+                with self.assertRaises(KeyboardInterrupt):
+                    p.apply(slot, target, claim='c1', generation='g1',
+                            allowed_paths={'a.txt', 'b.txt'})
+            self.assertEqual((target / 'a.txt').read_text(), 'NEW_A')
+            self.assertEqual(p.reconcile_apply(slot, target, claim='c1', generation='g1',
+                            allowed_paths={'a.txt', 'b.txt'}), 'restored')
+            self.assertEqual((target / 'a.txt').read_text(), 'OLD_A')
+            self.assertEqual((target / 'b.txt').read_text(), 'OLD_B')
+
     def test_invalid_later_staged_file_creates_no_destination_directories(self):
         with tempfile.TemporaryDirectory() as temp:
             base = pathlib.Path(temp)

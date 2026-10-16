@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Fail-closed staging of a generation-bound WSL proposal (not worktree apply).
+"""Experimental root-owned WSL proposal seal/apply/reconcile; not production dispatch.
 
 Controller supplies exact allowed file names; globs must be expanded by the
 existing Mycelink matcher in the trusted controller, not by this worker.
-Result and reviewer verdict slots require separate protocol/ownership checks.
+Root-owned result and reviewer verdict slots are distinct. A journal restores
+an interrupted multi-file apply, but the real Orchestrator claim/gates/settle
+protocol does not yet invoke this module; do not enable Codex preflight.
 """
 import hashlib
 import json
@@ -141,6 +143,23 @@ def read_submission(slot, *, claim, generation, role):
         os.close(root)
 
 
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def mark_apply(slot, name):
+    fd = os.open(slot / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    sync_directory(slot)
+
+
 def apply(slot, destination, *, claim, generation, allowed_paths):
     """Copy validated staged bytes to fresh inodes via directory FDs.
 
@@ -204,6 +223,30 @@ def apply(slot, destination, *, claim, generation, allowed_paths):
                 finally:
                     os.close(prior_fd)
             prepared.append((parent_fd, name.split('/')[-1], contents, prior))
+        journal_file = slot / '_apply-journal.json'
+        if journal_file.exists() or journal_file.is_symlink():
+            raise ValueError('apply journal exists; reconcile before retrying')
+        rollback_dir = slot / '_rollback'
+        rollback_dir.mkdir(mode=0o700)
+        journal = {'claim': claim, 'generation': generation, 'role': 'worker', 'entries': []}
+        for index, (_, leaf, contents, prior) in enumerate(prepared):
+            name = verified[index][0]
+            old_digest = hashlib.sha256(prior).hexdigest() if prior is not None else None
+            if prior is not None:
+                fd = os.open(rollback_dir / str(index), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'wb') as backup:
+                    backup.write(prior)
+                    backup.flush()
+                    os.fsync(backup.fileno())
+            journal['entries'].append({'name': name, 'old_sha256': old_digest,
+                                       'new_sha256': hashlib.sha256(contents).hexdigest(), 'index': index})
+        staging = slot / ('_apply-journal-' + secrets.token_hex(12))
+        with staging.open('x') as output:
+            json.dump(journal, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.rename(staging, journal_file)
+        sync_directory(slot)
         replaced = []
         try:
             for parent_fd, leaf, contents, prior in prepared:
@@ -222,6 +265,7 @@ def apply(slot, destination, *, claim, generation, allowed_paths):
                         os.unlink(temporary, dir_fd=parent_fd)
                     except FileNotFoundError:
                         pass
+            mark_apply(slot, '_apply-committed')
         except OSError:
             # Only an in-process failure can be restored here. A crash between
             # replacements still requires a controller-owned journal/reconcile.
@@ -237,7 +281,105 @@ def apply(slot, destination, *, claim, generation, allowed_paths):
                         output.flush()
                         os.fsync(output.fileno())
                     os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            mark_apply(slot, '_apply-restored')
             raise
     finally:
         for fd in reversed(open_dirs):
+            os.close(fd)
+
+
+def reconcile_apply(slot, destination, *, claim, generation, allowed_paths):
+    """Restore a journaled but uncommitted apply after an interrupted controller."""
+    if os.geteuid() != 0:
+        raise ValueError('trusted root reconcile required')
+    slot = pathlib.Path(slot)
+    read_submission(slot, claim=claim, generation=generation, role='worker')
+    if (slot / '_apply-committed').exists():
+        return 'committed'
+    if (slot / '_apply-restored').exists():
+        return 'restored'
+    path = slot / '_apply-journal.json'
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_size > MAX_FILE:
+            raise ValueError('invalid apply journal')
+        with os.fdopen(os.dup(fd), 'rb') as journal_stream:
+            journal = json.loads(journal_stream.read(MAX_FILE + 1))
+    finally:
+        os.close(fd)
+    if (journal.get('claim'), journal.get('generation'), journal.get('role')) != (claim, generation, 'worker'):
+        raise ValueError('stale apply journal')
+    entries = journal.get('entries')
+    if not isinstance(entries, list) or len(entries) > 4096:
+        raise ValueError('invalid apply entries')
+    receipt = json.loads((slot / '_receipt.json').read_text())
+    hashes = receipt.get('sha256')
+    if not isinstance(hashes, dict) or set(hashes) != {entry.get('name') for entry in entries}:
+        raise ValueError('apply journal does not match sealed proposal')
+    root_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    opened = [root_fd]
+    restores = []
+    try:
+        # Preflight every backup and current destination before changing any.
+        for position, entry in enumerate(entries):
+            name = entry.get('name')
+            if (not safe_name(name) or name not in allowed_paths or entry.get('index') != position or
+                entry.get('new_sha256') != hashes.get(name)):
+                raise ValueError('unsafe apply journal path or digest')
+            prior_digest = entry.get('old_sha256')
+            if prior_digest is not None and not isinstance(prior_digest, str):
+                raise ValueError('invalid old digest')
+            prior = None
+            if prior_digest is not None:
+                backup_fd = os.open(slot / '_rollback' / str(position), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                try:
+                    info = os.fstat(backup_fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                        raise ValueError('invalid rollback file')
+                    with os.fdopen(os.dup(backup_fd), 'rb') as data:
+                        prior = data.read(MAX_FILE + 1)
+                    if hashlib.sha256(prior).hexdigest() != prior_digest:
+                        raise ValueError('rollback bytes changed')
+                finally:
+                    os.close(backup_fd)
+            parent_fd = root_fd
+            for segment in name.split('/')[:-1]:
+                parent_fd = os.open(segment, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+                opened.append(parent_fd)
+            leaf = name.split('/')[-1]
+            try:
+                current_fd = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+            except FileNotFoundError:
+                current_digest = None
+            else:
+                try:
+                    info = os.fstat(current_fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
+                        raise ValueError('unsafe current destination')
+                    with os.fdopen(os.dup(current_fd), 'rb') as data:
+                        current_digest = hashlib.sha256(data.read(MAX_FILE + 1)).hexdigest()
+                finally:
+                    os.close(current_fd)
+            if current_digest not in (prior_digest, entry['new_sha256']):
+                raise ValueError('destination moved since interrupted apply')
+            restores.append((parent_fd, leaf, prior, current_digest == prior_digest))
+        for parent_fd, leaf, prior, already in reversed(restores):
+            if already:
+                continue
+            if prior is None:
+                os.unlink(leaf, dir_fd=parent_fd)
+            else:
+                temporary = '.mycelink-recover-' + secrets.token_hex(12)
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=parent_fd)
+                with os.fdopen(fd, 'wb') as output:
+                    output.write(prior)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        mark_apply(slot, '_apply-restored')
+        return 'restored'
+    finally:
+        for fd in reversed(opened):
             os.close(fd)
