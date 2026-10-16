@@ -14,6 +14,17 @@ LAUNCHER = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'wsl-codex-
 
 @unittest.skipUnless(os.geteuid() == 0 and os.environ.get('MYCELINK_LIVE_WSL_WORKER') == '1', 'requires explicit WSL root opt-in')
 class WorkerIsolationTest(unittest.TestCase):
+    def test_pinned_non_setuid_bwrap_uses_patch_release(self):
+        executable = pathlib.Path('/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap')
+        self.assertTrue(executable.is_file(), 'private patched bwrap required; Ubuntu 0.11.1 dropped CVE-2026-87766 patch')
+        self.assertFalse(executable.stat().st_mode & 0o4000)
+        self.assertEqual(executable.stat().st_uid, 0)
+        version = subprocess.run([str(executable), '--version'], text=True, capture_output=True, timeout=5)
+        self.assertEqual(version.returncode, 0, version.stderr)
+        self.assertIn('0.13.1', version.stdout)
+        launcher = LAUNCHER.read_text()
+        self.assertIn("'/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap'", launcher)
+
     def test_separate_principal_snapshot_proposal_and_inherited_fd(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-worker-test-') as temp:
             base = pathlib.Path(temp)

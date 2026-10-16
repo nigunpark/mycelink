@@ -205,7 +205,8 @@ def main():
         os.chown(proposal, identity.pw_uid, identity.pw_gid)
 
         command = [
-            'bwrap', '--die-with-parent', '--unshare-all', '--new-session',
+            '/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap',
+            '--die-with-parent', '--unshare-all', '--new-session',
             '--ro-bind', '/usr', '/usr', '--ro-bind', '/bin', '/bin',
             '--ro-bind', '/lib', '/lib', '--ro-bind', '/lib64', '/lib64',
             '--ro-bind', '/etc', '/etc', '--proc', '/proc', '--dev', '/dev',
