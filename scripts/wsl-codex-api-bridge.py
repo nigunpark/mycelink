@@ -34,13 +34,16 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     max_handlers = 8
 
     def __init__(self, path, upstream, expected_uid, claim, generation, role, request_budget, byte_budget,
-                 allowed_model, max_output_tokens):
+                 allowed_model, max_output_tokens, total_output_tokens):
         if not 1 <= request_budget <= 256 or not 1 <= byte_budget <= 64 * MAX_BODY:
             raise ValueError('bridge requires bounded per-claim budgets')
         if allowed_model is not None and (not isinstance(allowed_model, str) or
             not re.fullmatch(r'[A-Za-z0-9._-]{1,80}', allowed_model) or
             type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 65536):
             raise ValueError('bridge model and output ceiling must be trusted and bounded')
+        if (type(total_output_tokens) is not int or not 1 <= total_output_tokens <= 256 * 65536 or
+            (allowed_model is not None and total_output_tokens < max_output_tokens)):
+            raise ValueError('bridge requires a bounded per-claim output reservation')
         self.upstream = upstream
         self.expected_uid = expected_uid
         self.claim = claim
@@ -50,6 +53,7 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.byte_budget = byte_budget
         self.allowed_model = allowed_model
         self.max_output_tokens = max_output_tokens
+        self.total_output_tokens = total_output_tokens
         self.budget_lock = threading.Lock()
         self.handler_slots = threading.BoundedSemaphore(self.max_handlers)
         super().__init__(path, Request)
@@ -81,12 +85,14 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
             return
         super().handle_error(request, client_address)
 
-    def reserve_request(self, size):
+    def reserve_request(self, size, output_tokens):
         with self.budget_lock:
-            if self.request_budget < 1 or self.byte_budget < size:
+            if (self.request_budget < 1 or self.byte_budget < size or
+                self.total_output_tokens < output_tokens):
                 return False
             self.request_budget -= 1
             self.byte_budget -= size
+            self.total_output_tokens -= output_tokens
             return True
 
 
@@ -156,7 +162,8 @@ class Request(BaseHTTPRequestHandler):
             body = json.dumps(payload, separators=(',', ':')).encode('utf-8')
             if len(body) > MAX_BODY:
                 return self.refuse()
-        if not self.server.reserve_request(len(body)):
+        output_reservation = payload['max_output_tokens'] if self.server.allowed_model is not None else 0
+        if not self.server.reserve_request(len(body), output_reservation):
             return self.refuse()
         # No Authorization, Host, Cookie, forwarding, or caller-selected destination.
         headers = {'Content-Type': 'application/json'}
@@ -165,6 +172,11 @@ class Request(BaseHTTPRequestHandler):
         try:
             status, payload, content_type = self.server.upstream('/v1/responses', body, headers)
         except Exception:
+            status, payload, content_type = 502, b'', 'application/json'
+        # Never splice a response header returned by an untrusted upstream into
+        # the worker-facing HTTP stream (including newline/header injection).
+        if not isinstance(content_type, str) or not re.fullmatch(
+            r'(?:application/json|text/event-stream)(?:; charset=[A-Za-z0-9_-]+)?', content_type):
             status, payload, content_type = 502, b'', 'application/json'
         audit = getattr(self.server, 'audit', None)
         if audit:
@@ -205,20 +217,30 @@ class Request(BaseHTTPRequestHandler):
 
 def make_server(path, upstream, expected_uid=None, claim=None, generation=None, role=None,
                 request_budget=64, byte_budget=8 * MAX_BODY,
-                allowed_model=None, max_output_tokens=None):
+                allowed_model=None, max_output_tokens=None, total_output_tokens=None):
     if os.path.lexists(path):
         raise FileExistsError('existing bridge path refused')
     return Bridge(path, upstream, expected_uid, claim, generation, role,
-                  request_budget, byte_budget, allowed_model, max_output_tokens)
+                  request_budget, byte_budget, allowed_model, max_output_tokens,
+                  total_output_tokens if total_output_tokens is not None else
+                  (request_budget * max_output_tokens if allowed_model is not None else 1))
 
 
 def trusted_upstream(auth_path):
     """Read the original WSL login only in this trusted process, per request."""
     def send(path, body, headers):
-        info = os.stat(auth_path, follow_symlinks=False)
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
-            raise PermissionError('invalid private auth file')
-        auth = json.loads(pathlib.Path(auth_path).read_text())
+        # Open once and validate the inode actually read. A separate lstat
+        # followed by read_text follows a replacement symlink (credential TOCTOU).
+        fd = os.open(auth_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        with os.fdopen(fd, 'rb') as source:
+            info = os.fstat(source.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or
+                info.st_uid != os.getuid() or info.st_size > 1024 * 1024):
+                raise PermissionError('invalid private auth file')
+            raw = source.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise PermissionError('oversized private auth file')
+        auth = json.loads(raw)
         tokens = auth.get('tokens') or {}
         token = tokens.get('access_token')
         account = tokens.get('account_id')
@@ -258,10 +280,12 @@ def main():
     parser.add_argument('--generation', required=True)
     parser.add_argument('--model', required=True)
     parser.add_argument('--max-output-tokens', required=True, type=int)
+    parser.add_argument('--total-output-tokens', required=True, type=int)
     args = parser.parse_args()
     server = make_server(args.socket, trusted_upstream(args.auth), expected_uid=args.worker_uid,
                          claim=args.claim, generation=args.generation, role='worker',
-                         allowed_model=args.model, max_output_tokens=args.max_output_tokens)
+                         allowed_model=args.model, max_output_tokens=args.max_output_tokens,
+                         total_output_tokens=args.total_output_tokens)
     try:
         os.chown(args.socket, os.getuid(), args.worker_gid)
         os.chmod(args.socket, 0o660)

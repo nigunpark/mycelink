@@ -188,6 +188,135 @@ class BridgePolicyTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_upstream_auth_file_swap_to_symlink_never_reads_replacement(self):
+        from unittest.mock import patch
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            auth = pathlib.Path(temp) / 'auth.json'
+            replacement = pathlib.Path(temp) / 'replacement.json'
+            auth.write_text(json.dumps({'tokens': {'access_token': 'ORIGINAL', 'account_id': 'original'}}))
+            replacement.write_text(json.dumps({'tokens': {'access_token': 'EXTRACTED', 'account_id': 'replacement'}}))
+            auth.chmod(0o600)
+            replacement.chmod(0o600)
+            original_stat = os.stat
+            def swap_after_check(path, *args, **kwargs):
+                info = original_stat(path, *args, **kwargs)
+                if str(path) == str(auth):
+                    auth.unlink()
+                    auth.symlink_to(replacement)
+                return info
+            sent = []
+            class FakeHTTPS:
+                def __init__(self, *args, **kwargs): pass
+                def request(self, *args, **kwargs):
+                    sent.append((args, kwargs))
+                def getresponse(self):
+                    class Response:
+                        status = 200
+                        def read(self, *args): return b'{}'
+                        def getheader(self, *args): return 'application/json'
+                    return Response()
+                def close(self): pass
+            with patch.object(bridge.os, 'stat', side_effect=swap_after_check), \
+                 patch.object(bridge.http.client, 'HTTPSConnection', FakeHTTPS):
+                try:
+                    bridge.trusted_upstream(str(auth))('/v1/responses', b'{}', {})
+                except (OSError, PermissionError):
+                    pass  # Fail closed on the path substitution.
+            self.assertNotIn('EXTRACTED', repr(sent), 'replaced credential was used for outbound auth')
+            self.assertTrue(not sent or sent[0][1]['headers']['ChatGPT-Account-ID'] == 'original')
+            # Independently verify the currently installed symlink fails at open,
+            # rather than relying only on the simulated lstat/read race above.
+            if not auth.is_symlink():
+                auth.unlink()
+                auth.symlink_to(replacement)
+            with self.assertRaises(OSError):
+                bridge.trusted_upstream(str(auth))('/v1/responses', b'{}', {})
+
+    def test_alternate_protocols_and_credentials_cannot_retarget_upstream(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append((path, headers)) or (200, b'{}', 'application/json')),
+                allowed_model='assigned-model', max_output_tokens=128)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                for method, path in (('CONNECT', 'example.com:443'), ('POST', 'https://example.com/v1/responses'),
+                                     ('POST', 'gopher://example.com/'), ('TRACE', '/v1/responses'),
+                                     ('GET', '/v1/responses')):
+                    conn = UnixHTTP(server.server_address)
+                    conn.request(method, path, body=b'{}', headers={'Content-Type': 'application/json',
+                        'Authorization': 'Bearer stolen', 'Proxy-Authorization': 'Bearer stolen'})
+                    response = conn.getresponse()
+                    self.assertNotEqual(response.status, 200, (method, path))
+                    response.read()
+                    conn.close()
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', body=b'{"model":"assigned-model"}',
+                    headers={'Content-Type': 'application/json', 'Authorization': 'Bearer stolen',
+                             'Cookie': 'session=stolen', 'Host': 'example.com'})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                response.read()
+                conn.close()
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][0], '/v1/responses')
+                self.assertEqual(set(calls[0][1]), {'Content-Type'})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_output_token_reservations_are_shared_and_failed_calls_still_spend_budget(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(json.loads(body)) or (502, b'{}', 'application/json')),
+                allowed_model='assigned-model', max_output_tokens=128, total_output_tokens=200)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                statuses = []
+                for body in ({'model': 'assigned-model'},
+                             {'model': 'assigned-model', 'max_output_tokens': 73},
+                             {'model': 'assigned-model', 'max_output_tokens': 72},
+                             {'model': 'assigned-model', 'max_output_tokens': 1}):
+                    conn = UnixHTTP(server.server_address)
+                    conn.request('POST', '/v1/responses', json.dumps(body).encode(),
+                                 {'Content-Type': 'application/json'})
+                    response = conn.getresponse()
+                    statuses.append(response.status)
+                    response.read()
+                    conn.close()
+                self.assertEqual(statuses, [502, 403, 502, 403])
+                self.assertEqual([c['max_output_tokens'] for c in calls], [128, 72])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_untrusted_upstream_content_type_cannot_inject_response_headers(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (200, b'{}', 'application/json\r\nX-Leaked: credential'))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', b'{}', {'Content-Type': 'application/json'})
+                response = conn.getresponse()
+                self.assertNotIn('X-Leaked', dict(response.getheaders()))
+                response.read()
+                conn.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_broker_rejects_wrong_os_principal_before_upstream(self):
         bridge = load_bridge()
         with tempfile.TemporaryDirectory() as temp:

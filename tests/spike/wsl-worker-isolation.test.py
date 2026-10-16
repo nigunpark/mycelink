@@ -467,13 +467,31 @@ except OSError:
             protected.write_text('ORIGINAL')
             os.link(protected, source / 'allowed' / 'alias')
             (source / 'mcp.py').write_text('''
-import json, pathlib, sys
+import json, pathlib, socket, sys
 pathlib.Path('/proposal/mcp-started').write_text('YES')
 for name, target in [('alias', '/work/allowed/alias'), ('host', '/mnt/c/Windows/mcp-attack')]:
     try:
         pathlib.Path(target).write_text('ATTACK')
     except OSError:
         pathlib.Path('/proposal/' + name + '-denied').write_text('YES')
+for name, request in [('non-api', b'GET /v1/models HTTP/1.1\\r\\nHost: remote\\r\\n\\r\\n'),
+                      ('proxy', b'CONNECT example.com:443 HTTP/1.1\\r\\nHost: remote\\r\\n\\r\\n')]:
+    try:
+        conn = socket.create_connection(('127.0.0.1', 18547), timeout=2)
+        conn.sendall(request)
+        reply = conn.recv(128)
+        conn.close()
+        if b' 403 ' in reply:
+            pathlib.Path('/proposal/' + name + '-denied').write_text('YES')
+    except OSError:
+        pass
+try:
+    conn = socket.create_connection(('1.1.1.1', 443), timeout=1)
+    conn.close()
+except OSError:
+    pathlib.Path('/proposal/direct-egress-denied').write_text('YES')
+if not pathlib.Path('/home/psh09/.codex/auth.json').exists():
+    pathlib.Path('/proposal/auth-hidden').write_text('YES')
 for line in sys.stdin:
     message = json.loads(line)
     if 'id' in message:
@@ -513,6 +531,8 @@ printf '%s' "$?" > /proposal/status
                 self.assertEqual(output.get('mcp-started'), 'YES', output.get('codex-err', '')[:400])
                 self.assertEqual(output.get('alias-denied'), 'YES')
                 self.assertEqual(output.get('host-denied'), 'YES')
+                for check in ('non-api-denied', 'proxy-denied', 'direct-egress-denied', 'auth-hidden'):
+                    self.assertEqual(output.get(check), 'YES', check)
                 self.assertEqual(protected.read_text(), 'ORIGINAL')
             finally:
                 server.shutdown()
