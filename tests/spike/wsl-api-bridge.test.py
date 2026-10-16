@@ -122,6 +122,38 @@ class BridgePolicyTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_per_claim_model_and_output_ceiling_reject_worker_chosen_upgrade(self):
+        import inspect
+        bridge = load_bridge()
+        self.assertIn('allowed_model', inspect.signature(bridge.make_server).parameters)
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(json.loads(body)) or (200, b'{}', 'application/json')),
+                allowed_model='assigned-model', max_output_tokens=4096)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                statuses = []
+                for body in ({'model': 'other-model', 'max_output_tokens': 10},
+                             {'model': 'assigned-model', 'max_output_tokens': 999999},
+                             {'model': 'assigned-model', 'tools': [{'type': 'web_search'}]},
+                             {'model': 'assigned-model', 'tools': [{'type': 'function', 'name': 'local_tool'}]}):
+                    conn = UnixHTTP(server.server_address)
+                    conn.request('POST', '/v1/responses', body=json.dumps(body).encode(),
+                                 headers={'Content-Type': 'application/json'})
+                    response = conn.getresponse()
+                    statuses.append(response.status)
+                    response.read()
+                    conn.close()
+                self.assertEqual(statuses, [403, 403, 403, 200])
+                self.assertEqual(calls, [{'model': 'assigned-model',
+                    'tools': [{'type': 'function', 'name': 'local_tool'}], 'max_output_tokens': 4096}])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_partial_request_flood_has_bounded_concurrent_handlers(self):
         bridge = load_bridge()
         with tempfile.TemporaryDirectory() as temp:
@@ -134,7 +166,11 @@ class BridgePolicyTest(unittest.TestCase):
                 for _ in range(24):
                     conn = socket.socket(socket.AF_UNIX)
                     conn.settimeout(1)
-                    conn.connect(server.server_address)
+                    try:
+                        conn.connect(server.server_address)
+                    except (BlockingIOError, TimeoutError, ConnectionRefusedError):
+                        conn.close()  # Bounded listen backlog is also a valid rejection.
+                        continue
                     sockets.append(conn)
                     try:
                         conn.sendall(b'POST /v1/responses HTTP/1.1\r\nHost: local\r\n')

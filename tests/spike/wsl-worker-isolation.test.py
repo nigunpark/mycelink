@@ -366,8 +366,12 @@ printf '%s' "$?" > /proposal/status
             source.mkdir()
             report = base / 'report.json'
             calls = []
+            shapes = []
             def fake_upstream(path, body, headers):
                 calls.append(path)
+                payload = json.loads(body)
+                shapes.append({'model': payload.get('model'), 'has_max_output_tokens': 'max_output_tokens' in payload,
+                               'tool_types': [tool.get('type') for tool in payload.get('tools', []) if isinstance(tool, dict)]})
                 return (401, b'{"error":{"message":"fake auth denied"}}', 'application/json')
             bridge_socket = base / 'bridge.sock'
             server = module.make_server(str(bridge_socket), fake_upstream,
@@ -395,6 +399,8 @@ printf '%s' "$?" > /proposal/status
                 proposals = json.loads(report.read_text())['proposals']
                 self.assertTrue(calls, proposals['codex-err'][:500])
                 self.assertEqual(set(calls), {'/v1/responses'})
+                self.assertTrue(all(isinstance(shape['model'], str) and not shape['has_max_output_tokens'] for shape in shapes), shapes)
+                self.assertTrue(all(set(shape['tool_types']) <= {'function'} for shape in shapes), shapes)
                 self.assertNotEqual(proposals['status'], '0')
             finally:
                 server.shutdown()
@@ -430,7 +436,8 @@ printf '%s' "$?" > /proposal/status
                 os.setuid(principal.pw_uid)
                 service = module.make_server(str(bridge_socket),
                     module.trusted_upstream('/home/psh09/.codex/auth.json'), expected_uid=worker.pw_uid,
-                    claim='claim-1', generation='generation-1', role='worker')
+                    claim='claim-1', generation='generation-1', role='worker',
+                    allowed_model='gpt-6.1-sol', max_output_tokens=4096)
                 def audit(event, method, path):
                     with audit_file.open('a') as output:
                         output.write(json.dumps([event, method, path]) + '\n')

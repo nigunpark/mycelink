@@ -11,6 +11,7 @@ import http.client
 import json
 import os
 import pathlib
+import re
 import socket
 import socketserver
 import stat
@@ -27,9 +28,14 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     allow_reuse_address = False
     max_handlers = 8
 
-    def __init__(self, path, upstream, expected_uid, claim, generation, role, request_budget, byte_budget):
+    def __init__(self, path, upstream, expected_uid, claim, generation, role, request_budget, byte_budget,
+                 allowed_model, max_output_tokens):
         if not 1 <= request_budget <= 256 or not 1 <= byte_budget <= 64 * MAX_BODY:
             raise ValueError('bridge requires bounded per-claim budgets')
+        if allowed_model is not None and (not isinstance(allowed_model, str) or
+            not re.fullmatch(r'[A-Za-z0-9._-]{1,80}', allowed_model) or
+            type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 65536):
+            raise ValueError('bridge model and output ceiling must be trusted and bounded')
         self.upstream = upstream
         self.expected_uid = expected_uid
         self.claim = claim
@@ -37,6 +43,8 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.role = role
         self.request_budget = request_budget
         self.byte_budget = byte_budget
+        self.allowed_model = allowed_model
+        self.max_output_tokens = max_output_tokens
         self.budget_lock = threading.Lock()
         self.handler_slots = threading.BoundedSemaphore(self.max_handlers)
         super().__init__(path, Request)
@@ -120,11 +128,28 @@ class Request(BaseHTTPRequestHandler):
         if len(body) != length:
             return self.refuse()
         try:
-            if not isinstance(json.loads(body), dict):
+            payload = json.loads(body)
+            if not isinstance(payload, dict):
                 return self.refuse()
         except (ValueError, UnicodeDecodeError):
             return self.refuse()
-        if not self.server.reserve_request(length):
+        if self.server.allowed_model is not None:
+            tools = payload.get('tools', [])
+            if (not isinstance(tools, list) or len(tools) > 64 or
+                any(not isinstance(tool, dict) or tool.get('type') != 'function' for tool in tools)):
+                return self.refuse()
+            supplied = payload.get('max_output_tokens')
+            if (payload.get('model') != self.server.allowed_model or
+                (supplied is not None and (type(supplied) is not int or
+                 not 1 <= supplied <= self.server.max_output_tokens))):
+                return self.refuse()
+            # Installed Codex 0.163.0 omits this field. The trusted broker
+            # sets the ceiling; a worker cannot raise it by choosing a model.
+            payload['max_output_tokens'] = supplied if supplied is not None else self.server.max_output_tokens
+            body = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+            if len(body) > MAX_BODY:
+                return self.refuse()
+        if not self.server.reserve_request(len(body)):
             return self.refuse()
         # No Authorization, Host, Cookie, forwarding, or caller-selected destination.
         headers = {'Content-Type': 'application/json'}
@@ -172,11 +197,12 @@ class Request(BaseHTTPRequestHandler):
 
 
 def make_server(path, upstream, expected_uid=None, claim=None, generation=None, role=None,
-                request_budget=64, byte_budget=8 * MAX_BODY):
+                request_budget=64, byte_budget=8 * MAX_BODY,
+                allowed_model=None, max_output_tokens=None):
     if os.path.lexists(path):
         raise FileExistsError('existing bridge path refused')
     return Bridge(path, upstream, expected_uid, claim, generation, role,
-                  request_budget, byte_budget)
+                  request_budget, byte_budget, allowed_model, max_output_tokens)
 
 
 def trusted_upstream(auth_path):
@@ -223,9 +249,12 @@ def main():
     parser.add_argument('--worker-uid', type=int, required=True)
     parser.add_argument('--claim', required=True)
     parser.add_argument('--generation', required=True)
+    parser.add_argument('--model', required=True)
+    parser.add_argument('--max-output-tokens', required=True, type=int)
     args = parser.parse_args()
     server = make_server(args.socket, trusted_upstream(args.auth), expected_uid=args.worker_uid,
-                         claim=args.claim, generation=args.generation, role='worker')
+                         claim=args.claim, generation=args.generation, role='worker',
+                         allowed_model=args.model, max_output_tokens=args.max_output_tokens)
     try:
         os.chown(args.socket, os.getuid(), args.worker_gid)
         os.chmod(args.socket, 0o660)
