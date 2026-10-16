@@ -25,9 +25,10 @@
  * credential-looking string.
  */
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { SyntaxKind as K } from 'typescript/unstable/ast';
+import { computeLineStarts, createScanner, tokenIsIdentifierOrKeyword } from 'typescript/unstable/ast/scanner';
 import { verifyArchive } from './fixture-archive.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,17 +53,55 @@ function* walk(dir, ext) {
   }
 }
 
-/** Case mentions in one script's tokens: in comments, and in code (identifiers, strings, templates, regular expressions). */
-function tokenMentions(file, kind) {
+/** The code tokens a case mention counts in: identifiers, strings, template parts, regular expressions. */
+const LITERAL = new Set([K.Identifier, K.StringLiteral, K.NoSubstitutionTemplateLiteral, K.TemplateHead, K.TemplateMiddle, K.TemplateTail, K.RegularExpressionLiteral]);
+/** Tokens (besides identifiers, keywords and `)`) that end an operand: a `/` after one divides, after any other opens a regular expression. */
+const OPERAND_END = new Set([K.PrivateIdentifier, K.NumericLiteral, K.BigIntLiteral, K.StringLiteral, K.NoSubstitutionTemplateLiteral, K.TemplateTail, K.RegularExpressionLiteral, K.CloseBracketToken, K.CloseBraceToken]);
+/** Keywords an operand follows (a `/` after one opens a regular expression), unless named as a property. */
+const BEFORE_OPERAND = new Set([K.ReturnKeyword, K.TypeOfKeyword, K.InstanceOfKeyword, K.InKeyword, K.OfKeyword, K.NewKeyword, K.DeleteKeyword, K.VoidKeyword, K.ThrowKeyword, K.CaseKeyword, K.DoKeyword, K.ElseKeyword, K.YieldKeyword, K.AwaitKeyword]);
+/** Keywords whose parenthesized head a statement follows, not an operator. */
+const CONDITION = new Set([K.IfKeyword, K.WhileKeyword, K.ForKeyword, K.WithKeyword]);
+
+/**
+ * Case mentions in one script's tokens: in comments, and in code (identifiers,
+ * strings, templates, regular expressions). TypeScript 7's scanner reads the
+ * tokens; what its parser would settle (whether a `/` divides or opens a
+ * regular expression, whether a `}` closes a block or resumes a template) is
+ * settled here from the tokens before it.
+ */
+export function tokenMentions(file) {
   const text = readFileSync(file, 'utf8');
-  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
-  const code = [];
-  const visit = (n) => {
-    const literal = ts.isStringLiteralLike(n) || ts.isIdentifier(n) || ts.isRegularExpressionLiteral(n) || n.kind === ts.SyntaxKind.TemplateHead || n.kind === ts.SyntaxKind.TemplateMiddle || n.kind === ts.SyntaxKind.TemplateTail;
-    if (literal && CASE.test(n.getText(sf))) code.push(sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1);
-    ts.forEachChild(n, visit);
+  const lineStarts = computeLineStarts(text);
+  const lineOf = (pos) => {
+    let lo = 0;
+    for (let hi = lineStarts.length - 1; lo < hi; ) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid] <= pos) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
   };
-  visit(sf);
+  const scanner = createScanner(true);
+  scanner.setText(text);
+  const code = [];
+  const braces = []; // per open `{` or `${`: whether a template resumes at its `}`
+  const parens = []; // per open `(`: whether it is a statement's condition
+  let operand = false;
+  let previous = K.Unknown;
+  for (let kind = scanner.scan(); kind !== K.EndOfFile; previous = kind, kind = scanner.scan()) {
+    if ((kind === K.SlashToken || kind === K.SlashEqualsToken) && !operand) kind = scanner.reScanSlashToken();
+    else if (kind === K.CloseBraceToken && braces.pop() === true) kind = scanner.reScanTemplateToken(false);
+    // Only a misread (a regular expression taken for code) yields a token that does not advance, and the scanner would never move on.
+    if (scanner.getTokenEnd() <= scanner.getTokenStart()) throw new Error(`${rel(file)}:${lineOf(scanner.getTokenStart())}: the token reader lost its place (an empty ${K[kind]}); it cannot audit this file`);
+    if (kind === K.TemplateHead || kind === K.TemplateMiddle) braces.push(true);
+    else if (kind === K.OpenBraceToken) braces.push(false);
+    else if (kind === K.OpenParenToken) parens.push(CONDITION.has(previous));
+    if (LITERAL.has(kind) && CASE.test(scanner.getTokenText())) code.push(lineOf(scanner.getTokenStart()));
+    if (kind === K.CloseParenToken) operand = parens.pop() !== true;
+    else if (kind === K.ExclamationToken || kind === K.PlusPlusToken || kind === K.MinusMinusToken) continue; // postfix after an operand, prefix before one: either way as it was
+    else if (tokenIsIdentifierOrKeyword(kind)) operand = previous === K.DotToken || previous === K.QuestionDotToken || !BEFORE_OPERAND.has(kind);
+    else operand = OPERAND_END.has(kind);
+  }
   const all = (text.match(CASE_G) ?? []).length;
   return { all, code };
 }
@@ -72,7 +111,7 @@ function caseCoupling() {
   let comments = 0;
   const codePaths = [];
   for (const f of walk(join(ROOT, 'src'), ['.ts'])) {
-    const m = tokenMentions(f, ts.ScriptKind.TS);
+    const m = tokenMentions(f);
     if (m.all === 0) continue;
     perFile[rel(f)] = m.all;
     comments += m.all - m.code.length;
@@ -86,7 +125,7 @@ function caseCoupling() {
       if (n > 0) modelFacing[rel(f)] = n;
     }
   }
-  const bundle = tokenMentions(join(ROOT, 'dist', 'mycelink.mjs'), ts.ScriptKind.JS);
+  const bundle = tokenMentions(join(ROOT, 'dist', 'mycelink.mjs'));
   const tests = {};
   const testFiles = [...walk(join(ROOT, 'tests'), ['.ts', '.mjs'])];
   for (const id of CASE_IDS) tests[id] = testFiles.filter((f) => readFileSync(f, 'utf8').includes(id)).length;
@@ -165,26 +204,30 @@ function problems(record, docText) {
   return out;
 }
 
-const mode = process.argv[2];
-if (mode !== '--check' && mode !== '--write') {
-  process.stderr.write('usage: node scripts/constraint-audit.mjs --check | --write\n');
-  process.exit(2);
+function main() {
+  const mode = process.argv[2];
+  if (mode !== '--check' && mode !== '--write') {
+    process.stderr.write('usage: node scripts/constraint-audit.mjs --check | --write\n');
+    process.exit(2);
+  }
+  const record = JSON.parse(readFileSync(RECORD, 'utf8'));
+  const docText = existsSync(DOC) ? readFileSync(DOC, 'utf8') : '';
+  const generated = { case_coupling: caseCoupling(), summary: summary(record) };
+  if (mode === '--write') {
+    const next = { ...record, ...generated };
+    writeFileSync(RECORD, JSON.stringify(next, null, 2) + '\n');
+    process.stdout.write(`wrote ${rel(RECORD)}\n`);
+    process.exit(0);
+  }
+  const found = problems(record, docText);
+  for (const k of Object.keys(generated)) if (JSON.stringify(record[k]) !== JSON.stringify(generated[k])) found.push(`${k} drifted: run node scripts/constraint-audit.mjs --write`);
+  if (generated.case_coupling.plugin_source.code_token_mentions !== 0) found.push(`case-specific core code: ${generated.case_coupling.plugin_source.code_token_paths.join(', ')}`);
+  if (generated.case_coupling.model_facing.mentions !== 0) found.push(`case-specific model-facing text: ${Object.keys(generated.case_coupling.model_facing.per_file).join(', ')}`);
+  if (found.length > 0) {
+    process.stderr.write(found.map((p) => `constraint-audit: ${p}`).join('\n') + '\n');
+    process.exit(1);
+  }
+  process.stdout.write(`constraint-audit: ok (${record.inventory.length} enforcement points, ${record.history.length} runs, 0 case-specific core code tokens)\n`);
 }
-const record = JSON.parse(readFileSync(RECORD, 'utf8'));
-const docText = existsSync(DOC) ? readFileSync(DOC, 'utf8') : '';
-const generated = { case_coupling: caseCoupling(), summary: summary(record) };
-if (mode === '--write') {
-  const next = { ...record, ...generated };
-  writeFileSync(RECORD, JSON.stringify(next, null, 2) + '\n');
-  process.stdout.write(`wrote ${rel(RECORD)}\n`);
-  process.exit(0);
-}
-const found = problems(record, docText);
-for (const k of Object.keys(generated)) if (JSON.stringify(record[k]) !== JSON.stringify(generated[k])) found.push(`${k} drifted: run node scripts/constraint-audit.mjs --write`);
-if (generated.case_coupling.plugin_source.code_token_mentions !== 0) found.push(`case-specific core code: ${generated.case_coupling.plugin_source.code_token_paths.join(', ')}`);
-if (generated.case_coupling.model_facing.mentions !== 0) found.push(`case-specific model-facing text: ${Object.keys(generated.case_coupling.model_facing.per_file).join(', ')}`);
-if (found.length > 0) {
-  process.stderr.write(found.map((p) => `constraint-audit: ${p}`).join('\n') + '\n');
-  process.exit(1);
-}
-process.stdout.write(`constraint-audit: ok (${record.inventory.length} enforcement points, ${record.history.length} runs, 0 case-specific core code tokens)\n`);
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

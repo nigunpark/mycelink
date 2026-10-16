@@ -56,6 +56,33 @@ function on<T>(platform: NodeJS.Platform, body: () => T): T {
   }
 }
 
+/**
+ * Run `body` on a clock only its waits move: performance.now reads it, and a
+ * timed Atomics.wait (util/retry.ts's sleep) advances it by exactly its
+ * timeout instead of blocking. A retry schedule is then the code's alone, not
+ * the host scheduler's: a loaded runner oversleeping each backoff cannot make
+ * fewer tries fit inside a hold.
+ */
+function onVirtualClock<T>(body: (now: () => number) => T): T {
+  let t = 0;
+  const now = () => t;
+  const realNow = Object.getOwnPropertyDescriptor(performance, 'now');
+  const realWait = Atomics.wait;
+  Object.defineProperty(performance, 'now', { value: now, configurable: true, writable: true });
+  (Atomics as any).wait = (_array: Int32Array, _index: number, _value: number, ms?: number) => {
+    if (ms === undefined || !Number.isFinite(ms)) throw new Error('an untimed wait would block forever on a virtual clock');
+    t += ms;
+    return 'timed-out';
+  };
+  try {
+    return body(now);
+  } finally {
+    (Atomics as any).wait = realWait;
+    if (realNow) Object.defineProperty(performance, 'now', realNow);
+    else delete (performance as any).now;
+  }
+}
+
 const refused = (code: string, from: string, to: string): NodeJS.ErrnoException =>
   Object.assign(new Error(`${code}: operation not permitted, rename '${from}' -> '${to}'`), { code, syscall: 'rename', path: from, dest: to });
 
@@ -94,40 +121,43 @@ function tempTracker(file: string) {
 }
 
 describe('atomic replace under Windows contention', () => {
-  it('a replace refused with EPERM after the temp is written, synced and closed lands once the holder lets go, past the old 210 ms of retries', () => {
+  it('a replace refused with EPERM after the temp is written, synced and closed lands once the holder lets go, past the old six tries and 210 ms of retries', () => {
     const dir = makeTmpDir('replace-');
     const file = join(dir, 'STATE.json');
     writeDocAtomic(file, { count: 0 });
     const old = readFileSync(file);
     const t = tempTracker(file);
     const renames: { from: string; at: number }[] = [];
-    let since = 0;
-    const doc = on('win32', () =>
-      withFs(
-        {
-          ...t.patch,
-          renameSync: (o) => (from: string, to: string) => {
-            if (to !== file) return o(from, to);
-            renames.push({ from, at: Date.now() });
-            if (renames.length === 1) {
-              since = Date.now();
-              // The exact boundary: every byte is in the temp, synced, and its descriptor closed.
-              const e = t.entry(from);
-              expect(e).toEqual({ tmp: from, synced: true, closed: true });
-              expect(JSON.parse(readFileSync(from, 'utf8'))).toEqual({ revision: 2, data: { count: 1 } });
-              expect(readFileSync(file)).toEqual(old);
-            }
-            // A reader holds STATE.json for 600 ms.
-            if (Date.now() - since < 600) throw refused('EPERM', from, to);
-            return o(from, to);
+    const doc = onVirtualClock((now) =>
+      on('win32', () =>
+        withFs(
+          {
+            ...t.patch,
+            renameSync: (o) => (from: string, to: string) => {
+              if (to !== file) return o(from, to);
+              renames.push({ from, at: now() });
+              if (renames.length === 1) {
+                // The exact boundary: every byte is in the temp, synced, and its descriptor closed.
+                const e = t.entry(from);
+                expect(e).toEqual({ tmp: from, synced: true, closed: true });
+                expect(JSON.parse(readFileSync(from, 'utf8'))).toEqual({ revision: 2, data: { count: 1 } });
+                expect(readFileSync(file)).toEqual(old);
+              }
+              // A reader holds STATE.json for 600 ms of the writer's clock.
+              if (now() - renames[0]!.at < 600) throw refused('EPERM', from, to);
+              return o(from, to);
+            },
           },
-        },
-        () => writeDocAtomic(file, { count: 1 }),
+          () => writeDocAtomic(file, { count: 1 }),
+        ),
       ),
     );
     expect(doc).toEqual({ revision: 2, data: { count: 1 } });
     expect(readDoc(file)).toEqual({ revision: 2, data: { count: 1 } });
-    expect(renames.length).toBeGreaterThan(6);
+    // Backing off from 10 ms, doubling to 250 ms: refused seven times over
+    // 560 ms, more tries for longer than the old six over ~210 ms ever made;
+    // the eighth, after the holder let go, lands.
+    expect(renames.map((r) => r.at)).toEqual([0, 10, 30, 70, 150, 310, 560, 810]);
     // One temp, renamed every time: the very file the writer synced.
     expect(new Set(renames.map((r) => r.from)).size).toBe(1);
     expect(t.log).toHaveLength(1);
