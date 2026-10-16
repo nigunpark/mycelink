@@ -1,0 +1,10 @@
+{
+  "version": "codex-cli 0.163.0",
+  "exit_code": 1,
+  "events": [
+    { "type": "thread.started", "thread_id": "00000000-0000-4000-8000-000000000001" },
+    { "type": "turn.started" },
+    { "type": "error", "message": "unexpected status 401 Unauthorized" },
+    { "type": "turn.failed", "error": { "message": "unexpected status 401 Unauthorized" } }
+  ]
+}

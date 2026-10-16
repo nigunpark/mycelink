@@ -1,0 +1,3 @@
+# Codex CLI 0.163.0 sanitized fixtures
+
+These records preserve observed top-level event and usage shapes, not transcripts. IDs, text and token counts are synthetic. A successful authenticated read-only stdin invocation produced `thread.started`, `turn.started`, `item.completed` (`agent_message`), and `turn.completed` (usage totals). An isolated unauthenticated home produced retry `error` events and a terminal `turn.failed` (HTTP 401), exiting 1. No credential, real prompt, request ID, or user profile data is stored here. The opt-in live test in `tests/spike/codex-cli-contract.test.ts` refreshes the behavioral check; run only with `MYCELINK_LIVE_CODEX=1` and an authenticated profile.
