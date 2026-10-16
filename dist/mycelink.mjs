@@ -41745,68 +41745,13 @@ function isProcessAlive2(pid) {
   }
 }
 
-// src/sessions/claude-cli-adapter.ts
+// src/sessions/process-session.ts
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync as existsSync33, mkdirSync as mkdirSync21, rmSync as rmSync14 } from "node:fs";
 import { dirname as dirname17, resolve as resolve21 } from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
-var PermissionPolicyError = class extends Error {
-  constructor(detail) {
-    super(
-      `${detail} disables Claude Code's permission system for every worker session. Set allow_dangerous_permission_bypass: true in mycelink.config.json only if workers run in a disposable sandbox.`
-    );
-    this.name = "PermissionPolicyError";
-  }
-};
-function permissionBypassFlag(args, permissionMode) {
-  if (permissionMode === "bypassPermissions") return "--permission-mode bypassPermissions";
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--dangerously-skip-permissions" || a === "--allow-dangerously-skip-permissions") return a;
-    if (a === "--permission-mode=bypassPermissions") return a;
-    if (a === "--permission-mode" && args[i + 1] === "bypassPermissions") return `${a} ${args[i + 1]}`;
-  }
-  return null;
-}
-var ClaudeCliAdapter = class {
-  name;
-  options;
+var ProcessSessionAdapter = class {
   runs = /* @__PURE__ */ new Map();
-  constructor(options) {
-    const bypass = permissionBypassFlag(
-      [...options.prefixArgs ?? [], ...options.extraArgs ?? []],
-      options.permissionMode
-    );
-    if (bypass !== null && options.allowPermissionBypass !== true) throw new PermissionPolicyError(bypass);
-    this.options = options;
-    this.name = options.adapterName ?? "claude-background";
-  }
-  /** Gate lines the worker is offered; each is also its own exact permission rule. */
-  gateLines(request) {
-    return (request.gateCommands ?? []).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
-  }
-  /** CLI argv. The prompt is not part of it: it goes to stdin. */
-  buildArgs(request, sessionId) {
-    const args = [...this.options.prefixArgs ?? []];
-    args.push("-p");
-    args.push("--output-format", "stream-json", "--verbose");
-    args.push("--model", request.model);
-    args.push("--session-id", sessionId);
-    if (this.options.mode === "background") args.push("--bg");
-    if (this.options.permissionMode) args.push("--permission-mode", this.options.permissionMode);
-    for (const dir of request.addDirs ?? []) args.push("--add-dir", dir);
-    args.push(
-      "--allowed-tools",
-      WORKER_RESULT_GRANT,
-      ...this.gateLines(request).map((g) => `Bash(${g.line})`),
-      ...request.allowedTools ?? []
-    );
-    if (request.disallowedTools && request.disallowedTools.length > 0) {
-      args.push("--disallowed-tools", ...request.disallowedTools);
-    }
-    args.push(...this.options.extraArgs ?? []);
-    return args;
-  }
   spawn(request) {
     const sessionId = randomUUID4();
     mkdirSync21(dirname17(resolve21(request.logPath)), { recursive: true });
@@ -41871,7 +41816,7 @@ var ClaudeCliAdapter = class {
       this.settle(state, "failed");
       return handle;
     }
-    const plan = planCommand([this.options.executable, ...args]);
+    const plan = planCommand([this.executable, ...args]);
     const child = spawn(plan.file, plan.args, {
       cwd: request.cwd,
       windowsHide: true,
@@ -41888,18 +41833,25 @@ var ClaudeCliAdapter = class {
     const log = createWriteStream(resolve21(request.logPath), { flags: "a" });
     const outRedactor = new LineRedactor(workerEnv);
     const errRedactor = new LineRedactor(workerEnv);
-    child.stdout.on("end", () => log.write(outRedactor.flush()));
-    child.stderr.on("end", () => log.write(errRedactor.flush()));
+    child.stdout.on("end", () => {
+      const tail2 = outRedactor.flush();
+      if (tail2) log.write(tail2);
+    });
+    child.stderr.on("end", () => {
+      const tail2 = errRedactor.flush();
+      if (tail2) log.write(tail2);
+    });
     let buffer = "";
     child.stdout.on("data", (chunk) => {
       state.lastProgressMs = Date.now();
-      log.write(outRedactor.push(chunk.toString("utf8")));
-      buffer += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      log.write(outRedactor.push(text));
+      buffer += text;
       let idx;
       while ((idx = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, idx).trim();
         buffer = buffer.slice(idx + 1);
-        if (line !== "") this.consumeStreamLine(state, line);
+        if (line !== "") this.parser.consume(line, state);
       }
     });
     child.stderr.on("data", (chunk) => {
@@ -41925,40 +41877,13 @@ var ClaudeCliAdapter = class {
     child.on("error", (err) => {
       state.exitCode = 127;
       state.failureReason = `SPAWN_FAILED: ${err.message}`;
-      this.settle(state, "failed", log);
     });
     child.on("close", (code) => {
-      state.exitCode = code;
+      if (buffer.trim()) this.parser.consume(buffer.trim(), state);
+      if (state.exitCode !== 127) state.exitCode = code;
       this.settle(state, null, log);
     });
     return handle;
-  }
-  /** Accumulate turns and usage from one NDJSON line of the CLI stream. */
-  consumeStreamLine(state, line) {
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      return;
-    }
-    const type = event["type"];
-    if (type === "assistant") {
-      state.turns += 1;
-      const message = event["message"];
-      const usage = message?.usage;
-      if (usage) {
-        state.usage.input_tokens += usage["input_tokens"] ?? 0;
-        state.usage.output_tokens += usage["output_tokens"] ?? 0;
-      }
-    } else if (type === "result") {
-      const turns = event["num_turns"];
-      if (typeof turns === "number") state.turns = turns;
-      const usage = event["usage"];
-      if (usage) {
-        state.usage.input_tokens = usage["input_tokens"] ?? state.usage.input_tokens;
-        state.usage.output_tokens = usage["output_tokens"] ?? state.usage.output_tokens;
-      }
-    }
   }
   kill(state, status) {
     if (state.settled || state.child === null) return;
@@ -41977,25 +41902,16 @@ var ClaudeCliAdapter = class {
     state.usage.sessions = 1;
     state.usage.model_turns = state.turns;
     if (log && "end" in log) log.end();
-    if (forced !== null) {
-      state.status = forced;
-    } else if (state.stopped) {
-      state.status = "stopped";
-    } else if (state.status === "stalled" || state.status === "budget-exhausted") {
+    if (forced !== null) state.status = forced;
+    else if (state.stopped) state.status = "stopped";
+    else if (state.status === "stalled" || state.status === "budget-exhausted") {
     } else if (state.exitCode !== 0) {
       state.status = "failed";
       state.failureReason ??= `EXIT_${state.exitCode}`;
-    } else {
-      state.status = "done";
-    }
+    } else state.status = "done";
     if (state.child !== null) {
       try {
-        const collected = collectWorkerResult(
-          state.request.cwd,
-          state.request,
-          resolve21(state.request.resultPath),
-          state.workerEnv
-        );
+        const collected = collectWorkerResult(state.request.cwd, state.request, resolve21(state.request.resultPath), state.workerEnv);
         state.result = collected.result;
         state.resultFailure = collected.failure;
       } catch (err) {
@@ -42006,21 +41922,15 @@ var ClaudeCliAdapter = class {
   }
   observe(state) {
     let status = state.status;
-    let result = null;
+    const result = state.settled ? state.result : null;
     let failureReason = state.failureReason;
-    if (state.settled) {
-      result = state.result;
-      failureReason = state.failureReason;
-      if (status === "done") {
-        if (result === null) {
-          status = "failed";
-          failureReason ??= state.resultFailure ?? "RESULT_MISSING";
-        } else {
-          status = statusForOutcome(result.outcome);
-          if (status === "failed" && failureReason === null) {
-            failureReason = `WORKER_${result.outcome}`;
-          }
-        }
+    if (state.settled && status === "done") {
+      if (result === null) {
+        status = "failed";
+        failureReason ??= state.resultFailure ?? "RESULT_MISSING";
+      } else {
+        status = statusForOutcome(result.outcome);
+        if (status === "failed" && failureReason === null) failureReason = `WORKER_${result.outcome}`;
       }
     }
     return {
@@ -42051,6 +41961,97 @@ var ClaudeCliAdapter = class {
     state.stopped = true;
     state.failureReason ??= "STOPPED_BY_CONTROLLER";
     this.kill(state, "stopped");
+  }
+};
+
+// src/sessions/provider-stream.ts
+var ClaudeStreamParser = class {
+  consume(line, progress) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const type = event["type"];
+    if (type === "assistant") {
+      progress.turns += 1;
+      const message = event["message"];
+      const usage = message?.usage;
+      if (usage) {
+        progress.usage.input_tokens += usage["input_tokens"] ?? 0;
+        progress.usage.output_tokens += usage["output_tokens"] ?? 0;
+      }
+    } else if (type === "result") {
+      const turns = event["num_turns"];
+      if (typeof turns === "number") progress.turns = turns;
+      const usage = event["usage"];
+      if (usage) {
+        progress.usage.input_tokens = usage["input_tokens"] ?? progress.usage.input_tokens;
+        progress.usage.output_tokens = usage["output_tokens"] ?? progress.usage.output_tokens;
+      }
+    }
+  }
+};
+
+// src/sessions/claude-cli-adapter.ts
+var PermissionPolicyError = class extends Error {
+  constructor(detail) {
+    super(
+      `${detail} disables Claude Code's permission system for every worker session. Set allow_dangerous_permission_bypass: true in mycelink.config.json only if workers run in a disposable sandbox.`
+    );
+    this.name = "PermissionPolicyError";
+  }
+};
+function permissionBypassFlag(args, permissionMode) {
+  if (permissionMode === "bypassPermissions") return "--permission-mode bypassPermissions";
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--dangerously-skip-permissions" || a === "--allow-dangerously-skip-permissions") return a;
+    if (a === "--permission-mode=bypassPermissions") return a;
+    if (a === "--permission-mode" && args[i + 1] === "bypassPermissions") return `${a} ${args[i + 1]}`;
+  }
+  return null;
+}
+var ClaudeCliAdapter = class extends ProcessSessionAdapter {
+  name;
+  executable;
+  parser = new ClaudeStreamParser();
+  options;
+  constructor(options) {
+    super();
+    const bypass = permissionBypassFlag(
+      [...options.prefixArgs ?? [], ...options.extraArgs ?? []],
+      options.permissionMode
+    );
+    if (bypass !== null && options.allowPermissionBypass !== true) throw new PermissionPolicyError(bypass);
+    this.options = options;
+    this.executable = options.executable;
+    this.name = options.adapterName ?? "claude-background";
+  }
+  gateLines(request) {
+    return (request.gateCommands ?? []).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
+  }
+  buildArgs(request, sessionId) {
+    const args = [...this.options.prefixArgs ?? []];
+    args.push("-p");
+    args.push("--output-format", "stream-json", "--verbose");
+    args.push("--model", request.model);
+    args.push("--session-id", sessionId);
+    if (this.options.mode === "background") args.push("--bg");
+    if (this.options.permissionMode) args.push("--permission-mode", this.options.permissionMode);
+    for (const dir of request.addDirs ?? []) args.push("--add-dir", dir);
+    args.push(
+      "--allowed-tools",
+      WORKER_RESULT_GRANT,
+      ...this.gateLines(request).map((g) => `Bash(${g.line})`),
+      ...request.allowedTools ?? []
+    );
+    if (request.disallowedTools && request.disallowedTools.length > 0) {
+      args.push("--disallowed-tools", ...request.disallowedTools);
+    }
+    args.push(...this.options.extraArgs ?? []);
+    return args;
   }
 };
 
