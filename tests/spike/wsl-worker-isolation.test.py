@@ -48,6 +48,18 @@ class WorkerIsolationTest(unittest.TestCase):
             self.assertEqual(proposals['source'], 'PUBLIC_SOURCE')
             self.assertNotIn('leaked', proposals, 'private control/auth files crossed into worker snapshot')
 
+    def test_manifest_rejects_case_aliases_before_snapshot(self):
+        import importlib.util
+        module_path = LAUNCHER
+        spec = importlib.util.spec_from_file_location('wsl_worker_manifest', module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-manifest-case-') as temp:
+            manifest = pathlib.Path(temp) / 'manifest.json'
+            manifest.write_text(json.dumps(['Module.py', 'module.py']))
+            with self.assertRaises(ValueError):
+                module.source_manifest(manifest)
+
     def test_launcher_refuses_snapshot_without_manifest_by_default(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-unmanifested-test-') as temp:
             base = pathlib.Path(temp)

@@ -47,8 +47,8 @@ def source_manifest(path):
         not isinstance(name, str) or not SOURCE_NAME.fullmatch(name) or
         any(part == '' or part.startswith('.') or part.endswith(('.', ' '))
             for part in name.split('/')) for name in names
-    ) or len(set(names)) != len(names):
-        raise ValueError('source manifest has unsafe or duplicate names')
+    ) or len(set(names)) != len(names) or len({name.casefold() for name in names}) != len(names):
+        raise ValueError('source manifest has unsafe, duplicate or case-aliased names')
     return set(names)
 
 
