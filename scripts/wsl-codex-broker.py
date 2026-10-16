@@ -121,14 +121,21 @@ class PolicyBroker:
                 (self.root / name).unlink(missing_ok=True)
                 os.close(root_fd)
 
-    def consume_transport(self, transport_root, role):
+    def consume_transport(self, transport_root, role, *, expected_source_files, expected_source_hashes):
         """Consume a root-only published launcher envelope, not a worker JSON assertion.
 
         The caller chooses the expected role from its own launch record. A
         pending-only or temporary generation is never a successful submission.
         """
-        if os.geteuid() != 0 or role not in ('worker', 'reviewer'):
+        if (os.geteuid() != 0 or role not in ('worker', 'reviewer') or
+            type(expected_source_files) is not int or not 0 <= expected_source_files <= 4096):
             raise ValueError('trusted role selection required')
+        if (not isinstance(expected_source_hashes, dict) or
+            len(expected_source_hashes) != expected_source_files or
+            any(not isinstance(name, str) or not POLICY.safe_name(name) or
+                not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None
+                for name, digest in expected_source_hashes.items())):
+            raise ValueError('trusted source hashes required')
         transport_root = Path(transport_root)
         if not transport_root.is_absolute():
             raise ValueError('absolute private transport required')
@@ -169,7 +176,9 @@ class PolicyBroker:
             envelope = checked_read(role + '.json')
             if (not isinstance(envelope, dict) or
                 {key: envelope.get(key) for key in expected} != expected or
-                not isinstance(envelope.get('source_files'), list)):
+                type(envelope.get('source_files')) is not int or
+                envelope['source_files'] != expected_source_files or
+                envelope.get('source_hashes') != expected_source_hashes):
                 raise ValueError('wrong launcher envelope')
             proposal = {key: envelope.get(key) for key in (*expected, 'proposals', 'submission')}
             answer = self._submit(proposal, role)

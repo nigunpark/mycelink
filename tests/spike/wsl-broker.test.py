@@ -152,22 +152,22 @@ class BrokerTest(unittest.TestCase):
         generation.mkdir(parents=True, mode=0o700)
         (transport / 'c1').chmod(0o700)
         envelope = {'claim': 'c1', 'generation': 'g1', 'role': 'worker',
-                    'source_files': [], 'proposals': {'src/a.txt': 'TRANSPORT'},
+                    'source_files': 0, 'source_hashes': {}, 'proposals': {'src/a.txt': 'TRANSPORT'},
                     'submission': {'status': 'DONE'}}
         with self.assertRaises(ValueError):
-            self.broker.consume_transport(transport, 'worker')
+            self.broker.consume_transport(transport, 'worker', expected_source_files=0, expected_source_hashes={})
         (generation / 'worker.pending').write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker'}))
         (generation / 'worker.pending').chmod(0o600)
         with self.assertRaises(ValueError):
-            self.broker.consume_transport(transport, 'worker')
+            self.broker.consume_transport(transport, 'worker', expected_source_files=0, expected_source_hashes={})
         (generation / 'worker.json').write_text(json.dumps(envelope))
         (generation / 'worker.json').chmod(0o600)
-        self.assertEqual(self.broker.consume_transport(transport, 'worker'), {'ok': True})
+        self.assertEqual(self.broker.consume_transport(transport, 'worker', expected_source_files=0, expected_source_hashes={}), {'ok': True})
         self.assertEqual((self.root / 'worker' / 'src/a.txt').read_text(), 'TRANSPORT')
         with self.assertRaises(ValueError):
-            self.broker.consume_transport(transport, 'worker')
+            self.broker.consume_transport(transport, 'worker', expected_source_files=0, expected_source_hashes={})
         with self.assertRaises(ValueError):
-            self.broker.consume_transport(transport, 'reviewer')
+            self.broker.consume_transport(transport, 'reviewer', expected_source_files=0, expected_source_hashes={})
 
     def test_transport_symlink_and_case_alias_are_denied(self):
         transport = self.root / 'transport'
@@ -180,16 +180,16 @@ class BrokerTest(unittest.TestCase):
         pending.chmod(0o600)
         target = generation / 'other.json'
         target.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
-            'source_files': [], 'proposals': {'SRC/A.TXT': 'BAD'}, 'submission': {}}))
+            'source_files': 0, 'source_hashes': {}, 'proposals': {'SRC/A.TXT': 'BAD'}, 'submission': {}}))
         target.chmod(0o600)
         (generation / 'worker.json').symlink_to(target)
         with self.assertRaises(ValueError):
-            self.broker.consume_transport(transport, 'worker')
+            self.broker.consume_transport(transport, 'worker', expected_source_files=0, expected_source_hashes={})
         self.assertFalse((self.root / 'worker').exists())
         (generation / 'worker.json').unlink()
         target.rename(generation / 'worker.json')
         with self.assertRaises(ValueError):
-            self.broker.consume_transport(transport, 'worker')
+            self.broker.consume_transport(transport, 'worker', expected_source_files=0, expected_source_hashes={})
         self.assertFalse((self.root / 'worker').exists())
 
     def test_root_rejects_case_aliased_grant_before_socket_creation(self):

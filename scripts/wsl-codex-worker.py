@@ -7,6 +7,7 @@ Unix broker may supply model API access without exposing host credentials.
 This does not execute Mycelink gates or authorize production Codex dispatch.
 """
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -134,7 +135,7 @@ def source_manifest(path):
     return set(names)
 
 
-def copied_tree(source, dest, selected=None):
+def copied_tree(source, dest, selected=None, hashes=None):
     """Copy through pinned directory handles, never path-reopen a checked parent."""
     budget = 0
     count = 0
@@ -190,6 +191,8 @@ def copied_tree(source, dest, selected=None):
                             writer.write(contents)
                         (target / name).chmod(0o444)
                         seen.add(relative)
+                        if hashes is not None:
+                            hashes[relative] = hashlib.sha256(contents).hexdigest()
                     finally:
                         os.close(fd)
                 else:
@@ -339,7 +342,8 @@ def main():
         snapshot = stage / 'snapshot'
         proposal = stage / 'proposal'
         snapshot.mkdir(mode=0o755)
-        count = copied_tree(source, snapshot, selected)
+        source_hashes = {}
+        count = copied_tree(source, snapshot, selected, source_hashes)
         proposal.mkdir(mode=0o700)
         os.chown(proposal, identity.pw_uid, identity.pw_gid)
 
@@ -372,7 +376,8 @@ def main():
             if not isinstance(submission, dict):
                 raise ValueError('result channel requires a JSON object')
         record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
-                  'source_files': count, 'proposals': proposals, 'submission': submission}
+                  'source_files': count, 'source_hashes': source_hashes,
+                  'proposals': proposals, 'submission': submission}
         # A pre-existing target (including a hardlink/symlink) must not be overwritten.
         if transport_fd is not None:
             publish_transport(transport_fd, args.role, record)
