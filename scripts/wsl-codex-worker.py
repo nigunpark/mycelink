@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Experimental WSL worker transport. NOT a production Codex launch authorization.
+
+Invoked by the trusted Windows controller as WSL root. The worker only receives
+copied source in a read-only mount and a private proposal directory. No auth,
+network, broker, gate execution or result-slot capability is provided here.
+"""
+import argparse
+import json
+import os
+import pathlib
+import pwd
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+
+BASE = pathlib.Path('/var/lib/mycelink-codex/claims')
+MAX_FILE = 2 * 1024 * 1024
+MAX_TOTAL = 32 * 1024 * 1024
+
+
+def copied_tree(source, dest):
+    """Copy bytes, not inode references; refuse links/devices and oversized input."""
+    budget = 0
+    count = 0
+    for directory, dirs, files in os.walk(source, followlinks=False):
+        relative = pathlib.Path(directory).relative_to(source)
+        target = dest / relative
+        target.mkdir(mode=0o755, parents=True, exist_ok=True)
+        for entry in dirs + files:
+            item = pathlib.Path(directory) / entry
+            mode = item.lstat().st_mode
+            if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                raise ValueError('source contains a link or special file')
+        for entry in files:
+            item = pathlib.Path(directory) / entry
+            fd = os.open(item, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
+                    raise ValueError('source file is not bounded regular data')
+                budget += info.st_size
+                count += 1
+                if budget > MAX_TOTAL or count > 4096:
+                    raise ValueError('source exceeds snapshot budget')
+                with os.fdopen(os.dup(fd), 'rb') as reader, open(target / entry, 'xb') as writer:
+                    shutil.copyfileobj(reader, writer)
+                (target / entry).chmod(0o444)
+            finally:
+                os.close(fd)
+    return count
+
+
+def proposals_from(directory):
+    result = {}
+    size = 0
+    for root, dirs, files in os.walk(directory, followlinks=False):
+        for name in dirs + files:
+            item = pathlib.Path(root) / name
+            if not (stat.S_ISDIR(item.lstat().st_mode) or stat.S_ISREG(item.lstat().st_mode)):
+                raise ValueError('proposal contains link or special file')
+        for name in files:
+            item = pathlib.Path(root) / name
+            fd = os.open(item, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                    raise ValueError('proposal file has unsafe inode or size')
+                size += info.st_size
+                if size > MAX_TOTAL or len(result) >= 4096:
+                    raise ValueError('proposal exceeds budget')
+                with os.fdopen(os.dup(fd), 'rb') as reader:
+                    result[str(item.relative_to(directory))] = reader.read(MAX_FILE + 1).decode('utf-8')
+            finally:
+                os.close(fd)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--source', required=True)
+    parser.add_argument('--report', required=True)
+    parser.add_argument('--claim', required=True)
+    parser.add_argument('--generation', required=True)
+    parser.add_argument('--role', choices=('worker', 'reviewer'), required=True)
+    parser.add_argument('--bridge-socket')
+    parser.add_argument('--codex-install')
+    parser.add_argument('--timeout-sec', type=int, default=20)
+    parser.add_argument('command', nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    if os.geteuid() != 0 or not args.command or args.command[0] != '--':
+        parser.error('trusted root launch and explicit command required')
+    if not 1 <= args.timeout_sec <= 120:
+        parser.error('timeout must be bounded')
+    identity = pwd.getpwnam('mycelink-codex-worker' if args.role == 'worker' else 'mycelink-codex-reviewer')
+    if not BASE.is_dir() or BASE.stat().st_uid != 0:
+        raise RuntimeError('root-owned claim base must be provisioned')
+    source = pathlib.Path(args.source)
+    if not source.is_dir() or source.is_symlink():
+        raise ValueError('source must be a real directory')
+    if args.bridge_socket and not stat.S_ISSOCK(os.stat(args.bridge_socket, follow_symlinks=False).st_mode):
+        raise ValueError('bridge must be a Unix socket')
+    if args.codex_install:
+        package = pathlib.Path(args.codex_install)
+        info = package.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or package.is_symlink():
+            raise ValueError('Codex package must be a root-owned non-writable directory')
+    stage = pathlib.Path(tempfile.mkdtemp(prefix='claim-', dir=BASE))
+    try:
+        stage.chmod(0o711)
+        snapshot = stage / 'snapshot'
+        proposal = stage / 'proposal'
+        snapshot.mkdir(mode=0o755)
+        count = copied_tree(source, snapshot)
+        proposal.mkdir(mode=0o700)
+        os.chown(proposal, identity.pw_uid, identity.pw_gid)
+
+        def drop():
+            os.setgroups([])
+            os.setgid(identity.pw_gid)
+            os.setuid(identity.pw_uid)
+
+        command = [
+            'bwrap', '--die-with-parent', '--unshare-all', '--new-session',
+            '--ro-bind', '/usr', '/usr', '--ro-bind', '/bin', '/bin',
+            '--ro-bind', '/lib', '/lib', '--ro-bind', '/lib64', '/lib64',
+            '--ro-bind', '/etc', '/etc', '--proc', '/proc', '--dev', '/dev',
+            '--tmpfs', '/tmp', '--dir', '/home', '--dir', '/work',
+            '--ro-bind', str(snapshot), '/work', '--bind', str(proposal), '/proposal',
+        ]
+        if args.bridge_socket:
+            command.extend(['--dir', '/run', '--ro-bind', args.bridge_socket, '/run/bridge.sock'])
+        if args.codex_install:
+            command.extend(['--dir', '/opt', '--ro-bind', args.codex_install, '/opt/node_modules'])
+        command.extend(['--clearenv', '--setenv', 'HOME', '/home',
+                        '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin',
+                        '--chdir', '/work', '--', *args.command[1:]])
+        child = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, env={'PATH': '/usr/bin:/bin'},
+                               close_fds=True, preexec_fn=drop, timeout=args.timeout_sec)
+        if child.returncode != 0:
+            raise RuntimeError(f'isolated command failed ({child.returncode}): {child.stderr[:400]!r}')
+        record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
+                  'source_files': count, 'proposals': proposals_from(proposal)}
+        # A pre-existing target (including a hardlink/symlink) must not be overwritten.
+        fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'w') as output:
+            json.dump(record, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+    finally:
+        shutil.rmtree(stage)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        print(f'WSL worker refused: {exc}', file=sys.stderr)
+        sys.exit(1)
