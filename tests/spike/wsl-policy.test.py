@@ -252,6 +252,43 @@ class SealedProposalTest(unittest.TestCase):
             self.assertEqual(protected.read_text(), 'ORIGINAL')
             self.assertFalse((base / 'file.txt').exists())
     @unittest.skipUnless(os.environ.get('MYCELINK_LIVE_WSL_WORKER') == '1', 'requires explicit WSL crossing opt-in')
+    def test_windows_drive_interrupted_apply_restores_without_touching_hardlink_target(self):
+        scratch = '/mnt/c/Users/psh09/AppData/Local/hermes/cache/scratch'
+        with tempfile.TemporaryDirectory() as linux, tempfile.TemporaryDirectory(dir=scratch) as windows:
+            source = pathlib.Path(linux)
+            target = pathlib.Path(windows) / 'target'
+            target.mkdir()
+            protected = pathlib.Path(windows) / 'protected.txt'
+            protected.write_text('ORIGINAL')
+            os.link(protected, target / 'a.txt')
+            (target / 'b.txt').write_text('OLD_B')
+            report = source / 'report.json'
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
+                'source_files': 0, 'proposals': {'a.txt': 'NEW_A', 'b.txt': 'NEW_B'},
+                'submission': {}}))
+            slot = source / 'sealed'
+            p = policy()
+            p.seal(report, slot, claim='c1', generation='g1', role='worker',
+                   allowed_paths={'a.txt', 'b.txt'})
+            pid = os.fork()
+            if pid == 0:
+                original = p.os.replace
+                def die_after_first(*args, **kwargs):
+                    original(*args, **kwargs)
+                    os._exit(19)
+                p.os.replace = die_after_first
+                p.apply(slot, target, claim='c1', generation='g1', allowed_paths={'a.txt', 'b.txt'})
+                os._exit(20)
+            _, status = os.waitpid(pid, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 19)
+            self.assertEqual(protected.read_text(), 'ORIGINAL')
+            self.assertEqual(p.reconcile_apply(slot, target, claim='c1', generation='g1',
+                            allowed_paths={'a.txt', 'b.txt'}), 'restored')
+            self.assertEqual((target / 'a.txt').read_text(), 'ORIGINAL')
+            self.assertEqual((target / 'b.txt').read_text(), 'OLD_B')
+            self.assertEqual(protected.read_text(), 'ORIGINAL')
+
+    @unittest.skipUnless(os.environ.get('MYCELINK_LIVE_WSL_WORKER') == '1', 'requires explicit WSL crossing opt-in')
     def test_windows_drive_hardlink_remains_unchanged_after_apply(self):
         scratch = '/mnt/c/Users/psh09/AppData/Local/hermes/cache/scratch'
         with tempfile.TemporaryDirectory() as linux, tempfile.TemporaryDirectory(dir=scratch) as windows:
