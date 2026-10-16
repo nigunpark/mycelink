@@ -21,6 +21,11 @@ import time
 from http.server import BaseHTTPRequestHandler
 
 MAX_BODY = 2 * 1024 * 1024
+CODEX_REQUEST_FIELDS = frozenset({
+    'client_metadata', 'include', 'input', 'model', 'parallel_tool_calls',
+    'prompt_cache_key', 'reasoning', 'store', 'stream', 'text', 'tool_choice',
+    'tools', 'max_output_tokens',
+})
 
 
 class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -134,6 +139,8 @@ class Request(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return self.refuse()
         if self.server.allowed_model is not None:
+            if set(payload) - CODEX_REQUEST_FIELDS:
+                return self.refuse()
             tools = payload.get('tools', [])
             if (not isinstance(tools, list) or len(tools) > 64 or
                 any(not isinstance(tool, dict) or tool.get('type') != 'function' for tool in tools)):

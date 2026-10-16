@@ -138,6 +138,7 @@ class BridgePolicyTest(unittest.TestCase):
                 for body in ({'model': 'other-model', 'max_output_tokens': 10},
                              {'model': 'assigned-model', 'max_output_tokens': 999999},
                              {'model': 'assigned-model', 'tools': [{'type': 'web_search'}]},
+                             {'model': 'assigned-model', 'url': 'https://example.com'},
                              {'model': 'assigned-model', 'tools': [{'type': 'function', 'name': 'local_tool'}]}):
                     conn = UnixHTTP(server.server_address)
                     conn.request('POST', '/v1/responses', body=json.dumps(body).encode(),
@@ -146,7 +147,7 @@ class BridgePolicyTest(unittest.TestCase):
                     statuses.append(response.status)
                     response.read()
                     conn.close()
-                self.assertEqual(statuses, [403, 403, 403, 200])
+                self.assertEqual(statuses, [403, 403, 403, 403, 200])
                 self.assertEqual(calls, [{'model': 'assigned-model',
                     'tools': [{'type': 'function', 'name': 'local_tool'}], 'max_output_tokens': 4096}])
             finally:

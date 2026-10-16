@@ -371,6 +371,7 @@ printf '%s' "$?" > /proposal/status
                 calls.append(path)
                 payload = json.loads(body)
                 shapes.append({'model': payload.get('model'), 'has_max_output_tokens': 'max_output_tokens' in payload,
+                               'keys': sorted(payload),
                                'tool_types': [tool.get('type') for tool in payload.get('tools', []) if isinstance(tool, dict)]})
                 return (401, b'{"error":{"message":"fake auth denied"}}', 'application/json')
             bridge_socket = base / 'bridge.sock'
@@ -401,6 +402,8 @@ printf '%s' "$?" > /proposal/status
                 self.assertEqual(set(calls), {'/v1/responses'})
                 self.assertTrue(all(isinstance(shape['model'], str) and not shape['has_max_output_tokens'] for shape in shapes), shapes)
                 self.assertTrue(all(set(shape['tool_types']) <= {'function'} for shape in shapes), shapes)
+                self.assertTrue(all(set(shape['keys']) <= module.CODEX_REQUEST_FIELDS for shape in shapes),
+                                [shape['keys'] for shape in shapes])
                 self.assertNotEqual(proposals['status'], '0')
             finally:
                 server.shutdown()
