@@ -37,6 +37,11 @@ def copied_tree(source, dest):
             with os.scandir(directory_fd) as entries:
                 names = sorted(entry.name for entry in entries)
             for name in names:
+                # The worker receives source bytes, never host metadata, auth,
+                # control state or untracked dotfiles. A future controller must
+                # explicitly stage any needed public dotfile from an allowlist.
+                if name.startswith('.'):
+                    continue
                 info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode):
                     child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)

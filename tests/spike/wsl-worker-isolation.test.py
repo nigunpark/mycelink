@@ -25,6 +25,29 @@ class WorkerIsolationTest(unittest.TestCase):
         launcher = LAUNCHER.read_text()
         self.assertIn("'/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap'", launcher)
 
+    def test_snapshot_does_not_copy_hidden_git_auth_or_untracked_secret_files(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-snapshot-secret-test-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            (source / 'module.py').write_text('PUBLIC_SOURCE')
+            (source / '.env').write_text('SECRET_ENV_VALUE')
+            (source / '.npmrc').write_text('SECRET_NPM_TOKEN')
+            (source / '.git').mkdir()
+            (source / '.git' / 'config').write_text('SECRET_GIT_CREDENTIAL')
+            (source / '.codex').mkdir()
+            (source / '.codex' / 'auth.json').write_text('SECRET_CODEX_AUTH')
+            report = base / 'report.json'
+            command = 'cat /work/module.py > /proposal/source; for name in .git/config .env .npmrc .codex/auth.json; do if test -e /work/$name; then echo "$name" >> /proposal/leaked; fi; done'
+            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--report', str(report), '--claim', 'claim-secret', '--generation', 'g1',
+                '--role', 'worker', '--', '/bin/sh', '-c', command],
+                text=True, capture_output=True, timeout=20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            proposals = json.loads(report.read_text())['proposals']
+            self.assertEqual(proposals['source'], 'PUBLIC_SOURCE')
+            self.assertNotIn('leaked', proposals, 'private control/auth files crossed into worker snapshot')
+
     def test_separate_principal_snapshot_proposal_and_inherited_fd(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-worker-test-') as temp:
             base = pathlib.Path(temp)
