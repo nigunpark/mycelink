@@ -32356,6 +32356,9 @@ function unjudged(input, env, err) {
 function decide(input, env) {
   const tool = input.tool_name ?? "";
   const cwd = typeof input.cwd === "string" && input.cwd !== "" ? input.cwd : process.cwd();
+  if ((tool === "apply_patch" || tool.startsWith("mcp__")) && controlRoots([cwd, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], []).length > 0) {
+    return { ok: false, reason: `Blocked: unclassified Codex ${tool} call cannot be judged by the Mycelink fence.` };
+  }
   const role = roleOf(input, env);
   if (role === "reviewer") return reviewerDecision(input);
   if (role === "worker" && (tool === "Agent" || tool === "Task")) {

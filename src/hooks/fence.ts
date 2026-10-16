@@ -338,6 +338,13 @@ export function unjudged(input: FenceInput, env: NodeJS.ProcessEnv, err: unknown
 function decide(input: FenceInput, env: NodeJS.ProcessEnv): FenceDecision {
   const tool = input.tool_name ?? '';
   const cwd = typeof input.cwd === 'string' && input.cwd !== '' ? input.cwd : process.cwd();
+  // Codex sends patch text (not Claude file_path) and arbitrary MCP arguments.
+  // Neither can be proven safe by this Claude-shaped path reader. Until a
+  // complete host fence exists, refuse these calls in a Mycelink workspace.
+  if ((tool === 'apply_patch' || tool.startsWith('mcp__')) &&
+      controlRoots([cwd, env['CLAUDE_PROJECT_DIR'], env['MYCELINK_CONTROL_ROOT']], []).length > 0) {
+    return { ok: false, reason: `Blocked: unclassified Codex ${tool} call cannot be judged by the Mycelink fence.` };
+  }
   const role = roleOf(input, env);
   if (role === 'reviewer') return reviewerDecision(input);
   // A module-worker implements one node itself: no nested delegation.
