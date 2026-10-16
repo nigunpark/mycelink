@@ -104,6 +104,43 @@ def seal(report_path, slot, *, claim, generation, role, allowed_paths):
             shutil.rmtree(temporary)
 
 
+def read_submission(slot, *, claim, generation, role):
+    """Consume only a root-sealed, hash-matching result of this exact generation."""
+    if role not in ('worker', 'reviewer'):
+        raise ValueError('invalid submission role')
+    name = 'result.json' if role == 'worker' else 'verdict.json'
+    root = os.open(slot, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        root_info = os.fstat(root)
+        if root_info.st_uid != 0 or root_info.st_mode & 0o022:
+            raise ValueError('untrusted sealed slot')
+        def read_checked(filename):
+            fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                    raise ValueError('untrusted sealed file')
+                with os.fdopen(os.dup(fd), 'rb') as stream:
+                    payload = stream.read(MAX_FILE + 1)
+                if len(payload) > MAX_FILE:
+                    raise ValueError('oversized sealed file')
+                return payload
+            finally:
+                os.close(fd)
+        receipt = json.loads(read_checked('_receipt.json'))
+        if (receipt.get('claim'), receipt.get('generation'), receipt.get('role')) != (claim, generation, role):
+            raise ValueError('stale or wrong-role sealed submission')
+        payload = read_checked(name)
+        if hashlib.sha256(payload).hexdigest() != receipt.get('submission_sha256'):
+            raise ValueError('sealed submission hash mismatch')
+        data = json.loads(payload)
+        if not isinstance(data, dict):
+            raise ValueError('sealed submission must be an object')
+        return data
+    finally:
+        os.close(root)
+
+
 def apply(slot, destination, *, claim, generation, allowed_paths):
     """Copy validated staged bytes to fresh inodes via directory FDs.
 

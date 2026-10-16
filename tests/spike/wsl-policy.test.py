@@ -17,6 +17,25 @@ def policy():
 
 
 class SealedProposalTest(unittest.TestCase):
+    def test_consumer_verifies_generation_role_and_hash_before_accepting_submission(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            report = base / 'report.json'
+            slot = base / 'sealed'
+            p = policy()
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'reviewer',
+                'source_files': 0, 'proposals': {}, 'submission': {'verdict': 'PASS'}}))
+            p.seal(report, slot, claim='c1', generation='g1', role='reviewer', allowed_paths=set())
+            self.assertEqual(p.read_submission(slot, claim='c1', generation='g1', role='reviewer'),
+                             {'verdict': 'PASS'})
+            for claim, generation, role in (('c2', 'g1', 'reviewer'), ('c1', 'g2', 'reviewer'),
+                                            ('c1', 'g1', 'worker')):
+                with self.assertRaises(ValueError):
+                    p.read_submission(slot, claim=claim, generation=generation, role=role)
+            (slot / 'verdict.json').write_text('{"verdict":"FORGED"}')
+            with self.assertRaises(ValueError):
+                p.read_submission(slot, claim='c1', generation='g1', role='reviewer')
+
     def test_reserved_result_names_cannot_hide_in_allowed_subdirectories(self):
         with tempfile.TemporaryDirectory() as temp:
             base = pathlib.Path(temp)
