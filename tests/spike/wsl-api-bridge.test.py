@@ -2,6 +2,7 @@
 import http.client
 import importlib.util
 import json
+import os
 import pathlib
 import socket
 import tempfile
@@ -65,6 +66,27 @@ class BridgePolicyTest(unittest.TestCase):
                 self.assertIn(('deny', 'POST', '/v1/models'), audits)
                 self.assertIn(('upstream-200', 'POST', '/v1/responses'), audits)
                 self.assertNotIn('example.com', repr(audits))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+    def test_broker_rejects_wrong_os_principal_before_upstream(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(path) or (200, b'OK', 'text/plain')),
+                expected_uid=os.getuid() + 1)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', body=b'{}', headers={'Content-Type': 'application/json'})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 403)
+                response.read()
+                conn.close()
+                self.assertEqual(calls, [])
             finally:
                 server.shutdown()
                 server.server_close()

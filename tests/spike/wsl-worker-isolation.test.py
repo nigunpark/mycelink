@@ -100,6 +100,13 @@ class WorkerIsolationTest(unittest.TestCase):
             received = []
             def service():
                 listener.settimeout(5)
+                identity = json.dumps({'claim': 'claim-1', 'generation': 'generation-1',
+                    'role': 'worker', 'uid': __import__('pwd').getpwnam('mycelink-codex-worker').pw_uid}).encode()
+                conn, _ = listener.accept()
+                with conn:
+                    conn.recv(1024)
+                    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: ' + str(len(identity)).encode() +
+                                 b'\r\nConnection: close\r\n\r\n' + identity)
                 conn, _ = listener.accept()
                 with conn:
                     received.append(conn.recv(20))
@@ -177,7 +184,9 @@ except OSError:
                 calls.append(path)
                 return (401, b'{"error":{"message":"fake auth denied"}}', 'application/json')
             bridge_socket = base / 'bridge.sock'
-            server = module.make_server(str(bridge_socket), fake_upstream)
+            server = module.make_server(str(bridge_socket), fake_upstream,
+                expected_uid=__import__('pwd').getpwnam('mycelink-codex-worker').pw_uid,
+                claim='claim-1', generation='generation-1', role='worker')
             bridge_socket.chmod(0o666)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -234,7 +243,8 @@ printf '%s' "$?" > /proposal/status
                 os.setgid(principal.pw_gid)
                 os.setuid(principal.pw_uid)
                 service = module.make_server(str(bridge_socket),
-                    module.trusted_upstream('/home/psh09/.codex/auth.json'))
+                    module.trusted_upstream('/home/psh09/.codex/auth.json'), expected_uid=worker.pw_uid,
+                    claim='claim-1', generation='generation-1', role='worker')
                 def audit(event, method, path):
                     with audit_file.open('a') as output:
                         output.write(json.dumps([event, method, path]) + '\n')
@@ -276,6 +286,56 @@ printf '%s' "$?" > /proposal/status
             finally:
                 os.kill(broker_pid, signal.SIGTERM)
                 os.waitpid(broker_pid, 0)
+    def test_mismatched_bridge_generation_blocks_worker_launch(self):
+        import importlib.util
+        import pwd
+        bridge_path = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'wsl-codex-api-bridge.py'
+        spec = importlib.util.spec_from_file_location('codex_api_bridge_generation', bridge_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-generation-test-') as temp:
+            base = pathlib.Path(temp)
+            base.chmod(0o711)
+            source = base / 'source'
+            source.mkdir()
+            report = base / 'report.json'
+            sock = base / 'bridge.sock'
+            worker = pwd.getpwnam('mycelink-codex-worker')
+            server = module.make_server(str(sock), lambda *args: (200, b'', 'application/json'),
+                expected_uid=worker.pw_uid, claim='claim-1', generation='stale-generation', role='worker')
+            sock.chmod(0o666)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                    '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
+                    '--role', 'worker', '--bridge-socket', str(sock), '--', '/bin/sh', '-c',
+                    'echo RUN > /proposal/executed'], text=True, capture_output=True, timeout=10)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertFalse(report.exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+    def test_interrupted_generation_writes_no_report_and_followup_runs(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-interrupt-test-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            stale = base / 'stale.json'
+            failed = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--report', str(stale), '--claim', 'claim-1', '--generation', 'old',
+                '--role', 'worker', '--timeout-sec', '1', '--', '/bin/sh', '-c',
+                'sleep 4; echo OLD > /proposal/answer'], text=True, capture_output=True, timeout=8)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertFalse(stale.exists())
+            current = base / 'current.json'
+            succeeded = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--report', str(current), '--claim', 'claim-1', '--generation', 'new',
+                '--role', 'worker', '--', '/bin/sh', '-c', 'echo NEW > /proposal/answer'],
+                text=True, capture_output=True, timeout=8)
+            self.assertEqual(succeeded.returncode, 0, succeeded.stderr)
+            self.assertEqual(json.loads(current.read_text())['proposals']['answer'].strip(), 'NEW')
 
 
 if __name__ == '__main__':

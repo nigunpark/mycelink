@@ -11,8 +11,10 @@ import http.client
 import json
 import os
 import pathlib
+import socket
 import socketserver
 import stat
+import struct
 import time
 from http.server import BaseHTTPRequestHandler
 
@@ -23,8 +25,12 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, path, upstream):
+    def __init__(self, path, upstream, expected_uid, claim, generation, role):
         self.upstream = upstream
+        self.expected_uid = expected_uid
+        self.claim = claim
+        self.generation = generation
+        self.role = role
         super().__init__(path, Request)
 
 
@@ -46,6 +52,12 @@ class Request(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def do_POST(self):
+        try:
+            _, uid, _ = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        except (OSError, struct.error):
+            return self.refuse()
+        if self.server.expected_uid is not None and uid != self.server.expected_uid:
+            return self.refuse()
         if self.path != '/v1/responses' or self.headers.get('Transfer-Encoding'):
             return self.refuse()
         try:
@@ -76,7 +88,24 @@ class Request(BaseHTTPRequestHandler):
         self.wfile.write(payload)
         self.close_connection = True
 
-    def do_GET(self): self.refuse()
+    def do_GET(self):
+        if self.path != '/internal/identity' or self.server.claim is None:
+            return self.refuse()
+        try:
+            _, uid, _ = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        except (OSError, struct.error):
+            return self.refuse()
+        if uid != 0:
+            return self.refuse()
+        body = json.dumps({'claim': self.server.claim, 'generation': self.server.generation,
+                           'role': self.server.role, 'uid': self.server.expected_uid}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
     def do_HEAD(self): self.refuse()
     def do_PUT(self): self.refuse()
     def do_DELETE(self): self.refuse()
@@ -85,10 +114,10 @@ class Request(BaseHTTPRequestHandler):
     def do_PATCH(self): self.refuse()
 
 
-def make_server(path, upstream):
+def make_server(path, upstream, expected_uid=None, claim=None, generation=None, role=None):
     if os.path.lexists(path):
         raise FileExistsError('existing bridge path refused')
-    return Bridge(path, upstream)
+    return Bridge(path, upstream, expected_uid, claim, generation, role)
 
 
 def trusted_upstream(auth_path):
@@ -132,8 +161,12 @@ def main():
     parser.add_argument('--socket', required=True)
     parser.add_argument('--auth', required=True)
     parser.add_argument('--worker-gid', type=int, required=True)
+    parser.add_argument('--worker-uid', type=int, required=True)
+    parser.add_argument('--claim', required=True)
+    parser.add_argument('--generation', required=True)
     args = parser.parse_args()
-    server = make_server(args.socket, trusted_upstream(args.auth))
+    server = make_server(args.socket, trusted_upstream(args.auth), expected_uid=args.worker_uid,
+                         claim=args.claim, generation=args.generation, role='worker')
     try:
         os.chown(args.socket, os.getuid(), args.worker_gid)
         os.chmod(args.socket, 0o660)

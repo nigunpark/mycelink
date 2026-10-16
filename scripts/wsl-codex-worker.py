@@ -2,16 +2,20 @@
 """Experimental WSL worker transport. NOT a production Codex launch authorization.
 
 Invoked by the trusted Windows controller as WSL root. The worker only receives
-copied source in a read-only mount and a private proposal directory. No auth,
-network, broker, gate execution or result-slot capability is provided here.
+copied source in a read-only mount and a private proposal directory. A scoped
+Unix broker may supply model API access without exposing host credentials.
+This does not execute Mycelink gates or authorize production Codex dispatch.
 """
 import argparse
+import http.client
 import json
 import os
 import pathlib
 import pwd
 import shutil
+import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -78,6 +82,29 @@ def proposals_from(directory):
     return result
 
 
+def bridge_identity(path, claim, generation, role, expected_uid):
+    channel = socket.socket(socket.AF_UNIX)
+    channel.settimeout(2)
+    try:
+        channel.connect(path)
+        _, owner_uid, _ = struct.unpack('3i', channel.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if owner_uid not in (0, pwd.getpwnam('psh09').pw_uid):
+            raise PermissionError('untrusted bridge process')
+        channel.sendall(b'GET /internal/identity HTTP/1.1\r\nHost: internal\r\nConnection: close\r\n\r\n')
+        response = http.client.HTTPResponse(channel)
+        response.begin()
+        if response.status != 200:
+            raise ValueError('broker identity unavailable')
+        payload = response.read(513)
+        if len(payload) > 512:
+            raise ValueError('broker identity too large')
+        identity = json.loads(payload)
+        if identity != {'claim': claim, 'generation': generation, 'role': role, 'uid': expected_uid}:
+            raise ValueError('broker identity does not match claim generation or role')
+    finally:
+        channel.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
@@ -100,8 +127,11 @@ def main():
     source = pathlib.Path(args.source)
     if not source.is_dir() or source.is_symlink():
         raise ValueError('source must be a real directory')
-    if args.bridge_socket and not stat.S_ISSOCK(os.stat(args.bridge_socket, follow_symlinks=False).st_mode):
-        raise ValueError('bridge must be a Unix socket')
+    if args.bridge_socket:
+        socket_info = os.stat(args.bridge_socket, follow_symlinks=False)
+        if not stat.S_ISSOCK(socket_info.st_mode):
+            raise ValueError('bridge must be a Unix socket')
+        bridge_identity(args.bridge_socket, args.claim, args.generation, args.role, identity.pw_uid)
     if args.codex_install:
         package = pathlib.Path(args.codex_install)
         info = package.lstat()
