@@ -38,6 +38,128 @@ class WorkerIsolationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.trusted_executable(executable)
 
+    def test_private_transport_survives_launch_and_denies_worker_aliases(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-private-transport-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            protected = base / 'protected'
+            protected.write_text('ORIGINAL')
+            os.link(protected, source / 'alias')
+            transport = base / 'transport'
+            transport.mkdir(mode=0o700)
+            program = '''
+                printf ATTACK > /work/alias 2>/dev/null || :
+                printf ATTACK > /mnt/c/Users/psh09/protected 2>/dev/null || :
+                ln -s /work/alias /proposal/escape
+            '''
+            rejected = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                '--source', str(source), '--transport-dir', str(transport), '--claim', 'c1',
+                '--generation', 'g1', '--role', 'worker', '--', '/bin/sh', '-c', program],
+                text=True, capture_output=True, timeout=20)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(protected.read_text(), 'ORIGINAL')
+            self.assertFalse((transport / 'c1' / 'g1' / 'worker.json').exists())
+            self.assertTrue((transport / 'c1' / 'g1' / 'worker.pending').exists())
+            again = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                '--source', str(source), '--transport-dir', str(transport), '--claim', 'c1',
+                '--generation', 'g1', '--role', 'worker', '--', '/bin/sh', '-c', 'echo FORGED > /proposal/file'],
+                text=True, capture_output=True, timeout=20)
+            self.assertNotEqual(again.returncode, 0, 'a failed generation cannot be replayed')
+            ok = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                '--source', str(source), '--transport-dir', str(transport), '--claim', 'c1',
+                '--generation', 'g2', '--role', 'worker', '--', '/bin/sh', '-c',
+                ('printf INPUT > /proposal/file; test ! -e /mnt/c; test ! -e /init; '
+                 'if ln /work/alias /proposal/hardlink 2>/dev/null; then exit 91; fi; '
+                 'if mount --bind /work/alias /proposal/file 2>/dev/null; then exit 92; fi')],
+                text=True, capture_output=True, timeout=20)
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            report = transport / 'c1' / 'g2' / 'worker.json'
+            self.assertEqual(json.loads(report.read_text())['proposals']['file'], 'INPUT')
+            self.assertEqual(report.stat().st_uid, 0)
+            self.assertEqual(report.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(transport.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(protected.read_text(), 'ORIGINAL')
+
+    def test_transport_refuses_symlink_parent_and_path_tokens(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-transport-path-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            private = base / 'private'
+            private.mkdir(mode=0o700)
+            alias = base / 'alias'
+            alias.symlink_to(private, target_is_directory=True)
+            for transport, claim in ((alias, 'safe'), (private, '../escape')):
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                    '--source', str(source), '--transport-dir', str(transport), '--claim', claim,
+                    '--generation', 'g1', '--role', 'worker', '--', '/bin/sh', '-c',
+                    'echo FORGED > /proposal/file'], text=True, capture_output=True, timeout=20)
+                self.assertNotEqual(run.returncode, 0)
+            self.assertEqual(list(private.iterdir()), [])
+
+    def test_transport_crash_reconciliation_never_reuses_pending_generation(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-transport-interrupt-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            transport = base / 'transport'
+            transport.mkdir(mode=0o700)
+            command = ['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                       '--source', str(source), '--transport-dir', str(transport),
+                       '--claim', 'claim1', '--generation', 'gen1', '--role', 'worker',
+                       '--', '/bin/sh', '-c', 'sleep 8; echo LATE > /proposal/data']
+            child = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                pending = transport / 'claim1' / 'gen1' / 'worker.pending'
+                import time
+                for _ in range(100):
+                    if pending.exists():
+                        break
+                    time.sleep(0.02)
+                self.assertTrue(pending.exists(), 'reservation must precede worker launch')
+                child.kill()
+                child.wait(timeout=5)
+                self.assertFalse((pending.parent / 'worker.json').exists())
+                retry = subprocess.run(command[:-1] + ['echo FORGED > /proposal/data'],
+                                       capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(retry.returncode, 0)
+                self.assertFalse((pending.parent / 'worker.json').exists())
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+
+    def test_source_changed_during_copy_is_not_a_claim_snapshot(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('wsl_source_race', LAUNCHER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-source-race-') as temp:
+            root = pathlib.Path(temp)
+            source, target = root / 'source', root / 'snapshot'
+            source.mkdir()
+            target.mkdir()
+            original = source / 'file.txt'
+            original.write_text('BEFORE')
+            fdopen = module.os.fdopen
+            def mutate_after_read(fd, mode='r', *args, **kwargs):
+                reader = fdopen(fd, mode, *args, **kwargs)
+                if mode == 'rb':
+                    class RacingReader:
+                        def __enter__(self): return self
+                        def __exit__(self, *exc): reader.close()
+                        def read(self, limit):
+                            contents = reader.read(limit)
+                            original.write_text('CHANGED')
+                            return contents
+                    return RacingReader()
+                return reader
+            with patch.object(module.os, 'fdopen', side_effect=mutate_after_read):
+                with self.assertRaisesRegex(ValueError, 'changed during snapshot'):
+                    module.copied_tree(source, target, {'file.txt'})
+
     def test_refuses_worker_writable_claim_base_before_spawning(self):
         import importlib.util
         from unittest.mock import patch

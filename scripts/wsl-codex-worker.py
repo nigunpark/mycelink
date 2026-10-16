@@ -27,6 +27,75 @@ BWRAP = pathlib.Path('/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap')
 MAX_FILE = 2 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
 SOURCE_NAME = re.compile(r'^[A-Za-z0-9_./-]{1,240}$')
+TOKEN = re.compile(r'^[A-Za-z0-9_-]{1,100}$')
+
+
+def private_transport(path, claim, generation, role):
+    """Reserve one root-owned generation slot; a pending slot never replays.
+
+    Only the trusted launcher can create these files. The broker must separately
+    authorize and seal a proposal; this transport is not that authorization.
+    """
+    if not TOKEN.fullmatch(claim) or not TOKEN.fullmatch(generation):
+        raise ValueError('unsafe claim or generation token')
+    root = pathlib.Path(path)
+    if not root.is_absolute():
+        raise ValueError('transport must be absolute')
+    # Refuse symlink components even above the private root. A root-owned
+    # sticky /tmp is permitted for disposable opt-in probes, but the private
+    # root itself must not be writable by another principal.
+    for component in (root, *root.parents):
+        info = component.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0:
+            raise ValueError('transport parent must be a root-owned directory')
+        if component == root and info.st_mode & 0o077:
+            raise ValueError('transport must be private')
+        if component != root and info.st_mode & 0o022 and not (
+            info.st_mode & stat.S_ISVTX and info.st_uid == 0):
+            raise ValueError('transport parent is replaceable')
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for token in (claim, generation):
+            try:
+                os.mkdir(token, mode=0o700, dir_fd=root_fd)
+                os.fsync(root_fd)
+            except FileExistsError:
+                pass
+            next_fd = os.open(token, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+            info = os.fstat(next_fd)
+            if info.st_uid != 0 or info.st_mode & 0o077:
+                os.close(next_fd)
+                raise ValueError('transport slot is not private')
+            os.close(root_fd)
+            root_fd = next_fd
+        pending = role + '.pending'
+        fd = os.open(pending, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                     0o600, dir_fd=root_fd)
+        with os.fdopen(fd, 'w') as output:
+            json.dump({'claim': claim, 'generation': generation, 'role': role}, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.fsync(root_fd)
+        return root_fd
+    except BaseException:
+        os.close(root_fd)
+        raise
+
+
+def publish_transport(fd, role, record):
+    """Publish complete fsynced JSON, never a partially written result."""
+    temporary = role + '.tmp'
+    final = role + '.json'
+    output_fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                        0o600, dir_fd=fd)
+    with os.fdopen(output_fd, 'w') as output:
+        json.dump(record, output, sort_keys=True)
+        output.flush()
+        os.fsync(output.fileno())
+    os.link(temporary, final, src_dir_fd=fd, dst_dir_fd=fd, follow_symlinks=False)
+    os.fsync(fd)
+    os.unlink(temporary, dir_fd=fd)
+    os.fsync(fd)
 
 def trusted_executable(path):
     """Reject a replaceable sandbox executable or writable ancestor before launch."""
@@ -101,6 +170,8 @@ def copied_tree(source, dest, selected=None):
                     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
                     try:
                         actual = os.fstat(fd)
+                        if (actual.st_dev, actual.st_ino) != (info.st_dev, info.st_ino):
+                            raise ValueError('source changed during snapshot')
                         if not stat.S_ISREG(actual.st_mode) or actual.st_size > MAX_FILE:
                             raise ValueError('source file is not bounded regular data')
                         budget += actual.st_size
@@ -109,6 +180,10 @@ def copied_tree(source, dest, selected=None):
                             raise ValueError('source exceeds snapshot budget')
                         with os.fdopen(os.dup(fd), 'rb') as reader:
                             contents = reader.read(MAX_FILE + 1)
+                        after = os.fstat(fd)
+                        if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
+                            actual.st_dev, actual.st_ino, actual.st_size, actual.st_mtime_ns, actual.st_ctime_ns):
+                            raise ValueError('source changed during snapshot')
                         if len(contents) > MAX_FILE or budget + len(contents) - actual.st_size > MAX_TOTAL:
                             raise ValueError('source grew while copying')
                         with open(target / name, 'xb') as writer:
@@ -221,7 +296,9 @@ def main():
     parser.add_argument('--source', required=True)
     parser.add_argument('--source-files')
     parser.add_argument('--experimental-unrestricted-source', action='store_true')
-    parser.add_argument('--report', required=True)
+    destination = parser.add_mutually_exclusive_group(required=True)
+    destination.add_argument('--report')
+    destination.add_argument('--transport-dir')
     parser.add_argument('--claim', required=True)
     parser.add_argument('--generation', required=True)
     parser.add_argument('--role', choices=('worker', 'reviewer'), required=True)
@@ -255,6 +332,7 @@ def main():
         info = package.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or package.is_symlink():
             raise ValueError('Codex package must be a root-owned non-writable directory')
+    transport_fd = private_transport(args.transport_dir, args.claim, args.generation, args.role) if args.transport_dir else None
     stage = pathlib.Path(tempfile.mkdtemp(prefix='claim-', dir=BASE))
     try:
         stage.chmod(0o711)
@@ -296,13 +374,18 @@ def main():
         record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
                   'source_files': count, 'proposals': proposals, 'submission': submission}
         # A pre-existing target (including a hardlink/symlink) must not be overwritten.
-        fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, 'w') as output:
-            json.dump(record, output, sort_keys=True)
-            output.flush()
-            os.fsync(output.fileno())
+        if transport_fd is not None:
+            publish_transport(transport_fd, args.role, record)
+        else:
+            fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'w') as output:
+                json.dump(record, output, sort_keys=True)
+                output.flush()
+                os.fsync(output.fileno())
     finally:
         shutil.rmtree(stage)
+        if transport_fd is not None:
+            os.close(transport_fd)
 
 
 if __name__ == '__main__':
