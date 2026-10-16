@@ -9,6 +9,14 @@ import { validateAgainstSchema } from '../../src/schema/registry.js';
 afterEach(() => cleanupTmpRoots());
 
 describe('provider-neutral configuration', () => {
+  it('records the host-native Codex fence blocker instead of claiming hook parity', () => {
+    const compatibility = readFileSync(join(process.cwd(), 'docs', 'CODEX_COMPATIBILITY.md'), 'utf8');
+    expect(compatibility).toMatch(/PreToolUse.*(?:agent_id|subagent identity)/s);
+    expect(compatibility).toMatch(/(?:opt out|opt-out).*hook/s);
+    expect(compatibility).toMatch(/fail.open|continues the tool call/s);
+    expect(compatibility).toMatch(/host.native.*unsupported/s);
+  });
+
   it('writes new control repositories with a provider block instead of Claude-specific keys', () => {
     const root = makeTmpDir('provider-config-');
 
