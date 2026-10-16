@@ -74,6 +74,11 @@ step, which keeps credentials out of Mycelink.
 
 ## 2. Session adapters (who runs a node)
 
+The provider-neutral lifecycle and security requirements are defined in
+[`PROVIDER_CONTRACT.md`](PROVIDER_CONTRACT.md). A host integration may
+translate process streams, hooks and subagent identities, but graph, state,
+evidence, result ownership and settle rules remain shared.
+
 Worker sessions sit behind `SessionAdapter` in `src/sessions/adapter.ts`:
 
 - `ClaudeCliAdapter` — spawns real Claude Code print-mode sessions
