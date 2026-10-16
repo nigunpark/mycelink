@@ -12,6 +12,7 @@ import json
 import os
 import pathlib
 import pwd
+import re
 import shutil
 import socket
 import stat
@@ -24,15 +25,41 @@ import threading
 BASE = pathlib.Path('/var/lib/mycelink-codex/claims')
 MAX_FILE = 2 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
+SOURCE_NAME = re.compile(r'^[A-Za-z0-9_./-]{1,240}$')
 
 
-def copied_tree(source, dest):
+def source_manifest(path):
+    """Accept only a bounded root-owned exact file list outside worker mounts."""
+    parent = pathlib.Path(path).parent.lstat()
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022:
+        raise ValueError('source manifest parent must be trusted')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or
+            info.st_mode & 0o022 or info.st_nlink != 1 or info.st_size > 512 * 1024):
+            raise ValueError('source manifest is not a private regular file')
+        with os.fdopen(os.dup(fd), 'rb') as reader:
+            names = json.loads(reader.read(512 * 1024 + 1))
+    finally:
+        os.close(fd)
+    if not isinstance(names, list) or len(names) > 4096 or any(
+        not isinstance(name, str) or not SOURCE_NAME.fullmatch(name) or
+        any(part == '' or part.startswith('.') or part.endswith(('.', ' '))
+            for part in name.split('/')) for name in names
+    ) or len(set(names)) != len(names):
+        raise ValueError('source manifest has unsafe or duplicate names')
+    return set(names)
+
+
+def copied_tree(source, dest, selected=None):
     """Copy through pinned directory handles, never path-reopen a checked parent."""
     budget = 0
     count = 0
     root_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        def visit(directory_fd, target):
+        seen = set()
+        def visit(directory_fd, target, prefix=''):
             nonlocal budget, count
             with os.scandir(directory_fd) as entries:
                 names = sorted(entry.name for entry in entries)
@@ -42,16 +69,22 @@ def copied_tree(source, dest):
                 # explicitly stage any needed public dotfile from an allowlist.
                 if name.startswith('.'):
                     continue
+                relative = prefix + name
+                if selected is not None and relative not in selected and not any(
+                    item.startswith(relative + '/') for item in selected):
+                    continue
                 info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode):
                     child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
                     try:
                         child_target = target / name
                         child_target.mkdir(mode=0o755)
-                        visit(child_fd, child_target)
+                        visit(child_fd, child_target, relative + '/')
                     finally:
                         os.close(child_fd)
                 elif stat.S_ISREG(info.st_mode):
+                    if selected is not None and relative not in selected:
+                        raise ValueError('manifest names a directory as a file')
                     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
                     try:
                         actual = os.fstat(fd)
@@ -68,11 +101,14 @@ def copied_tree(source, dest):
                         with open(target / name, 'xb') as writer:
                             writer.write(contents)
                         (target / name).chmod(0o444)
+                        seen.add(relative)
                     finally:
                         os.close(fd)
                 else:
                     raise ValueError('source contains a link or special file')
         visit(root_fd, dest)
+        if selected is not None and seen != selected:
+            raise ValueError('source manifest names missing or unsafe files')
     finally:
         os.close(root_fd)
     return count
@@ -170,6 +206,8 @@ def run_bounded(command, identity, timeout_sec):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
+    parser.add_argument('--source-files')
+    parser.add_argument('--experimental-unrestricted-source', action='store_true')
     parser.add_argument('--report', required=True)
     parser.add_argument('--claim', required=True)
     parser.add_argument('--generation', required=True)
@@ -189,6 +227,9 @@ def main():
     source = pathlib.Path(args.source)
     if not source.is_dir() or source.is_symlink():
         raise ValueError('source must be a real directory')
+    selected = source_manifest(args.source_files) if args.source_files else None
+    if selected is None and not args.experimental_unrestricted_source:
+        raise ValueError('source manifest required; unrestricted snapshot is experimental only')
     if args.bridge_socket:
         socket_info = os.stat(args.bridge_socket, follow_symlinks=False)
         if not stat.S_ISSOCK(socket_info.st_mode):
@@ -205,7 +246,7 @@ def main():
         snapshot = stage / 'snapshot'
         proposal = stage / 'proposal'
         snapshot.mkdir(mode=0o755)
-        count = copied_tree(source, snapshot)
+        count = copied_tree(source, snapshot, selected)
         proposal.mkdir(mode=0o700)
         os.chown(proposal, identity.pw_uid, identity.pw_gid)
 

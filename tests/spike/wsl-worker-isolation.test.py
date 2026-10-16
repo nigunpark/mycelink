@@ -39,7 +39,7 @@ class WorkerIsolationTest(unittest.TestCase):
             (source / '.codex' / 'auth.json').write_text('SECRET_CODEX_AUTH')
             report = base / 'report.json'
             command = 'cat /work/module.py > /proposal/source; for name in .git/config .env .npmrc .codex/auth.json; do if test -e /work/$name; then echo "$name" >> /proposal/leaked; fi; done'
-            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(report), '--claim', 'claim-secret', '--generation', 'g1',
                 '--role', 'worker', '--', '/bin/sh', '-c', command],
                 text=True, capture_output=True, timeout=20)
@@ -47,6 +47,50 @@ class WorkerIsolationTest(unittest.TestCase):
             proposals = json.loads(report.read_text())['proposals']
             self.assertEqual(proposals['source'], 'PUBLIC_SOURCE')
             self.assertNotIn('leaked', proposals, 'private control/auth files crossed into worker snapshot')
+
+    def test_launcher_refuses_snapshot_without_manifest_by_default(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-unmanifested-test-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            (source / 'credentials.json').write_text('PRIVATE_SECRET')
+            report = base / 'report.json'
+            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--report', str(report), '--claim', 'claim-unsafe', '--generation', 'g1',
+                '--role', 'worker', '--', '/bin/sh', '-c',
+                'cat /work/credentials.json > /proposal/leaked'],
+                text=True, capture_output=True, timeout=20)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertFalse(report.exists())
+
+    def test_explicit_source_manifest_excludes_non_hidden_untracked_secrets(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-manifest-test-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            (source / 'module.py').write_text('PUBLIC_SOURCE')
+            (source / 'credentials.json').write_text('PRIVATE_SECRET')
+            manifest = base / 'manifest.json'
+            manifest.write_text(json.dumps(['module.py']))
+            report = base / 'report.json'
+            command = 'cat /work/module.py > /proposal/source; if test -e /work/credentials.json; then echo LEAK > /proposal/leaked; fi'
+            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--source-files', str(manifest), '--report', str(report),
+                '--claim', 'claim-manifest', '--generation', 'g1', '--role', 'worker',
+                '--', '/bin/sh', '-c', command], text=True, capture_output=True, timeout=20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            proposals = json.loads(report.read_text())['proposals']
+            self.assertEqual(proposals['source'], 'PUBLIC_SOURCE')
+            self.assertNotIn('leaked', proposals)
+            manifest.write_text(json.dumps(['module.py', 'missing.txt']))
+            missing = base / 'missing-report.json'
+            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                '--source-files', str(manifest), '--report', str(missing),
+                '--claim', 'claim-manifest', '--generation', 'g2', '--role', 'worker',
+                '--', '/bin/sh', '-c', 'echo RUN > /proposal/run'],
+                text=True, capture_output=True, timeout=20)
+            self.assertNotEqual(run.returncode, 0, 'missing source entry must fail closed')
+            self.assertFalse(missing.exists())
 
     def test_separate_principal_snapshot_proposal_and_inherited_fd(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-worker-test-') as temp:
@@ -65,7 +109,7 @@ class WorkerIsolationTest(unittest.TestCase):
             os.set_inheritable(9, True)
             os.close(fd)
             try:
-                cmd = ['python3', str(LAUNCHER), '--source', str(source), '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1', '--role', 'worker', '--', '/bin/sh', '-c', '''
+                cmd = ['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source), '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1', '--role', 'worker', '--', '/bin/sh', '-c', '''
                     id -u > /proposal/uid
                     cat /work/allowed/input.txt > /proposal/answer
                     printf ATTACK > /work/allowed/alias.txt 2>/dev/null || :
@@ -98,7 +142,7 @@ class WorkerIsolationTest(unittest.TestCase):
             identities = {}
             for role in ('worker', 'reviewer'):
                 report = base / (role + '.json')
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                     '--role', role, '--', '/bin/sh', '-c', 'id -u > /proposal/uid'],
                     text=True, capture_output=True, timeout=30)
@@ -116,7 +160,7 @@ class WorkerIsolationTest(unittest.TestCase):
             records = {}
             for role, filename in (('worker', 'result.json'), ('reviewer', 'verdict.json')):
                 report = base / (role + '.json')
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                     '--role', role, '--', '/bin/sh', '-c',
                     'printf \'{"decision":"OK"}\' > /proposal/' + filename],
@@ -127,7 +171,7 @@ class WorkerIsolationTest(unittest.TestCase):
                 self.assertEqual(records[role]['proposals'], {})
             self.assertNotEqual(records['worker']['role'], records['reviewer']['role'])
             wrong = base / 'wrong.json'
-            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(wrong), '--claim', 'claim-1', '--generation', 'generation-1',
                 '--role', 'worker', '--', '/bin/sh', '-c',
                 'printf \'{"decision":"FORGED"}\' > /proposal/verdict.json'],
@@ -141,7 +185,7 @@ class WorkerIsolationTest(unittest.TestCase):
             source = base / 'source'
             source.mkdir()
             report = base / 'report.json'
-            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                 '--role', 'worker', '--', '/bin/sh', '-c', 'ln -s /etc/passwd /proposal/alias'],
                 text=True, capture_output=True, timeout=30)
@@ -196,7 +240,7 @@ try:
 except OSError:
     pathlib.Path('/proposal/direct-denied').write_text('YES')
 '''
-            cmd = ['python3', str(LAUNCHER), '--source', str(source), '--report', str(report),
+            cmd = ['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source), '--report', str(report),
                    '--claim', 'claim-1', '--generation', 'generation-1', '--role', 'worker',
                    '--bridge-socket', str(bridge), '--', '/bin/sh', '-c',
                    'socat TCP-LISTEN:18547,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/bridge.sock & '
@@ -218,7 +262,7 @@ except OSError:
             source.mkdir()
             report = base / 'report.json'
             package = '/var/lib/mycelink-codex/pkg/node_modules'
-            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                 '--role', 'worker', '--codex-install', package, '--', '/bin/sh', '-c',
                 '/usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js --version > /proposal/version; '
@@ -281,7 +325,7 @@ OPENAI_API_KEY=placeholder timeout 12s /usr/local/bin/node /opt/node_modules/@op
 printf '%s' "$?" > /proposal/status
 '''
                 report = base / 'report.json'
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-mcp', '--generation', 'g1',
                     '--role', 'worker', '--timeout-sec', '20', '--bridge-socket', str(bridge_socket),
                     '--codex-install', '/var/lib/mycelink-codex/pkg/node_modules',
@@ -330,7 +374,7 @@ OPENAI_API_KEY=placeholder timeout 12s /usr/local/bin/node /opt/node_modules/@op
   > /proposal/codex-out 2>/proposal/codex-err
 printf '%s' "$?" > /proposal/status
 '''
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                     '--role', 'worker', '--bridge-socket', str(bridge_socket),
                     '--codex-install', '/var/lib/mycelink-codex/pkg/node_modules',
@@ -397,7 +441,7 @@ OPENAI_API_KEY=placeholder timeout 42s /usr/local/bin/node /opt/node_modules/@op
   > /proposal/codex-out 2>/proposal/codex-err
 printf '%s' "$?" > /proposal/status
 '''
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                     '--role', 'worker', '--timeout-sec', '50', '--bridge-socket', str(bridge_socket),
                     '--codex-install', '/var/lib/mycelink-codex/pkg/node_modules',
@@ -495,7 +539,7 @@ OPENAI_API_KEY=placeholder timeout 55s /usr/local/bin/node /opt/node_modules/@op
 printf '%s' "$?" > /proposal/status
 '''
                 report = base / 'report.json'
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-model-mcp', '--generation', 'g1',
                     '--role', 'worker', '--timeout-sec', '65', '--bridge-socket', str(bridge_socket),
                     '--codex-install', '/var/lib/mycelink-codex/pkg/node_modules',
@@ -534,7 +578,7 @@ printf '%s' "$?" > /proposal/status
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                     '--role', 'worker', '--bridge-socket', str(sock), '--', '/bin/sh', '-c',
                     'echo RUN > /proposal/executed'], text=True, capture_output=True, timeout=10)
@@ -550,7 +594,7 @@ printf '%s' "$?" > /proposal/status
             source = base / 'source'
             source.mkdir()
             report = base / 'report.json'
-            run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                 '--role', 'worker', '--', '/bin/sh', '-c',
                 'head -c 3145728 /dev/zero'], text=True, capture_output=True, timeout=15)
@@ -580,7 +624,7 @@ printf '%s' "$?" > /proposal/status
             report = base / 'report.json'
             program = 'setsid python3 -c "import time; time.sleep(20) # ' + marker + '" </dev/null >/dev/null 2>&1 & sleep 5'
             try:
-                run = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+                run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                     '--report', str(report), '--claim', 'claim-1', '--generation', 'generation-1',
                     '--role', 'worker', '--timeout-sec', '2', '--', '/bin/sh', '-c', program],
                     text=True, capture_output=True, timeout=8)
@@ -598,14 +642,14 @@ printf '%s' "$?" > /proposal/status
             source = base / 'source'
             source.mkdir()
             stale = base / 'stale.json'
-            failed = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            failed = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(stale), '--claim', 'claim-1', '--generation', 'old',
                 '--role', 'worker', '--timeout-sec', '1', '--', '/bin/sh', '-c',
                 'sleep 4; echo OLD > /proposal/answer'], text=True, capture_output=True, timeout=8)
             self.assertNotEqual(failed.returncode, 0)
             self.assertFalse(stale.exists())
             current = base / 'current.json'
-            succeeded = subprocess.run(['python3', str(LAUNCHER), '--source', str(source),
+            succeeded = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
                 '--report', str(current), '--claim', 'claim-1', '--generation', 'new',
                 '--role', 'worker', '--', '/bin/sh', '-c', 'echo NEW > /proposal/answer'],
                 text=True, capture_output=True, timeout=8)
