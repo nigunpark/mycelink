@@ -223,6 +223,9 @@ function emit(io: CliIo, args: ParsedArgs, value: unknown, human: () => string):
 
 function adapterFor(controlRoot: string): ClaudeCliAdapter {
   const config = loadConfig(controlRoot);
+  if (config.provider.provider === 'codex') {
+    throw new Error('Codex worker adapter is not supported: the per-command and allowed-path security fence is unverified.');
+  }
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];
   if (config.adapter === 'fake-provider' || fakeExecutable) {
     return new ClaudeCliAdapter({

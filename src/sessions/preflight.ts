@@ -19,7 +19,7 @@ import type { SessionAdapterId } from './adapter.js';
 
 export interface PreflightResult {
   ok: boolean;
-  adapter?: 'fake-claude' | 'claude-background';
+  adapter?: 'fake-claude' | 'claude-background' | 'codex-cli';
   executable?: string;
   /** The file the spawn would run, or null when it cannot be found. */
   resolved?: string | null;
@@ -71,6 +71,9 @@ function probe(argv: string[], base: PreflightResult): PreflightResult {
 /** Check that the configured worker adapter can start, without claiming anything. */
 export function preflightAdapter(input: MycelinkConfigInput, env: NodeJS.ProcessEnv = process.env): PreflightResult {
   const config = normalizeConfig(input);
+  if (config.provider.provider === 'codex') {
+    return { ok: false, adapter: 'codex-cli', detail: 'Codex worker adapter is not supported: the per-command and allowed-path security fence is unverified.' };
+  }
   // Preserve the legacy direct-call overrides used by existing integrations.
   const legacyAdapter = input.session_adapter;
   const legacyExecutable = input.claude_executable;

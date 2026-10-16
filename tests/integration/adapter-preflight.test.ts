@@ -49,6 +49,16 @@ async function setup(): Promise<Portfolio> {
 }
 
 describe('adapter preflight', () => {
+  it('never certifies an unimplemented Codex adapter through Claude or fake overrides', () => {
+    const fake = join(process.cwd(), 'tests', 'fake-claude', 'claude.mjs');
+    const configured = { ...DEFAULT_CONFIG, provider: { provider: 'codex' as const, executable: process.execPath } };
+    for (const input of [configured, { ...configured, session_adapter: 'fake-claude' as const, claude_executable: fake }]) {
+      const result = preflightAdapter(input, { ...process.env, MYCELINK_FAKE_CLAUDE: fake });
+      expect(result).toMatchObject({ ok: false, adapter: 'codex-cli' });
+      expect(result.detail).toMatch(/security fence|not supported/i);
+    }
+  });
+
   it('reports an executable that cannot be found, without starting anything', () => {
     const r = preflightAdapter({ ...DEFAULT_CONFIG, claude_executable: 'definitely-not-claude-xyz' });
     expect(r.ok).toBe(false);
