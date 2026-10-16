@@ -14,6 +14,50 @@ LAUNCHER = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'wsl-codex-
 
 @unittest.skipUnless(os.geteuid() == 0 and os.environ.get('MYCELINK_LIVE_WSL_WORKER') == '1', 'requires explicit WSL root opt-in')
 class WorkerIsolationTest(unittest.TestCase):
+    def test_rejects_replaced_or_writable_sandbox_executable(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('wsl_worker_runtime_check', LAUNCHER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-bwrap-check-', dir='/var/lib/mycelink-codex/claims') as temp:
+            base = pathlib.Path(temp)
+            executable = base / 'bwrap'
+            executable.write_text('#!/bin/sh\nexit 0\n')
+            executable.chmod(0o755)
+            base.chmod(0o777)
+            with self.assertRaises(ValueError):
+                module.trusted_executable(executable)
+            base.chmod(0o755)
+            executable.chmod(0o777)
+            with self.assertRaises(ValueError):
+                module.trusted_executable(executable)
+            executable.chmod(0o755)
+            self.assertEqual(module.trusted_executable(executable), str(executable))
+            executable.unlink()
+            executable.symlink_to('/bin/sh')
+            with self.assertRaises(ValueError):
+                module.trusted_executable(executable)
+
+    def test_refuses_worker_writable_claim_base_before_spawning(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('wsl_worker_base_check', LAUNCHER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-insecure-base-') as temp:
+            base = pathlib.Path(temp)
+            base.chmod(0o777)
+            source = base / 'source'
+            source.mkdir()
+            report = base / 'report.json'
+            argv = [str(LAUNCHER), '--experimental-unrestricted-source', '--source', str(source),
+                    '--report', str(report), '--claim', 'claim-1', '--generation', 'g1',
+                    '--role', 'worker', '--', '/bin/sh', '-c', 'echo RUN > /proposal/ran']
+            with patch.object(module, 'BASE', base), patch.object(module.sys, 'argv', argv):
+                with self.assertRaisesRegex(RuntimeError, 'claim base'):
+                    module.main()
+            self.assertFalse(report.exists())
+
     def test_pinned_non_setuid_bwrap_uses_patch_release(self):
         executable = pathlib.Path('/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap')
         self.assertTrue(executable.is_file(), 'private patched bwrap required; Ubuntu 0.11.1 dropped CVE-2026-87766 patch')

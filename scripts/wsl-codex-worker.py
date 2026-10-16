@@ -23,9 +23,22 @@ import tempfile
 import threading
 
 BASE = pathlib.Path('/var/lib/mycelink-codex/claims')
+BWRAP = pathlib.Path('/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap')
 MAX_FILE = 2 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
 SOURCE_NAME = re.compile(r'^[A-Za-z0-9_./-]{1,240}$')
+
+def trusted_executable(path):
+    """Reject a replaceable sandbox executable or writable ancestor before launch."""
+    path = pathlib.Path(path)
+    for item in (path, *path.parents):
+        info = item.lstat()
+        expected = stat.S_ISREG if item == path else stat.S_ISDIR
+        if not expected(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('sandbox executable or parent is not root-owned and immutable to worker')
+    if not os.access(path, os.X_OK) or path.stat().st_mode & (stat.S_ISUID | stat.S_ISGID):
+        raise ValueError('sandbox executable must be non-setuid and executable')
+    return str(path)
 
 
 def source_manifest(path):
@@ -222,8 +235,10 @@ def main():
     if not 1 <= args.timeout_sec <= 120:
         parser.error('timeout must be bounded')
     identity = pwd.getpwnam('mycelink-codex-worker' if args.role == 'worker' else 'mycelink-codex-reviewer')
-    if not BASE.is_dir() or BASE.stat().st_uid != 0:
-        raise RuntimeError('root-owned claim base must be provisioned')
+    base_info = BASE.lstat()
+    if (not stat.S_ISDIR(base_info.st_mode) or base_info.st_uid != 0 or
+        base_info.st_mode & 0o022):
+        raise RuntimeError('root-owned, non-writable claim base must be provisioned')
     source = pathlib.Path(args.source)
     if not source.is_dir() or source.is_symlink():
         raise ValueError('source must be a real directory')
@@ -251,7 +266,7 @@ def main():
         os.chown(proposal, identity.pw_uid, identity.pw_gid)
 
         command = [
-            '/var/lib/mycelink-codex/pkg/bwrap-0.13.1/bin/bwrap',
+            trusted_executable(BWRAP),
             '--die-with-parent', '--unshare-all', '--new-session',
             '--ro-bind', '/usr', '/usr', '--ro-bind', '/bin', '/bin',
             '--ro-bind', '/lib', '/lib', '--ro-bind', '/lib64', '/lib64',
