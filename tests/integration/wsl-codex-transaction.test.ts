@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -248,6 +248,18 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     await expect(transaction(o, request(implement))).rejects.toThrow(/SOURCE_DRIFT|DIRTY|SNAPSHOT/);
     expect(readFileSync(join(ticket.worktree!, 'tests', 'run.mjs'), 'utf8')).toContain('untrusted mutable worktree source');
     assertNoSettlement(p.featureDir);
+  }, 180_000);
+
+  it.skipIf(!authenticated)('rejects a DrvFS apply-parent junction swap after model completion', async () => {
+    const { p, o, ticket, request } = await claim();
+    const parent = join(ticket.worktree!, 'tests');
+    const saved = join(ticket.worktree!, 'tests-original');
+    await expect(transaction(o, { ...request(implement), onPhase: async () => {
+      renameSync(parent, saved);
+      symlinkSync(saved, parent, 'junction');
+    } })).rejects.toThrow(/SOURCE_DRIFT|DIRTY|SNAPSHOT|SYMLINK/);
+    assertNoSettlement(p.featureDir);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
   }, 180_000);
 
   it.skipIf(!authenticated)('rejects failed hooks, broker denial and unsealed transport before any apply', async () => {
