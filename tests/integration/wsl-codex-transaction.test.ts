@@ -209,6 +209,21 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     }
   }, 240_000);
 
+  it.skipIf(!authenticated)('records MCP and built-in shell calls inside one authenticated claim and sealed turn', async () => {
+    const { p, o, ticket, request } = await claim('mcp');
+    const receipt = await transaction(o, {
+      ...request('After the configured probe MCP call, use the built-in shell to run ls /mnt/c/Windows exactly once; continue despite the denied path. Then ' + implement),
+      isolationProbe: 'mcp',
+    });
+    expect(receipt).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId,
+      settlement: { outcome: 'DONE', usageSessions: 1 },
+      isolation: { hostMountDenied: true, directEgressDenied: true, otherRoleSlotDenied: true } });
+    expect(receipt.model.mcpCalls).toBeGreaterThan(0);
+    expect(receipt.model.builtinCalls).toBeGreaterThan(0);
+    expect(receipt.gates.map(gate => gate.gate)).toEqual(['red', 'green', 'regression']);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
+  }, 180_000);
+
   it.skipIf(!authenticated)('binds a real model-driven MCP tool to both sealed OS isolation receipts', async () => {
     const { p, o, request } = await claim('mcp');
     const receipt = await transaction(o, { ...request('Use the configured probe MCP inspect_fixture tool, then ' + implement), isolationProbe: 'mcp' });
