@@ -51,6 +51,7 @@ export type WslCodexVerifiedTurn = {
   proposals: Record<string, string>;
   worker: { status: string; events: string[]; transcript: unknown[] };
   reviewer: { verdict: string };
+  isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
 };
 
 /** Re-read pinned root-owned slots; this is evidence, not apply authority. */

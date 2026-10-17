@@ -38,6 +38,24 @@ class WorkerIsolationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.trusted_executable(executable)
 
+    def test_root_attests_mount_network_and_role_slot_before_untrusted_command(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-isolation-proof-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            report = base / 'report.json'
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                '--source', str(source), '--report', str(report), '--claim', 'isolation',
+                '--generation', 'g1', '--role', 'worker', '--attest-isolation',
+                '--', '/bin/sh', '-c',
+                'echo fake-isolation-output; echo OK > /proposal/file'],
+                text=True, capture_output=True, timeout=20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            record = json.loads(report.read_text())
+            self.assertEqual(record['proposals'], {'file': 'OK\n'})
+            self.assertEqual(record['isolation'], {
+                'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True})
+
     def test_private_transport_survives_launch_and_denies_worker_aliases(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-private-transport-') as temp:
             base = pathlib.Path(temp)

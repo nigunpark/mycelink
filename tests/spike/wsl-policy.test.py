@@ -78,6 +78,23 @@ class SealedProposalTest(unittest.TestCase):
                 p.read_verified_turn(worker, reviewer, claim='c1', generation='g1',
                     allowed_paths={'src/publish.js'})
 
+    def test_worker_claim_about_isolation_cannot_replace_both_root_seals(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            p = policy()
+            denied = {'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True}
+            for role, proposal, submission in (
+                ('worker', {'src/publish.js': 'SAFE'}, {'status': '0', 'isolation': denied}),
+                ('reviewer', {}, {'verdict': 'PASS'})):
+                report = base / (role + '.json')
+                report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': role,
+                    'proposals': proposal, 'submission': submission, 'isolation': denied}))
+                p.seal(report, base / role, claim='c1', generation='g1', role=role,
+                    allowed_paths={'src/publish.js'}, isolation=denied if role == 'worker' else None)
+            with self.assertRaises(ValueError):
+                p.read_verified_turn(base / 'worker', base / 'reviewer', claim='c1', generation='g1',
+                    allowed_paths={'src/publish.js'})
+
     def test_controller_accepts_only_two_matching_sealed_roles(self):
         with tempfile.TemporaryDirectory() as temp:
             base = pathlib.Path(temp)

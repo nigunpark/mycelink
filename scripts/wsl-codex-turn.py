@@ -162,7 +162,7 @@ PY
             '--source', args.source, '--source-files', args.manifest,
             '--transport-dir', str(transport), '--claim', args.claim,
             '--generation', args.generation, '--role', 'worker', '--timeout-sec', '80',
-            '--bridge-socket', str(socket), '--codex-install', str(WORKER),
+            '--attest-isolation', '--bridge-socket', str(socket), '--codex-install', str(WORKER),
             '--', '/bin/sh', '-c', script]
         completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, timeout=100, check=False)
@@ -232,7 +232,7 @@ PY
                 '--source', args.source, '--source-files', args.manifest,
                 '--transport-dir', str(transport), '--claim', args.claim,
                 '--generation', args.generation, '--role', 'reviewer', '--timeout-sec', '80',
-                '--bridge-socket', str(socket), '--codex-install', str(WORKER),
+                '--attest-isolation', '--bridge-socket', str(socket), '--codex-install', str(WORKER),
                 '--', '/bin/sh', '-c', review_script]
             reviewed = subprocess.run(review_command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                       stderr=subprocess.DEVNULL, timeout=100, check=False)

@@ -32,7 +32,10 @@ def safe_name(path):
     return not any(part in RESERVED | {'_receipt.json', 'mycelink'} for part in parts)
 
 
-def seal(report_path, slot, *, claim, generation, role, allowed_paths):
+def seal(report_path, slot, *, claim, generation, role, allowed_paths, isolation=None):
+    if isolation is not None and isolation != {
+            'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True}:
+        raise ValueError('invalid root isolation observation')
     if os.geteuid() != 0 or role not in ('worker', 'reviewer'):
         raise ValueError('trusted principal and exact role required')
     report_path, slot = pathlib.Path(report_path), pathlib.Path(slot)
@@ -96,6 +99,8 @@ def seal(report_path, slot, *, claim, generation, role, allowed_paths):
             os.fsync(output.fileno())
         receipt = {'claim': claim, 'generation': generation, 'role': role, 'sha256': hashes,
                    'submission_sha256': hashlib.sha256(submission_bytes).hexdigest()}
+        if isolation is not None:
+            receipt['isolation'] = isolation
         (temporary / '_receipt.json').write_text(json.dumps(receipt, sort_keys=True))
         if slot.exists() or slot.is_symlink():
             raise ValueError('slot became occupied')
@@ -202,6 +207,28 @@ def read_proposals(slot, *, claim, generation, allowed_paths, role='worker'):
         os.close(root)
 
 
+def read_root_isolation(slot, *, claim, generation, role):
+    """Read only the root-generated attestation in the role-bound seal."""
+    directory = os.open(slot, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if os.fstat(directory).st_uid != 0 or os.fstat(directory).st_mode & 0o022:
+            raise ValueError('untrusted isolation slot')
+        fd = os.open('_receipt.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_size > 512 * 1024:
+                raise ValueError('untrusted isolation receipt')
+            with os.fdopen(os.dup(fd), 'rb') as stream:
+                receipt = json.loads(stream.read(512 * 1024 + 1))
+            if (receipt.get('claim'), receipt.get('generation'), receipt.get('role')) != (claim, generation, role):
+                raise ValueError('wrong isolation generation or role')
+            return receipt.get('isolation')
+        finally:
+            os.close(fd)
+    finally:
+        os.close(directory)
+
+
 def read_verified_turn(worker_slot, reviewer_slot, *, claim, generation, allowed_paths):
     """Both role-bound seals must agree before proposals enter controller memory."""
     worker = read_submission(worker_slot, claim=claim, generation=generation, role='worker')
@@ -213,7 +240,14 @@ def read_verified_turn(worker_slot, reviewer_slot, *, claim, generation, allowed
         raise ValueError('worker proposal does not cover exact requested paths')
     if read_proposals(reviewer_slot, claim=claim, generation=generation, allowed_paths=allowed_paths, role='reviewer'):
         raise ValueError('reviewer proposed worker files')
-    return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer}
+    worker_isolation = read_root_isolation(worker_slot, claim=claim, generation=generation, role='worker')
+    reviewer_isolation = read_root_isolation(reviewer_slot, claim=claim, generation=generation, role='reviewer')
+    if worker_isolation is None and reviewer_isolation is None:
+        return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer}
+    expected = {'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True}
+    if worker_isolation != expected or reviewer_isolation != expected:
+        raise ValueError('role isolation receipts disagree or do not deny access')
+    return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer, 'isolation': expected}
 
 
 def sync_directory(path):

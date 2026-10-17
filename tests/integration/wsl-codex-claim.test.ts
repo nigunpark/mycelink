@@ -202,11 +202,12 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(outcome).toEqual({ exit_code: 0, revoked: false });
         const transport = `/var/lib/mycelink-codex/transport/${ticket.claimId}/${ticket.dispatchId}/worker.json`;
         const published = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
-          'import json,sys; x=json.load(open(sys.argv[1])); print(json.dumps({"claim":x["claim"],"generation":x["generation"],"events":x["submission"]["events"],"status":x["submission"]["status"],"proposals":x["proposals"]}))', transport],
+          'import json,sys; x=json.load(open(sys.argv[1])); print(json.dumps({"claim":x["claim"],"generation":x["generation"],"events":x["submission"]["events"],"status":x["submission"]["status"],"proposals":x["proposals"],"isolation":x.get("isolation")}))', transport],
         { encoding: 'utf8', timeout: 10_000 });
         expect(published.status, published.stderr).toBe(0);
         expect(JSON.parse(published.stdout)).toMatchObject({ claim: ticket.claimId,
           generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']),
+          isolation: { hostMountDenied: true, directEgressDenied: true, otherRoleSlotDenied: true },
           proposals: { 'src/publish.js': 'JOB_RESULT_V2\n',
            'tests/run.mjs': proposedTest } });
         const configFile = join(p.control, 'mycelink.config.json');
@@ -231,6 +232,7 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(verified.proposals).toEqual({ 'src/publish.js': 'JOB_RESULT_V2\n',
          'tests/run.mjs': proposedTest });
         expect(verified.reviewer.verdict).toBe('PASS');
+        expect(verified.isolation).toEqual({ hostMountDenied: true, directEgressDenied: true, otherRoleSlotDenied: true });
         writeFileSync(join(ticket.worktree!, 'tests', 'run.mjs'), 'throw new Error("post-seal source drift");\n');
         expect(() => o.readExperimentalWslCodexSealedTurn(CORE, ticket.claimId, ticket.dispatchId!,
           ['src/publish.js', 'tests/run.mjs'])).toThrow(/SOURCE_DRIFT/);

@@ -33938,7 +33938,8 @@ var Orchestrator = class _Orchestrator {
           });
           const invoked = request.isolationProbe === "mcp" ? items2.some((item) => item["type"] === "mcp_tool_call" && item["server"] === "probe" && item["tool"] === "inspect_fixture") : items2.some((item) => item["type"] === "command_execution" && typeof item["command"] === "string" && item["command"].includes("/mnt/c/Windows") && typeof item["exit_code"] === "number" && item["exit_code"] !== 0);
           if (!invoked) throw new Error("WSL_CODEX_MODEL_TOOL_CALL_NOT_OBSERVED");
-          throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
+          if (turn.isolation?.hostMountDenied !== true || turn.isolation.directEgressDenied !== true || turn.isolation.otherRoleSlotDenied !== true)
+            throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
         }
         this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, "tests/run.mjs");
         this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
@@ -33987,6 +33988,15 @@ var Orchestrator = class _Orchestrator {
         if (criteria.length !== 1 || failed.length !== 1)
           throw new Error("WSL_CODEX_CRITERION_AMBIGUOUS");
         const sealed = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        const toolItems = sealed.worker.transcript.flatMap((event) => {
+          if (!event || typeof event !== "object" || Array.isArray(event)) return [];
+          const entry = event;
+          return entry["type"] === "item.completed" && entry["item"] && typeof entry["item"] === "object" && !Array.isArray(entry["item"]) ? [entry["item"]] : [];
+        });
+        const mcpCalls = toolItems.filter((item) => item["type"] === "mcp_tool_call" && item["server"] === "probe" && item["tool"] === "inspect_fixture").length;
+        const builtinCalls = toolItems.filter((item) => item["type"] === "command_execution" && typeof item["command"] === "string" && item["command"].includes("/mnt/c/Windows") && typeof item["exit_code"] === "number" && item["exit_code"] !== 0).length;
+        if (request.isolationProbe && (!sealed.isolation || (request.isolationProbe === "mcp" ? mcpCalls : builtinCalls) < 1))
+          throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
         const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
         for (const transcript of [
           sealed.worker.transcript,
@@ -34056,7 +34066,8 @@ var Orchestrator = class _Orchestrator {
           sourceSha256,
           // A completed authenticated turn proves a lower bound, not the
           // bridge's exact HTTP request count. Never call this an API audit.
-          model: { platform: "linux", apiRequests: usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
+          model: { platform: "linux", apiRequests: usage.model_turns, mcpCalls, builtinCalls },
+          ...sealed.isolation ? { isolation: sealed.isolation } : {},
           gates: completed.gates
         };
         const receiptSha256 = createHash35("sha256").update(JSON.stringify(receipt)).digest("hex");

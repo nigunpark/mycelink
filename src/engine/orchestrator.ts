@@ -1734,6 +1734,7 @@ export class Orchestrator {
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+    isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
     gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[];
     settlement: { outcome: string; idempotent: boolean; usageSessions: number } }> {
     if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1' ||
@@ -1840,9 +1841,13 @@ export class Orchestrator {
               typeof item['command'] === 'string' && item['command'].includes('/mnt/c/Windows') &&
               typeof item['exit_code'] === 'number' && item['exit_code'] !== 0);
         if (!invoked) throw new Error('WSL_CODEX_MODEL_TOOL_CALL_NOT_OBSERVED');
-        // Transcript evidence is not a trusted OS proof of host mount, direct
-        // egress and other-role isolation. No test-only fixture may assert it.
-        throw new Error('WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE');
+        // The broker re-reads root-owned worker AND reviewer receipts. Each
+        // prelude ran in its role's bwrap namespace before untrusted model
+        // code; a transcript, tool response or worker proposal is not proof.
+        if (turn.isolation?.hostMountDenied !== true ||
+            turn.isolation.directEgressDenied !== true ||
+            turn.isolation.otherRoleSlotDenied !== true)
+          throw new Error('WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE');
       }
       this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, 'tests/run.mjs');
       this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
@@ -1888,6 +1893,21 @@ export class Orchestrator {
         if (criteria.length !== 1 || failed.length !== 1)
           throw new Error('WSL_CODEX_CRITERION_AMBIGUOUS');
         const sealed = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        const toolItems = sealed.worker.transcript.flatMap((event: unknown) => {
+          if (!event || typeof event !== 'object' || Array.isArray(event)) return [];
+          const entry = event as Record<string, unknown>;
+          return entry['type'] === 'item.completed' && entry['item'] &&
+            typeof entry['item'] === 'object' && !Array.isArray(entry['item'])
+            ? [entry['item'] as Record<string, unknown>] : [];
+        });
+        const mcpCalls = toolItems.filter(item => item['type'] === 'mcp_tool_call' &&
+          item['server'] === 'probe' && item['tool'] === 'inspect_fixture').length;
+        const builtinCalls = toolItems.filter(item => item['type'] === 'command_execution' &&
+          typeof item['command'] === 'string' && item['command'].includes('/mnt/c/Windows') &&
+          typeof item['exit_code'] === 'number' && item['exit_code'] !== 0).length;
+        if (request.isolationProbe && (!sealed.isolation ||
+            (request.isolationProbe === 'mcp' ? mcpCalls : builtinCalls) < 1))
+          throw new Error('WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE');
         const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
         for (const transcript of [sealed.worker.transcript,
           (sealed.reviewer as { transcript?: unknown[] }).transcript]) {
@@ -1937,7 +1957,8 @@ export class Orchestrator {
           reviewerSeal: reviewerSealHash, sourceSha256,
           // A completed authenticated turn proves a lower bound, not the
           // bridge's exact HTTP request count. Never call this an API audit.
-          model: { platform: 'linux' as const, apiRequests: usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
+          model: { platform: 'linux' as const, apiRequests: usage.model_turns, mcpCalls, builtinCalls },
+          ...(sealed.isolation ? { isolation: sealed.isolation } : {}),
           gates: completed.gates };
         const receiptSha256 = createHash('sha256').update(JSON.stringify(receipt)).digest('hex');
         writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-intent', resultSha256, receipt, receiptSha256 }) + '\n');
@@ -1972,6 +1993,7 @@ export class Orchestrator {
     Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
       sourceSha256: Record<string, string>;
       model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+      isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
       gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[];
       settlement: { outcome: string; idempotent: boolean; usageSessions: number } }> {
     if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1' ||

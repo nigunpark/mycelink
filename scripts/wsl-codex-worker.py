@@ -14,6 +14,8 @@ import os
 import pathlib
 import pwd
 import re
+import select
+import shlex
 import shutil
 import socket
 import stat
@@ -29,6 +31,21 @@ MAX_FILE = 2 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
 SOURCE_NAME = re.compile(r'^[A-Za-z0-9_./-]{1,240}$')
 TOKEN = re.compile(r'^[A-Za-z0-9_-]{1,100}$')
+ISOLATION_PREFIX = b'__MYCELINK_ISOLATION_V1__'
+# Runs as a fixed root-selected prelude inside the *same* bwrap namespace,
+# before the untrusted command. No worker file or model text supplies a verdict.
+ISOLATION_PROBE = '''import json, os, pathlib, socket
+mount = not pathlib.Path('/mnt/c/Windows').exists() and not pathlib.Path('/init').exists()
+role = not pathlib.Path('/var/lib/mycelink-codex/transport').exists() and not pathlib.Path('/home/psh09/.codex/auth.json').exists()
+try:
+    with socket.create_connection(('1.1.1.1', 443), timeout=0.5):
+        egress = False
+except OSError:
+    egress = True
+print('__MYCELINK_ISOLATION_V1__' + json.dumps({'hostMountDenied': mount, 'directEgressDenied': egress, 'otherRoleSlotDenied': role}), flush=True)
+if not (mount and role and egress):
+    raise SystemExit(1)
+'''
 
 
 def private_transport(path, claim, generation, role):
@@ -253,7 +270,7 @@ def bridge_identity(path, claim, generation, role, expected_uid):
         channel.close()
 
 
-def run_bounded(command, identity, timeout_sec):
+def run_bounded(command, identity, timeout_sec, attest_isolation=False):
     """Drain hostile stdio with backpressure; never accumulate output in RAM."""
     def drop():
         os.setgroups([])
@@ -275,6 +292,27 @@ def run_bounded(command, identity, timeout_sec):
                     break
         finally:
             stream.close()
+    isolation = None
+    if attest_isolation:
+        if not select.select([child.stdout], [], [], min(timeout_sec, 5))[0]:
+            child.kill()
+            child.wait(timeout=3)
+            raise ValueError('isolated prelude did not attest before model execution')
+        first = child.stdout.readline(513)
+        if not first.startswith(ISOLATION_PREFIX) or len(first) > 512 or not first.endswith(b'\n'):
+            child.kill()
+            child.wait(timeout=3)
+            raise ValueError('isolated prelude was missing or malformed')
+        try:
+            isolation = json.loads(first[len(ISOLATION_PREFIX):])
+        except (ValueError, UnicodeError):
+            child.kill()
+            child.wait(timeout=3)
+            raise ValueError('isolated prelude verdict malformed')
+        if isolation != {'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True}:
+            child.kill()
+            child.wait(timeout=3)
+            raise ValueError('isolated prelude detected a host escape')
     readers = [threading.Thread(target=drain, args=(stream,), daemon=True)
                for stream in (child.stdout, child.stderr)]
     for reader in readers:
@@ -292,6 +330,7 @@ def run_bounded(command, identity, timeout_sec):
         raise ValueError('isolated command exceeded stdio budget or retained a channel')
     if child.returncode != 0:
         raise RuntimeError(f'isolated command failed ({child.returncode})')
+    return isolation
 
 
 def main():
@@ -307,6 +346,7 @@ def main():
     parser.add_argument('--role', choices=('worker', 'reviewer'), required=True)
     parser.add_argument('--bridge-socket')
     parser.add_argument('--codex-install')
+    parser.add_argument('--attest-isolation', action='store_true')
     parser.add_argument('--timeout-sec', type=int, default=20)
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -360,10 +400,15 @@ def main():
             command.extend(['--dir', '/run', '--ro-bind', args.bridge_socket, '/run/bridge.sock'])
         if args.codex_install:
             command.extend(['--dir', '/opt', '--ro-bind', args.codex_install, '/opt/node_modules'])
+        sandbox_command = args.command[1:]
+        if args.attest_isolation:
+            sandbox_command = ['/bin/sh', '-c',
+                '/usr/bin/python3 -c ' + shlex.quote(ISOLATION_PROBE) + ' || exit 1; exec "$@"',
+                'mycelink-isolation-prelude', *sandbox_command]
         command.extend(['--clearenv', '--setenv', 'HOME', '/home',
                         '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin',
-                        '--chdir', '/work', '--', *args.command[1:]])
-        run_bounded(command, identity, args.timeout_sec)
+                        '--chdir', '/work', '--', *sandbox_command])
+        isolation = run_bounded(command, identity, args.timeout_sec, args.attest_isolation)
         proposals = proposals_from(proposal)
         own_slot = 'result.json' if args.role == 'worker' else 'verdict.json'
         foreign_slot = 'verdict.json' if args.role == 'worker' else 'result.json'
@@ -378,6 +423,8 @@ def main():
         record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
                   'source_files': count, 'source_hashes': source_hashes,
                   'proposals': proposals, 'submission': submission}
+        if isolation is not None:
+            record['isolation'] = isolation
         # A pre-existing target (including a hardlink/symlink) must not be overwritten.
         if transport_fd is not None:
             publish_transport(transport_fd, args.role, record)

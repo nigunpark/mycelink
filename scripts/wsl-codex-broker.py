@@ -94,8 +94,11 @@ class PolicyBroker:
         return all(POLICY.safe_name(p) and p in self.allowed_paths and isinstance(value, str)
                    and len(value.encode('utf-8')) <= POLICY.MAX_FILE for p, value in proposals.items())
 
-    def _submit(self, data, role):
+    def _submit(self, data, role, *, isolation=None):
         with self.lock:
+            if isolation is not None and isolation != {
+                'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True}:
+                return {'ok': False}
             if not (self._live() and self.validate(data, role) and self._live()):
                 return {'ok': False}
             slot = self.root / role
@@ -112,7 +115,8 @@ class PolicyBroker:
                     os.fsync(output.fileno())
                 if self._live():
                     POLICY.seal(self.root / name, slot, claim=self.claim,
-                        generation=self.generation, role=role, allowed_paths=self.allowed_paths)
+                        generation=self.generation, role=role, allowed_paths=self.allowed_paths,
+                        isolation=isolation)
                     if self._live():
                         return {'ok': True}
                     shutil.rmtree(slot)
@@ -181,7 +185,7 @@ class PolicyBroker:
                 envelope.get('source_hashes') != expected_source_hashes):
                 raise ValueError('wrong launcher envelope')
             proposal = {key: envelope.get(key) for key in (*expected, 'proposals', 'submission')}
-            answer = self._submit(proposal, role)
+            answer = self._submit(proposal, role, isolation=envelope.get('isolation'))
             if not answer['ok']:
                 raise ValueError('broker denied launcher envelope')
             return answer

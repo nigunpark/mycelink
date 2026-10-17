@@ -198,18 +198,22 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     }
   }, 240_000);
 
-  it.skipIf(!authenticated)('observes a model-driven MCP tool before refusing missing OS isolation attestation', async () => {
+  it.skipIf(!authenticated)('binds a real model-driven MCP tool to both sealed OS isolation receipts', async () => {
     const { p, o, request } = await claim('mcp');
-    await expect(transaction(o, { ...request('Use the configured probe MCP inspect_fixture tool, then ' + implement), isolationProbe: 'mcp' }))
-      .rejects.toThrow(/WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE/);
-    assertNoSettlement(p.featureDir);
+    const receipt = await transaction(o, { ...request('Use the configured probe MCP inspect_fixture tool, then ' + implement), isolationProbe: 'mcp' });
+    expect(receipt.settlement.outcome).toBe('DONE');
+    expect(receipt.model.mcpCalls).toBeGreaterThan(0);
+    expect(receipt.isolation).toEqual({ hostMountDenied: true, directEgressDenied: true, otherRoleSlotDenied: true });
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
   }, 180_000);
 
-  it.skipIf(!authenticated)('observes a real built-in shell invocation before refusing missing OS isolation attestation', async () => {
+  it.skipIf(!authenticated)('binds a real built-in shell invocation to both sealed OS isolation receipts', async () => {
     const { p, o, request } = await claim('builtin');
-    await expect(transaction(o, { ...request(implement), isolationProbe: 'builtin' }))
-      .rejects.toThrow(/WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE/);
-    assertNoSettlement(p.featureDir);
+    const receipt = await transaction(o, { ...request(implement), isolationProbe: 'builtin' });
+    expect(receipt.settlement.outcome).toBe('DONE');
+    expect(receipt.model.builtinCalls).toBeGreaterThan(0);
+    expect(receipt.isolation).toEqual({ hostMountDenied: true, directEgressDenied: true, otherRoleSlotDenied: true });
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
   }, 180_000);
 
   it.skipIf(!authenticated)('refuses mutable DrvFS source drift before any proposal is applied', async () => {
