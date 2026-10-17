@@ -269,12 +269,20 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
     const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
       adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    const originalJournal = readFileSync(journal, 'utf8');
+    const beforeSettlementForged = JSON.parse(originalJournal);
+    beforeSettlementForged.receipt.sourceSha256['tests/run.mjs'] = '0'.repeat(64);
+    beforeSettlementForged.receiptSha256 = createHash('sha256').update(JSON.stringify(beforeSettlementForged.receipt)).digest('hex');
+    writeFileSync(journal, JSON.stringify(beforeSettlementForged));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+    writeFileSync(journal, originalJournal);
     const receipt = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(receipt.settlement).toMatchObject({ outcome: 'DONE', idempotent: false, usageSessions: 1 });
     const again = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(again.settlement).toMatchObject({ outcome: 'DONE', idempotent: true, usageSessions: 1 });
-    const journal = join(p.featureDir, 'wsl-codex-transactions',
-      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
     const forged = JSON.parse(readFileSync(journal, 'utf8'));
     forged.receipt.gates[0].exitCode = 9;
     forged.receiptSha256 = createHash('sha256').update(JSON.stringify(forged.receipt)).digest('hex');

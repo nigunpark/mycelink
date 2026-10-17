@@ -2022,6 +2022,14 @@ export class Orchestrator {
         JSON.stringify(receipt['gates']) !== JSON.stringify(declaredGates) ||
         record['receiptSha256'] !== createHash('sha256').update(JSON.stringify(receipt)).digest('hex'))
       throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+    if (record['phase'] === 'result-written') {
+      const liveClaim = this.state().nodes[nodeId]?.claim;
+      if (!liveClaim || liveClaim.claim_id !== claimId || liveClaim.dispatch_id !== generation ||
+          !liveClaim.worktree || typeof record['base'] !== 'string' ||
+          JSON.stringify(receipt?.['sourceSha256']) !==
+            JSON.stringify(immutableGitSource(liveClaim.worktree, record['base']).hashes))
+        throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+    }
     if (record['phase'] === 'settled') {
       const runtime = this.state().nodes[nodeId];
       if (runtime?.state !== 'DONE' || runtime.usage.sessions !== 1)
