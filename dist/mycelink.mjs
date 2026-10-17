@@ -29370,6 +29370,50 @@ function sealRegisteredWslCodexRole(featureDir, controlRoot, grant, role) {
   }
   return receipt;
 }
+function readRegisteredWslCodexApiAudit(featureDir, claim, generation) {
+  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
+    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
+  const outcome = wslCodexProcessResult(featureDir, claim, generation);
+  if (outcome.exit_code !== 0 || outcome.revoked) throw new Error("WSL_CODEX_GENERATION_NOT_SUCCESSFUL");
+  const script = join38(packageRoot(), "scripts", "wsl-codex-turn.py");
+  const translated = spawnSync9(
+    "wsl.exe",
+    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
+    { encoding: "utf8", timeout: 1e4, windowsHide: true }
+  );
+  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
+    throw new Error("WSL_CODEX_API_AUDIT_UNAVAILABLE");
+  const response = spawnSync9(
+    "wsl.exe",
+    [
+      "-d",
+      "Ubuntu",
+      "-u",
+      "root",
+      "--",
+      "python3",
+      translated.stdout.trim(),
+      "--claim",
+      claim,
+      "--generation",
+      generation,
+      "--audit-summary"
+    ],
+    { encoding: "utf8", timeout: 2e4, maxBuffer: 4096, windowsHide: true }
+  );
+  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_API_AUDIT_INVALID");
+  try {
+    const value = JSON.parse(response.stdout);
+    if (!value || Object.keys(value).sort().join(",") !== "reviewer,worker") throw new Error("roles");
+    for (const role of ["worker", "reviewer"]) {
+      const item = value[role];
+      if (!item || Object.keys(item).sort().join(",") !== "apiRequests,denied,sha256,upstream200" || !Number.isSafeInteger(item["apiRequests"]) || item["apiRequests"] < 1 || !Number.isSafeInteger(item["upstream200"]) || item["upstream200"] < 1 || item["upstream200"] > item["apiRequests"] || !Number.isSafeInteger(item["denied"]) || item["denied"] < 0 || typeof item["sha256"] !== "string" || !/^[a-f0-9]{64}$/.test(item["sha256"])) throw new Error("shape");
+    }
+    return value;
+  } catch {
+    throw new Error("WSL_CODEX_API_AUDIT_INVALID");
+  }
+}
 function readRegisteredWslCodexTurn(featureDir, controlRoot, grant) {
   if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
     throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
@@ -34137,15 +34181,20 @@ var Orchestrator = class _Orchestrator {
         const bytes2 = JSON.stringify(result) + "\n";
         const resultSha256 = createHash35("sha256").update(bytes2).digest("hex");
         const sourceSha256 = immutableGitSource(grant.worktree, grant.base_sha).hashes;
+        const apiAudit = readRegisteredWslCodexApiAudit(this.paths.featureDir, claimId, generation);
         const receipt = {
           claim: claimId,
           generation,
           workerSeal: workerSealHash,
           reviewerSeal: reviewerSealHash,
           sourceSha256,
-          // A completed authenticated turn proves a lower bound, not the
-          // bridge's exact HTTP request count. Never call this an API audit.
-          model: { platform: "linux", apiRequests: usage.model_turns, mcpCalls, builtinCalls },
+          model: {
+            platform: "linux",
+            apiRequests: apiAudit.worker.apiRequests + apiAudit.reviewer.apiRequests,
+            apiAudit,
+            mcpCalls,
+            builtinCalls
+          },
           ...sealed.isolation ? { isolation: sealed.isolation } : {},
           gates: completed.gates
         };
@@ -34230,6 +34279,10 @@ var Orchestrator = class _Orchestrator {
     const receipt = record["receipt"];
     const declaredGates = this.gateCommands(nodeId, "redacted-reconcile-only").filter((gate) => gate.gate === "red" || gate.gate === "green" || gate.gate === "regression").map((gate) => ({ gate: gate.gate, exitCode: 0, argv: gate.argv.slice(0, -2) }));
     if (!receipt || receipt["claim"] !== claimId || receipt["generation"] !== generation || typeof receipt["workerSeal"] !== "string" || typeof receipt["reviewerSeal"] !== "string" || !Array.isArray(receipt["gates"]) || JSON.stringify(receipt["gates"]) !== JSON.stringify(declaredGates) || record["receiptSha256"] !== createHash35("sha256").update(JSON.stringify(receipt)).digest("hex"))
+      throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
+    const model = receipt["model"];
+    const apiAudit = readRegisteredWslCodexApiAudit(this.paths.featureDir, claimId, generation);
+    if (!model || JSON.stringify(model["apiAudit"]) !== JSON.stringify(apiAudit) || model["apiRequests"] !== apiAudit.worker.apiRequests + apiAudit.reviewer.apiRequests)
       throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
     const anchor = wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation);
     if (anchor.receiptSha256 !== record["receiptSha256"] || anchor.resultSha256 !== record["resultSha256"])

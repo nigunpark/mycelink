@@ -47,7 +47,8 @@ type TransactionReceipt = {
   reviewerSeal: string;
   /** Controller-derived immutable Git object bytes, not the worker's own manifest. */
   sourceSha256: Record<string, string>;
-  model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+  model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number;
+    apiAudit: { worker: { apiRequests: number; sha256: string }; reviewer: { apiRequests: number; sha256: string } } };
   /** Controller-observed probe evidence, never a free-form model assertion. */
   isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
   gates: { gate: 'red' | 'green' | 'regression'; exitCode: number; argv: string[] }[];
@@ -167,6 +168,11 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(receipt.workerSeal).not.toBe(receipt.reviewerSeal);
     expect(receipt.sourceSha256['tests/run.mjs']).toBe(trustedDigest);
     expect(receipt.model.apiRequests).toBeGreaterThan(0);
+    expect(receipt.model.apiAudit.worker.apiRequests).toBeGreaterThan(0);
+    expect(receipt.model.apiAudit.reviewer.apiRequests).toBeGreaterThan(0);
+    expect(receipt.model.apiRequests).toBe(receipt.model.apiAudit.worker.apiRequests + receipt.model.apiAudit.reviewer.apiRequests);
+    expect(receipt.model.apiAudit.worker.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(receipt.model.apiAudit.reviewer.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.input_tokens).toBeGreaterThan(0);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.output_tokens).toBeGreaterThan(0);
     expect(receipt.gates.map((g) => [g.gate, g.exitCode])).toEqual([['red', 0], ['green', 0], ['regression', 0]]);
@@ -328,6 +334,18 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     const journal = join(p.featureDir, 'wsl-codex-transactions',
       createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
     const originalJournal = readFileSync(journal, 'utf8');
+    const auditPath = `/var/lib/mycelink-codex/audits/${ticket.claimId}/${ticket.dispatchId}/worker.jsonl`;
+    const audit = execFileSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+      'import pathlib,sys; sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())', auditPath]);
+    try {
+      execFileSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+        'import pathlib,sys,json; p=pathlib.Path(sys.argv[1]); p.write_bytes(p.read_bytes()+json.dumps(dict(event="deny",method="GET",path="/v1/responses")).encode()+bytes([10]))', auditPath]);
+      await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+        .rejects.toThrow(/RECEIPT_INVALID/);
+    } finally {
+      execFileSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+        'import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(sys.stdin.buffer.read())', auditPath], { input: audit });
+    }
     const forgedSeal = JSON.parse(originalJournal);
     forgedSeal.receipt.workerSeal = '0'.repeat(64);
     forgedSeal.receiptSha256 = createHash('sha256').update(JSON.stringify(forgedSeal.receipt)).digest('hex');

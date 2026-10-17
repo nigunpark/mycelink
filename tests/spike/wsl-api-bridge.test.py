@@ -1,5 +1,6 @@
 """Allowlist tests for the Unix-socket credential broker. No real API calls."""
 import http.client
+import hashlib
 import importlib.util
 import json
 import os
@@ -31,6 +32,30 @@ class UnixHTTP(http.client.HTTPConnection):
 
 
 class BridgePolicyTest(unittest.TestCase):
+    def test_root_ledger_attestation_refuses_missing_or_unfinished_roles(self):
+        turn_path = BRIDGE_PATH.with_name('wsl-codex-turn.py')
+        spec = importlib.util.spec_from_file_location('wsl_codex_turn_attestation', turn_path)
+        turn = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(turn)
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            for role, count in (('worker', 2), ('reviewer', 1)):
+                lines = ([{'event': 'deny', 'method': 'GET', 'path': '/v1/responses'}] +
+                         [{'event': event, 'method': 'POST', 'path': '/v1/responses'}
+                          for _ in range(count) for event in ('admit', 'upstream-200')])
+                (root / (role + '.jsonl')).write_text(''.join(json.dumps(line) + '\n' for line in lines))
+                (root / (role + '.jsonl')).chmod(0o600)
+            receipt = turn.attest_api_audit(root)
+            self.assertEqual(receipt['worker']['apiRequests'], 2)
+            self.assertEqual(receipt['reviewer']['apiRequests'], 1)
+            self.assertEqual(receipt['worker']['sha256'], hashlib.sha256((root / 'worker.jsonl').read_bytes()).hexdigest())
+            (root / 'reviewer.jsonl').write_text('{"event":"admit","method":"POST","path":"/v1/responses"}\n')
+            with self.assertRaises(ValueError):
+                turn.attest_api_audit(root)
+            (root / 'reviewer.jsonl').unlink()
+            with self.assertRaises((ValueError, FileNotFoundError)):
+                turn.attest_api_audit(root)
+
     def test_reviewer_bridge_requires_distinct_registered_linux_principal(self):
         bridge = load_bridge()
         worker = pwd.getpwnam('mycelink-codex-worker')

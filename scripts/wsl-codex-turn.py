@@ -5,6 +5,7 @@ Only the trusted Windows claim controller may start this as the registered
 WSL process. A successful process receipt is NOT broker seal or settlement.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -58,6 +59,48 @@ def root_audit_stream(channel, path):
             ledger.flush()
             os.fsync(ledger.fileno())
             channel.sendall(b'1')
+
+
+def attest_api_audit(directory):
+    """Attest both role ledgers, not model-reported turns or worker bytes."""
+    if os.geteuid() != 0:
+        raise ValueError('root audit reader required')
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe audit directory')
+    result = {}
+    for role in ('worker', 'reviewer'):
+        fd = os.open(directory / (role + '.jsonl'), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o177:
+                raise ValueError('unsafe audit ledger')
+            raw = source.read(65_537)
+        if not raw or len(raw) > 65_536 or not raw.endswith(b'\n'):
+            raise ValueError('missing or oversized audit ledger')
+        admits = completed = successful = denied = 0
+        for line in raw.splitlines():
+            if len(line) > 256:
+                raise ValueError('oversized audit event')
+            record = json.loads(line)
+            if not isinstance(record, dict) or set(record) != {'event', 'method', 'path'}:
+                raise ValueError('invalid audit event')
+            event = record['event']
+            if event == 'deny':
+                denied += 1
+            elif record['method'] == 'POST' and record['path'] == '/v1/responses' and event == 'admit':
+                admits += 1
+            elif (record['method'] == 'POST' and record['path'] == '/v1/responses' and
+                  isinstance(event, str) and re.fullmatch(r'upstream-[0-9]{3}', event)):
+                completed += 1
+                successful += event == 'upstream-200'
+            else:
+                raise ValueError('unknown audit event')
+        if not admits or admits != completed or not successful:
+            raise ValueError('unfinished or unsuccessful authenticated role')
+        result[role] = {'apiRequests': admits, 'upstream200': successful,
+                        'denied': denied, 'sha256': hashlib.sha256(raw).hexdigest()}
+    return result
 
 
 def run(args):
@@ -314,12 +357,24 @@ PY
 
 def main():
     parser = argparse.ArgumentParser()
-    for name in ('source', 'manifest', 'claim', 'generation', 'prompt'):
+    for name in ('claim', 'generation'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--audit-summary', action='store_true')
+    for name in ('source', 'manifest', 'prompt'):
+        parser.add_argument('--' + name)
     parser.add_argument('--proposal-path', action='append', default=[])
     parser.add_argument('--isolation-probe', choices=('mcp', 'builtin'))
     parser.add_argument('--review-prompt')
-    run(parser.parse_args())
+    args = parser.parse_args()
+    if args.audit_summary:
+        if (os.geteuid() != 0 or not TOKEN.fullmatch(args.claim) or
+            not TOKEN.fullmatch(args.generation)):
+            raise ValueError('trusted audit generation required')
+        print(json.dumps(attest_api_audit(ROOT / 'audits' / args.claim / args.generation)))
+    else:
+        if not all((args.source, args.manifest, args.prompt)):
+            raise ValueError('isolated turn input required')
+        run(args)
 
 
 if __name__ == '__main__':

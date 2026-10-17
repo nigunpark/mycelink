@@ -106,7 +106,7 @@ import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
 import { assertImmutableWslApplyBase, stageImmutableWslCodexSource, immutableGitSource } from '../sessions/wsl-codex-source.js';
-import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, wslCodexSettlementAnchor, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
+import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, readRegisteredWslCodexApiAudit, wslCodexSettlementAnchor, type WslCodexApiAudit, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
 import { protectExperimentalWslCapability, unprotectExperimentalWslCapability } from '../sessions/wsl-codex-escrow.js';
 import {
   acquireResource,
@@ -1739,7 +1739,7 @@ export class Orchestrator {
     interruptAfter?: 'red-intent' | 'first-apply' | 'red-gate-running' | 'green-intent' | 'green-gate-running' | 'regression-gate-running' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
-    model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+    model: { platform: 'linux'; apiRequests: number; apiAudit: WslCodexApiAudit; mcpCalls: number; builtinCalls: number };
     isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
     gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[];
     settlement: { outcome: string; idempotent: boolean; usageSessions: number } }> {
@@ -1968,11 +1968,12 @@ export class Orchestrator {
         const bytes = JSON.stringify(result) + '\n';
         const resultSha256 = createHash('sha256').update(bytes).digest('hex');
         const sourceSha256 = immutableGitSource(grant.worktree, grant.base_sha).hashes;
+        const apiAudit = readRegisteredWslCodexApiAudit(this.paths.featureDir, claimId, generation);
         const receipt = { claim: claimId, generation, workerSeal: workerSealHash,
           reviewerSeal: reviewerSealHash, sourceSha256,
-          // A completed authenticated turn proves a lower bound, not the
-          // bridge's exact HTTP request count. Never call this an API audit.
-          model: { platform: 'linux' as const, apiRequests: usage.model_turns, mcpCalls, builtinCalls },
+          model: { platform: 'linux' as const,
+            apiRequests: apiAudit.worker.apiRequests + apiAudit.reviewer.apiRequests,
+            apiAudit, mcpCalls, builtinCalls },
           ...(sealed.isolation ? { isolation: sealed.isolation } : {}),
           gates: completed.gates };
         const receiptSha256 = createHash('sha256').update(JSON.stringify(receipt)).digest('hex');
@@ -2011,7 +2012,7 @@ export class Orchestrator {
   async reconcileExperimentalWslCodexTransaction(nodeId: string, claimId: string, generation: string):
     Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
       sourceSha256: Record<string, string>;
-      model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+      model: { platform: 'linux'; apiRequests: number; apiAudit: WslCodexApiAudit; mcpCalls: number; builtinCalls: number };
       isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
       gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[];
       settlement: { outcome: string; idempotent: boolean; usageSessions: number } }> {
@@ -2062,6 +2063,11 @@ export class Orchestrator {
         !Array.isArray(receipt['gates']) ||
         JSON.stringify(receipt['gates']) !== JSON.stringify(declaredGates) ||
         record['receiptSha256'] !== createHash('sha256').update(JSON.stringify(receipt)).digest('hex'))
+      throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+    const model = receipt['model'] as Record<string, unknown> | undefined;
+    const apiAudit = readRegisteredWslCodexApiAudit(this.paths.featureDir, claimId, generation);
+    if (!model || JSON.stringify(model['apiAudit']) !== JSON.stringify(apiAudit) ||
+        model['apiRequests'] !== apiAudit.worker.apiRequests + apiAudit.reviewer.apiRequests)
       throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
     const anchor = wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation);
     if (anchor.receiptSha256 !== record['receiptSha256'] || anchor.resultSha256 !== record['resultSha256'])
