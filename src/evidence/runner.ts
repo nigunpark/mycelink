@@ -213,7 +213,15 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   }
 
   // Where the command writes its structured report: a controller-owned file, or a directory inside cwd emptied first.
-  const report = args.report ?? null;
+  // A declared bare Node verifier can opt into a structured report without a
+  // module descriptor. Only this exact reporter argv grants a controller-owned
+  // ${REPORT} destination; never infer identities from unstructured stdout.
+  const nodeJUnit = args.shellScript === undefined && args.command?.length === 4 &&
+    args.command[0] === 'node' && args.command[1] === '--test-reporter=junit' &&
+    args.command[2] === '--test-reporter-destination=${REPORT}' &&
+    /^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(args.command[3] ?? '') &&
+    !args.command[3]?.split('/').includes('..');
+  const report = args.report ?? (nodeJUnit ? { format: 'junit-xml' as const } : null);
   const scratch = report !== null && report.dir === undefined ? mkdtempSync(join(tmpdir(), 'mycelink-report-')) : null;
   const reportFile = scratch === null ? null : join(scratch, (report as ModuleReport).format === 'vitest-json' ? 'report.json' : 'report.xml');
   const reportDir = report?.dir !== undefined ? resolve(cwd, report.dir) : null;

@@ -10,6 +10,7 @@ import {
   runVerification,
 } from '../../src/evidence/runner.js';
 import { validateAgainstSchema } from '../../src/schema/registry.js';
+import { readGateTests } from '../../src/evidence/gate-tests.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -88,6 +89,18 @@ describe('classifyRedReason', () => {
 });
 
 describe('runVerification', () => {
+  it('records real Node JUnit identities from an explicitly declared reporter command without a module', () => {
+    const { repo, evidence } = workspace({ 'tests/run.mjs': "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('publishing emits JOB_RESULT_V2', () => assert.equal(1, 2));\n" });
+    const record = runVerification({ kind: 'red', nodeId: 'N', repository: 'core',
+      command: ['node', '--test-reporter=junit', '--test-reporter-destination=${REPORT}', 'tests/run.mjs'],
+      cwd: repo, evidenceDir: evidence, pathBase: join(repo, '..'),
+      redDeclared: [{ file: 'tests/run.mjs', name: 'publishing emits JOB_RESULT_V2' }] });
+    expect(record.exit_code).not.toBe(0);
+    expect(record.results?.format).toBe('junit-xml');
+    expect(readGateTests(join(repo, '..'), record)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'tests/run.mjs', name: 'publishing emits JOB_RESULT_V2', status: 'failed' }),
+    ]));
+  });
   it('records a passing command as evidence with exit 0 and no fingerprint', () => {
     const { repo, evidence } = workspace();
     const record = runVerification({

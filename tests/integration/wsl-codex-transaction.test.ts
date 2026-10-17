@@ -13,6 +13,7 @@ import { Orchestrator } from '../../src/engine/orchestrator.js';
 import { FakeInProcessAdapter } from '../../src/sessions/fake-adapter.js';
 import { enableCodexLifecycle } from '../../src/state/codex-lifecycle.js';
 import { loadState } from '../../src/state/feature-state.js';
+import { readGateTests } from '../../src/evidence/gate-tests.js';
 
 /**
  * RED contract for a DISTINCT trusted controller path. This is deliberately
@@ -65,7 +66,15 @@ afterAll(() => cleanupTmpRoots());
 async function claim() {
   const p = createPortfolio();
   writePrd(p);
-  writeFileSync(join(p.featureDir, 'PORTFOLIO-GRAPH.yaml'), YAML.stringify(portfolioGraph(), { lineWidth: 0 }));
+  const graph = portfolioGraph();
+  const core = (graph['nodes'] as { id: string; verification_commands: { id: string; command: string[] }[] }[])
+    .find((node) => node.id === CORE)!;
+  // The exact declared verifier writes a controller-owned JUnit report. Raw
+  // console/TAP text alone is not accepted as a named criterion test.
+  core.verification_commands = [{ id: 'targeted', command: [
+    'node', '--test-reporter=junit', '--test-reporter-destination=${REPORT}', 'tests/run.mjs',
+  ] }];
+  writeFileSync(join(p.featureDir, 'PORTFOLIO-GRAPH.yaml'), YAML.stringify(graph, { lineWidth: 0 }));
   const io: CliIo = { out: () => undefined, err: (error) => { throw new Error(error); } };
   expect(await main([...asController(['feature', 'init', FEATURE_ID], p.control), '--control-root', p.control], io)).toBe(0);
   const configFile = join(p.control, 'mycelink.config.json');
@@ -84,7 +93,7 @@ async function claim() {
   return { p, o, ticket, request };
 }
 
-const implement = 'Modify tests/run.mjs with a node:test assertion named "publishing emits JOB_RESULT_V2" which fails because src/publish.js does not yet exist, then implement src/publish.js with JOB_RESULT_V2. Preserve the existing tests and use the declared node tests/run.mjs command.';
+const implement = 'Modify tests/run.mjs with a node:test assertion named "publishing emits JOB_RESULT_V2" which fails because src/publish.js does not yet exist, then implement src/publish.js with JOB_RESULT_V2. Preserve the existing tests and use the declared Node reporter command.';
 
 function transaction(o: TransactionController, request: TransactionRequest): Promise<TransactionReceipt> {
   // A missing controller is a deliberate RED, not a WSL/login failure or a
@@ -98,11 +107,16 @@ function assertNoSettlement(featureDir: string) {
 }
 
 describe('trusted Windows claim to WSL Codex transaction (production dispatch stays disabled)', () => {
-  it.skipIf(!authenticated)('fails closed after real sealed gates when RED test identity has no normalized results record', async () => {
+  it.skipIf(!authenticated)('binds RED test identity to a real structured report before refusing unfinished settlement', async () => {
     const { p, o, ticket, request } = await claim();
     const base = git(ticket.worktree!, ['rev-parse', 'HEAD']);
-    await expect(transaction(o, request(implement))).rejects.toThrow(/WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE/);
+    await expect(transaction(o, request(implement))).rejects.toThrow(/WSL_CODEX_RESULT_SETTLEMENT_NOT_IMPLEMENTED/);
     expect(git(ticket.worktree!, ['log', '--format=%H', `${base}..HEAD`]).split('\n').filter(Boolean)).toHaveLength(2);
+    const red = loadState(p.featureDir)!.data.nodes[CORE]!.evidence.red;
+    expect(red?.results?.format).toBe('junit-xml');
+    expect(readGateTests(p.control, red)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'tests/run.mjs', name: 'publishing emits JOB_RESULT_V2', status: 'failed' }),
+    ]));
     assertNoSettlement(p.featureDir);
   }, 180_000);
 

@@ -26726,7 +26726,8 @@ function runVerification(args) {
       break;
     }
   }
-  const report = args.report ?? null;
+  const nodeJUnit = args.shellScript === void 0 && args.command?.length === 4 && args.command[0] === "node" && args.command[1] === "--test-reporter=junit" && args.command[2] === "--test-reporter-destination=${REPORT}" && /^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(args.command[3] ?? "") && !args.command[3]?.split("/").includes("..");
+  const report = args.report ?? (nodeJUnit ? { format: "junit-xml" } : null);
   const scratch = report !== null && report.dir === void 0 ? mkdtempSync3(join29(tmpdir3(), "mycelink-report-")) : null;
   const reportFile = scratch === null ? null : join29(scratch, report.format === "vitest-json" ? "report.json" : "report.xml");
   const reportDir = report?.dir !== void 0 ? resolve12(cwd, report.dir) : null;
