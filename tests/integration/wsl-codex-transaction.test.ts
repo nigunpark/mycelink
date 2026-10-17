@@ -404,6 +404,34 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
   }, 120_000);
 
+  it.skipIf(!authenticated)('rejects ambiguous gate and apply journal phases without replaying commits or usage', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'first-apply' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_FIRST_APPLY/);
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    const original = readFileSync(journal, 'utf8');
+    expect(JSON.parse(original).phase).toBe('red-committed');
+    const head = git(p.core, ['rev-parse', ticket.branch!]);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    // A changed journal phase is not proof that an operation ran. No phase
+    // transition can be replayed or promoted from this untrusted record.
+    for (const phase of ['red-intent', 'red-gate-running', 'green-intent',
+      'green-committed', 'green-gate-running', 'green-gated',
+      'regression-gate-running', 'gates-complete']) {
+      writeFileSync(journal, JSON.stringify({ ...JSON.parse(original), phase }) + '\n');
+      await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+        .rejects.toThrow(/AMBIGUOUS_PHASE|JOURNAL_INVALID/);
+      expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(head);
+      expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+      assertNoSettlement(p.featureDir);
+    }
+    writeFileSync(journal, original);
+    const receipt = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
+    expect(receipt.settlement).toMatchObject({ outcome: 'DONE', usageSessions: 1 });
+  }, 180_000);
+
   it.skipIf(!authenticated)('recovers post-DONE interruption from independently authenticated evidence and refuses self-rehashed settled forgery', async () => {
     const { p, o, ticket, request } = await claim();
     await expect(transaction(o, { ...request(implement), interruptAfter: 'post-settle' }))
