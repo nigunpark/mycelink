@@ -277,7 +277,15 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
     const forged = JSON.parse(readFileSync(journal, 'utf8'));
     forged.receipt.gates[0].exitCode = 9;
+    forged.receiptSha256 = createHash('sha256').update(JSON.stringify(forged.receipt)).digest('hex');
     writeFileSync(journal, JSON.stringify(forged));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+    const altered = JSON.parse(readFileSync(journal, 'utf8'));
+    altered.receipt.gates[0].exitCode = 0;
+    altered.receipt.gates[0].argv = ['node', 'unrelated.mjs'];
+    altered.receiptSha256 = createHash('sha256').update(JSON.stringify(altered.receipt)).digest('hex');
+    writeFileSync(journal, JSON.stringify(altered));
     await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
       .rejects.toThrow(/RECEIPT_INVALID/);
   }, 180_000);

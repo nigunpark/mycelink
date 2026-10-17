@@ -34135,7 +34135,8 @@ var Orchestrator = class _Orchestrator {
     if (typeof record["resultSha256"] !== "string" || !/^[a-f0-9]{64}$/.test(record["resultSha256"]))
       throw new Error("WSL_CODEX_RECONCILE_JOURNAL_INVALID");
     const receipt = record["receipt"];
-    if (!receipt || receipt["claim"] !== claimId || receipt["generation"] !== generation || typeof receipt["workerSeal"] !== "string" || typeof receipt["reviewerSeal"] !== "string" || !Array.isArray(receipt["gates"]) || receipt["gates"].length !== 3 || receipt["gates"].some((gate, index) => !gate || typeof gate !== "object" || gate.gate !== ["red", "green", "regression"][index] || gate.exitCode !== 0 || !Array.isArray(gate.argv) || gate.argv[0] !== "node") || record["receiptSha256"] !== createHash35("sha256").update(JSON.stringify(receipt)).digest("hex"))
+    const declaredGates = this.gateCommands(nodeId, "redacted-reconcile-only").filter((gate) => gate.gate === "red" || gate.gate === "green" || gate.gate === "regression").map((gate) => ({ gate: gate.gate, exitCode: 0, argv: gate.argv.slice(0, -2) }));
+    if (!receipt || receipt["claim"] !== claimId || receipt["generation"] !== generation || typeof receipt["workerSeal"] !== "string" || typeof receipt["reviewerSeal"] !== "string" || !Array.isArray(receipt["gates"]) || JSON.stringify(receipt["gates"]) !== JSON.stringify(declaredGates) || record["receiptSha256"] !== createHash35("sha256").update(JSON.stringify(receipt)).digest("hex"))
       throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
     if (record["phase"] === "settled") {
       const runtime = this.state().nodes[nodeId];
