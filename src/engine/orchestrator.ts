@@ -1888,8 +1888,14 @@ export class Orchestrator {
       throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
     const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
       createHash('sha256').update(`${nodeId}\0${claimId}\0${generation}`).digest('hex') + '.json');
-    if (!existsSync(journal) || lstatSync(journal).isSymbolicLink())
+    if (!existsSync(journal) || lstatSync(journal).isSymbolicLink()) {
+      const state = this.state();
+      const claim = state.nodes[nodeId]?.claim;
+      if (STOPPED_FEATURE_STATES.has(state.feature_state) || claim?.claim_id !== claimId ||
+          claim?.dispatch_id !== generation || claim.provider_interrupted != null)
+        throw new Error('WSL_CLAIM_STALE_OR_REVOKED');
       throw new Error('WSL_CODEX_RECONCILE_JOURNAL_MISSING');
+    }
     const record = JSON.parse(readFileSync(journal, 'utf8')) as Record<string, unknown>;
     if (record['nodeId'] !== nodeId || record['claimId'] !== claimId || record['dispatchId'] !== generation ||
         typeof record['resultSha256'] !== 'string' || !/^[a-f0-9]{64}$/.test(record['resultSha256']))

@@ -33982,8 +33982,13 @@ var Orchestrator = class _Orchestrator {
       "wsl-codex-transactions",
       createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
     );
-    if (!existsSync36(journal) || lstatSync17(journal).isSymbolicLink())
+    if (!existsSync36(journal) || lstatSync17(journal).isSymbolicLink()) {
+      const state = this.state();
+      const claim = state.nodes[nodeId]?.claim;
+      if (STOPPED_FEATURE_STATES.has(state.feature_state) || claim?.claim_id !== claimId || claim?.dispatch_id !== generation || claim.provider_interrupted != null)
+        throw new Error("WSL_CLAIM_STALE_OR_REVOKED");
       throw new Error("WSL_CODEX_RECONCILE_JOURNAL_MISSING");
+    }
     const record = JSON.parse(readFileSync31(journal, "utf8"));
     if (record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== generation || typeof record["resultSha256"] !== "string" || !/^[a-f0-9]{64}$/.test(record["resultSha256"]))
       throw new Error("WSL_CODEX_RECONCILE_JOURNAL_INVALID");
