@@ -96,6 +96,33 @@ class ProcessRegistryTest(unittest.TestCase):
         self.assertEqual(json.loads(subprocess.check_output(['python3', str(SCRIPT), 'result', token, claim, generation])),
                          {'exit_code': 17, 'revoked': False})
 
+    def test_supervisor_does_not_attest_success_while_background_group_child_survives(self):
+        token, claim, generation = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+        marker = REGISTRY / token / 'background.pid'
+        launched = subprocess.run(['python3', str(SCRIPT), 'start', token, claim, generation,
+                                   '--', '/bin/sh', '-c', f'sleep 60 & echo $! > {marker}; exit 0'],
+                                  text=True, capture_output=True, timeout=10)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        for _ in range(100):
+            observed = subprocess.run(['python3', str(SCRIPT), 'result', token, claim, generation],
+                                      text=True, capture_output=True)
+            if observed.returncode == 0:
+                break
+            time.sleep(.03)
+        try:
+            self.assertEqual(observed.returncode, 0, observed.stderr)
+            self.assertEqual(json.loads(observed.stdout), {'exit_code': 1, 'revoked': False})
+            pid = int(marker.read_text())
+            self.assertFalse(Path(f'/proc/{pid}').exists() and Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].strip().split()[0] != 'Z')
+        finally:
+            if marker.exists():
+                pid = int(marker.read_text())
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                marker.unlink()
+
     def test_result_refuses_unfinished_and_unregistered_generation(self):
         token, claim, generation = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
         fresh = subprocess.run(['python3', str(SCRIPT), 'result', token, claim, generation], capture_output=True)

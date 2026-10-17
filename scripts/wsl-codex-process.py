@@ -180,6 +180,22 @@ def revoke(token):
         time.sleep(.02)
 
 
+def live_group_members(pgid):
+    # A leader exiting is not proof that its background process group exited.
+    # Only inspect kernel identities; never use a worker-written PID file.
+    members = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / 'stat').read_text().rsplit(')', 1)[1].strip().split()
+            if fields[0] != 'Z' and int(fields[2]) == pgid:
+                members.append(int(entry.name))
+        except (FileNotFoundError, ProcessLookupError, IndexError, ValueError):
+            continue
+    return members
+
+
 def run(token, claim, generation, command, ready_fd=None):
     path = location(token)
     name = slot_name(claim, generation)
@@ -248,6 +264,23 @@ def run(token, claim, generation, command, ready_fd=None):
             except subprocess.TimeoutExpired:
                 pass
         exit_code = 1 if stopped or child.returncode < 0 else child.returncode
+        if live_group_members(child.pid):
+            exit_code = 1  # a leader's clean exit is not a successful generation
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + 1
+            while live_group_members(child.pid) and time.monotonic() < deadline:
+                time.sleep(.02)
+            if live_group_members(child.pid):
+                os.killpg(child.pid, signal.SIGKILL)
+                deadline = time.monotonic() + 1
+                while live_group_members(child.pid) and time.monotonic() < deadline:
+                    time.sleep(.02)
+            if live_group_members(child.pid):
+                exit_code = None  # retain active slot for manual reconciliation
+                raise ValueError('WSL descendants survived group termination')
         return exit_code
     finally:
         if child.poll() is None:
