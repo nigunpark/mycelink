@@ -106,7 +106,7 @@ import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
 import { assertImmutableWslApplyBase, stageImmutableWslCodexSource, immutableGitSource } from '../sessions/wsl-codex-source.js';
-import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
+import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, wslCodexSettlementAnchor, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
 import { protectExperimentalWslCapability, unprotectExperimentalWslCapability } from '../sessions/wsl-codex-escrow.js';
 import {
   acquireResource,
@@ -1730,7 +1730,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'first-apply' | 'result-written'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'first-apply' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1967,12 +1967,15 @@ export class Orchestrator {
         writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-intent', resultSha256, receipt, receiptSha256 }) + '\n');
         writeTextAtomic(slot, bytes);
         writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-written', resultSha256, receipt, receiptSha256 }) + '\n');
+        // Root-owned write-once authentication must precede DONE, which clears the claim.
+        wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation, { receiptSha256, resultSha256 });
         return { receipt, resultSha256, journal };
       });
       if (request.interruptAfter === 'result-written') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_RESULT_WRITTEN');
       const settled = this.settle(nodeId, capability);
       if (settled.outcome !== 'DONE' || this.state().nodes[nodeId]?.state !== 'DONE')
         throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
+      if (request.interruptAfter === 'post-settle') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_SETTLEMENT');
       const prior = JSON.parse(readFileSync(verified.journal, 'utf8')) as Record<string, unknown>;
       if (prior['phase'] !== 'result-written' || prior['resultSha256'] !== verified.resultSha256)
         throw new Error('WSL_CODEX_RESULT_JOURNAL_INVALID');
@@ -2047,7 +2050,21 @@ export class Orchestrator {
         JSON.stringify(receipt['gates']) !== JSON.stringify(declaredGates) ||
         record['receiptSha256'] !== createHash('sha256').update(JSON.stringify(receipt)).digest('hex'))
       throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
-    if (record['phase'] === 'result-written') {
+    const anchor = wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation);
+    if (anchor.receiptSha256 !== record['receiptSha256'] || anchor.resultSha256 !== record['resultSha256'])
+      throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+    const runtime = this.state().nodes[nodeId];
+    const done = runtime?.state === 'DONE';
+    if (done) {
+      const settled = runtime.last_settlement;
+      if (runtime.claim !== null || runtime.usage.sessions !== 1 ||
+          settled?.outcome !== 'DONE' || settled.claim_id !== claimId || settled.dispatch_id !== generation ||
+          typeof settled.result_file !== 'string' || typeof settled.result_sha256 !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(settled.result_sha256) ||
+          sha256OfFile(join(this.sessionDir(nodeId), settled.result_file)) !== settled.result_sha256)
+        throw new Error('WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT');
+    }
+    if (record['phase'] === 'result-written' && !done) {
       const liveClaim = this.state().nodes[nodeId]?.claim;
       if (!liveClaim || liveClaim.claim_id !== claimId || liveClaim.dispatch_id !== generation ||
           !liveClaim.worktree || typeof record['base'] !== 'string' ||
@@ -2061,10 +2078,12 @@ export class Orchestrator {
           throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
       });
     }
-    if (record['phase'] === 'settled') {
-      const runtime = this.state().nodes[nodeId];
-      if (runtime?.state !== 'DONE' || runtime.usage.sessions !== 1)
+    if (record['phase'] === 'settled' || (record['phase'] === 'result-written' && done)) {
+      if (!done)
         throw new Error('WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT');
+      if (record['phase'] === 'result-written')
+        writeTextAtomic(journal, JSON.stringify({ ...record, phase: 'settled' }) + '\n');
+      rmSync(journal.slice(0, -'.json'.length) + '.cap', { force: true });
       return { ...(receipt as any), settlement: { outcome: 'DONE', idempotent: true, usageSessions: 1 } };
     }
     if (record['phase'] !== 'result-written') throw new Error('WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE');

@@ -98,3 +98,29 @@ export function sealRegisteredWslCodexReviewer(featureDir: string, controlRoot: 
   grant: { claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[] }): WslCodexWorkerSeal {
   return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, 'reviewer');
 }
+
+/** Root-owned write-once digest, independent of the mutable DrvFS journal. */
+export function wslCodexSettlementAnchor(featureDir: string, claim: string, generation: string,
+  expected?: { receiptSha256: string; resultSha256: string }): { receiptSha256: string; resultSha256: string } {
+  if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')
+    throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
+  const script = join(packageRoot(), 'scripts', 'wsl-codex-settlement.py');
+  const translated = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u', script.replace(/\\/g, '/')],
+    { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  if (translated.status !== 0 || !translated.stdout?.trim().startsWith('/mnt/'))
+    throw new Error('WSL_CODEX_SETTLEMENT_ANCHOR_UNAVAILABLE');
+  const args = ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', translated.stdout.trim(),
+    '--feature-token', wslCodexFeatureToken(featureDir), '--claim', claim, '--generation', generation];
+  if (expected) args.push('--write');
+  const response = spawnSync('wsl.exe', args, { encoding: 'utf8', input: expected ? JSON.stringify(expected) : undefined,
+    timeout: 20_000, windowsHide: true });
+  if (response.status !== 0 || response.error) throw new Error('WSL_CODEX_SETTLEMENT_ANCHOR_INVALID');
+  if (expected) return expected;
+  try {
+    const value = JSON.parse(response.stdout) as Record<string, unknown>;
+    if (Object.keys(value).sort().join(',') !== 'receiptSha256,resultSha256' ||
+        !/^[a-f0-9]{64}$/.test(String(value['receiptSha256'])) ||
+        !/^[a-f0-9]{64}$/.test(String(value['resultSha256']))) throw new Error('invalid');
+    return value as { receiptSha256: string; resultSha256: string };
+  } catch { throw new Error('WSL_CODEX_SETTLEMENT_ANCHOR_INVALID'); }
+}

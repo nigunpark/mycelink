@@ -29431,6 +29431,49 @@ function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
 function sealRegisteredWslCodexReviewer(featureDir, controlRoot, grant) {
   return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "reviewer");
 }
+function wslCodexSettlementAnchor(featureDir, claim, generation, expected) {
+  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
+    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
+  const script = join38(packageRoot(), "scripts", "wsl-codex-settlement.py");
+  const translated = spawnSync9(
+    "wsl.exe",
+    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
+    { encoding: "utf8", timeout: 1e4, windowsHide: true }
+  );
+  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
+    throw new Error("WSL_CODEX_SETTLEMENT_ANCHOR_UNAVAILABLE");
+  const args = [
+    "-d",
+    "Ubuntu",
+    "-u",
+    "root",
+    "--",
+    "python3",
+    translated.stdout.trim(),
+    "--feature-token",
+    wslCodexFeatureToken(featureDir),
+    "--claim",
+    claim,
+    "--generation",
+    generation
+  ];
+  if (expected) args.push("--write");
+  const response = spawnSync9("wsl.exe", args, {
+    encoding: "utf8",
+    input: expected ? JSON.stringify(expected) : void 0,
+    timeout: 2e4,
+    windowsHide: true
+  });
+  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_SETTLEMENT_ANCHOR_INVALID");
+  if (expected) return expected;
+  try {
+    const value = JSON.parse(response.stdout);
+    if (Object.keys(value).sort().join(",") !== "receiptSha256,resultSha256" || !/^[a-f0-9]{64}$/.test(String(value["receiptSha256"])) || !/^[a-f0-9]{64}$/.test(String(value["resultSha256"]))) throw new Error("invalid");
+    return value;
+  } catch {
+    throw new Error("WSL_CODEX_SETTLEMENT_ANCHOR_INVALID");
+  }
+}
 
 // src/sessions/wsl-codex-escrow.ts
 import { spawnSync as spawnSync10 } from "node:child_process";
@@ -34076,12 +34119,14 @@ var Orchestrator = class _Orchestrator {
         writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-intent", resultSha256, receipt, receiptSha256 }) + "\n");
         writeTextAtomic(slot, bytes2);
         writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-written", resultSha256, receipt, receiptSha256 }) + "\n");
+        wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation, { receiptSha256, resultSha256 });
         return { receipt, resultSha256, journal };
       });
       if (request.interruptAfter === "result-written") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RESULT_WRITTEN");
       const settled = this.settle(nodeId, capability);
       if (settled.outcome !== "DONE" || this.state().nodes[nodeId]?.state !== "DONE")
         throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
+      if (request.interruptAfter === "post-settle") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_SETTLEMENT");
       const prior = JSON.parse(readFileSync31(verified.journal, "utf8"));
       if (prior["phase"] !== "result-written" || prior["resultSha256"] !== verified.resultSha256)
         throw new Error("WSL_CODEX_RESULT_JOURNAL_INVALID");
@@ -34151,7 +34196,17 @@ var Orchestrator = class _Orchestrator {
     const declaredGates = this.gateCommands(nodeId, "redacted-reconcile-only").filter((gate) => gate.gate === "red" || gate.gate === "green" || gate.gate === "regression").map((gate) => ({ gate: gate.gate, exitCode: 0, argv: gate.argv.slice(0, -2) }));
     if (!receipt || receipt["claim"] !== claimId || receipt["generation"] !== generation || typeof receipt["workerSeal"] !== "string" || typeof receipt["reviewerSeal"] !== "string" || !Array.isArray(receipt["gates"]) || JSON.stringify(receipt["gates"]) !== JSON.stringify(declaredGates) || record["receiptSha256"] !== createHash35("sha256").update(JSON.stringify(receipt)).digest("hex"))
       throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-    if (record["phase"] === "result-written") {
+    const anchor = wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation);
+    if (anchor.receiptSha256 !== record["receiptSha256"] || anchor.resultSha256 !== record["resultSha256"])
+      throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
+    const runtime = this.state().nodes[nodeId];
+    const done2 = runtime?.state === "DONE";
+    if (done2) {
+      const settled2 = runtime.last_settlement;
+      if (runtime.claim !== null || runtime.usage.sessions !== 1 || settled2?.outcome !== "DONE" || settled2.claim_id !== claimId || settled2.dispatch_id !== generation || typeof settled2.result_file !== "string" || typeof settled2.result_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(settled2.result_sha256) || sha256OfFile(join49(this.sessionDir(nodeId), settled2.result_file)) !== settled2.result_sha256)
+        throw new Error("WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT");
+    }
+    if (record["phase"] === "result-written" && !done2) {
       const liveClaim = this.state().nodes[nodeId]?.claim;
       if (!liveClaim || liveClaim.claim_id !== claimId || liveClaim.dispatch_id !== generation || !liveClaim.worktree || typeof record["base"] !== "string" || JSON.stringify(receipt?.["sourceSha256"]) !== JSON.stringify(immutableGitSource(liveClaim.worktree, record["base"]).hashes))
         throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
@@ -34161,10 +34216,12 @@ var Orchestrator = class _Orchestrator {
           throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
       });
     }
-    if (record["phase"] === "settled") {
-      const runtime = this.state().nodes[nodeId];
-      if (runtime?.state !== "DONE" || runtime.usage.sessions !== 1)
+    if (record["phase"] === "settled" || record["phase"] === "result-written" && done2) {
+      if (!done2)
         throw new Error("WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT");
+      if (record["phase"] === "result-written")
+        writeTextAtomic(journal, JSON.stringify({ ...record, phase: "settled" }) + "\n");
+      rmSync14(journal.slice(0, -".json".length) + ".cap", { force: true });
       return { ...receipt, settlement: { outcome: "DONE", idempotent: true, usageSessions: 1 } };
     }
     if (record["phase"] !== "result-written") throw new Error("WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE");

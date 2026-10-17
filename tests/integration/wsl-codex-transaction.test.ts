@@ -36,7 +36,7 @@ type TransactionRequest = {
   /** Fixture hook/broker refusal must be enforced by the trusted consumer. */
   refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
   /** Fixture-only interruption; the controller owns the journal and recovery. */
-  interruptAfter?: 'first-apply' | 'result-written';
+  interruptAfter?: 'first-apply' | 'result-written' | 'post-settle';
   /** Observation only: a test may pause the turn, never authorize a gate. */
   onPhase?: (phase: 'model-complete') => Promise<void>;
 };
@@ -391,4 +391,44 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(after);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
   }, 120_000);
+
+  it.skipIf(!authenticated)('recovers post-DONE interruption from independently authenticated evidence and refuses self-rehashed settled forgery', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'post-settle' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_SETTLEMENT/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).toBe('DONE');
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    const initial = readFileSync(journal, 'utf8');
+    expect(JSON.parse(initial).phase).toBe('result-written');
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    const forged = JSON.parse(initial);
+    forged.receipt.workerSeal = '0'.repeat(64);
+    forged.receiptSha256 = createHash('sha256').update(JSON.stringify(forged.receipt)).digest('hex');
+    writeFileSync(journal, JSON.stringify(forged));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+    writeFileSync(journal, initial);
+    const receipt = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
+    expect(receipt.settlement).toMatchObject({ outcome: 'DONE', idempotent: true, usageSessions: 1 });
+    expect(JSON.parse(readFileSync(journal, 'utf8')).phase).toBe('settled');
+    for (const mutate of [
+      (value: any) => { value.workerSeal = '0'.repeat(64); },
+      (value: any) => { value.reviewerSeal = '0'.repeat(64); },
+      (value: any) => { value.sourceSha256['tests/run.mjs'] = '0'.repeat(64); },
+      (value: any) => { value.model.builtinCalls += 1; },
+    ]) {
+      const authentic = readFileSync(journal, 'utf8');
+      const altered = JSON.parse(authentic);
+      mutate(altered.receipt);
+      altered.receiptSha256 = createHash('sha256').update(JSON.stringify(altered.receipt)).digest('hex');
+      writeFileSync(journal, JSON.stringify(altered));
+      await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+        .rejects.toThrow(/RECEIPT_INVALID/);
+      writeFileSync(journal, authentic);
+    }
+    expect((await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!)).settlement.usageSessions).toBe(1);
+  }, 180_000);
 });
