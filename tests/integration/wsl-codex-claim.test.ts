@@ -180,18 +180,19 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
       const { p, o } = await fixture();
       const ticket = o.claim(CORE, { mode: 'host' });
       enableCodexLifecycle(p.featureDir);
-      const stage = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
+      const proposedTest = "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { existsSync, readFileSync } from 'node:fs';\ntest('publishing emits JOB_RESULT_V2', () => {\n  const path = new URL('../src/publish.js', import.meta.url);\n  assert.ok(existsSync(path), 'publish module missing');\n  assert.match(readFileSync(path, 'utf8'), /JOB_RESULT_V2/);\n});\n";
+      const stage = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/run.mjs']);
       try {
         const script = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u',
           join(process.cwd(), 'scripts', 'wsl-codex-turn.py').replace(/\\/g, '/')],
         { encoding: 'utf8', timeout: 10_000 });
         expect(script.status, script.stderr).toBe(0);
         const launched = o.startExperimentalWslCodexGeneration(CORE, ticket.claimId, ticket.dispatchId!,
-          ['src/publish.js', 'tests/publish.test.mjs'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
+          ['src/publish.js', 'tests/run.mjs'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
             '--manifest', stage.manifest, '--claim', ticket.claimId, '--generation', ticket.dispatchId!,
-            '--proposal-path', 'src/publish.js', '--proposal-path', 'tests/publish.test.mjs',
+            '--proposal-path', 'src/publish.js', '--proposal-path', 'tests/run.mjs',
             '--review-prompt', 'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
-            '--prompt', 'Respond only with this JSON object, no markdown: {"src/publish.js":"JOB_RESULT_V2\\n","tests/publish.test.mjs":"import assert from \'node:assert/strict\';\\nassert.ok(true);\\n"}']);
+            '--prompt', 'Respond only with this JSON object, no markdown: ' + JSON.stringify({ 'src/publish.js': 'JOB_RESULT_V2\n', 'tests/run.mjs': proposedTest })]);
         expect(launched.claim).toBe(ticket.claimId);
         let outcome: { exit_code: number; revoked: boolean } | undefined;
         for (let i = 0; i < 100 && !outcome; i++) {
@@ -207,32 +208,47 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(JSON.parse(published.stdout)).toMatchObject({ claim: ticket.claimId,
           generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']),
           proposals: { 'src/publish.js': 'JOB_RESULT_V2\n',
-            'tests/publish.test.mjs': "import assert from 'node:assert/strict';\nassert.ok(true);\n" } });
+           'tests/run.mjs': proposedTest } });
         const configFile = join(p.control, 'mycelink.config.json');
         const configured = readFileSync(configFile);
         rmSync(configFile); // a missing host fence self-test cannot seal even a completed model turn
         try {
-          expect(() => o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']))
+          expect(() => o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/run.mjs']))
             .toThrow(/WSL_CODEX_BROKER_DENIED/);
         } finally {
           writeFileSync(configFile, configured);
         }
-        expect(() => o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']))
+        expect(() => o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/run.mjs']))
           .toThrow(/WSL_CODEX_BROKER_DENIED/);
-        const seal = o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
+        const seal = o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/run.mjs']);
         expect(seal).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!,
           role: 'worker', sha256: { 'src/publish.js': createHash('sha256').update('JOB_RESULT_V2\n').digest('hex') } });
-        const review = o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
+        const review = o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/run.mjs']);
         expect(review).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!, role: 'reviewer' });
         expect(review.submission_sha256).not.toBe(seal.submission_sha256);
         const verified = o.readExperimentalWslCodexSealedTurn(CORE, ticket.claimId, ticket.dispatchId!,
-          ['src/publish.js', 'tests/publish.test.mjs']);
+          ['src/publish.js', 'tests/run.mjs']);
         expect(verified.proposals).toEqual({ 'src/publish.js': 'JOB_RESULT_V2\n',
-          'tests/publish.test.mjs': "import assert from 'node:assert/strict';\nassert.ok(true);\n" });
+         'tests/run.mjs': proposedTest });
         expect(verified.reviewer.verdict).toBe('PASS');
         writeFileSync(join(ticket.worktree!, 'tests', 'run.mjs'), 'throw new Error("post-seal source drift");\n');
         expect(() => o.readExperimentalWslCodexSealedTurn(CORE, ticket.claimId, ticket.dispatchId!,
-          ['src/publish.js', 'tests/publish.test.mjs'])).toThrow(/SOURCE_DRIFT/);
+          ['src/publish.js', 'tests/run.mjs'])).toThrow(/SOURCE_DRIFT/);
+        expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
+        // The controller, not the model, must journal and commit the test path.
+        expect(spawnSync('git', ['restore', '--', 'tests/run.mjs'], { cwd: ticket.worktree! }).status).toBe(0);
+        const redApply = o.applyExperimentalWslCodexRedTest(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js', 'tests/run.mjs'], 'tests/run.mjs');
+        expect(redApply).toMatchObject({ phase: 'red-committed', testPath: 'tests/run.mjs', commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
+        expect(spawnSync('git', ['show', '--format=', '--name-only', 'HEAD'], { cwd: ticket.worktree!, encoding: 'utf8' })
+          .stdout.trim()).toBe('tests/run.mjs');
+        const redGate = o.gateCommands(CORE, ticket.capability).find((entry) => entry.gate === 'red')!;
+        const gateResult = spawnSync(redGate.argv[0]!, redGate.argv.slice(1), {
+          cwd: ticket.worktree!, encoding: 'utf8', timeout: 30_000 });
+        expect(gateResult.status, gateResult.stderr + gateResult.stdout).toBe(0);
+        expect(redGate.argv.slice(2, 6)).toEqual(['tdd', 'red', FEATURE_ID, CORE]);
+        expect(() => o.applyExperimentalWslCodexRedTest(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js', 'tests/run.mjs'], 'tests/run.mjs')).toThrow(/JOURNAL|ALREADY/);
         expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
       } finally {
         stage.dispose();
@@ -351,7 +367,7 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
     const { p, o } = await fixture();
     const ticket = o.claim(CORE, { mode: 'host' });
     enableCodexLifecycle(p.featureDir);
-    const paths = ['tests/publish.test.mjs', 'src/publish.js'];
+    const paths = ['tests/run.mjs', 'src/publish.js'];
     expect(() => o.assertExperimentalWslCodexApplyBase(CORE, ticket.claimId, ticket.dispatchId!, paths))
       .not.toThrow();
     const runner = join(ticket.worktree!, 'tests', 'run.mjs');

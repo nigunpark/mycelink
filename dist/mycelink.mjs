@@ -29037,7 +29037,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { closeSync as closeSync14, constants as fsConstants, fstatSync as fstatSync8, lstatSync as lstatSync17, openSync as openSync12, unlinkSync as unlinkSync3 } from "node:fs";
+import { closeSync as closeSync14, constants as fsConstants, fstatSync as fstatSync8, fsyncSync as fsyncSync3, lstatSync as lstatSync17, openSync as openSync12, unlinkSync as unlinkSync3, writeSync as writeSync6 } from "node:fs";
 
 // src/sessions/wsl-codex-policy.ts
 function expandAllowedProposalPaths(proposals, fence) {
@@ -33497,6 +33497,70 @@ var Orchestrator = class _Orchestrator {
         return turn;
       }
     );
+  }
+  /**
+   * First, deliberately incomplete transaction phase: the controller re-reads
+   * both root-owned seals under the live claim and journals before touching the
+   * test path. No gate, implementation apply or settlement is implied. An
+   * interrupted phase is not retried blindly; reconciliation must examine it.
+   */
+  applyExperimentalWslCodexRedTest(nodeId, claimId, dispatchId, proposedPaths, testPath) {
+    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      if (!/^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(testPath) || !grant.allowed_paths.includes(testPath) || proposedPaths.length !== 2 || grant.allowed_paths.length !== 2 || !this.node(nodeId).verification_commands.some((step) => step.command.includes(testPath)))
+        throw new Error("WSL_RED_TEST_PATH_DENIED");
+      const journalDir = join49(this.paths.featureDir, "wsl-codex-transactions");
+      const journal = join49(journalDir, createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json");
+      if (existsSync36(journal)) throw new Error("WSL_RED_JOURNAL_ALREADY_EXISTS");
+      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+      const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+      const paths = Object.keys(turn.proposals).sort();
+      if (paths.length !== 2 || paths[0] !== [...grant.allowed_paths].sort()[0] || paths[1] !== [...grant.allowed_paths].sort()[1]) throw new Error("WSL_RED_PROPOSAL_INCOMPLETE");
+      const content = turn.proposals[testPath];
+      if (typeof content !== "string" || Buffer.byteLength(content) > 512 * 1024 || !content.trim()) throw new Error("WSL_RED_TEST_INVALID");
+      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+      const prior = runGit(grant.worktree, ["show", `${grant.base_sha}:${testPath}`], { allowFail: true });
+      if (prior.exitCode !== 0 || prior.stdout === content) throw new Error("WSL_RED_TEST_UNCHANGED");
+      mkdirSync21(journalDir, { recursive: true });
+      const proposalSha256 = createHash35("sha256").update(content).digest("hex");
+      const fd = openSync12(journal, "wx");
+      try {
+        writeSync6(fd, JSON.stringify({
+          phase: "red-intent",
+          nodeId,
+          claimId,
+          dispatchId,
+          base: grant.base_sha,
+          testPath,
+          proposalSha256
+        }) + "\n");
+        fsyncSync3(fd);
+      } finally {
+        closeSync14(fd);
+      }
+      const destination = join49(grant.worktree, ...testPath.split("/"));
+      writeTextAtomic(destination, content);
+      if (readFileSync31(destination, "utf8") !== content) throw new Error("WSL_RED_TEST_WRITE_DRIFT");
+      const status = runGit(grant.worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trimEnd();
+      if (status !== ` M ${testPath}`) throw new Error("WSL_RED_TEST_WRITE_DRIFT");
+      runGit(grant.worktree, ["add", "--", testPath]);
+      const staged = runGit(grant.worktree, ["diff", "--cached", "--name-only"]).stdout.trim();
+      if (staged !== testPath) throw new Error("WSL_RED_TEST_STAGE_DRIFT");
+      runGit(grant.worktree, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", `test: WSL Codex RED ${nodeId}`]);
+      const commit = runGit(grant.worktree, ["rev-parse", "HEAD"]).stdout.trim();
+      if (!/^[0-9a-f]{40}$/.test(commit) || runGit(grant.worktree, ["rev-parse", "HEAD^"]).stdout.trim() !== grant.base_sha || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== testPath)
+        throw new Error("WSL_RED_COMMIT_DRIFT");
+      writeTextAtomic(journal, JSON.stringify({
+        phase: "red-committed",
+        nodeId,
+        claimId,
+        dispatchId,
+        base: grant.base_sha,
+        testPath,
+        proposalSha256,
+        commit
+      }) + "\n");
+      return { phase: "red-committed", testPath, commit };
+    });
   }
   graph() {
     return loadGraph(this.controlRoot, this.featureId);
