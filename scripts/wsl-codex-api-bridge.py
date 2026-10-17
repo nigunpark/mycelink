@@ -34,7 +34,9 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     max_handlers = 8
 
     def __init__(self, path, upstream, expected_uid, claim, generation, role, request_budget, byte_budget,
-                 allowed_model, max_output_tokens, total_output_tokens):
+                 allowed_model, max_output_tokens, total_output_tokens, lease_seconds):
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
+            raise ValueError('bridge requires a finite generation lease of at most five minutes')
         if not 1 <= request_budget <= 256 or not 1 <= byte_budget <= 64 * MAX_BODY:
             raise ValueError('bridge requires bounded per-claim budgets')
         if allowed_model is not None and (not isinstance(allowed_model, str) or
@@ -55,6 +57,8 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.max_output_tokens = max_output_tokens
         self.total_output_tokens = total_output_tokens
         self.budget_lock = threading.Lock()
+        self.expires_at = time.monotonic() + lease_seconds
+        self.revoked = False
         self.handler_slots = threading.BoundedSemaphore(self.max_handlers)
         super().__init__(path, Request)
 
@@ -85,9 +89,15 @@ class Bridge(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
             return
         super().handle_error(request, client_address)
 
+    def revoke(self):
+        """Trusted in-process controller: deny every subsequent reservation."""
+        with self.budget_lock:
+            self.revoked = True
+
     def reserve_request(self, size, output_tokens):
         with self.budget_lock:
-            if (self.request_budget < 1 or self.byte_budget < size or
+            if (self.revoked or time.monotonic() >= self.expires_at or
+                self.request_budget < 1 or self.byte_budget < size or
                 self.total_output_tokens < output_tokens):
                 return False
             self.request_budget -= 1
@@ -217,13 +227,15 @@ class Request(BaseHTTPRequestHandler):
 
 def make_server(path, upstream, expected_uid=None, claim=None, generation=None, role=None,
                 request_budget=64, byte_budget=8 * MAX_BODY,
-                allowed_model=None, max_output_tokens=None, total_output_tokens=None):
+                allowed_model=None, max_output_tokens=None, total_output_tokens=None,
+                lease_seconds=300):
     if os.path.lexists(path):
         raise FileExistsError('existing bridge path refused')
     return Bridge(path, upstream, expected_uid, claim, generation, role,
                   request_budget, byte_budget, allowed_model, max_output_tokens,
                   total_output_tokens if total_output_tokens is not None else
-                  (request_budget * max_output_tokens if allowed_model is not None else 1))
+                  (request_budget * max_output_tokens if allowed_model is not None else 1),
+                  lease_seconds)
 
 
 def trusted_upstream(auth_path):
@@ -281,11 +293,13 @@ def main():
     parser.add_argument('--model', required=True)
     parser.add_argument('--max-output-tokens', required=True, type=int)
     parser.add_argument('--total-output-tokens', required=True, type=int)
+    parser.add_argument('--lease-seconds', type=int, default=300)
     args = parser.parse_args()
     server = make_server(args.socket, trusted_upstream(args.auth), expected_uid=args.worker_uid,
                          claim=args.claim, generation=args.generation, role='worker',
                          allowed_model=args.model, max_output_tokens=args.max_output_tokens,
-                         total_output_tokens=args.total_output_tokens)
+                         total_output_tokens=args.total_output_tokens,
+                         lease_seconds=args.lease_seconds)
     try:
         os.chown(args.socket, os.getuid(), args.worker_gid)
         os.chmod(args.socket, 0o660)

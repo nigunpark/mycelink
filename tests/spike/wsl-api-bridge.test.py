@@ -122,6 +122,52 @@ class BridgePolicyTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_expired_generation_lease_refuses_api_without_upstream_call(self):
+        import time
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(body) or (200, b'{}', 'application/json')),
+                lease_seconds=1)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                time.sleep(1.1)
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', body=b'{}', headers={'Content-Type': 'application/json'})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 403)
+                response.read()
+                conn.close()
+                self.assertEqual(calls, [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_controller_revokes_generation_before_budget_is_spent(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            calls = []
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda path, body, headers: (calls.append(body) or (200, b'{}', 'application/json')))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                server.revoke()
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', body=b'{}', headers={'Content-Type': 'application/json'})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 403)
+                response.read()
+                conn.close()
+                self.assertEqual(calls, [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_per_claim_model_and_output_ceiling_reject_worker_chosen_upgrade(self):
         import inspect
         bridge = load_bridge()
