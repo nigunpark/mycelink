@@ -1634,6 +1634,63 @@ export class Orchestrator {
     return receipts;
   }
 
+  /**
+   * Revalidate a completed experimental gate chain under the live claim.
+   * This is evidence for a later controller settlement, never permission to
+   * settle: an interrupted/running journal or a changed Git tree is denied.
+   */
+  verifyExperimentalWslCodexCompletedGates(nodeId: string, claimId: string, dispatchId: string,
+    proposedPaths: readonly string[], capability: string):
+    { redCommit: string; commit: string; gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[] } {
+    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      const claim = this.state().nodes[nodeId]?.claim;
+      if (!claim?.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256))
+        throw new CapabilityError('CAPABILITY_INVALID', 'completed gate evidence requires the current host capability');
+      const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
+        createHash('sha256').update(`${nodeId}\0${claimId}\0${dispatchId}`).digest('hex') + '.json');
+      if (!existsSync(journal)) throw new Error('WSL_GATE_JOURNAL_MISSING');
+      const record = JSON.parse(readFileSync(journal, 'utf8')) as Record<string, unknown>;
+      if (record['phase'] !== 'gates-complete' || record['nodeId'] !== nodeId ||
+          record['claimId'] !== claimId || record['dispatchId'] !== dispatchId ||
+          record['base'] !== grant.base_sha || typeof record['testPath'] !== 'string' ||
+          typeof record['implementationPath'] !== 'string' ||
+          record['testPath'] === record['implementationPath'] ||
+          !grant.allowed_paths.includes(record['testPath']) ||
+          !grant.allowed_paths.includes(record['implementationPath']) || grant.allowed_paths.length !== 2 ||
+          typeof record['commit'] !== 'string' || !/^[0-9a-f]{40}$/.test(record['commit']) ||
+          typeof record['greenCommit'] !== 'string' || !/^[0-9a-f]{40}$/.test(record['greenCommit']))
+        throw new Error('WSL_GATE_JOURNAL_INVALID');
+      const redCommit = record['commit'];
+      const commit = record['greenCommit'];
+      assertImmutableWslApplyBase(grant.worktree, commit, grant.allowed_paths);
+      if (runGit(grant.worktree, ['rev-parse', `${redCommit}^`]).stdout.trim() !== grant.base_sha ||
+          runGit(grant.worktree, ['rev-parse', `${commit}^`]).stdout.trim() !== redCommit ||
+          runGit(grant.worktree, ['diff-tree', '--no-commit-id', '--name-only', '-r', redCommit]).stdout.trim() !== record['testPath'] ||
+          runGit(grant.worktree, ['diff-tree', '--no-commit-id', '--name-only', '-r', commit]).stdout.trim() !== record['implementationPath'])
+        throw new Error('WSL_GATE_COMMIT_DRIFT');
+      const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+      for (const [path, digest] of [[record['testPath'], record['proposalSha256']],
+        [record['implementationPath'], record['implementationSha256']]] as const) {
+        if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest) ||
+            createHash('sha256').update(turn.proposals[path] ?? '').digest('hex') !== digest ||
+            createHash('sha256').update(runGit(grant.worktree, ['show', `${commit}:${path}`]).stdout).digest('hex') !== digest)
+          throw new Error('WSL_GATE_PROPOSAL_DRIFT');
+      }
+      const gates = this.gateCommands(nodeId, capability).filter((g) =>
+        g.gate === 'red' || g.gate === 'green' || g.gate === 'regression');
+      if (gates.map((g) => g.gate).join(',') !== 'red,green,regression')
+        throw new Error('WSL_GATE_UNDECLARED');
+      for (const gate of gates) {
+        const receipt = gate.gate === 'red' ? record : record[`${gate.gate}Gate`] as Record<string, unknown> | undefined;
+        if (!receipt || receipt['exitCode'] !== 0 ||
+            receipt['argvSha256'] !== createHash('sha256').update(JSON.stringify(gate.argv)).digest('hex'))
+          throw new Error('WSL_GATE_JOURNAL_INVALID');
+      }
+      return { redCommit, commit, gates: gates.map((gate) => ({ gate: gate.gate as 'red' | 'green' | 'regression',
+        exitCode: 0 as const, argv: gate.argv })) };
+    });
+  }
+
   graph(): PortfolioGraph {
     return loadGraph(this.controlRoot, this.featureId);
   }

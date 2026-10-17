@@ -267,6 +267,27 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(postGates.every((entry) => entry.argv.slice(2, 3)[0] === 'tdd')).toBe(true);
         expect(() => o.runExperimentalWslCodexGreenGates(CORE, ticket.claimId, ticket.dispatchId!,
           ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/JOURNAL|ALREADY/);
+        const completed = o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js', 'tests/run.mjs'], ticket.capability);
+        expect(completed).toMatchObject({ commit: greenApply.commit, redCommit: redApply.commit });
+        expect(completed.gates.map((g) => g.gate)).toEqual(['red', 'green', 'regression']);
+        const journalPath = join(p.featureDir, 'wsl-codex-transactions',
+          createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId}`).digest('hex') + '.json');
+        const originalJournal = readFileSync(journalPath, 'utf8');
+        try {
+          writeFileSync(journalPath, originalJournal.replace('"gates-complete"', '"green-gate-running"'));
+          expect(() => o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,
+            ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/JOURNAL|GATE/);
+        } finally { writeFileSync(journalPath, originalJournal); }
+        try {
+          const record = JSON.parse(originalJournal) as Record<string, unknown>;
+          record['regressionGate'] = { exitCode: 0, argvSha256: '0'.repeat(64) };
+          writeFileSync(journalPath, JSON.stringify(record));
+          expect(() => o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,
+            ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/JOURNAL|GATE/);
+        } finally { writeFileSync(journalPath, originalJournal); }
+        expect(() => o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js', 'tests/run.mjs'], 'invalid-capability')).toThrow(/CAPABILITY/);
         expect(() => o.applyExperimentalWslCodexRedTest(CORE, ticket.claimId, ticket.dispatchId!,
           ['src/publish.js', 'tests/run.mjs'], 'tests/run.mjs')).toThrow(/JOURNAL|ALREADY/);
         expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');

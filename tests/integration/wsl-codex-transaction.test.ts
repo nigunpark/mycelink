@@ -77,12 +77,14 @@ async function claim() {
   enableCodexLifecycle(p.featureDir);
   const request = (prompt: string): TransactionRequest => ({
     nodeId: CORE, claimId: ticket.claimId, generation: ticket.dispatchId!,
-    allowedPaths: ['tests/publish.test.mjs', 'src/publish.js'], prompt,
+    // The portfolio declares `node tests/run.mjs`; an unreferenced test file
+    // cannot establish RED, even if it is committed by the controller.
+    allowedPaths: ['tests/run.mjs', 'src/publish.js'], prompt,
   });
   return { p, o, ticket, request };
 }
 
-const implement = 'Add a test named "publishing emits JOB_RESULT_V2" which fails before implementation, then implement src/publish.js with JOB_RESULT_V2. Use the declared node test command.';
+const implement = 'Modify tests/run.mjs with a node:test assertion named "publishing emits JOB_RESULT_V2" which fails because src/publish.js does not yet exist, then implement src/publish.js with JOB_RESULT_V2. Preserve the existing tests and use the declared node tests/run.mjs command.';
 
 function transaction(o: TransactionController, request: TransactionRequest): Promise<TransactionReceipt> {
   // A missing controller is a deliberate RED, not a WSL/login failure or a
@@ -126,7 +128,7 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(receipt.gates.every((g) => g.argv.includes('node') || g.argv.includes('mycelink'))).toBe(true);
     const commits = git(ticket.worktree!, ['log', '--reverse', '--format=%H', `${base}..HEAD`]).split('\n').filter(Boolean);
     expect(commits.map((sha) => git(ticket.worktree!, ['show', '--format=', '--name-only', sha]).split('\n').filter(Boolean)))
-      .toEqual([['tests/publish.test.mjs'], ['src/publish.js']]);
+      .toEqual([['tests/run.mjs'], ['src/publish.js']]);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).toBe('DONE');
   }, 180_000);
 
