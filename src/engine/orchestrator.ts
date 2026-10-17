@@ -1680,11 +1680,29 @@ export class Orchestrator {
         g.gate === 'red' || g.gate === 'green' || g.gate === 'regression');
       if (gates.map((g) => g.gate).join(',') !== 'red,green,regression')
         throw new Error('WSL_GATE_UNDECLARED');
+      const evidence = this.state().nodes[nodeId]?.evidence;
       for (const gate of gates) {
         const receipt = gate.gate === 'red' ? record : record[`${gate.gate}Gate`] as Record<string, unknown> | undefined;
         if (!receipt || receipt['exitCode'] !== 0 ||
             receipt['argvSha256'] !== createHash('sha256').update(JSON.stringify(gate.argv)).digest('hex'))
           throw new Error('WSL_GATE_JOURNAL_INVALID');
+        const proof = evidence?.[gate.gate];
+        const expectedCommit = gate.gate === 'red' ? redCommit : commit;
+        // The journal records the wrapper exit; the CLI's own evidence must
+        // independently bind the declared verifier output to this exact head.
+        if (!proof || proof.kind !== gate.gate || proof.node_id !== nodeId ||
+            typeof proof.cwd !== 'string' || join(this.controlRoot, proof.cwd) !== grant.worktree ||
+            proof.commit_sha !== expectedCommit ||
+            !Array.isArray(proof.command) ||
+            proof.command.join('\0') !== this.node(nodeId).verification_commands[0]?.command.join('\0') ||
+            typeof proof.output_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(proof.output_sha256) ||
+            (gate.gate === 'red' ? proof.exit_code === 0 || proof.red_reason !== 'behaviour-missing'
+              : proof.exit_code !== 0) ||
+            typeof proof.output_path !== 'string' ||
+            !/^[\w./-]+$/.test(proof.output_path) || proof.output_path.split('/').includes('..') ||
+            !existsSync(join(this.controlRoot, proof.output_path)) ||
+            createHash('sha256').update(readFileSync(join(this.controlRoot, proof.output_path))).digest('hex') !== proof.output_sha256)
+          throw new Error('WSL_GATE_EVIDENCE_INVALID');
       }
       return { redCommit, commit, gates: gates.map((gate) => ({ gate: gate.gate as 'red' | 'green' | 'regression',
         exitCode: 0 as const, argv: gate.argv })) };

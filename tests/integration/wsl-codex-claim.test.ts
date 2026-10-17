@@ -271,6 +271,27 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
           ['src/publish.js', 'tests/run.mjs'], ticket.capability);
         expect(completed).toMatchObject({ commit: greenApply.commit, redCommit: redApply.commit });
         expect(completed.gates.map((g) => g.gate)).toEqual(['red', 'green', 'regression']);
+        // Journaled exit codes alone cannot attest that the declared verifier
+        // actually recorded its evidence for this generation and Git head.
+        const regressionEvidence = loadState(p.featureDir)!.data.nodes[CORE]!.evidence.regression;
+        expect(regressionEvidence).toBeDefined();
+        try {
+          mutateState(p.featureDir, (s) => { delete s.nodes[CORE]!.evidence.regression; return s; });
+          expect(() => o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,
+            ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/WSL_GATE_EVIDENCE/);
+        } finally {
+          mutateState(p.featureDir, (s) => { s.nodes[CORE]!.evidence.regression = regressionEvidence!; return s; });
+        }
+        try {
+          mutateState(p.featureDir, (s) => {
+            s.nodes[CORE]!.evidence.regression = { ...regressionEvidence!, output_sha256: '0'.repeat(64) };
+            return s;
+          });
+          expect(() => o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,
+            ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/WSL_GATE_EVIDENCE/);
+        } finally {
+          mutateState(p.featureDir, (s) => { s.nodes[CORE]!.evidence.regression = regressionEvidence!; return s; });
+        }
         const journalPath = join(p.featureDir, 'wsl-codex-transactions',
           createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId}`).digest('hex') + '.json');
         const originalJournal = readFileSync(journalPath, 'utf8');
