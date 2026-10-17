@@ -96,6 +96,9 @@ class SealedProposalTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 p.read_verified_turn(base / 'worker', base / 'reviewer',
                     claim='c1', generation='g2', allowed_paths={'src/publish.js'})
+            with self.assertRaises(ValueError):
+                p.read_verified_turn(base / 'worker', base / 'reviewer',
+                    claim='c1', generation='g1', allowed_paths={'src/publish.js', 'tests/publish.test.mjs'})
 
     def test_reserved_result_names_cannot_hide_in_allowed_subdirectories(self):
         with tempfile.TemporaryDirectory() as temp:

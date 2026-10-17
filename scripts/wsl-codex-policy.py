@@ -209,6 +209,8 @@ def read_verified_turn(worker_slot, reviewer_slot, *, claim, generation, allowed
     if worker.get('status') != '0' or reviewer.get('verdict') != 'PASS':
         raise ValueError('worker or independent reviewer denied')
     proposals = read_proposals(worker_slot, claim=claim, generation=generation, allowed_paths=allowed_paths)
+    if set(proposals) != set(allowed_paths):
+        raise ValueError('worker proposal does not cover exact requested paths')
     if read_proposals(reviewer_slot, claim=claim, generation=generation, allowed_paths=allowed_paths, role='reviewer'):
         raise ValueError('reviewer proposed worker files')
     return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer}
