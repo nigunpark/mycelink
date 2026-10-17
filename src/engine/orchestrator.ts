@@ -1727,7 +1727,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'first-apply'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'first-apply' | 'result-written'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1842,12 +1842,20 @@ export class Orchestrator {
           throw new Error('WSL_CODEX_RESULT_JOURNAL_INVALID');
         const bytes = JSON.stringify(result) + '\n';
         const resultSha256 = createHash('sha256').update(bytes).digest('hex');
-        writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-intent', resultSha256 }) + '\n');
+        const sourceSha256 = immutableGitSource(grant.worktree, grant.base_sha).hashes;
+        const receipt = { claim: claimId, generation, workerSeal: workerSeal.submission_sha256,
+          reviewerSeal: reviewerSeal.submission_sha256, sourceSha256,
+          // A completed authenticated turn proves a lower bound, not the
+          // bridge's exact HTTP request count. Never call this an API audit.
+          model: { platform: 'linux' as const, apiRequests: usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
+          gates: completed.gates };
+        const receiptSha256 = createHash('sha256').update(JSON.stringify(receipt)).digest('hex');
+        writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-intent', resultSha256, receipt, receiptSha256 }) + '\n');
         writeTextAtomic(slot, bytes);
-        writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-written', resultSha256 }) + '\n');
-        return { usage, sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes,
-          resultSha256, journal };
+        writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-written', resultSha256, receipt, receiptSha256 }) + '\n');
+        return { receipt, resultSha256, journal };
       });
+      if (request.interruptAfter === 'result-written') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_RESULT_WRITTEN');
       const settled = this.settle(nodeId, capability);
       if (settled.outcome !== 'DONE' || this.state().nodes[nodeId]?.state !== 'DONE')
         throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
@@ -1855,10 +1863,8 @@ export class Orchestrator {
       if (prior['phase'] !== 'result-written' || prior['resultSha256'] !== verified.resultSha256)
         throw new Error('WSL_CODEX_RESULT_JOURNAL_INVALID');
       writeTextAtomic(verified.journal, JSON.stringify({ ...prior, phase: 'settled' }) + '\n');
-      return { claim: claimId, generation, workerSeal: workerSeal.submission_sha256,
-        reviewerSeal: reviewerSeal.submission_sha256, sourceSha256: verified.sourceSha256,
-        model: { platform: 'linux', apiRequests: verified.usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
-        gates: completed.gates, settlement: { outcome: settled.outcome, idempotent: settled.idempotent,
+      return { ...verified.receipt,
+        settlement: { outcome: settled.outcome, idempotent: settled.idempotent,
           usageSessions: this.state().nodes[nodeId]?.usage.sessions ?? 0 } };
     } finally {
       stage.dispose();
@@ -1866,6 +1872,71 @@ export class Orchestrator {
       // another request. A future reconciler needs its own trusted escrow.
       this.experimentalWslCapabilities.delete(`${nodeId}\0${claimId}\0${generation}`);
     }
+  }
+
+  /** Resume only a controller-journaled result whose exact slot is still bound.
+   * Earlier intent/gate phases are ambiguous without a durable capability
+   * escrow and are deliberately NOT replayed by this recovery path. */
+  async reconcileExperimentalWslCodexTransaction(nodeId: string, claimId: string, generation: string):
+    Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
+      sourceSha256: Record<string, string>;
+      model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+      gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[];
+      settlement: { outcome: string; idempotent: boolean; usageSessions: number } }> {
+    if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1' ||
+        process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] !== '1')
+      throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
+    const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${nodeId}\0${claimId}\0${generation}`).digest('hex') + '.json');
+    if (!existsSync(journal) || lstatSync(journal).isSymbolicLink())
+      throw new Error('WSL_CODEX_RECONCILE_JOURNAL_MISSING');
+    const record = JSON.parse(readFileSync(journal, 'utf8')) as Record<string, unknown>;
+    if (record['nodeId'] !== nodeId || record['claimId'] !== claimId || record['dispatchId'] !== generation ||
+        typeof record['resultSha256'] !== 'string' || !/^[a-f0-9]{64}$/.test(record['resultSha256']))
+      throw new Error('WSL_CODEX_RECONCILE_JOURNAL_INVALID');
+    const receipt = record['receipt'] as Record<string, unknown> | undefined;
+    if (!receipt || receipt['claim'] !== claimId || receipt['generation'] !== generation ||
+        typeof receipt['workerSeal'] !== 'string' || typeof receipt['reviewerSeal'] !== 'string' ||
+        !Array.isArray(receipt['gates']) || receipt['gates'].length !== 3 ||
+        receipt['gates'].some((gate, index) => !gate || typeof gate !== 'object' ||
+          gate.gate !== ['red', 'green', 'regression'][index] || gate.exitCode !== 0 ||
+          !Array.isArray(gate.argv) || gate.argv[0] !== 'node') ||
+        record['receiptSha256'] !== createHash('sha256').update(JSON.stringify(receipt)).digest('hex'))
+      throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+    if (record['phase'] === 'settled') {
+      const runtime = this.state().nodes[nodeId];
+      if (runtime?.state !== 'DONE' || runtime.usage.sessions !== 1)
+        throw new Error('WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT');
+      return { ...(receipt as any), settlement: { outcome: 'DONE', idempotent: true, usageSessions: 1 } };
+    }
+    if (record['phase'] !== 'result-written') throw new Error('WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE');
+    this.withLiveWslCodexClaim(nodeId, claimId, generation, ['tests/run.mjs', 'src/publish.js'], grant => {
+      this.assertExperimentalWslStopped(nodeId);
+      const claim = this.state().nodes[nodeId]?.claim;
+      if (!claim || claim.claim_id !== claimId || claim.dispatch_id !== generation || claim.worktree !== grant.worktree)
+        throw new Error('WSL_CLAIM_STALE');
+      if (!claim.result_captured_sha256) {
+        const slot = join(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
+        if (!lstatSync(slot).isFile() || lstatSync(slot).isSymbolicLink() ||
+            createHash('sha256').update(readFileSync(slot)).digest('hex') !== record['resultSha256'])
+          throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+        const captured = this.attestSlot(nodeId, claim);
+        // Capture redacts and re-serializes the result; its controller-copy
+        // hash deliberately differs from the original slot's journal hash.
+        // The exact original bytes were checked before the atomic capture.
+        if (!captured) throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+        mutateState(this.paths.featureDir, state => this.recordCapture(state, nodeId, captured, claimId));
+      } else if (!claim.result_captured_file ||
+          sha256OfFile(join(this.sessionDir(nodeId), claim.result_captured_file)) !== claim.result_captured_sha256) {
+        throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+      }
+    });
+    const settled = this.completeSettlement(nodeId, 'resume');
+    if (settled.outcome !== 'DONE' || this.state().nodes[nodeId]?.state !== 'DONE')
+      throw new Error(`WSL_CODEX_RECONCILE_SETTLEMENT_REFUSED:${settled.outcome}`);
+    writeTextAtomic(journal, JSON.stringify({ ...record, phase: 'settled' }) + '\n');
+    return { ...(receipt as any), settlement: { outcome: 'DONE', idempotent: false,
+      usageSessions: this.state().nodes[nodeId]?.usage.sessions ?? 0 } };
   }
 
   graph(): PortfolioGraph {

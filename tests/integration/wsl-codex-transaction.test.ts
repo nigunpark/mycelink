@@ -36,7 +36,7 @@ type TransactionRequest = {
   /** Fixture hook/broker refusal must be enforced by the trusted consumer. */
   refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
   /** Fixture-only interruption; the controller owns the journal and recovery. */
-  interruptAfter?: 'first-apply';
+  interruptAfter?: 'first-apply' | 'result-written';
   /** Observation only: a test may pause the turn, never authorize a gate. */
   onPhase?: (phase: 'model-complete') => Promise<void>;
 };
@@ -242,16 +242,36 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     assertNoSettlement(p.featureDir);
   }, 120_000);
 
+  it.skipIf(!authenticated)('reconciles a durable result-written interruption in a new controller without charging twice', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'result-written' }))
+      .rejects.toThrow(/INTERRUPT/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    const receipt = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
+    expect(receipt.settlement).toMatchObject({ outcome: 'DONE', idempotent: false, usageSessions: 1 });
+    const again = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
+    expect(again.settlement).toMatchObject({ outcome: 'DONE', idempotent: true, usageSessions: 1 });
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    const forged = JSON.parse(readFileSync(journal, 'utf8'));
+    forged.receipt.gates[0].exitCode = 9;
+    writeFileSync(journal, JSON.stringify(forged));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+  }, 180_000);
+
   it.skipIf(!authenticated)('reconciles a crash after first apply without duplicate Git commits or double usage settlement', async () => {
     const { p, o, ticket, request } = await claim();
     await expect(transaction(o, { ...request(implement), interruptAfter: 'first-apply' }))
       .rejects.toThrow(/INTERRUPT|CRASH/);
     const receipt = await o.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(receipt.settlement).toMatchObject({ outcome: 'DONE', usageSessions: 1 });
-    const after = git(ticket.worktree!, ['rev-parse', 'HEAD']);
+    const after = git(p.core, ['rev-parse', ticket.branch!]);
     const again = await o.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(again.settlement).toMatchObject({ outcome: 'DONE', idempotent: true, usageSessions: 1 });
-    expect(git(ticket.worktree!, ['rev-parse', 'HEAD'])).toBe(after);
+    expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(after);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
   }, 120_000);
 });
