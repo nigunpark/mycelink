@@ -293,12 +293,19 @@ class BridgePolicyTest(unittest.TestCase):
                                      ('POST', 'gopher://example.com/'), ('TRACE', '/v1/responses'),
                                      ('GET', '/v1/responses')):
                     conn = UnixHTTP(server.server_address)
-                    conn.request(method, path, body=b'{}', headers={'Content-Type': 'application/json',
-                        'Authorization': 'Bearer stolen', 'Proxy-Authorization': 'Bearer stolen'})
-                    response = conn.getresponse()
-                    self.assertNotEqual(response.status, 200, (method, path))
-                    response.read()
-                    conn.close()
+                    try:
+                        conn.request(method, path, body=b'{}', headers={'Content-Type': 'application/json',
+                            'Authorization': 'Bearer stolen', 'Proxy-Authorization': 'Bearer stolen'})
+                        response = conn.getresponse()
+                        self.assertNotEqual(response.status, 200, (method, path))
+                        response.read()
+                    except (BrokenPipeError, ConnectionResetError):
+                        # The bridge can reject and close before the client
+                        # finishes sending an illicit request body; that is a
+                        # transport denial, not an upstream pass-through.
+                        pass
+                    finally:
+                        conn.close()
                 conn = UnixHTTP(server.server_address)
                 conn.request('POST', '/v1/responses', body=b'{"model":"assigned-model"}',
                     headers={'Content-Type': 'application/json', 'Authorization': 'Bearer stolen',
