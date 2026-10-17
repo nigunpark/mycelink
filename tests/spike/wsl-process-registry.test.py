@@ -66,9 +66,17 @@ class ProcessRegistryTest(unittest.TestCase):
             record = json.loads(launched.stdout)
             self.assertEqual((record['claim'], record['generation']), (claim, generation))
             self.assertTrue(Path(f"/proc/{record['pid']}").exists())
+            queried = subprocess.run(['python3', str(SCRIPT), 'status', token, claim, generation],
+                                     text=True, capture_output=True, timeout=10)
+            self.assertEqual(queried.returncode, 0, queried.stderr)
+            self.assertEqual(json.loads(queried.stdout), {'active': True})
             stopped = subprocess.run(['python3', str(SCRIPT), 'revoke', token], text=True, capture_output=True, timeout=12)
             self.assertEqual(stopped.returncode, 0, stopped.stderr)
             self.assertFalse(Path(f"/proc/{record['pid']}").exists())
+            finished = subprocess.run(['python3', str(SCRIPT), 'status', token, claim, generation],
+                                      text=True, capture_output=True, timeout=10)
+            self.assertEqual(finished.returncode, 0, finished.stderr)
+            self.assertEqual(json.loads(finished.stdout), {'active': False})
         finally:
             subprocess.run(['python3', str(SCRIPT), 'revoke', token], capture_output=True, timeout=12)
 

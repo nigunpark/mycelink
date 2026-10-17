@@ -102,7 +102,7 @@ import { statusForOutcome } from '../sessions/adapter.js';
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, unlinkSync } from 'node:fs';
 import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
-import { startExperimentalWslProcess, revokeWslCodexProcesses } from '../sessions/wsl-codex-process.js';
+import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive } from '../sessions/wsl-codex-process.js';
 import {
   acquireResource,
   listLeases,
@@ -6021,8 +6021,20 @@ export class Orchestrator {
    * it (see worker-protocol.ts). Its outcome only chooses the road; a
    * submission is believed only after fresh verification and integration.
    */
+  /** A status without a root-owned generation tombstone is not evidence of exit. */
+  private assertExperimentalWslStopped(nodeId: string): void {
+    const claim = this.state().nodes[nodeId]?.claim;
+    if (claim?.mode === 'host' && claim.dispatch_id &&
+        wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
+      throw new Error('WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits');
+    }
+  }
+
   settle(nodeId: string, capability: string | undefined): SettleReport {
-    const run = (): SettleReport => this.settleLocked(nodeId, capability);
+    const run = (): SettleReport => {
+      if (codexLifecycleEnabled(this.paths.featureDir)) this.assertExperimentalWslStopped(nodeId);
+      return this.settleLocked(nodeId, capability);
+    };
     return codexLifecycleEnabled(this.paths.featureDir)
       ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2_000 }) : run();
   }
@@ -6046,7 +6058,10 @@ export class Orchestrator {
    * the same receipt. `by` says who finished it, for the record.
    */
   completeSettlement(nodeId: string, by: 'dispatch' | 'resume'): SettleReport {
-    const run = (): SettleReport => this.settleGuard(nodeId, undefined, (claim) => this.settleWork(nodeId, claim, undefined), { resumedBy: by });
+    const run = (): SettleReport => {
+      if (codexLifecycleEnabled(this.paths.featureDir)) this.assertExperimentalWslStopped(nodeId);
+      return this.settleGuard(nodeId, undefined, (claim) => this.settleWork(nodeId, claim, undefined), { resumedBy: by });
+    };
     return codexLifecycleEnabled(this.paths.featureDir)
       ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2_000 }) : run();
   }

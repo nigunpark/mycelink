@@ -288,6 +288,23 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
     }, 45_000,
   );
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'refuses settlement while the registered Linux worker still runs', async () => {
+      const { p, o } = await fixture();
+      const claimed = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      o.startExperimentalWslCodexGeneration(CORE, claimed.claimId, claimed.dispatchId!,
+        ['src/new.ts'], ['/bin/sleep', '60']);
+      try {
+        expect(() => o.settle(CORE, claimed.capability)).toThrow(/WSL_CODEX_WORKER_ACTIVE/);
+        expect(() => o.completeSettlement(CORE, 'resume')).toThrow(/WSL_CODEX_WORKER_ACTIVE/);
+        expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).toBe(claimed.dispatchId);
+      } finally {
+        const io: CliIo = { out: () => undefined, err: (text) => { throw new Error(text); } };
+        await main([...asController(['feature', 'cancel', FEATURE_ID, '--control-root', p.control], p.control)], io);
+      }
+    }, 40_000,
+  );
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'does not report cancellation or mutate the claim when WSL revocation cannot be proven', async () => {
       const { p, o } = await fixture();
       const claimed = o.claim(CORE, { mode: 'host' });

@@ -29119,6 +29119,34 @@ function startExperimentalWslProcess(featureDir, claim, generation, command) {
     throw error;
   }
 }
+function wslCodexProcessActive(featureDir, claim, generation) {
+  const script = wslProcessScript();
+  const result = spawnSync7(
+    "wsl.exe",
+    [
+      "-d",
+      "Ubuntu",
+      "-u",
+      "root",
+      "--",
+      "python3",
+      script,
+      "status",
+      wslCodexFeatureToken(featureDir),
+      claim,
+      generation
+    ],
+    { encoding: "utf8", timeout: 12e3, windowsHide: true }
+  );
+  if (result.status !== 0) throw new Error("WSL_CODEX_STATUS_UNCONFIRMED");
+  try {
+    const response = JSON.parse(result.stdout);
+    if (Object.keys(response).length !== 1 || typeof response.active !== "boolean") throw new Error("invalid status");
+    return response.active;
+  } catch {
+    throw new Error("WSL_CODEX_STATUS_UNCONFIRMED");
+  }
+}
 function revokeWslCodexProcesses(featureDir) {
   const script = wslProcessScript();
   const result = spawnSync7("wsl.exe", [
@@ -37263,8 +37291,18 @@ var Orchestrator = class _Orchestrator {
    * it (see worker-protocol.ts). Its outcome only chooses the road; a
    * submission is believed only after fresh verification and integration.
    */
+  /** A status without a root-owned generation tombstone is not evidence of exit. */
+  assertExperimentalWslStopped(nodeId) {
+    const claim = this.state().nodes[nodeId]?.claim;
+    if (claim?.mode === "host" && claim.dispatch_id && wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
+      throw new Error("WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits");
+    }
+  }
   settle(nodeId, capability) {
-    const run = () => this.settleLocked(nodeId, capability);
+    const run = () => {
+      if (codexLifecycleEnabled(this.paths.featureDir)) this.assertExperimentalWslStopped(nodeId);
+      return this.settleLocked(nodeId, capability);
+    };
     return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2e3 }) : run();
   }
   settleLocked(nodeId, capability) {
@@ -37283,7 +37321,10 @@ var Orchestrator = class _Orchestrator {
    * the same receipt. `by` says who finished it, for the record.
    */
   completeSettlement(nodeId, by) {
-    const run = () => this.settleGuard(nodeId, void 0, (claim) => this.settleWork(nodeId, claim, void 0), { resumedBy: by });
+    const run = () => {
+      if (codexLifecycleEnabled(this.paths.featureDir)) this.assertExperimentalWslStopped(nodeId);
+      return this.settleGuard(nodeId, void 0, (claim) => this.settleWork(nodeId, claim, void 0), { resumedBy: by });
+    };
     return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2e3 }) : run();
   }
   /** Whether a claim's settlement can be finished by the controller: its result is in the controller's hands. */

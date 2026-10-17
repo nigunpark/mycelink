@@ -48,6 +48,21 @@ export function startExperimentalWslProcess(featureDir: string, claim: string, g
   }
 }
 
+export function wslCodexProcessActive(featureDir: string, claim: string, generation: string): boolean {
+  const script = wslProcessScript();
+  const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', script,
+    'status', wslCodexFeatureToken(featureDir), claim, generation],
+    { encoding: 'utf8', timeout: 12_000, windowsHide: true });
+  if (result.status !== 0) throw new Error('WSL_CODEX_STATUS_UNCONFIRMED');
+  try {
+    const response = JSON.parse(result.stdout) as { active?: unknown };
+    if (Object.keys(response).length !== 1 || typeof response.active !== 'boolean') throw new Error('invalid status');
+    return response.active;
+  } catch {
+    throw new Error('WSL_CODEX_STATUS_UNCONFIRMED');
+  }
+}
+
 export function revokeWslCodexProcesses(featureDir: string): void {
   const script = wslProcessScript();
   const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', script,

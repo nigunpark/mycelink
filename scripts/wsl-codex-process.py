@@ -91,6 +91,25 @@ def record(path):
     return data
 
 
+def status(token, claim, generation):
+    path = location(token)
+    name = slot_name(claim, generation)
+    guard = lock(path)
+    try:
+        slot = path / (name + '.json')
+        if slot.exists() or slot.is_symlink():
+            data = record(slot)
+            if proc_start(data['pid']) != data['start'] or os.getpgid(data['pid']) != data['pgid']:
+                raise ValueError('WSL process identity stale; reconciliation required')
+            return {'active': True}
+        used = path / (name + '.used')
+        if not used.is_file() or used.is_symlink() or used.stat().st_uid != 0:
+            raise ValueError('WSL generation was never registered')
+        return {'active': False}
+    finally:
+        os.close(guard)
+
+
 def revoke(token):
     path = location(token)
     guard = lock(path)
@@ -241,18 +260,22 @@ def start(token, claim, generation, command):
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='action', required=True)
-    for action in ('run', 'start', 'revoke'):
+    for action in ('run', 'start', 'status', 'revoke'):
         command = sub.add_parser(action)
         command.add_argument('token')
-        if action in ('run', 'start'):
+        if action in ('run', 'start', 'status'):
             command.add_argument('claim')
             command.add_argument('generation')
-            command.add_argument('command', nargs=argparse.REMAINDER)
+            if action in ('run', 'start'):
+                command.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise ValueError('root controller required')
     if args.action == 'revoke':
         revoke(args.token)
+        return 0
+    if args.action == 'status':
+        print(json.dumps(status(args.token, args.claim, args.generation)))
         return 0
     command = args.command[1:] if args.command and args.command[0] == '--' else args.command
     if not command or not command[0].startswith('/'):
