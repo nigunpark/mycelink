@@ -8,6 +8,7 @@ import socket
 import tempfile
 import threading
 import unittest
+import pwd
 
 BRIDGE_PATH = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'wsl-codex-api-bridge.py'
 
@@ -30,6 +31,18 @@ class UnixHTTP(http.client.HTTPConnection):
 
 
 class BridgePolicyTest(unittest.TestCase):
+    def test_reviewer_bridge_requires_distinct_registered_linux_principal(self):
+        bridge = load_bridge()
+        worker = pwd.getpwnam('mycelink-codex-worker')
+        reviewer = pwd.getpwnam('mycelink-codex-reviewer')
+        self.assertNotEqual(worker.pw_uid, reviewer.pw_uid)
+        self.assertEqual(bridge.bridge_principal('reviewer', reviewer.pw_uid, reviewer.pw_gid), 'reviewer')
+        for role, uid, gid in [('reviewer', worker.pw_uid, worker.pw_gid),
+                               ('worker', reviewer.pw_uid, reviewer.pw_gid),
+                               ('controller', reviewer.pw_uid, reviewer.pw_gid)]:
+            with self.assertRaises(ValueError):
+                bridge.bridge_principal(role, uid, gid)
+
     def test_allowlisted_responses_only_and_auth_stays_in_broker(self):
         bridge = load_bridge()
         with tempfile.TemporaryDirectory() as temp:

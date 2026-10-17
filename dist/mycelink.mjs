@@ -29288,7 +29288,7 @@ function stageImmutableWslCodexSource(worktree, base, claim, generation) {
 import { spawnSync as spawnSync9 } from "node:child_process";
 import { existsSync as existsSync27 } from "node:fs";
 import { join as join38 } from "node:path";
-function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
+function sealRegisteredWslCodexRole(featureDir, controlRoot, grant, role) {
   if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1") {
     throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
   }
@@ -29322,7 +29322,9 @@ function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
       "--generation",
       grant.generation,
       "--control-root",
-      controlRoot.replace(/\\/g, "/")
+      controlRoot.replace(/\\/g, "/"),
+      "--role",
+      role
     ],
     {
       encoding: "utf8",
@@ -29341,10 +29343,16 @@ function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
   const receipt = parsed;
-  if (receipt["claim"] !== grant.claim || receipt["generation"] !== grant.generation || receipt["role"] !== "worker" || !receipt["sha256"] || typeof receipt["sha256"] !== "object" || Array.isArray(receipt["sha256"]) || !Object.keys(receipt["sha256"]).every((path) => grant.allowed_paths.includes(path) && /^[0-9a-f]{64}$/.test(receipt["sha256"][path] ?? "")) || typeof receipt["submission_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(receipt["submission_sha256"])) {
+  if (receipt["claim"] !== grant.claim || receipt["generation"] !== grant.generation || receipt["role"] !== role || !receipt["sha256"] || typeof receipt["sha256"] !== "object" || Array.isArray(receipt["sha256"]) || !Object.keys(receipt["sha256"]).every((path) => grant.allowed_paths.includes(path) && /^[0-9a-f]{64}$/.test(receipt["sha256"][path] ?? "")) || typeof receipt["submission_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(receipt["submission_sha256"])) {
     throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
   }
   return receipt;
+}
+function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
+  return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "worker");
+}
+function sealRegisteredWslCodexReviewer(featureDir, controlRoot, grant) {
+  return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "reviewer");
 }
 
 // src/e2e/runner.ts
@@ -33383,6 +33391,16 @@ var Orchestrator = class _Orchestrator {
       dispatchId,
       proposedPaths,
       (grant) => sealRegisteredWslCodexWorker(this.paths.featureDir, this.controlRoot, grant)
+    );
+  }
+  /** Distinct Linux reviewer principal and root-only verdict, after worker seal. */
+  sealExperimentalWslCodexReviewer(nodeId, claimId, dispatchId, proposedPaths) {
+    return this.withLiveWslCodexClaim(
+      nodeId,
+      claimId,
+      dispatchId,
+      proposedPaths,
+      (grant) => sealRegisteredWslCodexReviewer(this.paths.featureDir, this.controlRoot, grant)
     );
   }
   graph() {

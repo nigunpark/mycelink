@@ -61,8 +61,19 @@ def run(args):
         return process.result(args.feature_token, args.claim, args.generation) == {'exit_code': 0, 'revoked': False}
     broker = broker_module.PolicyBroker(sealed, claim=args.claim, generation=args.generation,
         allowed_paths=frozenset(paths), current=current, hook_ready=lambda: hook_ready(args.control_root))
-    broker.consume_transport(ROOT / 'transport', 'worker', expected_source_files=len(hashes), expected_source_hashes=hashes)
-    with (sealed / 'worker' / '_receipt.json').open() as receipt:
+    if args.role == 'reviewer':
+        # A reviewer cannot become an independent authority without the
+        # controller having first consumed the registered worker publication.
+        worker_receipt = sealed / 'worker' / '_receipt.json'
+        if not worker_receipt.is_file():
+            raise ValueError('worker seal required before reviewer')
+        with worker_receipt.open() as receipt:
+            worker_record = json.load(receipt)
+        if (worker_record.get('claim'), worker_record.get('generation'), worker_record.get('role')) != (
+                args.claim, args.generation, 'worker'):
+            raise ValueError('worker seal belongs to another generation')
+    broker.consume_transport(ROOT / 'transport', args.role, expected_source_files=len(hashes), expected_source_hashes=hashes)
+    with (sealed / args.role / '_receipt.json').open() as receipt:
         print(json.dumps(json.load(receipt)))
 
 
@@ -70,6 +81,7 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ('feature-token', 'claim', 'generation', 'control-root'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--role', choices=('worker', 'reviewer'), default='worker')
     run(parser.parse_args())
 
 

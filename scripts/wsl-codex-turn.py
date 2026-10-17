@@ -63,33 +63,51 @@ def run(args):
     # replaced/replayed by a second turn in the same generation.
     runtime = Path(tempfile.mkdtemp(prefix='turn-', dir=ROOT / 'claims'))
     runtime.chmod(0o711)
-    bridge_dir = runtime / 'bridge'
-    bridge_dir.mkdir()
     principal = pwd.getpwnam('psh09')
     worker = pwd.getpwnam('mycelink-codex-worker')
-    os.chown(bridge_dir, principal.pw_uid, worker.pw_gid)
-    bridge_dir.chmod(0o2711)
-    socket = bridge_dir / 'bridge.sock'
+    reviewer = pwd.getpwnam('mycelink-codex-reviewer')
+    if reviewer.pw_uid == worker.pw_uid:
+        raise ValueError('independent reviewer principal required')
     bridge = None
     try:
+        def stop_bridge():
+            nonlocal bridge
+            if bridge is not None and bridge.poll() is None:
+                bridge.terminate()
+                try:
+                    bridge.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    bridge.kill()
+                    bridge.wait(timeout=3)
+            bridge = None
+
+        def start_bridge(role, identity):
+            nonlocal bridge
+            bridge_dir = runtime / role
+            bridge_dir.mkdir(mode=0o700)
+            os.chown(bridge_dir, principal.pw_uid, identity.pw_gid)
+            bridge_dir.chmod(0o2711)
+            socket = bridge_dir / 'bridge.sock'
+            bridge = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('wsl-codex-api-bridge.py')),
+                '--socket', str(socket), '--auth', str(AUTH), '--worker-gid', str(identity.pw_gid),
+                '--worker-uid', str(identity.pw_uid), '--role', role,
+                '--claim', args.claim, '--generation', args.generation,
+                '--model', 'gpt-6.1-sol', '--max-output-tokens', '4096', '--total-output-tokens', '131072',
+                '--lease-seconds', '120'], preexec_fn=drop, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+            for _ in range(100):
+                if socket.is_socket():
+                    return socket
+                if bridge.poll() is not None:
+                    raise ValueError('scoped API bridge exited before readiness')
+                time.sleep(.05)
+            raise ValueError('scoped API bridge readiness timeout')
+
         def drop():
             os.setgroups([])
             os.setgid(principal.pw_gid)
             os.setuid(principal.pw_uid)
-        bridge = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('wsl-codex-api-bridge.py')),
-            '--socket', str(socket), '--auth', str(AUTH), '--worker-gid', str(worker.pw_gid),
-            '--worker-uid', str(worker.pw_uid), '--claim', args.claim, '--generation', args.generation,
-            '--model', 'gpt-6.1-sol', '--max-output-tokens', '4096', '--total-output-tokens', '131072',
-            '--lease-seconds', '120'], preexec_fn=drop, stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
-        for _ in range(100):
-            if socket.is_socket():
-                break
-            if bridge.poll() is not None:
-                raise ValueError('scoped API bridge exited before readiness')
-            time.sleep(.05)
-        else:
-            raise ValueError('scoped API bridge readiness timeout')
+        socket = start_bridge('worker', worker)
         script = '''socat TCP-LISTEN:18547,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/bridge.sock &
 proxy=$!
 trap 'kill "$proxy" 2>/dev/null || true' EXIT
@@ -166,14 +184,63 @@ PY
                      isinstance(item.get('item'), dict) and item['item'].get('type') == 'agent_message']
             if len(final) != 1 or json.loads(final[0]) != data['proposals']:
                 raise ValueError('model proposal did not match role-owned source output')
+        if args.review_prompt:
+            # The reviewer receives only the immutable source and this bounded
+            # copy of the sealed worker proposal, never its writable directory,
+            # session, bridge socket, identity or worker result channel.
+            proposed = json.dumps(data['proposals'], sort_keys=True, ensure_ascii=False)
+            review_prompt = args.review_prompt + '\nProposed source files (read-only):\n' + proposed
+            if len(review_prompt.encode()) > 16_384:
+                raise ValueError('proposal exceeds independent review packet budget')
+            stop_bridge()
+            socket = start_bridge('reviewer', reviewer)
+            review_script = '''socat TCP-LISTEN:18547,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/bridge.sock &
+proxy=$!
+trap 'kill "$proxy" 2>/dev/null || true' EXIT
+OPENAI_API_KEY=placeholder timeout 65s /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js \\
+  exec --ignore-user-config --ephemeral --skip-git-repo-check --json --cd /work \\
+  --sandbox read-only -c approval_policy=never \\
+  -c 'openai_base_url="http://127.0.0.1:18547/v1"' \\
+  ''' + shlex.quote(review_prompt) + ''' >/proposal/review-out 2>/proposal/review-err
+status=$?
+if test "$status" -ne 0; then exit "$status"; fi
+/usr/bin/python3 - <<'PY' || exit 1
+import json
+from pathlib import Path
+root = Path('/proposal')
+raw = (root / 'review-out').read_bytes()
+if len(raw) > 2 * 1024 * 1024:
+    raise ValueError('reviewer turn exceeds submission budget')
+transcript = [json.loads(line) for line in raw.splitlines() if line]
+events = [item.get('type') for item in transcript]
+if events.count('turn.completed') != 1 or 'turn.failed' in events:
+    raise ValueError('independent reviewer turn did not complete')
+final = [item['item']['text'] for item in transcript if item.get('type') == 'item.completed'
+         and isinstance(item.get('item'), dict) and item['item'].get('type') == 'agent_message']
+if len(final) != 1 or json.loads(final[0]).get('verdict') != 'PASS':
+    raise ValueError('independent reviewer did not approve')
+(root / 'verdict.json').write_text(json.dumps({'verdict': 'PASS', 'events': events, 'transcript': transcript}, ensure_ascii=False))
+(root / 'review-out').unlink()
+(root / 'review-err').unlink()
+PY
+'''
+            review_command = ['/usr/bin/python3', str(Path(__file__).with_name('wsl-codex-worker.py')),
+                '--source', args.source, '--source-files', args.manifest,
+                '--transport-dir', str(transport), '--claim', args.claim,
+                '--generation', args.generation, '--role', 'reviewer', '--timeout-sec', '80',
+                '--bridge-socket', str(socket), '--codex-install', str(WORKER),
+                '--', '/bin/sh', '-c', review_script]
+            reviewed = subprocess.run(review_command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, timeout=100, check=False)
+            if reviewed.returncode != 0:
+                raise ValueError('independent reviewer turn failed')
+            verdict = json.loads((transport / args.claim / args.generation / 'reviewer.json').read_text())
+            if (verdict.get('role') != 'reviewer' or verdict.get('proposals') != {} or
+                verdict.get('source_hashes') != data['source_hashes'] or
+                verdict.get('submission', {}).get('verdict') != 'PASS'):
+                raise ValueError('independent reviewer transport is not bound to worker source')
     finally:
-        if bridge is not None and bridge.poll() is None:
-            bridge.terminate()
-            try:
-                bridge.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                bridge.kill()
-                bridge.wait(timeout=3)
+        stop_bridge()
         shutil.rmtree(runtime)
 
 
@@ -182,6 +249,7 @@ def main():
     for name in ('source', 'manifest', 'claim', 'generation', 'prompt'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--proposal-path', action='append', default=[])
+    parser.add_argument('--review-prompt')
     run(parser.parse_args())
 
 

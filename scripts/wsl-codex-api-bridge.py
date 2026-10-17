@@ -288,12 +288,22 @@ def trusted_upstream(auth_path):
     return send
 
 
+def bridge_principal(role, uid, gid):
+    import pwd
+    if role not in ('worker', 'reviewer'):
+        raise ValueError('unknown scoped bridge role')
+    expected = pwd.getpwnam('mycelink-codex-' + role)
+    if (uid, gid) != (expected.pw_uid, expected.pw_gid):
+        raise ValueError('bridge role does not match registered principal')
+    return role
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--socket', required=True)
     parser.add_argument('--auth', required=True)
     parser.add_argument('--worker-gid', type=int, required=True)
     parser.add_argument('--worker-uid', type=int, required=True)
+    parser.add_argument('--role', choices=('worker', 'reviewer'), default='worker')
     parser.add_argument('--claim', required=True)
     parser.add_argument('--generation', required=True)
     parser.add_argument('--model', required=True)
@@ -301,8 +311,9 @@ def main():
     parser.add_argument('--total-output-tokens', required=True, type=int)
     parser.add_argument('--lease-seconds', type=int, default=300)
     args = parser.parse_args()
+    bridge_principal(args.role, args.worker_uid, args.worker_gid)
     server = make_server(args.socket, trusted_upstream(args.auth), expected_uid=args.worker_uid,
-                         claim=args.claim, generation=args.generation, role='worker',
+                         claim=args.claim, generation=args.generation, role=args.role,
                          allowed_model=args.model, max_output_tokens=args.max_output_tokens,
                          total_output_tokens=args.total_output_tokens,
                          lease_seconds=args.lease_seconds)

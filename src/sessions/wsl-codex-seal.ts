@@ -7,11 +7,12 @@ import { immutableGitSource } from './wsl-codex-source.js';
 import { wslCodexFeatureToken, wslCodexProcessResult } from './wsl-codex-process.js';
 
 export type WslCodexWorkerSeal = {
-  claim: string; generation: string; role: 'worker'; sha256: Record<string, string>; submission_sha256: string;
+  claim: string; generation: string; role: 'worker' | 'reviewer'; sha256: Record<string, string>; submission_sha256: string;
 };
 
-export function sealRegisteredWslCodexWorker(featureDir: string, controlRoot: string,
-  grant: { claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[] }): WslCodexWorkerSeal {
+function sealRegisteredWslCodexRole(featureDir: string, controlRoot: string,
+  grant: { claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[] },
+  role: 'worker' | 'reviewer'): WslCodexWorkerSeal {
   if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1') {
     throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
   }
@@ -27,7 +28,7 @@ export function sealRegisteredWslCodexWorker(featureDir: string, controlRoot: st
   const hashes = immutableGitSource(grant.worktree, grant.base_sha).hashes;
   const response = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', translated.stdout.trim(),
     '--feature-token', wslCodexFeatureToken(featureDir), '--claim', grant.claim,
-    '--generation', grant.generation, '--control-root', controlRoot.replace(/\\/g, '/')],
+    '--generation', grant.generation, '--control-root', controlRoot.replace(/\\/g, '/'), '--role', role],
   { encoding: 'utf8', input: JSON.stringify({ source_hashes: hashes, allowed_paths: grant.allowed_paths }),
     maxBuffer: 1024 * 1024, timeout: 45_000, windowsHide: true });
   if (response.status !== 0 || response.error) throw new Error('WSL_CODEX_BROKER_DENIED');
@@ -36,7 +37,7 @@ export function sealRegisteredWslCodexWorker(featureDir: string, controlRoot: st
   catch { throw new Error('WSL_CODEX_BROKER_RECEIPT_INVALID'); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('WSL_CODEX_BROKER_RECEIPT_INVALID');
   const receipt = parsed as Record<string, unknown>;
-  if (receipt['claim'] !== grant.claim || receipt['generation'] !== grant.generation || receipt['role'] !== 'worker' ||
+  if (receipt['claim'] !== grant.claim || receipt['generation'] !== grant.generation || receipt['role'] !== role ||
       !receipt['sha256'] || typeof receipt['sha256'] !== 'object' || Array.isArray(receipt['sha256']) ||
       !Object.keys(receipt['sha256']).every(path => grant.allowed_paths.includes(path) &&
         /^[0-9a-f]{64}$/.test((receipt['sha256'] as Record<string, string>)[path] ?? '')) ||
@@ -44,4 +45,14 @@ export function sealRegisteredWslCodexWorker(featureDir: string, controlRoot: st
     throw new Error('WSL_CODEX_BROKER_RECEIPT_INVALID');
   }
   return receipt as WslCodexWorkerSeal;
+}
+
+export function sealRegisteredWslCodexWorker(featureDir: string, controlRoot: string,
+  grant: { claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[] }): WslCodexWorkerSeal {
+  return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, 'worker');
+}
+
+export function sealRegisteredWslCodexReviewer(featureDir: string, controlRoot: string,
+  grant: { claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[] }): WslCodexWorkerSeal {
+  return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, 'reviewer');
 }

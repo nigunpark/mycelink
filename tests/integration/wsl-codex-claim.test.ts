@@ -190,6 +190,7 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
           ['src/publish.js', 'tests/publish.test.mjs'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
             '--manifest', stage.manifest, '--claim', ticket.claimId, '--generation', ticket.dispatchId!,
             '--proposal-path', 'src/publish.js', '--proposal-path', 'tests/publish.test.mjs',
+            '--review-prompt', 'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
             '--prompt', 'Respond only with this JSON object, no markdown: {"src/publish.js":"JOB_RESULT_V2\\n","tests/publish.test.mjs":"import assert from \'node:assert/strict\';\\nassert.ok(true);\\n"}']);
         expect(launched.claim).toBe(ticket.claimId);
         let outcome: { exit_code: number; revoked: boolean } | undefined;
@@ -216,9 +217,14 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         } finally {
           writeFileSync(configFile, configured);
         }
+        expect(() => o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']))
+          .toThrow(/WSL_CODEX_BROKER_DENIED/);
         const seal = o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
         expect(seal).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!,
           role: 'worker', sha256: { 'src/publish.js': createHash('sha256').update('JOB_RESULT_V2\n').digest('hex') } });
+        const review = o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
+        expect(review).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!, role: 'reviewer' });
+        expect(review.submission_sha256).not.toBe(seal.submission_sha256);
         expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
       } finally {
         stage.dispose();
