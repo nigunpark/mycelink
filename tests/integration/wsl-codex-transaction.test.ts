@@ -156,6 +156,12 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(commits.map((sha) => git(p.core, ['show', '--format=', '--name-only', sha]).split('\n').filter(Boolean)))
       .toEqual([['tests/run.mjs'], ['src/publish.js']]);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).toBe('DONE');
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    expect(JSON.parse(readFileSync(journal, 'utf8'))).toMatchObject({
+      phase: 'settled', claimId: ticket.claimId, dispatchId: ticket.dispatchId,
+      resultSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
   }, 180_000);
 
   it.skipIf(!authenticated)('routes model-driven MCP and built-in shell tools through the same isolated generation', async () => {

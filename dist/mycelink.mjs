@@ -33922,12 +33922,33 @@ var Orchestrator = class _Orchestrator {
         const slot = join49(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
         if (resultInSlot(grant.worktree, claim.result_file ?? WORKER_RESULT_FILE))
           throw new Error("WSL_CODEX_RESULT_SLOT_OCCUPIED");
-        writeTextAtomic(slot, JSON.stringify(result) + "\n");
-        return { usage, sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes };
+        const journal = join49(
+          this.paths.featureDir,
+          "wsl-codex-transactions",
+          createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
+        );
+        const prior2 = JSON.parse(readFileSync31(journal, "utf8"));
+        if (prior2["phase"] !== "gates-complete" || prior2["greenCommit"] !== completed.commit)
+          throw new Error("WSL_CODEX_RESULT_JOURNAL_INVALID");
+        const bytes2 = JSON.stringify(result) + "\n";
+        const resultSha256 = createHash35("sha256").update(bytes2).digest("hex");
+        writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-intent", resultSha256 }) + "\n");
+        writeTextAtomic(slot, bytes2);
+        writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-written", resultSha256 }) + "\n");
+        return {
+          usage,
+          sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes,
+          resultSha256,
+          journal
+        };
       });
       const settled = this.settle(nodeId, capability);
       if (settled.outcome !== "DONE" || this.state().nodes[nodeId]?.state !== "DONE")
         throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
+      const prior = JSON.parse(readFileSync31(verified.journal, "utf8"));
+      if (prior["phase"] !== "result-written" || prior["resultSha256"] !== verified.resultSha256)
+        throw new Error("WSL_CODEX_RESULT_JOURNAL_INVALID");
+      writeTextAtomic(verified.journal, JSON.stringify({ ...prior, phase: "settled" }) + "\n");
       return {
         claim: claimId,
         generation,

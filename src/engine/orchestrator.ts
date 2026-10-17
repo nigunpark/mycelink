@@ -1835,12 +1835,26 @@ export class Orchestrator {
         const slot = join(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
         if (resultInSlot(grant.worktree, claim.result_file ?? WORKER_RESULT_FILE))
           throw new Error('WSL_CODEX_RESULT_SLOT_OCCUPIED');
-        writeTextAtomic(slot, JSON.stringify(result) + '\n');
-        return { usage, sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes };
+        const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
+          createHash('sha256').update(`${nodeId}\0${claimId}\0${generation}`).digest('hex') + '.json');
+        const prior = JSON.parse(readFileSync(journal, 'utf8')) as Record<string, unknown>;
+        if (prior['phase'] !== 'gates-complete' || prior['greenCommit'] !== completed.commit)
+          throw new Error('WSL_CODEX_RESULT_JOURNAL_INVALID');
+        const bytes = JSON.stringify(result) + '\n';
+        const resultSha256 = createHash('sha256').update(bytes).digest('hex');
+        writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-intent', resultSha256 }) + '\n');
+        writeTextAtomic(slot, bytes);
+        writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-written', resultSha256 }) + '\n');
+        return { usage, sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes,
+          resultSha256, journal };
       });
       const settled = this.settle(nodeId, capability);
       if (settled.outcome !== 'DONE' || this.state().nodes[nodeId]?.state !== 'DONE')
         throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
+      const prior = JSON.parse(readFileSync(verified.journal, 'utf8')) as Record<string, unknown>;
+      if (prior['phase'] !== 'result-written' || prior['resultSha256'] !== verified.resultSha256)
+        throw new Error('WSL_CODEX_RESULT_JOURNAL_INVALID');
+      writeTextAtomic(verified.journal, JSON.stringify({ ...prior, phase: 'settled' }) + '\n');
       return { claim: claimId, generation, workerSeal: workerSeal.submission_sha256,
         reviewerSeal: reviewerSeal.submission_sha256, sourceSha256: verified.sourceSha256,
         model: { platform: 'linux', apiRequests: verified.usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
