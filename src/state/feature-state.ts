@@ -12,6 +12,7 @@ import type {
 } from '../model/types.js';
 import { casUpdate, readDoc, writeDocAtomic, type AtomicDoc } from './atomic-json.js';
 import { withLock } from './process-lock.js';
+import { codexLifecycleEnabled, withCodexLifecycleLock } from './codex-lifecycle.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { emptyOrchestration, syncLeases } from './orchestration.js';
 
@@ -124,7 +125,7 @@ export function mutateState(
   mutate: (state: FeatureState_) => FeatureState_,
   options: { lockTimeoutMs?: number } = {},
 ): FeatureState_ {
-  return withLock(
+  const update = (): FeatureState_ => withLock(
     stateLockPath(featureDir),
     () => {
       const doc = loadState(featureDir);
@@ -138,4 +139,9 @@ export function mutateState(
     },
     { timeoutMs: options.lockTimeoutMs ?? 15_000, pollMs: 10, purpose: 'STATE.json mutation' },
   );
+  // No Claude feature takes the extra mutex. Once explicitly opted in, every
+  // claim/cancel/resume/settle state mutation takes it before STATE.json.
+  return codexLifecycleEnabled(featureDir)
+    ? withCodexLifecycleLock(featureDir, update, { timeoutMs: options.lockTimeoutMs })
+    : update();
 }

@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { hostname } from 'node:os';
+import { codexLifecycleLockPath, enableCodexLifecycle, withCodexLifecycleLock } from '../../src/state/codex-lifecycle.js';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -28,6 +30,93 @@ async function fixture() {
     adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) });
   return { p, o };
 }
+
+describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
+  it('never steals an aged live owner and refuses a mutation while it holds the gate', async () => {
+    const { p } = await fixture();
+    enableCodexLifecycle(p.featureDir);
+    const path = codexLifecycleLockPath(p.featureDir);
+    writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), token: 'other-process', acquired_at: '2000-01-01T00:00:00.000Z' }));
+    const before = readFileSync(join(p.featureDir, 'STATE.json'), 'utf8');
+    expect(() => withCodexLifecycleLock(p.featureDir, () => 1, { timeoutMs: 40 })).toThrow(/lifecycle|lock/i);
+    expect(() => mutateState(p.featureDir, (s) => { s.feature_state = 'CANCELLED'; return s; }, { lockTimeoutMs: 40 }))
+      .toThrow(/lifecycle|lock/i);
+    expect(readFileSync(join(p.featureDir, 'STATE.json'), 'utf8')).toBe(before);
+    expect(JSON.parse(readFileSync(path, 'utf8')).token).toBe('other-process');
+    rmSync(path);
+  });
+
+  it('does not inspect a live claim while another process controls revocation', async () => {
+    const { p, o } = await fixture();
+    const claimed = o.claim(CORE, { mode: 'host' });
+    enableCodexLifecycle(p.featureDir);
+    const path = codexLifecycleLockPath(p.featureDir);
+    writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), token: 'other-process', acquired_at: '2000-01-01T00:00:00.000Z' }));
+    expect(() => o.inspectWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts']))
+      .toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
+    rmSync(path);
+  });
+
+  it('authorizes broker work only inside the live generation mutex', async () => {
+    const { p, o } = await fixture();
+    const claimed = o.claim(CORE, { mode: 'host' });
+    expect(() => o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], () => 'sealed'))
+      .toThrow(/CODEX_LIFECYCLE_NOT_ENABLED/);
+    enableCodexLifecycle(p.featureDir);
+    expect(o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], (binding) => {
+      expect(binding.allowed_paths).toEqual(['src/new.ts']);
+      expect(JSON.parse(readFileSync(codexLifecycleLockPath(p.featureDir), 'utf8')).pid).toBe(process.pid);
+      return 'sealed';
+    })).toBe('sealed');
+    mutateState(p.featureDir, (s) => { s.feature_state = 'CANCELLED'; return s; });
+    expect(() => o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], () => 'wrong'))
+      .toThrow(/WSL_CLAIM_STALE/);
+  });
+
+  it('serializes a real cross-process cancel against broker consumption', async () => {
+    const { p, o } = await fixture();
+    const claimed = o.claim(CORE, { mode: 'host' });
+    enableCodexLifecycle(p.featureDir);
+    const argv = [join(process.cwd(), 'dist', 'mycelink.mjs'),
+      ...asController(['feature', 'cancel', FEATURE_ID, '--control-root', p.control], p.control)];
+    o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], () => {
+      const blocked = spawnSync(process.execPath, argv, { encoding: 'utf8', timeout: 2_000 });
+      expect((blocked.error as NodeJS.ErrnoException | undefined)?.code).toBe('ETIMEDOUT');
+      expect(loadState(p.featureDir)!.data.feature_state).not.toBe('CANCELLED');
+    });
+    const cancelled = spawnSync(process.execPath, argv, { encoding: 'utf8', timeout: 15_000 });
+    expect(cancelled.status, cancelled.stderr).toBe(0);
+    expect(loadState(p.featureDir)!.data.feature_state).toBe('CANCELLED');
+    expect(() => o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], () => 'bad'))
+      .toThrow(/WSL_CLAIM_STALE/);
+  });
+
+  it('refuses resume and settle while broker consumption owns the lifecycle gate', async () => {
+    const { p, o } = await fixture();
+    const claimed = o.claim(CORE, { mode: 'host' });
+    enableCodexLifecycle(p.featureDir);
+    const path = codexLifecycleLockPath(p.featureDir);
+    writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), token: 'other-process', acquired_at: '2000-01-01T00:00:00.000Z' }));
+    const started = Date.now();
+    expect(() => o.resumeDispatch(CORE)).toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
+    expect(() => o.settle(CORE, claimed.capability)).toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
+    expect(Date.now() - started).toBeLessThan(6_000); // entry gate, not a late lock after reading mutable slots
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).toBe(claimed.dispatchId);
+    rmSync(path);
+  });
+
+  it('recovers an orphaned owner and permits nested state mutation in the same transaction', async () => {
+    const { p } = await fixture();
+    enableCodexLifecycle(p.featureDir);
+    const path = codexLifecycleLockPath(p.featureDir);
+    writeFileSync(path, JSON.stringify({ pid: 2147483647, host: hostname(), token: 'orphan', acquired_at: '2000-01-01T00:00:00.000Z' }));
+    withCodexLifecycleLock(p.featureDir, () => {
+      expect(JSON.parse(readFileSync(path, 'utf8')).token).not.toBe('orphan');
+      mutateState(p.featureDir, (s) => { s.blocked_reason = 'recovered'; return s; });
+    });
+    expect(loadState(p.featureDir)!.data.blocked_reason).toBe('recovered');
+  });
+});
 
 describe('experimental WSL claim policy binding (not launch authorization)', () => {
   it('derives exact allowed names only from a live host claim and graph policy', async () => {
@@ -67,8 +156,9 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
 
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'crosses the real host claim/worktree into isolated WSL transport and sealed broker', async () => {
-      const { o } = await fixture();
+      const { p, o } = await fixture();
       const claimed = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
       const bound = o.inspectWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/publish.js']);
       const wslPath = (path: string): string => {
         const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u', path.replace(/\\/g, '/')],
@@ -79,10 +169,14 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
       const sourceFile = join(bound.worktree, 'tests', 'run.mjs');
       const digest = createHash('sha256').update(readFileSync(sourceFile)).digest('hex');
       const script = join(process.cwd(), 'tests', 'spike', 'wsl-real-claim-boundary.py');
-      const launched = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'env',
-        'MYCELINK_LIVE_WSL_WORKER=1', 'python3', wslPath(script), '--source', wslPath(bound.worktree),
-        '--claim', bound.claim, '--generation', bound.generation, '--expected-sha256', digest],
-      { encoding: 'utf8', timeout: 45_000 });
+      const launched = o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/publish.js'], (grant) => {
+        expect(grant.allowed_paths).toEqual(['src/publish.js']);
+        expect(readFileSync(codexLifecycleLockPath(p.featureDir), 'utf8')).toContain(`"pid":${process.pid}`);
+        return spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'env',
+          'MYCELINK_LIVE_WSL_WORKER=1', 'python3', wslPath(script), '--source', wslPath(bound.worktree),
+          '--claim', bound.claim, '--generation', bound.generation, '--expected-sha256', digest],
+        { encoding: 'utf8', timeout: 45_000 });
+      });
       expect(launched.status, launched.stderr).toBe(0);
       expect(JSON.parse(launched.stdout)).toMatchObject({ claim: bound.claim,
         generation: bound.generation, sealed: true, source_unchanged: true });

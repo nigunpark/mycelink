@@ -121,6 +121,7 @@ import {
 import { createCandidate, loadCandidate } from '../git/candidate.js';
 import { expectedIntegrationHead, IntegrationBranchMovedError, portfolioRefs, trustedIntegrationHead } from './portfolio.js';
 import { LockTimeoutError, withLock } from '../state/process-lock.js';
+import { codexLifecycleEnabled, withCodexLifecycleLock } from '../state/codex-lifecycle.js';
 import { FeatureBusyError, withFeatureLock } from './feature-lock.js';
 import { admitReworkReason, reasonSha256, reworkAcceptance, ReworkBriefError, reworkEvidence, stoodRework, verifiedReworkBrief } from './rework-brief.js';
 import { loadScenarios, runE2E } from '../e2e/runner.js';
@@ -1275,7 +1276,7 @@ export class Orchestrator {
     if (this.workspace.config.provider.provider !== 'codex') throw new Error('WSL_CODEX_NOT_CONFIGURED');
     this.assertGraphUnchanged();
     const node = this.node(nodeId);
-    return withLock(stateLockPath(this.paths.featureDir), () => {
+    const inspect = () => withLock(stateLockPath(this.paths.featureDir), () => {
       const state = this.state();
       const claim = state.nodes[nodeId]?.claim;
       const expires = Date.parse(claim?.expires_at ?? '');
@@ -1298,6 +1299,29 @@ export class Orchestrator {
       return { claim: claimId, generation: dispatchId, worktree: claim.worktree,
         base_sha: claim.base_sha as string, allowed_paths: allowed };
     }, { timeoutMs: 2_000, pollMs: 10, purpose: 'experimental WSL claim inspection' });
+    return codexLifecycleEnabled(this.paths.featureDir)
+      ? withCodexLifecycleLock(this.paths.featureDir, inspect, { timeoutMs: 2_000 })
+      : inspect();
+  }
+
+  /**
+   * Trusted synchronous broker/apply critical section. Claim policy is read
+   * afresh under the same mutex every opted-in STATE mutation must acquire.
+   * This does not launch Codex and is not callable by the isolated worker.
+   */
+  withLiveWslCodexClaim<T>(
+    nodeId: string, claimId: string, dispatchId: string, proposedPaths: readonly string[],
+    consume: (binding: { claim: string; generation: string; worktree: string; base_sha: string; allowed_paths: string[] }) => T,
+  ): T {
+    if (!codexLifecycleEnabled(this.paths.featureDir)) throw new Error('CODEX_LIFECYCLE_NOT_ENABLED');
+    return withCodexLifecycleLock(this.paths.featureDir, () => {
+      const binding = this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
+      const result = consume(binding);
+      if (result !== null && typeof result === 'object' && 'then' in result) {
+        throw new Error('CODEX_LIFECYCLE_ASYNC_FORBIDDEN');
+      }
+      return result;
+    });
   }
 
   graph(): PortfolioGraph {
@@ -5550,6 +5574,12 @@ export class Orchestrator {
    * claim, worktree, branch and any result already in the slot are kept.
    */
   resumeDispatch(nodeId: string): DispatchResult {
+    const run = (): DispatchResult => this.resumeDispatchLocked(nodeId);
+    return codexLifecycleEnabled(this.paths.featureDir)
+      ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2_000 }) : run();
+  }
+
+  private resumeDispatchLocked(nodeId: string): DispatchResult {
     try {
       this.assertGraphUnchanged();
     } catch (err) {
@@ -5961,6 +5991,12 @@ export class Orchestrator {
    * submission is believed only after fresh verification and integration.
    */
   settle(nodeId: string, capability: string | undefined): SettleReport {
+    const run = (): SettleReport => this.settleLocked(nodeId, capability);
+    return codexLifecycleEnabled(this.paths.featureDir)
+      ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2_000 }) : run();
+  }
+
+  private settleLocked(nodeId: string, capability: string | undefined): SettleReport {
     // No result because a model provider ended the worker (or its host): an interruption, never RESULT_MISSING.
     const provider = this.providerSettle(nodeId, capability);
     if (provider !== null) return provider;
