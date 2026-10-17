@@ -33693,7 +33693,7 @@ var Orchestrator = class _Orchestrator {
     return { phase: "red-gated", gate: "red", exitCode: 0, argv: gate.argv.slice(0, -2), commit };
   }
   /** Apply only the implementation from independently sealed proposal bytes after a controller RED gate. */
-  applyExperimentalWslCodexGreenImplementation(nodeId, claimId, dispatchId, proposedPaths, implementationPath) {
+  applyExperimentalWslCodexGreenImplementation(nodeId, claimId, dispatchId, proposedPaths, implementationPath, interruptAfterIntent = false) {
     const journal = join49(
       this.paths.featureDir,
       "wsl-codex-transactions",
@@ -33723,6 +33723,7 @@ var Orchestrator = class _Orchestrator {
         implementationPath,
         implementationSha256: createHash35("sha256").update(content).digest("hex")
       }) + "\n");
+      if (interruptAfterIntent) throw new Error("WSL_CODEX_INTERRUPTED_AFTER_GREEN_INTENT");
       const destination = join49(grant.worktree, ...implementationPath.split("/"));
       writeTextAtomic(destination, content);
       if (readFileSync31(destination, "utf8") !== content || runGit(grant.worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trimEnd() !== `${prior.exitCode === 0 ? " M" : "??"} ${implementationPath}`)
@@ -34032,7 +34033,14 @@ var Orchestrator = class _Orchestrator {
         capability,
         request.interruptAfter === "red-gate-running"
       );
-      this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, "src/publish.js");
+      this.applyExperimentalWslCodexGreenImplementation(
+        nodeId,
+        claimId,
+        generation,
+        allowedPaths,
+        "src/publish.js",
+        request.interruptAfter === "green-intent"
+      );
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
       if (request.interruptAfter === "gates-complete") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_GATES_COMPLETE");
