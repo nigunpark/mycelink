@@ -33047,6 +33047,7 @@ var Orchestrator = class _Orchestrator {
       if (result !== null && typeof result === "object" && "then" in result) {
         throw new Error("CODEX_LIFECYCLE_ASYNC_FORBIDDEN");
       }
+      this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
       return result;
     });
   }

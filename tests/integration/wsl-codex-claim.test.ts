@@ -31,6 +31,21 @@ async function fixture() {
   return { p, o };
 }
 
+describe('production Codex dispatch remains disabled', () => {
+  it('refuses the host dispatch command before creating any claim, even with the experimental marker', async () => {
+    const { p } = await fixture();
+    enableCodexLifecycle(p.featureDir);
+    let error = '';
+    let output = '';
+    const io: CliIo = { out: (text) => { output += text; }, err: (text) => { error += text; } };
+    const result = await main([...asController(['dispatch', FEATURE_ID], p.control), '--control-root', p.control], io);
+    expect(result).not.toBe(0);
+    expect(error + output).toMatch(/Codex.*disabled|Codex.*not supported/i);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim).toBeNull();
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.attempts).toBe(0);
+  });
+});
+
 describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
   it('never steals an aged live owner and refuses a mutation while it holds the gate', async () => {
     const { p } = await fixture();
@@ -71,6 +86,16 @@ describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
     mutateState(p.featureDir, (s) => { s.feature_state = 'CANCELLED'; return s; });
     expect(() => o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], () => 'wrong'))
       .toThrow(/WSL_CLAIM_STALE/);
+  });
+
+  it('does not return acceptance if the trusted callback itself revokes the generation', async () => {
+    const { p, o } = await fixture();
+    const claimed = o.claim(CORE, { mode: 'host' });
+    enableCodexLifecycle(p.featureDir);
+    expect(() => o.withLiveWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts'], () => {
+      mutateState(p.featureDir, (s) => { s.feature_state = 'CANCELLED'; return s; });
+      return 'sealed';
+    })).toThrow(/WSL_CLAIM_STALE/);
   });
 
   it('serializes a real cross-process cancel against broker consumption', async () => {

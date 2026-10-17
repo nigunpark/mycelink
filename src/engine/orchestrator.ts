@@ -1320,6 +1320,10 @@ export class Orchestrator {
       if (result !== null && typeof result === 'object' && 'then' in result) {
         throw new Error('CODEX_LIFECYCLE_ASYNC_FORBIDDEN');
       }
+      // A synchronous callback may itself perform trusted state operations,
+      // and expiry can pass during sealing. Never report its output accepted
+      // without another live generation check under the same mutex.
+      this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
       return result;
     });
   }
