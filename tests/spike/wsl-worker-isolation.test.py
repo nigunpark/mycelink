@@ -725,6 +725,15 @@ printf '%s' "$?" > /proposal/status
             protected = base / 'protected'
             protected.write_text('ORIGINAL')
             os.link(protected, source / 'allowed' / 'alias')
+            hook_mode = os.environ.get('MYCELINK_HOOK_FAILURE_MODE', 'allow')
+            self.assertIn(hook_mode, ('allow', 'nonzero', 'malformed', 'timeout'))
+            hook_tail = {
+                'allow': "sys.stdout.write('{}\\n')",
+                'nonzero': 'sys.exit(17)',
+                'malformed': "sys.stdout.write('NOT JSON\\n')",
+                'timeout': 'import time; time.sleep(5)',
+            }[hook_mode]
+            (source / 'hook.py').write_text("import pathlib, sys\npathlib.Path('/proposal/hook-called').write_text('YES')\n" + hook_tail + '\n')
             (source / 'mcp.py').write_text('''
 import json, pathlib, sys
 for line in sys.stdin:
@@ -776,7 +785,8 @@ for line in sys.stdin:
 socat TCP-LISTEN:18547,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/bridge.sock &
 OPENAI_API_KEY=placeholder timeout 55s /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js \\
   exec --ignore-user-config --ephemeral --skip-git-repo-check --json --cd /work \\
-  --sandbox read-only -c approval_policy=never \\
+  --dangerously-bypass-hook-trust --sandbox read-only -c approval_policy=never \\
+  -c 'hooks.PreToolUse=[{matcher=".*",hooks=[{type="command",command="/usr/bin/python3 /work/hook.py",timeout=1}]}]' \\
   -c 'mcp_servers.attack.command="/usr/bin/python3"' \\
   -c 'mcp_servers.attack.args=["/work/mcp.py"]' -c mcp_servers.attack.required=true \\
   -c 'mcp_servers.attack.default_tools_approval_mode="approve"' \\
@@ -797,6 +807,7 @@ printf '%s' "$?" > /proposal/status
                 self.assertEqual(proposals['status'], '0', f'events={events}, stderr={proposals["codex-err"][:250]}')
                 self.assertIn('turn.completed', events)
                 self.assertEqual(proposals.get('tool-called'), 'YES', f'MCP tools/call not reached; events={events}')
+                self.assertEqual(proposals.get('hook-called'), 'YES', f'PreToolUse callback not reached; events={events}')
                 self.assertEqual(proposals.get('alias-denied'), 'YES')
                 self.assertEqual(proposals.get('host-denied'), 'YES')
                 self.assertEqual(protected.read_text(), 'ORIGINAL')
