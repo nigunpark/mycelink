@@ -105,7 +105,7 @@ import { closeSync, constants as fsConstants, fstatSync, fsyncSync, lstatSync, o
 import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
-import { assertImmutableWslApplyBase, stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
+import { assertImmutableWslApplyBase, stageImmutableWslCodexSource, immutableGitSource } from '../sessions/wsl-codex-source.js';
 import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
 import {
   acquireResource,
@@ -1728,7 +1728,11 @@ export class Orchestrator {
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
     interruptAfter?: 'first-apply'; onPhase?: (phase: 'model-complete') => Promise<void>;
-  }): Promise<never> {
+  }): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
+    sourceSha256: Record<string, string>;
+    model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
+    gates: { gate: 'red' | 'green' | 'regression'; exitCode: 0; argv: string[] }[];
+    settlement: { outcome: string; idempotent: boolean; usageSessions: number } }> {
     if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1' ||
         process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] !== '1')
       throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
@@ -1768,8 +1772,8 @@ export class Orchestrator {
       await request.onPhase?.('model-complete');
       // The callback observes a phase, not authority: each operation below
       // re-enters the live claim mutex after a possible cancel or resume.
-      this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
-      this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
+      const workerSeal = this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
+      const reviewerSeal = this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
       const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
       if (turn.worker.events.filter(event => event === 'turn.completed').length !== 1)
         throw new Error('WSL_CODEX_MODEL_TRANSCRIPT_INVALID');
@@ -1778,14 +1782,70 @@ export class Orchestrator {
       this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability);
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, 'src/publish.js');
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
-      this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
-      // `node tests/run.mjs` currently produces no normalized test results
-      // record: readGateTests returns null even after a valid RED gate. The
-      // criterion judge cannot authenticate an id from raw TAP text. Refuse
-      // settlement instead of fabricating a passing test or a DONE receipt.
-      if (!readGateTests(this.controlRoot, this.state().nodes[nodeId]?.evidence.red)?.length)
-        throw new Error('WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE');
-      throw new Error('WSL_CODEX_RESULT_SETTLEMENT_NOT_IMPLEMENTED');
+      const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
+      const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, grant => {
+        const current = this.state().nodes[nodeId];
+        const red = current?.evidence.red;
+        const green = current?.evidence.green;
+        const regression = current?.evidence.regression;
+        const failed = (readGateTests(this.controlRoot, red) ?? []).filter(test => test.status === 'failed');
+        const passed = (readGateTests(this.controlRoot, green) ?? []).filter(test => test.status === 'passed');
+        const replayed = (readGateTests(this.controlRoot, regression) ?? []).filter(test => test.status === 'passed');
+        if (!red || !green || !regression || failed.length === 0 ||
+            failed.some(test => !passed.some(g => g.id === test.id) || !replayed.some(g => g.id === test.id)))
+          throw new Error('WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE');
+        const criteria = this.node(nodeId).acceptance_criteria ?? [];
+        if (criteria.length !== 1 || failed.length !== 1)
+          throw new Error('WSL_CODEX_CRITERION_AMBIGUOUS');
+        const sealed = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
+        for (const transcript of [sealed.worker.transcript,
+          (sealed.reviewer as { transcript?: unknown[] }).transcript]) {
+          if (!Array.isArray(transcript)) throw new Error('WSL_CODEX_USAGE_UNAVAILABLE');
+          const events = transcript.filter((entry): entry is Record<string, unknown> =>
+            !!entry && typeof entry === 'object' && !Array.isArray(entry));
+          const turns = events.filter(entry => entry['type'] === 'turn.completed');
+          if (turns.length !== 1) throw new Error('WSL_CODEX_USAGE_UNAVAILABLE');
+          const counts = turns[0]!['usage'] as Record<string, unknown> | undefined;
+          if (!counts || !Number.isSafeInteger(counts['input_tokens']) || !Number.isSafeInteger(counts['output_tokens']) ||
+              (counts['input_tokens'] as number) <= 0 || (counts['output_tokens'] as number) <= 0)
+            throw new Error('WSL_CODEX_USAGE_UNAVAILABLE');
+          usage.input_tokens += counts['input_tokens'] as number;
+          usage.output_tokens += counts['output_tokens'] as number;
+          usage.model_turns++;
+        }
+        if (!Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens))
+          throw new Error('WSL_CODEX_USAGE_UNAVAILABLE');
+        const claim = current?.claim;
+        if (!claim || claim.claim_id !== claimId || claim.dispatch_id !== generation ||
+            claim.worktree !== grant.worktree || claim.base_sha !== grant.base_sha)
+          throw new Error('WSL_CLAIM_STALE');
+        const result = {
+          schema_version: 1, node_id: nodeId, claim_id: claimId, dispatch_id: generation,
+          outcome: 'SUBMITTED', commands: completed.gates.map(gate => ({ command: gate.argv, exit_code: gate.exitCode })),
+          commit_sha: completed.commit, branch: runGit(grant.worktree, ['branch', '--show-current']).stdout.trim(),
+          changed_paths: [...allowedPaths], evidence_paths: [], failure_fingerprint: null, decision_request: null,
+          usage, tdd: { base_sha: grant.base_sha, head_sha: completed.commit,
+            cycles: [{ red_commits: [completed.redCommit], green_commits: [completed.commit] }] },
+          criterion_evidence: [{ criterion: criteria[0]!, test_id: failed[0]!.id,
+            gate: 'red', output_sha256: red.output_sha256 }],
+        };
+        // The controller writes after validating both immutable gate reports,
+        // not through a model-owned result or a worker-provided assertion.
+        const slot = join(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
+        if (resultInSlot(grant.worktree, claim.result_file ?? WORKER_RESULT_FILE))
+          throw new Error('WSL_CODEX_RESULT_SLOT_OCCUPIED');
+        writeTextAtomic(slot, JSON.stringify(result) + '\n');
+        return { usage, sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes };
+      });
+      const settled = this.settle(nodeId, capability);
+      if (settled.outcome !== 'DONE' || this.state().nodes[nodeId]?.state !== 'DONE')
+        throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
+      return { claim: claimId, generation, workerSeal: workerSeal.submission_sha256,
+        reviewerSeal: reviewerSeal.submission_sha256, sourceSha256: verified.sourceSha256,
+        model: { platform: 'linux', apiRequests: verified.usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
+        gates: completed.gates, settlement: { outcome: settled.outcome, idempotent: settled.idempotent,
+          usageSessions: this.state().nodes[nodeId]?.usage.sessions ?? 0 } };
     } finally {
       stage.dispose();
       // An unfinished transaction has no settlement authority to carry into

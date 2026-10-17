@@ -107,17 +107,18 @@ function assertNoSettlement(featureDir: string) {
 }
 
 describe('trusted Windows claim to WSL Codex transaction (production dispatch stays disabled)', () => {
-  it.skipIf(!authenticated)('binds RED test identity to a real structured report before refusing unfinished settlement', async () => {
+  it.skipIf(!authenticated)('binds RED test identity to a real structured report before settlement', async () => {
     const { p, o, ticket, request } = await claim();
     const base = git(ticket.worktree!, ['rev-parse', 'HEAD']);
-    await expect(transaction(o, request(implement))).rejects.toThrow(/WSL_CODEX_RESULT_SETTLEMENT_NOT_IMPLEMENTED/);
-    expect(git(ticket.worktree!, ['log', '--format=%H', `${base}..HEAD`]).split('\n').filter(Boolean)).toHaveLength(2);
+    const receipt = await transaction(o, request(implement));
+    expect(receipt.settlement.outcome).toBe('DONE');
+    expect(git(p.core, ['log', '--format=%H', `${base}..${ticket.branch!}`]).split('\n').filter(Boolean)).toHaveLength(2);
     const red = loadState(p.featureDir)!.data.nodes[CORE]!.evidence.red;
     expect(red?.results?.format).toBe('junit-xml');
     expect(readGateTests(p.control, red)).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'tests/run.mjs', name: 'publishing emits JOB_RESULT_V2', status: 'failed' }),
     ]));
-    assertNoSettlement(p.featureDir);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).toBe('DONE');
   }, 180_000);
 
   it('requires a controller-owned whole-transaction entry point instead of adapting a writable worker', async () => {
@@ -147,10 +148,12 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(receipt.workerSeal).not.toBe(receipt.reviewerSeal);
     expect(receipt.sourceSha256['tests/run.mjs']).toBe(trustedDigest);
     expect(receipt.model.apiRequests).toBeGreaterThan(0);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.input_tokens).toBeGreaterThan(0);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.output_tokens).toBeGreaterThan(0);
     expect(receipt.gates.map((g) => [g.gate, g.exitCode])).toEqual([['red', 0], ['green', 0], ['regression', 0]]);
     expect(receipt.gates.every((g) => g.argv.includes('node') || g.argv.includes('mycelink'))).toBe(true);
-    const commits = git(ticket.worktree!, ['log', '--reverse', '--format=%H', `${base}..HEAD`]).split('\n').filter(Boolean);
-    expect(commits.map((sha) => git(ticket.worktree!, ['show', '--format=', '--name-only', sha]).split('\n').filter(Boolean)))
+    const commits = git(p.core, ['log', '--reverse', '--format=%H', `${base}..${ticket.branch!}`]).split('\n').filter(Boolean);
+    expect(commits.map((sha) => git(p.core, ['show', '--format=', '--name-only', sha]).split('\n').filter(Boolean)))
       .toEqual([['tests/run.mjs'], ['src/publish.js']]);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).toBe('DONE');
   }, 180_000);

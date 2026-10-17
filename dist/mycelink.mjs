@@ -33847,8 +33847,8 @@ var Orchestrator = class _Orchestrator {
       if (!outcome || outcome.exit_code !== 0 || outcome.revoked)
         throw new Error("WSL_CODEX_GENERATION_FAILED_OR_REVOKED");
       await request.onPhase?.("model-complete");
-      this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
-      this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
+      const workerSeal = this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
+      const reviewerSeal = this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
       const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
       if (turn.worker.events.filter((event) => event === "turn.completed").length !== 1)
         throw new Error("WSL_CODEX_MODEL_TRANSCRIPT_INVALID");
@@ -33857,10 +33857,91 @@ var Orchestrator = class _Orchestrator {
       this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability);
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, "src/publish.js");
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
-      this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
-      if (!readGateTests(this.controlRoot, this.state().nodes[nodeId]?.evidence.red)?.length)
-        throw new Error("WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE");
-      throw new Error("WSL_CODEX_RESULT_SETTLEMENT_NOT_IMPLEMENTED");
+      const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
+      const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
+        const current = this.state().nodes[nodeId];
+        const red = current?.evidence.red;
+        const green = current?.evidence.green;
+        const regression = current?.evidence.regression;
+        const failed = (readGateTests(this.controlRoot, red) ?? []).filter((test) => test.status === "failed");
+        const passed = (readGateTests(this.controlRoot, green) ?? []).filter((test) => test.status === "passed");
+        const replayed = (readGateTests(this.controlRoot, regression) ?? []).filter((test) => test.status === "passed");
+        if (!red || !green || !regression || failed.length === 0 || failed.some((test) => !passed.some((g) => g.id === test.id) || !replayed.some((g) => g.id === test.id)))
+          throw new Error("WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE");
+        const criteria = this.node(nodeId).acceptance_criteria ?? [];
+        if (criteria.length !== 1 || failed.length !== 1)
+          throw new Error("WSL_CODEX_CRITERION_AMBIGUOUS");
+        const sealed = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
+        for (const transcript of [
+          sealed.worker.transcript,
+          sealed.reviewer.transcript
+        ]) {
+          if (!Array.isArray(transcript)) throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
+          const events = transcript.filter((entry) => !!entry && typeof entry === "object" && !Array.isArray(entry));
+          const turns = events.filter((entry) => entry["type"] === "turn.completed");
+          if (turns.length !== 1) throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
+          const counts = turns[0]["usage"];
+          if (!counts || !Number.isSafeInteger(counts["input_tokens"]) || !Number.isSafeInteger(counts["output_tokens"]) || counts["input_tokens"] <= 0 || counts["output_tokens"] <= 0)
+            throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
+          usage.input_tokens += counts["input_tokens"];
+          usage.output_tokens += counts["output_tokens"];
+          usage.model_turns++;
+        }
+        if (!Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens))
+          throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
+        const claim = current?.claim;
+        if (!claim || claim.claim_id !== claimId || claim.dispatch_id !== generation || claim.worktree !== grant.worktree || claim.base_sha !== grant.base_sha)
+          throw new Error("WSL_CLAIM_STALE");
+        const result = {
+          schema_version: 1,
+          node_id: nodeId,
+          claim_id: claimId,
+          dispatch_id: generation,
+          outcome: "SUBMITTED",
+          commands: completed.gates.map((gate) => ({ command: gate.argv, exit_code: gate.exitCode })),
+          commit_sha: completed.commit,
+          branch: runGit(grant.worktree, ["branch", "--show-current"]).stdout.trim(),
+          changed_paths: [...allowedPaths],
+          evidence_paths: [],
+          failure_fingerprint: null,
+          decision_request: null,
+          usage,
+          tdd: {
+            base_sha: grant.base_sha,
+            head_sha: completed.commit,
+            cycles: [{ red_commits: [completed.redCommit], green_commits: [completed.commit] }]
+          },
+          criterion_evidence: [{
+            criterion: criteria[0],
+            test_id: failed[0].id,
+            gate: "red",
+            output_sha256: red.output_sha256
+          }]
+        };
+        const slot = join49(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
+        if (resultInSlot(grant.worktree, claim.result_file ?? WORKER_RESULT_FILE))
+          throw new Error("WSL_CODEX_RESULT_SLOT_OCCUPIED");
+        writeTextAtomic(slot, JSON.stringify(result) + "\n");
+        return { usage, sourceSha256: immutableGitSource(grant.worktree, grant.base_sha).hashes };
+      });
+      const settled = this.settle(nodeId, capability);
+      if (settled.outcome !== "DONE" || this.state().nodes[nodeId]?.state !== "DONE")
+        throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
+      return {
+        claim: claimId,
+        generation,
+        workerSeal: workerSeal.submission_sha256,
+        reviewerSeal: reviewerSeal.submission_sha256,
+        sourceSha256: verified.sourceSha256,
+        model: { platform: "linux", apiRequests: verified.usage.model_turns, mcpCalls: 0, builtinCalls: 0 },
+        gates: completed.gates,
+        settlement: {
+          outcome: settled.outcome,
+          idempotent: settled.idempotent,
+          usageSessions: this.state().nodes[nodeId]?.usage.sessions ?? 0
+        }
+      };
     } finally {
       stage.dispose();
       this.experimentalWslCapabilities.delete(`${nodeId}\0${claimId}\0${generation}`);
