@@ -580,6 +580,23 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
   }, 180_000);
 
+  it.skipIf(!authenticated)('rejects a rotated generation during gates-complete reconcile without charging usage', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'gates-complete' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_GATES_COMPLETE/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    const head = git(p.core, ['rev-parse', ticket.branch!]);
+    o.resumeDispatch(CORE);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).not.toBe(ticket.dispatchId);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/CANCEL|REVOK|STALE|GENERATION|RECEIPT_INVALID|JOURNAL_INVALID/);
+    expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(head);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    assertNoSettlement(p.featureDir);
+  }, 180_000);
+
   it.skipIf(!authenticated)('does not replay or settle a crash after gates-complete without a result', async () => {
     const { p, o, ticket, request } = await claim();
     await expect(transaction(o, { ...request(implement), interruptAfter: 'gates-complete' }))
