@@ -103,7 +103,7 @@ import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, un
 import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
-import { stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
+import { assertImmutableWslApplyBase, stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
 import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
 import {
   acquireResource,
@@ -1351,6 +1351,14 @@ export class Orchestrator {
     }
   }
 
+  /** Preflight only: no lease or authorization survives return; apply must use this inside its own critical section. */
+  assertExperimentalWslCodexApplyBase(nodeId: string, claimId: string, dispatchId: string,
+    proposedPaths: readonly string[]): void {
+    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+    });
+  }
+
   /**
    * Opt-in Windows/WSL process-readiness tracer. Not a production dispatch:
    * command is trusted test/controller input, never a prompt or worker value.
@@ -1395,7 +1403,12 @@ export class Orchestrator {
   readExperimentalWslCodexSealedTurn(nodeId: string, claimId: string, dispatchId: string,
     proposedPaths: readonly string[]): WslCodexVerifiedTurn {
     return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths,
-      (grant) => readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant));
+      (grant) => {
+        assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+        return turn;
+      });
   }
 
   graph(): PortfolioGraph {

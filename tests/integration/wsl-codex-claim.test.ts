@@ -230,6 +230,9 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(verified.proposals).toEqual({ 'src/publish.js': 'JOB_RESULT_V2\n',
           'tests/publish.test.mjs': "import assert from 'node:assert/strict';\nassert.ok(true);\n" });
         expect(verified.reviewer.verdict).toBe('PASS');
+        writeFileSync(join(ticket.worktree!, 'tests', 'run.mjs'), 'throw new Error("post-seal source drift");\n');
+        expect(() => o.readExperimentalWslCodexSealedTurn(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js', 'tests/publish.test.mjs'])).toThrow(/SOURCE_DRIFT/);
         expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
       } finally {
         stage.dispose();
@@ -342,6 +345,20 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
     expect(() => o.inspectWslCodexClaim(CORE, 'forged', generation, ['src/new.ts'])).toThrow(/WSL_CLAIM_STALE/);
     expect(() => o.inspectWslCodexClaim(CORE, claimed.claimId, 'stale', ['src/new.ts'])).toThrow(/WSL_CLAIM_STALE/);
     expect(() => o.inspectWslCodexClaim(CORE, claimed.claimId, generation, ['forbidden/data.txt'])).toThrow(/OWNERSHIP_VIOLATION/);
+  });
+
+  it('rechecks the immutable Git base and clean checkout immediately before a trusted apply', async () => {
+    const { p, o } = await fixture();
+    const ticket = o.claim(CORE, { mode: 'host' });
+    enableCodexLifecycle(p.featureDir);
+    const paths = ['tests/publish.test.mjs', 'src/publish.js'];
+    expect(() => o.assertExperimentalWslCodexApplyBase(CORE, ticket.claimId, ticket.dispatchId!, paths))
+      .not.toThrow();
+    const runner = join(ticket.worktree!, 'tests', 'run.mjs');
+    writeFileSync(runner, 'throw new Error("changed after model staging");\n');
+    expect(() => o.assertExperimentalWslCodexApplyBase(CORE, ticket.claimId, ticket.dispatchId!, paths))
+      .toThrow(/SOURCE_DRIFT/);
+    expect(readFileSync(runner, 'utf8')).toContain('changed after model staging');
   });
 
   it('rejects an expired claim before furnishing any WSL grant', async () => {

@@ -1,7 +1,7 @@
 /* Experimental immutable source staging for a trusted WSL controller, not dispatch. */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageRoot } from '../util/paths.js';
 
@@ -38,6 +38,30 @@ export function immutableGitSource(worktree: string, base: string):
   }
   if (Object.keys(files).length === 0) throw new Error('IMMUTABLE_GIT_TREE_EMPTY');
   return { files, hashes };
+}
+
+/** Recheck the immutable base and destination paths under the live lifecycle mutex. */
+export function assertImmutableWslApplyBase(worktree: string, base: string, allowedPaths: readonly string[]): void {
+  if (!/^[0-9a-f]{40}$/.test(base) ||
+      gitBytes(worktree, ['rev-parse', 'HEAD']).toString('utf8').trim() !== base ||
+      gitBytes(worktree, ['status', '--porcelain', '--untracked-files=all']).length !== 0) {
+    throw new Error('SOURCE_DRIFT: checkout changed after immutable staging');
+  }
+  for (const name of allowedPaths) {
+    const parts = name.split('/');
+    if (!/^[A-Za-z0-9_./-]{1,240}$/.test(name) || parts.some(p => !p || p === '.' || p === '..'))
+      throw new Error('SOURCE_DRIFT: unsafe apply path');
+    let current = worktree;
+    for (const part of parts) {
+      current = join(current, part);
+      try {
+        const entry = lstatSync(current);
+        if (entry.isSymbolicLink()) throw new Error('SOURCE_DRIFT: apply path redirects through a symlink');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  }
 }
 
 function wslSourceScript(): string {

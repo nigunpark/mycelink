@@ -15361,7 +15361,7 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync47, lstatSync as lstatSync18, mkdirSync as mkdirSync26, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync6 } from "node:fs";
+import { existsSync as existsSync47, lstatSync as lstatSync19, mkdirSync as mkdirSync26, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync6 } from "node:fs";
 import { createHash as createHash41 } from "node:crypto";
 import { dirname as dirname21, join as join58, resolve as resolve27 } from "node:path";
 
@@ -29037,7 +29037,7 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { closeSync as closeSync14, constants as fsConstants, fstatSync as fstatSync8, lstatSync as lstatSync16, openSync as openSync12, unlinkSync as unlinkSync3 } from "node:fs";
+import { closeSync as closeSync14, constants as fsConstants, fstatSync as fstatSync8, lstatSync as lstatSync17, openSync as openSync12, unlinkSync as unlinkSync3 } from "node:fs";
 
 // src/sessions/wsl-codex-policy.ts
 function expandAllowedProposalPaths(proposals, fence) {
@@ -29196,7 +29196,7 @@ function revokeWslCodexProcesses(featureDir) {
 // src/sessions/wsl-codex-source.ts
 import { createHash as createHash29 } from "node:crypto";
 import { spawnSync as spawnSync8 } from "node:child_process";
-import { existsSync as existsSync26 } from "node:fs";
+import { existsSync as existsSync26, lstatSync as lstatSync14 } from "node:fs";
 import { join as join37 } from "node:path";
 function gitBytes(cwd, args, limit = 34 * 1024 * 1024) {
   const result = spawnSync8("git", [...args], { cwd, encoding: "buffer", maxBuffer: limit, timeout: 15e3, windowsHide: true });
@@ -29226,6 +29226,26 @@ function immutableGitSource(worktree, base) {
   }
   if (Object.keys(files).length === 0) throw new Error("IMMUTABLE_GIT_TREE_EMPTY");
   return { files, hashes };
+}
+function assertImmutableWslApplyBase(worktree, base, allowedPaths) {
+  if (!/^[0-9a-f]{40}$/.test(base) || gitBytes(worktree, ["rev-parse", "HEAD"]).toString("utf8").trim() !== base || gitBytes(worktree, ["status", "--porcelain", "--untracked-files=all"]).length !== 0) {
+    throw new Error("SOURCE_DRIFT: checkout changed after immutable staging");
+  }
+  for (const name of allowedPaths) {
+    const parts = name.split("/");
+    if (!/^[A-Za-z0-9_./-]{1,240}$/.test(name) || parts.some((p) => !p || p === "." || p === ".."))
+      throw new Error("SOURCE_DRIFT: unsafe apply path");
+    let current = worktree;
+    for (const part of parts) {
+      current = join37(current, part);
+      try {
+        const entry = lstatSync14(current);
+        if (entry.isSymbolicLink()) throw new Error("SOURCE_DRIFT: apply path redirects through a symlink");
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+  }
 }
 function wslSourceScript() {
   if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1") {
@@ -30382,7 +30402,7 @@ function evidenceReuse(uses, traced) {
 
 // src/engine/evidence-integrity.ts
 import { createHash as createHash32 } from "node:crypto";
-import { lstatSync as lstatSync14, mkdirSync as mkdirSync18, readFileSync as readFileSync26, readdirSync as readdirSync13, rmSync as rmSync13 } from "node:fs";
+import { lstatSync as lstatSync15, mkdirSync as mkdirSync18, readFileSync as readFileSync26, readdirSync as readdirSync13, rmSync as rmSync13 } from "node:fs";
 import { basename as basename9, dirname as dirname14, join as join43 } from "node:path";
 var REPAIR_SCHEMA = "mycelink-evidence-repair/1";
 var REPAIRED_DIR = "repaired";
@@ -30937,7 +30957,7 @@ function reapEvidenceTemps(controlRoot, featureId, now3 = Date.now()) {
       const file = join43(dir, name);
       let st;
       try {
-        st = lstatSync14(file);
+        st = lstatSync15(file);
       } catch {
         continue;
       }
@@ -31527,7 +31547,7 @@ import { basename as basename12, isAbsolute as isAbsolute11, join as join48 } fr
 import { createHash as createHash34 } from "node:crypto";
 
 // src/hooks/fence.ts
-import { existsSync as existsSync34, lstatSync as lstatSync15, readFileSync as readFileSync29, readdirSync as readdirSync17, realpathSync as realpathSync5, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync34, lstatSync as lstatSync16, readFileSync as readFileSync29, readdirSync as readdirSync17, realpathSync as realpathSync5, statSync as statSync4 } from "node:fs";
 import { basename as basename11, dirname as dirname16, isAbsolute as isAbsolute10, join as join47, resolve as resolve20 } from "node:path";
 
 // src/security/shell.ts
@@ -32759,7 +32779,7 @@ function reviewerDecision(input) {
 }
 function heldVerdict(dir) {
   try {
-    if (!lstatSync15(join47(dir, "verdict.json")).isFile()) return { transport: "unknown", agent_id: "" };
+    if (!lstatSync16(join47(dir, "verdict.json")).isFile()) return { transport: "unknown", agent_id: "" };
   } catch {
     return null;
   }
@@ -33277,7 +33297,7 @@ var NotSchedulableError = class extends Error {
 var HOST_WORKER_AGENT = "mycelink:module-worker";
 function resultInSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   try {
-    return lstatSync16(join49(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync16(join49(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
+    return lstatSync17(join49(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync17(join49(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
   } catch {
     return false;
   }
@@ -33416,6 +33436,12 @@ var Orchestrator = class _Orchestrator {
       throw error;
     }
   }
+  /** Preflight only: no lease or authorization survives return; apply must use this inside its own critical section. */
+  assertExperimentalWslCodexApplyBase(nodeId, claimId, dispatchId, proposedPaths) {
+    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+    });
+  }
   /**
    * Opt-in Windows/WSL process-readiness tracer. Not a production dispatch:
    * command is trusted test/controller input, never a prompt or worker value.
@@ -33464,7 +33490,12 @@ var Orchestrator = class _Orchestrator {
       claimId,
       dispatchId,
       proposedPaths,
-      (grant) => readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant)
+      (grant) => {
+        assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
+        return turn;
+      }
     );
   }
   graph() {
@@ -36963,7 +36994,7 @@ var Orchestrator = class _Orchestrator {
     if (!realDirectory(dirname17(slot))) return null;
     let st;
     try {
-      st = lstatSync16(slot);
+      st = lstatSync17(slot);
     } catch {
       return null;
     }
@@ -38237,7 +38268,7 @@ var Orchestrator = class _Orchestrator {
   /** The generation's verdict file is there (the reviewer's Write, or a final answer ingested before). */
   slotHolds(open) {
     try {
-      return lstatSync16(join49(this.controlRoot, ...open.slot.split("/"))).isFile();
+      return lstatSync17(join49(this.controlRoot, ...open.slot.split("/"))).isFile();
     } catch {
       return false;
     }
@@ -39258,7 +39289,7 @@ var Orchestrator = class _Orchestrator {
     const slot = join49(safe3.dir, VERDICT_FILE);
     let st = null;
     try {
-      st = lstatSync16(slot);
+      st = lstatSync17(slot);
     } catch {
       st = null;
     }
@@ -42220,12 +42251,12 @@ var Orchestrator = class _Orchestrator {
 };
 function slotTouched(cwd, resultFile) {
   try {
-    if (!lstatSync16(join49(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+    if (!lstatSync17(join49(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
   } catch {
     return false;
   }
   try {
-    lstatSync16(join49(cwd, WORKER_RESULT_DIR, resultFile));
+    lstatSync17(join49(cwd, WORKER_RESULT_DIR, resultFile));
     return true;
   } catch {
     return false;
@@ -42233,7 +42264,7 @@ function slotTouched(cwd, resultFile) {
 }
 function realDirectory(path) {
   try {
-    const st = lstatSync16(path);
+    const st = lstatSync17(path);
     return st.isDirectory() && !st.isSymbolicLink();
   } catch {
     return false;
@@ -42335,7 +42366,7 @@ function readControllerCopy(file, sha25617, nodeId, claimId, dispatchId) {
   }
   try {
     const st = fstatSync8(fd);
-    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync16(file).isSymbolicLink()) return null;
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync17(file).isSymbolicLink()) return null;
     const bytes2 = readFileSync31(fd);
     if (sha25617 !== null && createHash35("sha256").update(bytes2).digest("hex") !== sha25617) return null;
     const parsed = JSON.parse(bytes2.toString("utf8"));
@@ -42854,7 +42885,7 @@ import { dirname as dirname20, join as join53, posix as posix3, relative as rela
 import { createHash as createHash38 } from "node:crypto";
 
 // src/hooks/worker-calls.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync39, lstatSync as lstatSync17, mkdirSync as mkdirSync23, readFileSync as readFileSync33, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync39, lstatSync as lstatSync18, mkdirSync as mkdirSync23, readFileSync as readFileSync33, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
 import { createHash as createHash36, randomBytes as randomBytes8 } from "node:crypto";
 import { dirname as dirname19, isAbsolute as isAbsolute13, join as join50, resolve as resolve23 } from "node:path";
 var CALLS_SCHEMA = "mycelink-calls/1";
@@ -42893,7 +42924,7 @@ function looseRefs(dir, prefix, out) {
     const p = join50(dir, name);
     let st;
     try {
-      st = lstatSync17(p);
+      st = lstatSync18(p);
     } catch {
       continue;
     }
@@ -45069,7 +45100,7 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
 // src/cli/cli.ts
 function isLink2(path) {
   try {
-    return lstatSync18(path).isSymbolicLink();
+    return lstatSync19(path).isSymbolicLink();
   } catch {
     return false;
   }
