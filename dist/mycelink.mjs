@@ -34118,6 +34118,7 @@ var Orchestrator = class _Orchestrator {
         };
         const receiptSha256 = createHash35("sha256").update(JSON.stringify(receipt)).digest("hex");
         writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-intent", resultSha256, receipt, receiptSha256 }) + "\n");
+        if (request.interruptAfter === "result-intent") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RESULT_INTENT");
         writeTextAtomic(slot, bytes2);
         writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-written", resultSha256, receipt, receiptSha256 }) + "\n");
         wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation, { receiptSha256, resultSha256 });

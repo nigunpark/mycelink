@@ -1730,7 +1730,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'first-apply' | 'gates-complete' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'first-apply' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1966,6 +1966,7 @@ export class Orchestrator {
           gates: completed.gates };
         const receiptSha256 = createHash('sha256').update(JSON.stringify(receipt)).digest('hex');
         writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-intent', resultSha256, receipt, receiptSha256 }) + '\n');
+        if (request.interruptAfter === 'result-intent') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_RESULT_INTENT');
         writeTextAtomic(slot, bytes);
         writeTextAtomic(journal, JSON.stringify({ ...prior, phase: 'result-written', resultSha256, receipt, receiptSha256 }) + '\n');
         // Root-owned write-once authentication must precede DONE, which clears the claim.

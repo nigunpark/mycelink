@@ -36,7 +36,7 @@ type TransactionRequest = {
   /** Fixture hook/broker refusal must be enforced by the trusted consumer. */
   refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
   /** Fixture-only interruption; the controller owns the journal and recovery. */
-  interruptAfter?: 'first-apply' | 'gates-complete' | 'result-written' | 'post-settle';
+  interruptAfter?: 'first-apply' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle';
   /** Observation only: a test may pause the turn, never authorize a gate. */
   onPhase?: (phase: 'model-complete') => Promise<void>;
 };
@@ -459,6 +459,23 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
     await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
       .rejects.toThrow(/AMBIGUOUS_PHASE|JOURNAL_INVALID/);
+    expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(head);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    assertNoSettlement(p.featureDir);
+  }, 180_000);
+
+  it.skipIf(!authenticated)('refuses an incomplete result-intent crash instead of inventing a result', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'result-intent' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_RESULT_INTENT/);
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    expect(JSON.parse(readFileSync(journal, 'utf8')).phase).toBe('result-intent');
+    const head = git(p.core, ['rev-parse', ticket.branch!]);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/AMBIGUOUS_PHASE|ANCHOR_INVALID/);
     expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(head);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
     assertNoSettlement(p.featureDir);
