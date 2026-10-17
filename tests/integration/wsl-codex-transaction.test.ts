@@ -63,8 +63,27 @@ const live = process.platform === 'win32' && process.env['MYCELINK_LIVE_WSL_WORK
 const authenticated = live && process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] === '1';
 afterAll(() => cleanupTmpRoots());
 
-async function claim() {
+async function claim(probe?: 'mcp' | 'builtin') {
   const p = createPortfolio();
+  if (probe === 'mcp') {
+    writeFileSync(join(p.core, 'mcp.py'), `import json, sys
+for line in sys.stdin:
+    m = json.loads(line)
+    method = m.get('method')
+    if method == 'initialize':
+        result = {'protocolVersion':'2024-11-05','capabilities':{'tools':{}},'serverInfo':{'name':'probe','version':'1'}}
+    elif method == 'tools/list':
+        result = {'tools':[{'name':'inspect_fixture','description':'Inspect the isolated fixture','inputSchema':{'type':'object','properties':{}}}]}
+    elif method == 'tools/call':
+        result = {'content':[{'type':'text','text':'fixture inspected'}]}
+    else:
+        result = {}
+    if 'id' in m:
+        print(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':result}), flush=True)
+`);
+    git(p.core, ['add', '--', 'mcp.py']);
+    git(p.core, ['commit', '-q', '-m', 'fixture: immutable MCP server']);
+  }
   writePrd(p);
   const graph = portfolioGraph();
   const core = (graph['nodes'] as { id: string; verification_commands: { id: string; command: string[] }[] }[])
@@ -170,7 +189,7 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       ['Use the configured MCP tool to inspect the fixture, then follow the test-first change request. ' + implement, 'mcpCalls', 'mcp'],
       ['Use the built-in shell to inspect the fixture, then follow the test-first change request. ' + implement, 'builtinCalls', 'builtin'],
     ] as const) {
-      const { o, ticket, request } = await claim();
+      const { o, ticket, request } = await claim(probe);
       const receipt = await transaction(o, { ...request(prompt), isolationProbe: probe });
       expect(receipt).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId, settlement: { outcome: 'DONE' } });
       expect(receipt.model[path]).toBeGreaterThan(0); // actual tool invocation, not text mentioning it
@@ -187,7 +206,7 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     assertNoSettlement(p.featureDir);
   }, 180_000);
 
-  it.skipIf(!live)('rejects failed hooks, broker denial and unsealed transport before any apply', async () => {
+  it.skipIf(!authenticated)('rejects failed hooks, broker denial and unsealed transport before any apply', async () => {
     for (const [fixture, reason] of [
       ['hook-exit-nonzero', /HOOK/],
       ['broker-denied', /BROKER|DENIED/],
@@ -197,7 +216,7 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       await expect(transaction(o, { ...request(implement), refusalFixture: fixture })).rejects.toThrow(reason);
       assertNoSettlement(p.featureDir);
     }
-  }, 90_000);
+  }, 240_000);
 
   it.skipIf(!authenticated)('revokes a generation cancelled between model turn and broker seal; no later settle may resurrect it', async () => {
     const { p, o, ticket, request } = await claim();

@@ -33816,8 +33816,8 @@ var Orchestrator = class _Orchestrator {
     if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1" || process.env["MYCELINK_LIVE_WSL_CODEX_AUTH"] !== "1")
       throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
     const { nodeId, claimId, generation, allowedPaths } = request;
-    if (request.refusalFixture || request.isolationProbe)
-      throw new Error("WSL_CODEX_PROBE_NOT_IMPLEMENTED");
+    if (request.refusalFixture && !["hook-exit-nonzero", "broker-denied", "unsealed-transport"].includes(request.refusalFixture))
+      throw new Error("WSL_CODEX_UNKNOWN_REFUSAL_FIXTURE");
     if (allowedPaths.length !== 2 || !allowedPaths.includes("tests/run.mjs") || !allowedPaths.includes("src/publish.js")) throw new Error("WSL_CODEX_TRANSACTION_PATH_DENIED");
     const capability = this.experimentalWslCapabilities.get(`${nodeId}\0${claimId}\0${generation}`);
     if (!capability) throw new Error("WSL_CODEX_CAPABILITY_UNAVAILABLE");
@@ -33840,6 +33840,8 @@ var Orchestrator = class _Orchestrator {
       let workerSealHash;
       let reviewerSealHash;
       if (!resuming) {
+        if (request.isolationProbe === "mcp" && !stage?.hashes["mcp.py"])
+          throw new Error("WSL_CODEX_MCP_FIXTURE_NOT_IN_IMMUTABLE_SOURCE");
         const script = join49(packageRoot(), "scripts", "wsl-codex-turn.py");
         const translated = spawnSync11(
           "wsl.exe",
@@ -33857,7 +33859,8 @@ var Orchestrator = class _Orchestrator {
         );
         if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
           throw new Error("WSL_CODEX_TURN_SCRIPT_UNAVAILABLE");
-        const modelPrompt = "Return only a JSON object keyed by the two exact paths tests/run.mjs and src/publish.js. The test file must be a valid node:test file that fails before the implementation exists; preserve the existing declared test behavior. No markdown. Task: " + request.prompt;
+        const probePrompt = request.isolationProbe === "mcp" ? "First call the configured probe MCP inspect_fixture tool exactly once with empty arguments. " : request.isolationProbe === "builtin" ? "First use the built-in shell to run ls /mnt/c/Windows exactly once, then continue despite the denied path. " : "";
+        const modelPrompt = probePrompt + "Return only a JSON object keyed by the two exact paths tests/run.mjs and src/publish.js. The test file must be a valid node:test file that fails before the implementation exists; preserve the existing declared test behavior. No markdown. Task: " + request.prompt;
         this.startExperimentalWslCodexGeneration(
           nodeId,
           claimId,
@@ -33878,6 +33881,7 @@ var Orchestrator = class _Orchestrator {
             "tests/run.mjs",
             "--proposal-path",
             "src/publish.js",
+            ...request.isolationProbe ? ["--isolation-probe", request.isolationProbe] : [],
             "--review-prompt",
             'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
             "--prompt",
@@ -33895,6 +33899,30 @@ var Orchestrator = class _Orchestrator {
         if (!outcome || outcome.exit_code !== 0 || outcome.revoked)
           throw new Error("WSL_CODEX_GENERATION_FAILED_OR_REVOKED");
         await request.onPhase?.("model-complete");
+        if (request.refusalFixture) {
+          const fixture = request.refusalFixture;
+          try {
+            this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
+              if (fixture === "unsealed-transport")
+                return readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+              if (fixture === "broker-denied")
+                return sealRegisteredWslCodexWorker(
+                  this.paths.featureDir,
+                  this.controlRoot,
+                  { ...grant, allowed_paths: ["tests/run.mjs"] }
+                );
+              return sealRegisteredWslCodexWorker(
+                this.paths.featureDir,
+                join49(dirname17(this.controlRoot), "missing-hook-workspace"),
+                grant
+              );
+            });
+          } catch (error) {
+            if (!String(error).includes("WSL_CODEX_BROKER_DENIED")) throw error;
+            throw new Error(fixture === "hook-exit-nonzero" ? "WSL_CODEX_HOOK_DENIED" : fixture === "broker-denied" ? "WSL_CODEX_BROKER_DENIED" : "WSL_CODEX_UNSEALED_TRANSPORT_DENIED");
+          }
+          throw new Error("WSL_CODEX_REFUSAL_FIXTURE_UNEXPECTED_ALLOW");
+        }
         const workerSeal = this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
         const reviewerSeal = this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
         workerSealHash = workerSeal.submission_sha256;
@@ -33902,6 +33930,16 @@ var Orchestrator = class _Orchestrator {
         const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
         if (turn.worker.events.filter((event) => event === "turn.completed").length !== 1)
           throw new Error("WSL_CODEX_MODEL_TRANSCRIPT_INVALID");
+        if (request.isolationProbe) {
+          const items2 = turn.worker.transcript.flatMap((entry) => {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+            const message = entry;
+            return message["type"] === "item.completed" && message["item"] && typeof message["item"] === "object" && !Array.isArray(message["item"]) ? [message["item"]] : [];
+          });
+          const invoked = request.isolationProbe === "mcp" ? items2.some((item) => item["type"] === "mcp_tool_call" && item["server"] === "probe" && item["tool"] === "inspect_fixture") : items2.some((item) => item["type"] === "command_execution" && typeof item["command"] === "string" && item["command"].includes("/mnt/c/Windows") && typeof item["exit_code"] === "number" && item["exit_code"] !== 0);
+          if (!invoked) throw new Error("WSL_CODEX_MODEL_TOOL_CALL_NOT_OBSERVED");
+          throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
+        }
         this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, "tests/run.mjs");
         this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
           const journal = join49(

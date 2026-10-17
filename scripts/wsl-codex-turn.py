@@ -108,13 +108,17 @@ def run(args):
             os.setgid(principal.pw_gid)
             os.setuid(principal.pw_uid)
         socket = start_bridge('worker', worker)
+        mcp_config = ('''-c 'mcp_servers.probe.command="/usr/bin/python3"' \\
+  -c 'mcp_servers.probe.args=["/work/mcp.py"]' -c mcp_servers.probe.required=true \\
+  -c 'mcp_servers.probe.default_tools_approval_mode="approve"' \\
+  ''' if args.isolation_probe == 'mcp' else '')
         script = '''socat TCP-LISTEN:18547,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/bridge.sock &
 proxy=$!
 trap 'kill "$proxy" 2>/dev/null || true' EXIT
 OPENAI_API_KEY=placeholder timeout 65s /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js \\
   exec --ignore-user-config --ephemeral --skip-git-repo-check --json --cd /work \\
   --sandbox read-only -c approval_policy=never \\
-  -c 'openai_base_url="http://127.0.0.1:18547/v1"' \\
+  ''' + mcp_config + '''-c 'openai_base_url="http://127.0.0.1:18547/v1"' \\
   ''' + shlex.quote(args.prompt) + ''' >/proposal/codex-out 2>/proposal/codex-err
 status=$?
 if test "$status" -ne 0; then exit "$status"; fi
@@ -249,6 +253,7 @@ def main():
     for name in ('source', 'manifest', 'claim', 'generation', 'prompt'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--proposal-path', action='append', default=[])
+    parser.add_argument('--isolation-probe', choices=('mcp', 'builtin'))
     parser.add_argument('--review-prompt')
     run(parser.parse_args())
 
