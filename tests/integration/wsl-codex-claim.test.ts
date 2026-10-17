@@ -191,6 +191,23 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
     }, 40_000,
   );
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'refuses host settlement after a registered command exits nonzero', async () => {
+      const { p, o } = await fixture();
+      const ticket = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      o.startExperimentalWslCodexGeneration(CORE, ticket.claimId, ticket.dispatchId!,
+        ['src/new.ts'], ['/bin/sh', '-c', 'exit 19']);
+      for (let i = 0; i < 25; i++) {
+        try { wslCodexProcessResult(p.featureDir, ticket.claimId, ticket.dispatchId!); break; }
+        catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+      }
+      expect(wslCodexProcessResult(p.featureDir, ticket.claimId, ticket.dispatchId!)).toEqual({ exit_code: 19, revoked: false });
+      expect(() => o.settle(CORE, ticket.capability)).toThrow(/WSL_CODEX_WORKER_FAILED/);
+      expect(() => o.completeSettlement(CORE, 'resume')).toThrow(/WSL_CODEX_WORKER_FAILED/);
+      expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
+    }, 40_000,
+  );
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'stages immutable Git source only while the live claim mutex is held and refuses a revoked claim', async () => {
       const { p, o } = await fixture();
       const ticket = o.claim(CORE, { mode: 'host' });

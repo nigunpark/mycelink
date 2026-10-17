@@ -102,7 +102,7 @@ import { statusForOutcome } from '../sessions/adapter.js';
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, unlinkSync } from 'node:fs';
 import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
-import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive } from '../sessions/wsl-codex-process.js';
+import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
 import { stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
 import {
   acquireResource,
@@ -6045,9 +6045,12 @@ export class Orchestrator {
   /** A status without a root-owned generation tombstone is not evidence of exit. */
   private assertExperimentalWslStopped(nodeId: string): void {
     const claim = this.state().nodes[nodeId]?.claim;
-    if (claim?.mode === 'host' && claim.dispatch_id &&
-        wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
-      throw new Error('WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits');
+    if (claim?.mode === 'host' && claim.dispatch_id) {
+      if (wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
+        throw new Error('WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits');
+      }
+      const result = wslCodexProcessResult(this.paths.featureDir, claim.claim_id, claim.dispatch_id);
+      if (result.revoked || result.exit_code !== 0) throw new Error('WSL_CODEX_WORKER_FAILED: root-supervisor exit was not successful');
     }
   }
 

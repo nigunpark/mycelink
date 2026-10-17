@@ -29147,6 +29147,36 @@ function wslCodexProcessActive(featureDir, claim, generation) {
     throw new Error("WSL_CODEX_STATUS_UNCONFIRMED");
   }
 }
+function wslCodexProcessResult(featureDir, claim, generation) {
+  const script = wslProcessScript();
+  const result = spawnSync7(
+    "wsl.exe",
+    [
+      "-d",
+      "Ubuntu",
+      "-u",
+      "root",
+      "--",
+      "python3",
+      script,
+      "result",
+      wslCodexFeatureToken(featureDir),
+      claim,
+      generation
+    ],
+    { encoding: "utf8", timeout: 12e3, windowsHide: true }
+  );
+  if (result.status !== 0 || result.error) throw new Error("WSL_CODEX_RESULT_UNCONFIRMED");
+  try {
+    const parsed = JSON.parse(result.stdout);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid result");
+    const value = parsed;
+    if (Object.keys(value).length !== 2 || !Number.isSafeInteger(value["exit_code"]) || value["exit_code"] < 0 || value["exit_code"] > 255 || typeof value["revoked"] !== "boolean") throw new Error("invalid result");
+    return value;
+  } catch {
+    throw new Error("WSL_CODEX_RESULT_UNCONFIRMED");
+  }
+}
 function revokeWslCodexProcesses(featureDir) {
   const script = wslProcessScript();
   const result = spawnSync7("wsl.exe", [
@@ -37402,8 +37432,12 @@ var Orchestrator = class _Orchestrator {
   /** A status without a root-owned generation tombstone is not evidence of exit. */
   assertExperimentalWslStopped(nodeId) {
     const claim = this.state().nodes[nodeId]?.claim;
-    if (claim?.mode === "host" && claim.dispatch_id && wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
-      throw new Error("WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits");
+    if (claim?.mode === "host" && claim.dispatch_id) {
+      if (wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
+        throw new Error("WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits");
+      }
+      const result = wslCodexProcessResult(this.paths.featureDir, claim.claim_id, claim.dispatch_id);
+      if (result.revoked || result.exit_code !== 0) throw new Error("WSL_CODEX_WORKER_FAILED: root-supervisor exit was not successful");
     }
   }
   settle(nodeId, capability) {
