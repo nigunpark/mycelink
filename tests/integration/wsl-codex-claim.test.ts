@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { codexLifecycleLockPath, enableCodexLifecycle, withCodexLifecycleLock } from '../../src/state/codex-lifecycle.js';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
@@ -209,6 +209,70 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
       .toThrow(/WSL_CLAIM_STALE/);
   });
 
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'a controller cancellation kills a registered WSL generation, not only its Windows shell', async () => {
+      const { p, o } = await fixture();
+      const claimed = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const token = createHash('sha256').update(realpathSync(p.featureDir).replace(/\\/g, '/').toLowerCase()).digest('hex');
+      const script = join(process.cwd(), 'scripts', 'wsl-codex-process.py');
+      const linuxScript = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u', script.replace(/\\/g, '/')],
+        { encoding: 'utf8', timeout: 10_000 });
+      expect(linuxScript.status, linuxScript.stderr).toBe(0);
+      const wslScript = linuxScript.stdout.trim();
+      const processInWsl = spawn('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', wslScript,
+        'run', token, claimed.claimId, claimed.dispatchId!, '--', '/bin/sleep', '60'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      try {
+        const ready = await new Promise<{ pid: number }>((resolveReady, reject) => {
+          const timeout = setTimeout(() => reject(new Error('WSL process registration timed out')), 15_000);
+          processInWsl.stdout.once('data', (buffer: Buffer) => {
+            clearTimeout(timeout);
+            try { resolveReady(JSON.parse(buffer.toString('utf8')) as { pid: number }); }
+            catch (err) { reject(err); }
+          });
+          processInWsl.once('error', reject);
+        });
+        expect(ready.pid).toBeGreaterThan(1);
+        expect(spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'test', '-e', `/proc/${ready.pid}`],
+          { timeout: 10_000 }).status).toBe(0);
+        const io: CliIo = { out: () => undefined, err: (text) => { throw new Error(text); } };
+        expect(await main([...asController(['feature', 'cancel', FEATURE_ID, '--control-root', p.control], p.control)], io)).toBe(0);
+        expect(loadState(p.featureDir)!.data.feature_state).toBe('CANCELLED');
+        expect(spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'test', '-e', `/proc/${ready.pid}`],
+          { timeout: 10_000 }).status).not.toBe(0);
+        expect(() => o.inspectWslCodexClaim(CORE, claimed.claimId, claimed.dispatchId!, ['src/new.ts']))
+          .toThrow(/WSL_CLAIM_STALE/);
+      } finally {
+        spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', wslScript, 'revoke', token],
+          { timeout: 10_000 });
+        processInWsl.kill();
+      }
+    }, 45_000,
+  );
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'does not report cancellation or mutate the claim when WSL revocation cannot be proven', async () => {
+      const { p, o } = await fixture();
+      const claimed = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const token = createHash('sha256').update(realpathSync(p.featureDir).replace(/\\/g, '/').toLowerCase()).digest('hex');
+      const code = 'from pathlib import Path; import os; p=Path("/var/lib/mycelink-codex/processes")/os.environ["TOKEN"]; p.mkdir(parents=True, exist_ok=True, mode=0o700); (p/"forged.json").write_text("{}")';
+      const created = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'env', `TOKEN=${token}`, 'python3', '-c', code],
+        { timeout: 10_000, encoding: 'utf8' });
+      expect(created.status, created.stderr).toBe(0);
+      try {
+        let error = '';
+        const io: CliIo = { out: () => undefined, err: (text) => { error += text; } };
+        expect(await main([...asController(['feature', 'cancel', FEATURE_ID, '--control-root', p.control], p.control)], io)).not.toBe(0);
+        expect(error).toMatch(/WSL_CODEX_REVOKE_UNCONFIRMED/);
+        expect(loadState(p.featureDir)!.data.feature_state).not.toBe('CANCELLED');
+        expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).toBe(claimed.dispatchId);
+      } finally {
+        const cleanup = 'from pathlib import Path; import os; p=Path("/var/lib/mycelink-codex/processes")/os.environ["TOKEN"]; (p/"forged.json").unlink(); (p/".lock").unlink(); p.rmdir()';
+        spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'env', `TOKEN=${token}`, 'python3', '-c', cleanup],
+          { timeout: 10_000 });
+      }
+    }, 30_000,
+  );
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'crosses the real host claim/worktree into isolated WSL transport and sealed broker', async () => {
       const { p, o } = await fixture();

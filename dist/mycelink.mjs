@@ -15361,9 +15361,9 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync44, lstatSync as lstatSync18, mkdirSync as mkdirSync26, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
-import { createHash as createHash39 } from "node:crypto";
-import { dirname as dirname21, join as join55, resolve as resolve27 } from "node:path";
+import { existsSync as existsSync45, lstatSync as lstatSync18, mkdirSync as mkdirSync26, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync6 } from "node:fs";
+import { createHash as createHash40 } from "node:crypto";
+import { dirname as dirname21, join as join56, resolve as resolve27 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -44293,10 +44293,44 @@ function featureDeliveryProblems(controlRoot, featureId) {
   return [];
 }
 
-// src/engine/deliver.ts
-import { existsSync as existsSync43, mkdirSync as mkdirSync25, readFileSync as readFileSync38 } from "node:fs";
+// src/sessions/wsl-codex-process.ts
 import { createHash as createHash38 } from "node:crypto";
+import { existsSync as existsSync43, realpathSync as realpathSync5 } from "node:fs";
 import { join as join54 } from "node:path";
+import { spawnSync as spawnSync7 } from "node:child_process";
+function wslCodexFeatureToken(featureDir) {
+  return createHash38("sha256").update(realpathSync5(featureDir).replace(/\\/g, "/").toLowerCase()).digest("hex");
+}
+function revokeWslCodexProcesses(featureDir) {
+  if (process.platform !== "win32") throw new Error("WSL_CODEX_REVOKE_UNAVAILABLE");
+  const script = join54(packageRoot(), "scripts", "wsl-codex-process.py");
+  if (!existsSync43(script)) throw new Error("WSL_CODEX_REVOKE_SCRIPT_MISSING");
+  const linuxPath = spawnSync7(
+    "wsl.exe",
+    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
+    { encoding: "utf8", timeout: 1e4, windowsHide: true }
+  );
+  if (linuxPath.status !== 0 || !linuxPath.stdout?.trim().startsWith("/mnt/")) {
+    throw new Error("WSL_CODEX_REVOKE_PATH_UNAVAILABLE");
+  }
+  const result = spawnSync7("wsl.exe", [
+    "-d",
+    "Ubuntu",
+    "-u",
+    "root",
+    "--",
+    "python3",
+    linuxPath.stdout.trim(),
+    "revoke",
+    wslCodexFeatureToken(featureDir)
+  ], { encoding: "utf8", timeout: 12e3, windowsHide: true });
+  if (result.status !== 0) throw new Error("WSL_CODEX_REVOKE_UNCONFIRMED");
+}
+
+// src/engine/deliver.ts
+import { existsSync as existsSync44, mkdirSync as mkdirSync25, readFileSync as readFileSync38 } from "node:fs";
+import { createHash as createHash39 } from "node:crypto";
+import { join as join55 } from "node:path";
 var DeliveryRefusedError = class extends Error {
   problems;
   constructor(problems) {
@@ -44313,10 +44347,10 @@ var DeliveryFailedError = class extends Error {
 };
 function manifestFile(featureDir, candidateId) {
   assertCandidateId(candidateId);
-  return join54(featureDir, "deliveries", `${candidateId}.json`);
+  return join55(featureDir, "deliveries", `${candidateId}.json`);
 }
 function readManifest(file) {
-  if (!existsSync43(file)) return null;
+  if (!existsSync44(file)) return null;
   try {
     return JSON.parse(readFileSync38(file, "utf8"));
   } catch {
@@ -44355,13 +44389,13 @@ function untrustedManifest(controlRoot, featureId, candidateId, targets, raw) {
   return null;
 }
 function save3(file, manifest) {
-  mkdirSync25(join54(file, ".."), { recursive: true });
+  mkdirSync25(join55(file, ".."), { recursive: true });
   writeTextAtomic(file, JSON.stringify(manifest, null, 2) + "\n");
 }
 function deliverFeature(controlRoot, featureId, options = {}) {
-  const lockDir = join54(featurePaths(controlRoot, featureId).featureDir, "deliveries");
+  const lockDir = join55(featurePaths(controlRoot, featureId).featureDir, "deliveries");
   mkdirSync25(lockDir, { recursive: true });
-  return withLock(join54(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
+  return withLock(join55(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
     timeoutMs: 2e3,
     pollMs: 50,
     purpose: "feature delivery"
@@ -44388,7 +44422,7 @@ function deliverLocked(controlRoot, featureId, options) {
     return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
   })) {
     const recorded = state.accepted_deliveries?.[candidateId];
-    const bytes2 = createHash38("sha256").update(readFileSync38(file)).digest("hex");
+    const bytes2 = createHash39("sha256").update(readFileSync38(file)).digest("hex");
     const why = recorded !== bytes2 ? "manifest does not match the accepted delivery recorded in STATE.json" : untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
     if (why === null) return { ...existing, ok: true, idempotent: true };
     appendEvent(paths.events, {
@@ -44528,13 +44562,13 @@ function deliverLocked(controlRoot, featureId, options) {
     feature_id: featureId,
     data: { candidate_id: candidateId, repositories: Object.fromEntries(names2.map((n) => [n, plan[n]?.after ?? null])) }
   });
-  const evidenceDir = join54(paths.evidenceDir, "delivery", candidateId);
+  const evidenceDir = join55(paths.evidenceDir, "delivery", candidateId);
   manifest.acceptance = names2.map((name) => acceptance(controlRoot, workspace, name, plan[name], candidateId, evidenceDir));
   const passed = manifest.acceptance.every((a) => a.failure_fingerprint === null);
   manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
   manifest.accepted_at = passed ? (/* @__PURE__ */ new Date()).toISOString() : null;
   save3(file, manifest);
-  const manifestSha = createHash38("sha256").update(readFileSync38(file)).digest("hex");
+  const manifestSha = createHash39("sha256").update(readFileSync38(file)).digest("hex");
   mutateState(paths.featureDir, (s) => {
     const accepted = { ...s.accepted_deliveries ?? {} };
     if (passed) accepted[candidateId] = manifestSha;
@@ -44567,10 +44601,10 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
   const decl = workspace.repositories.repositories.find((r) => r.name === name);
   const repo = repositoryPath(workspace, name);
   const command = decl?.commands.test ?? [];
-  const dir = join54(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
+  const dir = join55(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
   runGit(repo, ["worktree", "remove", "--force", dir], { allowFail: true });
   runGit(repo, ["worktree", "prune"], { allowFail: true });
-  mkdirSync25(join54(workspace.paths.workDir, "acceptance"), { recursive: true });
+  mkdirSync25(join55(workspace.paths.workDir, "acceptance"), { recursive: true });
   runGit(repo, ["worktree", "add", "--detach", dir, step.base_branch]);
   try {
     const sha = resolveRef(dir, "HEAD");
@@ -44583,7 +44617,7 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
         repository: name,
         repoPath: repo,
         worktree: dir,
-        root: join54(workspace.paths.workDir, "acceptance"),
+        root: join55(workspace.paths.workDir, "acceptance"),
         config: setup,
         evidenceDir,
         label: `acceptance-${name}.worktree-setup`
@@ -44639,7 +44673,7 @@ function isLink2(path) {
   }
 }
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync39(join55(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync39(join56(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -44732,7 +44766,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve27(env);
   let dir = resolve27(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync44(join55(dir, "mycelink.config.json"))) return dir;
+    if (existsSync45(join56(dir, "mycelink.config.json"))) return dir;
     const parent = dirname21(dir);
     if (parent === dir) break;
     dir = parent;
@@ -44784,7 +44818,7 @@ function orchestratorFor(controlRoot, featureId) {
 function requireController(args, operation) {
   if (args.positional[0] === "init") {
     const target = resolve27(args.positional[1] ?? ".");
-    if (!existsSync44(controlPaths(target).config)) {
+    if (!existsSync45(controlPaths(target).config)) {
       assertControllerRole(args, operation);
       return;
     }
@@ -44916,15 +44950,15 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync44(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync44(paths.config), paths.config);
+  push("control-root", existsSync45(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync45(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync44(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync45(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync44(paths.repositoriesManifest)) {
+  } else if (existsSync45(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
     repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
@@ -44946,11 +44980,11 @@ function doctor(args, io) {
     level: adapter.ok ? "ok" : "warn",
     detail: adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
-  if (existsSync44(paths.config)) {
+  if (existsSync45(paths.config)) {
     const hooks = hookHealth(controlRoot);
     push("hooks", hooks.ok, hooks.detail);
   }
-  const features = existsSync44(paths.featuresDir) ? readdirSync25(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync45(paths.featuresDir) ? readdirSync25(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -44964,14 +44998,14 @@ function doctor(args, io) {
 function cmdInit(args, io) {
   const target = resolve27(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync44(paths.repositoriesManifest)) {
+  if (!existsSync45(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync44(join55(target, "CLAUDE.md"))) {
-    writeTextAtomic(join55(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync45(join56(target, "CLAUDE.md"))) {
+    writeTextAtomic(join56(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -45016,7 +45050,7 @@ function repoGroup(args, io) {
   const sub = requirePositional(args, 1, "register|modules|audit|lock");
   if (sub === "register") {
     const name = flagString(args, "name");
-    const manifest = existsSync44(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync45(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     const existing = manifest.repositories.find((r) => r["name"] === name);
     const path = flagString(args, "path", typeof existing?.["path"] === "string" ? existing["path"] : void 0);
     const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve27(controlRoot, r["path"]), resolve27(controlRoot, path)));
@@ -45179,7 +45213,7 @@ function featureGroup(args, io) {
     if (typeof graphPath === "string") {
       writeTextAtomic(paths.graph, readFileSync39(resolve27(graphPath), "utf8"));
     }
-    if (!existsSync44(paths.graph)) {
+    if (!existsSync45(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -45200,7 +45234,7 @@ function featureGroup(args, io) {
     if (acceptance2 !== null) state.acceptance = { path: acceptance2.path, sha256: acceptance2.sha256 };
     state.acceptance_review = { required: reviewPolicy.required, max_rounds: reviewPolicy.max_rounds, criterion_ceiling: reviewPolicy.criterion_ceiling, max_review_sessions: reviewPolicy.max_review_sessions, review_wall_clock_ms: reviewPolicy.review_wall_clock_ms, reviewer_timeout_ms: reviewPolicy.reviewer_timeout_ms, open: null, reviews: [], blocked: null, usage: zeroUsage() };
     saveState(paths.featureDir, state);
-    if (!existsSync44(paths.loops)) {
+    if (!existsSync45(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -45209,7 +45243,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync44(file)) writeTextAtomic(file, body);
+      if (!existsSync45(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -45300,19 +45334,24 @@ function featureGroup(args, io) {
   if (sub === "cancel") {
     assertControllerRole(args, "feature cancel");
     const graph = loadGraph(controlRoot, featureId);
-    mutateState(paths.featureDir, (s) => {
-      s.feature_state = "CANCELLED";
-      s.blocked_reason = typeof args.flags["reason"] === "string" ? args.flags["reason"] : "cancelled by user";
-      for (const [id, runtime] of Object.entries(s.nodes)) {
-        if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== "INTEGRATED") {
-          s = applyNodeTransition(graph, s, id, "PAUSED", { actor: "mycelink", reason: "feature cancelled" });
+    const cancel = () => {
+      if (codexLifecycleEnabled(paths.featureDir)) revokeWslCodexProcesses(paths.featureDir);
+      mutateState(paths.featureDir, (s) => {
+        s.feature_state = "CANCELLED";
+        s.blocked_reason = typeof args.flags["reason"] === "string" ? args.flags["reason"] : "cancelled by user";
+        for (const [id, runtime] of Object.entries(s.nodes)) {
+          if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== "INTEGRATED") {
+            s = applyNodeTransition(graph, s, id, "PAUSED", { actor: "mycelink", reason: "feature cancelled" });
+          }
         }
+        return s;
+      });
+      for (const nodeId of Object.keys(loadState(paths.featureDir)?.data.nodes ?? {})) {
+        releaseAllForNode(paths.featureDir, nodeId);
       }
-      return s;
-    });
-    for (const nodeId of Object.keys(loadState(paths.featureDir)?.data.nodes ?? {})) {
-      releaseAllForNode(paths.featureDir, nodeId);
-    }
+    };
+    if (codexLifecycleEnabled(paths.featureDir)) withCodexLifecycleLock(paths.featureDir, cancel);
+    else cancel();
     emit2(io, args, { feature_id: featureId, cancelled: true }, () => `${featureId} cancelled; claims and leases released.`);
     return 0;
   }
@@ -45388,7 +45427,7 @@ function featureGroup(args, io) {
 }
 function featureAcceptance(args, io, controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
-  const target = join55(paths.featureDir, ACCEPTANCE_FILE);
+  const target = join56(paths.featureDir, ACCEPTANCE_FILE);
   const show = (written, from) => {
     const loaded = loadAcceptanceManifest(controlRoot, featureId);
     if (loaded === null) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}`);
@@ -45396,7 +45435,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     emit2(
       io,
       args,
-      { path: loaded.path, sha256: createHash39("sha256").update(written).digest("hex"), from, source: manifest2.source, criteria: manifest2.criteria },
+      { path: loaded.path, sha256: createHash40("sha256").update(written).digest("hex"), from, source: manifest2.source, criteria: manifest2.criteria },
       () => [
         `${loaded.path} (${from}): ${manifest2.criteria.map((c) => `${c.id} ${c.kind}`).join(", ")}`,
         "Copy the criteria into the graph exactly (acceptance_criteria: [{id, text, kind}] from this file); never summarise them."
@@ -45406,7 +45445,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   };
   const source = args.flags["source"];
   if (typeof source !== "string") {
-    if (!existsSync44(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
+    if (!existsSync45(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
     return show(readFileSync39(target), "manifest");
   }
   if (loadState(paths.featureDir) !== null) {
@@ -45414,7 +45453,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   }
   const sourceFile = resolve27(controlRoot, source);
   const sourceRel = relativeInside(controlRoot, sourceFile);
-  if (sourceRel === null || !existsSync44(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
+  if (sourceRel === null || !existsSync45(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
   const bytes2 = readFileSync39(sourceFile);
   const kinds = /* @__PURE__ */ new Map();
   const flag = args.flags["kind"];
@@ -45427,7 +45466,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   }
   const sidecar = resolve27(controlRoot, sidecarPath(sourceRel));
   mkdirSync26(paths.featureDir, { recursive: true });
-  if (existsSync44(sidecar)) {
+  if (existsSync45(sidecar)) {
     const raw = readFileSync39(sidecar);
     let parsed;
     try {
@@ -45437,7 +45476,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     }
     const problems = manifestProblems(parsed, { featureId, source: bytes2 });
     if (problems.length > 0) {
-      const stale = parsed.source?.sha256 !== createHash39("sha256").update(bytes2).digest("hex");
+      const stale = parsed.source?.sha256 !== createHash40("sha256").update(bytes2).digest("hex");
       throw new AcceptanceError(stale ? "ACCEPTANCE_SOURCE_MISMATCH" : "ACCEPTANCE_MANIFEST_INVALID", `${sidecarPath(sourceRel)}: ${problems.join("; ")}`);
     }
     for (const [id, kind] of kinds) {
@@ -45489,10 +45528,10 @@ function graphGroup(args, io) {
       }
       files[role] = readFileSync39(resolve27(file), "utf8");
     }
-    const repositories = existsSync44(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync45(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve27(args.flags["out"]) : join55(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    const out = typeof args.flags["out"] === "string" ? resolve27(args.flags["out"]) : join56(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
     if (resolve27(out) === resolve27(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
@@ -45522,7 +45561,7 @@ function graphGroup(args, io) {
   if (sub === "compile") {
     const source = flagString(args, "from");
     const parsed = import_yaml7.default.parse(readFileSync39(resolve27(source), "utf8"));
-    const repositories = existsSync44(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync45(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
@@ -45972,8 +46011,8 @@ function tddGroup(args, io) {
   const setupBinding = worktree !== null ? runtime.claim?.worktree_setup : void 0;
   const nowInputs = worktree !== null && setupBinding !== void 0 ? setupInputs(worktree, setupBinding.config) : null;
   if (worktree !== null && setupBinding !== void 0 && nowInputs !== null && nowInputs.sha256 !== setupBinding.inputs_sha256) {
-    const receiptFile = join55(controlRoot, setupBinding.receipt_path);
-    const before = existsSync44(receiptFile) ? JSON.parse(readFileSync39(receiptFile, "utf8")).input_files : void 0;
+    const receiptFile = join56(controlRoot, setupBinding.receipt_path);
+    const before = existsSync45(receiptFile) ? JSON.parse(readFileSync39(receiptFile, "utf8")).input_files : void 0;
     const files = changedInputs(before, nowInputs.files);
     const workspace = loadWorkspace(controlRoot);
     const run = runWorktreeSetup({
@@ -46048,7 +46087,7 @@ function tddGroup(args, io) {
   };
   let deferral = null;
   if (phase === "regression" && bound !== void 0 && record.exit_code !== 0) {
-    deferral = regressionDeferral({ graph, state: loadState(paths.featureDir).data, nodeId, output: readFileSync39(join55(controlRoot, record.output_path), "utf8"), exitCode: record.exit_code, checkout: cwd });
+    deferral = regressionDeferral({ graph, state: loadState(paths.featureDir).data, nodeId, output: readFileSync39(join56(controlRoot, record.output_path), "utf8"), exitCode: record.exit_code, checkout: cwd });
     if (deferral.deferred) record.regression_deferred = { to: deferral.to, failing: deferral.failing };
   }
   const noRed = phase === "red" && !redRequired(node, runtime);
@@ -46208,11 +46247,11 @@ function tddCheck(args, io, controlRoot, featureId, graph, node, runtime) {
   const repoPath = repositoryPath(workspace, node.repository);
   const branch = workerBranchName(featureId, node.id);
   const head = resolveRef(repoPath, branch);
-  const slot = join55(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
+  const slot = join56(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
   let result;
   const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
   if (read === null) {
-    if (existsSync44(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
+    if (existsSync45(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
     return refuse2("RESULT_MISSING", `write your result to ${slot} first (it does not exist)`);
   }
   try {
@@ -46307,19 +46346,19 @@ function challengeSnapshot(controlRoot, featureId, nodeId, worktree, record, bin
   if (!accepted && (record.exit_code !== 0 || record.red_category !== "passed")) return null;
   const red = shownTests(gateRan, declared, 64).filter((t) => declared.some((d) => namesDeclared(t, d)));
   if (red.length === 0 || (accepted ? !red.some((t) => t.status === "passed") : red.some((t) => t.status !== "passed"))) return null;
-  const sha = (bytes2) => createHash39("sha256").update(bytes2).digest("hex");
+  const sha = (bytes2) => createHash40("sha256").update(bytes2).digest("hex");
   const planned = [];
   let total = 0;
   for (const t of binding.tests) {
     if (t.blob === null) continue;
-    const bytes2 = readFileSync39(join55(worktree, ...t.path.split("/")));
+    const bytes2 = readFileSync39(join56(worktree, ...t.path.split("/")));
     total += bytes2.length;
     if (total > 8 * 1024 * 1024) return null;
     planned.push({ at: ["files", ...t.path.split("/")], bytes: bytes2, test: { path: t.path, blob: t.blob } });
   }
   const gateBytes = (rel2, want) => {
-    const src = join55(controlRoot, ...rel2.split("/"));
-    if (!existsSync44(src)) return null;
+    const src = join56(controlRoot, ...rel2.split("/"));
+    if (!existsSync45(src)) return null;
     const bytes2 = readFileSync39(src);
     return sha(bytes2) === want ? bytes2 : null;
   };
@@ -46327,21 +46366,21 @@ function challengeSnapshot(controlRoot, featureId, nodeId, worktree, record, bin
   const resultsBytes = record.results ? gateBytes(record.results.path, record.results.sha256) : null;
   if (outputBytes !== null) planned.push({ at: ["gate", "red.log"], bytes: outputBytes });
   if (resultsBytes !== null) planned.push({ at: ["gate", "red.results.json"], bytes: resultsBytes });
-  const root = join55(nodeEvidenceDir(controlRoot, featureId, nodeId), "challenge-red");
+  const root = join56(nodeEvidenceDir(controlRoot, featureId, nodeId), "challenge-red");
   const name = record.output_sha256.slice(0, 16);
   let dir = null;
   for (let n = 0; n <= 16 && dir === null; n++) {
-    const candidate = join55(root, n === 0 ? name : `${name}-${n}`);
-    if (planned.every((p) => artifactAt(join55(candidate, ...p.at), sha(p.bytes)) !== "other")) dir = candidate;
+    const candidate = join56(root, n === 0 ? name : `${name}-${n}`);
+    if (planned.every((p) => artifactAt(join56(candidate, ...p.at), sha(p.bytes)) !== "other")) dir = candidate;
   }
   if (dir === null) return null;
   for (const p of planned) {
-    const target = join55(dir, ...p.at);
+    const target = join56(dir, ...p.at);
     if (artifactAt(target, sha(p.bytes)) === "same") continue;
     mkdirSync26(dirname21(target), { recursive: true });
     if (createExclusive(target, p.bytes) === "exists" && artifactAt(target, sha(p.bytes)) !== "same") return null;
   }
-  const rel = (at) => (relativeInside(controlRoot, join55(dir, ...at)) ?? join55(dir, ...at)).replace(/\\/g, "/");
+  const rel = (at) => (relativeInside(controlRoot, join56(dir, ...at)) ?? join56(dir, ...at)).replace(/\\/g, "/");
   const files = planned.filter((p) => p.test !== void 0).map((p) => ({ path: p.test.path, blob: p.test.blob, copy: rel(p.at), sha256: sha(p.bytes) }));
   const output = outputBytes === null ? null : { path: rel(["gate", "red.log"]), sha256: record.output_sha256 };
   const results = resultsBytes === null || !record.results ? null : { path: rel(["gate", "red.results.json"]), sha256: record.results.sha256 };
@@ -46381,7 +46420,7 @@ function tddChallenge(args, io, controlRoot, featureId, graph, node, runtime) {
   const record = [...loadState(featurePaths(controlRoot, featureId).featureDir)?.data.acceptance_review?.reviews ?? []].reverse().find((r) => r.review_id === brief.origin?.review_id);
   let gaps = [];
   try {
-    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join55(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
+    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join56(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
   } catch {
     gaps = [];
   }
@@ -46466,7 +46505,7 @@ function tddCapsuleChallenge(args, io, controlRoot, featureId, graph, node, runt
   const record = [...loadState(featurePaths(controlRoot, featureId).featureDir)?.data.acceptance_review?.reviews ?? []].reverse().find((r) => r.review_id === brief.origin?.review_id);
   let gaps = [];
   try {
-    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join55(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
+    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join56(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
   } catch {
     gaps = [];
   }
@@ -46491,7 +46530,7 @@ function tddCapsuleChallenge(args, io, controlRoot, featureId, graph, node, runt
     return { id: u.capsule.criterion, missing: gap?.missing ?? null, reproduction: gap?.reproduction ?? null, clauses: criterionClauses(u.capsule.criterion, texts.find((t) => t.id === u.capsule.criterion)?.text ?? "") };
   });
   const others = brief.acceptance_criteria.filter((ac) => !used.some((u) => u.capsule.criterion === ac));
-  const capsules = used.map((u) => ({ capsule_id: u.capsule.capsule_id, capsule_sha256: u.capsule_sha256, criterion: u.capsule.criterion, artifact: join55(controlRoot, ...u.capsule.artifact.path.split("/")).replace(/\\/g, "/"), tests: u.capsule.tests.map((t) => ({ id: t.id, status: t.status, full_name: t.full_name, block: t.block })) }));
+  const capsules = used.map((u) => ({ capsule_id: u.capsule.capsule_id, capsule_sha256: u.capsule_sha256, criterion: u.capsule.criterion, artifact: join56(controlRoot, ...u.capsule.artifact.path.split("/")).replace(/\\/g, "/"), tests: u.capsule.tests.map((t) => ({ id: t.id, status: t.status, full_name: t.full_name, block: t.block })) }));
   emit2(
     io,
     args,
@@ -46684,7 +46723,7 @@ function candidateGroup(args, io) {
         const reviewedState = loadState(paths.featureDir)?.data;
         const unreviewed = [...reviewGateProblems(controlRoot, featureId), ...reviewedState ? reviewRevisionProblems(controlRoot, reviewedState) : []];
         if (unreviewed.length > 0) throw new Error(unreviewed.join("; "));
-        const contracts = existsSync44(workspace.paths.contractsDir) ? readdirSync25(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+        const contracts = existsSync45(workspace.paths.contractsDir) ? readdirSync25(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
         const cut = createCandidate({
           controlRepo: controlRoot,
           featureDir: paths.featureDir,
@@ -46835,7 +46874,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join55(paths.evidenceDir, "e2e"),
+      evidenceRoot: join56(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -46939,7 +46978,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync44(paths.decisions) ? readFileSync39(paths.decisions, "utf8") : "";
+    const body = existsSync45(paths.decisions) ? readFileSync39(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -47003,7 +47042,7 @@ function checkpointGroup(args, io) {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join55(paths.checkpointsDir, `${stamp}.json`);
+    const file = join56(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -47018,13 +47057,13 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync44(paths.checkpointsDir) ? readdirSync25(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync45(paths.checkpointsDir) ? readdirSync25(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync39(join55(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync39(join56(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -47044,7 +47083,7 @@ function checkpointGroup(args, io) {
       throw new Error("DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.");
     }
     assertDecisionUsable(paths.events, decisionId);
-    const file = join55(paths.checkpointsDir, name);
+    const file = join56(paths.checkpointsDir, name);
     const checkpoint = JSON.parse(readFileSync39(file, "utf8"));
     const restored = structuredClone(checkpoint.state);
     for (const runtime of Object.values(restored.nodes)) {
@@ -47121,7 +47160,7 @@ function hostResultCopy(spec, controlRoot, io) {
   }
   const file = resolve27(spec);
   try {
-    if (!isInsideReal(realpathSync5.native(controlRoot), realpathSync5.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
+    if (!isInsideReal(realpathSync6.native(controlRoot), realpathSync6.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
   } catch {
     return { ok: false, detail: `${spec} cannot be read` };
   }

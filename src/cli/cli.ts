@@ -59,6 +59,8 @@ import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js
 import { preflightAdapter } from '../sessions/preflight.js';
 import { featureDeliveryProblems, featureVerifyProblems } from '../engine/feature-verify.js';
 import { withLock } from '../state/process-lock.js';
+import { codexLifecycleEnabled, withCodexLifecycleLock } from '../state/codex-lifecycle.js';
+import { revokeWslCodexProcesses } from '../sessions/wsl-codex-process.js';
 import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
@@ -853,21 +855,29 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   if (sub === 'cancel') {
     assertControllerRole(args, 'feature cancel');
     const graph = loadGraph(controlRoot, featureId);
-    mutateState(paths.featureDir, (s) => {
-      s.feature_state = 'CANCELLED';
-      s.blocked_reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : 'cancelled by user';
-      for (const [id, runtime] of Object.entries(s.nodes)) {
-        // Every claim-holding state, not only the pending ones: a node at
-        // RED_VERIFIED or REGRESSION_VERIFIED still holds its claim.
-        if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== 'INTEGRATED') {
-          s = applyNodeTransition(graph, s, id, 'PAUSED', { actor: 'mycelink', reason: 'feature cancelled' });
+    const cancel = () => {
+      // An opted-in WSL generation is revoked while claim mutations are
+      // serialized. If WSL cannot confirm termination, leave STATE untouched
+      // and refuse to report a successful cancellation.
+      if (codexLifecycleEnabled(paths.featureDir)) revokeWslCodexProcesses(paths.featureDir);
+      mutateState(paths.featureDir, (s) => {
+        s.feature_state = 'CANCELLED';
+        s.blocked_reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : 'cancelled by user';
+        for (const [id, runtime] of Object.entries(s.nodes)) {
+          // Every claim-holding state, not only the pending ones: a node at
+          // RED_VERIFIED or REGRESSION_VERIFIED still holds its claim.
+          if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== 'INTEGRATED') {
+            s = applyNodeTransition(graph, s, id, 'PAUSED', { actor: 'mycelink', reason: 'feature cancelled' });
+          }
         }
+        return s;
+      });
+      for (const nodeId of Object.keys(loadState(paths.featureDir)?.data.nodes ?? {})) {
+        releaseAllForNode(paths.featureDir, nodeId);
       }
-      return s;
-    });
-    for (const nodeId of Object.keys(loadState(paths.featureDir)?.data.nodes ?? {})) {
-      releaseAllForNode(paths.featureDir, nodeId);
-    }
+    };
+    if (codexLifecycleEnabled(paths.featureDir)) withCodexLifecycleLock(paths.featureDir, cancel);
+    else cancel();
     emit(io, args, { feature_id: featureId, cancelled: true }, () => `${featureId} cancelled; claims and leases released.`);
     return 0;
   }
