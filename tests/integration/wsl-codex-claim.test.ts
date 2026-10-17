@@ -271,6 +271,7 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
           ['src/publish.js', 'tests/run.mjs'], ticket.capability);
         expect(completed).toMatchObject({ commit: greenApply.commit, redCommit: redApply.commit });
         expect(completed.gates.map((g) => g.gate)).toEqual(['red', 'green', 'regression']);
+        expect(JSON.stringify(completed.gates)).not.toContain(ticket.capability);
         // Journaled exit codes alone cannot attest that the declared verifier
         // actually recorded its evidence for this generation and Git head.
         const regressionEvidence = loadState(p.featureDir)!.data.nodes[CORE]!.evidence.regression;

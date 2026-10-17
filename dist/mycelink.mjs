@@ -33755,7 +33755,7 @@ var Orchestrator = class _Orchestrator {
       const evidence = this.state().nodes[nodeId]?.evidence;
       for (const gate of gates) {
         const receipt = gate.gate === "red" ? record : record[`${gate.gate}Gate`];
-        if (!receipt || receipt["exitCode"] !== 0 || receipt["argvSha256"] !== createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex"))
+        if (!receipt || receipt["exitCode"] !== 0 || receipt["argvSha256"] !== createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex") || gate.argv.at(-2) !== "--capability" || gate.argv.at(-1) !== capability)
           throw new Error("WSL_GATE_JOURNAL_INVALID");
         const proof = evidence?.[gate.gate];
         const expectedCommit = gate.gate === "red" ? redCommit : commit;
@@ -33765,7 +33765,7 @@ var Orchestrator = class _Orchestrator {
       return { redCommit, commit, gates: gates.map((gate) => ({
         gate: gate.gate,
         exitCode: 0,
-        argv: gate.argv
+        argv: gate.argv.slice(0, -2)
       })) };
     });
   }

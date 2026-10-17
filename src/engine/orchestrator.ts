@@ -1684,7 +1684,8 @@ export class Orchestrator {
       for (const gate of gates) {
         const receipt = gate.gate === 'red' ? record : record[`${gate.gate}Gate`] as Record<string, unknown> | undefined;
         if (!receipt || receipt['exitCode'] !== 0 ||
-            receipt['argvSha256'] !== createHash('sha256').update(JSON.stringify(gate.argv)).digest('hex'))
+            receipt['argvSha256'] !== createHash('sha256').update(JSON.stringify(gate.argv)).digest('hex') ||
+            gate.argv.at(-2) !== '--capability' || gate.argv.at(-1) !== capability)
           throw new Error('WSL_GATE_JOURNAL_INVALID');
         const proof = evidence?.[gate.gate];
         const expectedCommit = gate.gate === 'red' ? redCommit : commit;
@@ -1704,8 +1705,10 @@ export class Orchestrator {
             createHash('sha256').update(readFileSync(join(this.controlRoot, proof.output_path))).digest('hex') !== proof.output_sha256)
           throw new Error('WSL_GATE_EVIDENCE_INVALID');
       }
+      // Never return the capability-bearing tail to a caller that may render
+      // these receipts into result JSON, logs, or a reviewer prompt.
       return { redCommit, commit, gates: gates.map((gate) => ({ gate: gate.gate as 'red' | 'green' | 'regression',
-        exitCode: 0 as const, argv: gate.argv })) };
+        exitCode: 0 as const, argv: gate.argv.slice(0, -2) })) };
     });
   }
 
