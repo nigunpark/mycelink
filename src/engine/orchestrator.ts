@@ -1427,7 +1427,7 @@ export class Orchestrator {
    * interrupted phase is not retried blindly; reconciliation must examine it.
    */
   applyExperimentalWslCodexRedTest(nodeId: string, claimId: string, dispatchId: string,
-    proposedPaths: readonly string[], testPath: string):
+    proposedPaths: readonly string[], testPath: string, interruptAfterIntent = false):
     { phase: 'red-committed'; testPath: string; commit: string } {
     return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
       if (!/^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(testPath) ||
@@ -1461,6 +1461,7 @@ export class Orchestrator {
           base: grant.base_sha, testPath, proposalSha256 }) + '\n');
         fsyncSync(fd);
       } finally { closeSync(fd); }
+      if (interruptAfterIntent) throw new Error('WSL_CODEX_INTERRUPTED_AFTER_RED_INTENT');
       const destination = join(grant.worktree, ...testPath.split('/'));
       writeTextAtomic(destination, content);
       if (readFileSync(destination, 'utf8') !== content) throw new Error('WSL_RED_TEST_WRITE_DRIFT');
@@ -1730,7 +1731,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'first-apply' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'red-intent' | 'first-apply' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1849,7 +1850,8 @@ export class Orchestrator {
             turn.isolation.otherRoleSlotDenied !== true)
           throw new Error('WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE');
       }
-      this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, 'tests/run.mjs');
+      this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, 'tests/run.mjs',
+        request.interruptAfter === 'red-intent');
       this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
         const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
           createHash('sha256').update(`${nodeId}\0${claimId}\0${generation}`).digest('hex') + '.json');

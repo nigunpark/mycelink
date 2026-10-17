@@ -33585,7 +33585,7 @@ var Orchestrator = class _Orchestrator {
    * test path. No gate, implementation apply or settlement is implied. An
    * interrupted phase is not retried blindly; reconciliation must examine it.
    */
-  applyExperimentalWslCodexRedTest(nodeId, claimId, dispatchId, proposedPaths, testPath) {
+  applyExperimentalWslCodexRedTest(nodeId, claimId, dispatchId, proposedPaths, testPath, interruptAfterIntent = false) {
     return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
       if (!/^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(testPath) || !grant.allowed_paths.includes(testPath) || proposedPaths.length !== 2 || grant.allowed_paths.length !== 2 || !this.node(nodeId).verification_commands.some((step) => step.command.includes(testPath)))
         throw new Error("WSL_RED_TEST_PATH_DENIED");
@@ -33618,6 +33618,7 @@ var Orchestrator = class _Orchestrator {
       } finally {
         closeSync14(fd);
       }
+      if (interruptAfterIntent) throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RED_INTENT");
       const destination = join49(grant.worktree, ...testPath.split("/"));
       writeTextAtomic(destination, content);
       if (readFileSync31(destination, "utf8") !== content) throw new Error("WSL_RED_TEST_WRITE_DRIFT");
@@ -33984,7 +33985,14 @@ var Orchestrator = class _Orchestrator {
           if (turn.isolation?.hostMountDenied !== true || turn.isolation.directEgressDenied !== true || turn.isolation.otherRoleSlotDenied !== true)
             throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
         }
-        this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, "tests/run.mjs");
+        this.applyExperimentalWslCodexRedTest(
+          nodeId,
+          claimId,
+          generation,
+          allowedPaths,
+          "tests/run.mjs",
+          request.interruptAfter === "red-intent"
+        );
         this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
           const journal = join49(
             this.paths.featureDir,
