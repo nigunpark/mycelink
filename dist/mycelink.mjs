@@ -37188,7 +37188,8 @@ var Orchestrator = class _Orchestrator {
    * the same receipt. `by` says who finished it, for the record.
    */
   completeSettlement(nodeId, by) {
-    return this.settleGuard(nodeId, void 0, (claim) => this.settleWork(nodeId, claim, void 0), { resumedBy: by });
+    const run = () => this.settleGuard(nodeId, void 0, (claim) => this.settleWork(nodeId, claim, void 0), { resumedBy: by });
+    return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2e3 }) : run();
   }
   /** Whether a claim's settlement can be finished by the controller: its result is in the controller's hands. */
   resumableSettlement(claim) {

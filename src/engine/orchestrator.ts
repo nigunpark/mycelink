@@ -6015,7 +6015,9 @@ export class Orchestrator {
    * the same receipt. `by` says who finished it, for the record.
    */
   completeSettlement(nodeId: string, by: 'dispatch' | 'resume'): SettleReport {
-    return this.settleGuard(nodeId, undefined, (claim) => this.settleWork(nodeId, claim, undefined), { resumedBy: by });
+    const run = (): SettleReport => this.settleGuard(nodeId, undefined, (claim) => this.settleWork(nodeId, claim, undefined), { resumedBy: by });
+    return codexLifecycleEnabled(this.paths.featureDir)
+      ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2_000 }) : run();
   }
 
   /** Whether a claim's settlement can be finished by the controller: its result is in the controller's hands. */

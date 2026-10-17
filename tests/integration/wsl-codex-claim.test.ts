@@ -100,7 +100,8 @@ describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
     const started = Date.now();
     expect(() => o.resumeDispatch(CORE)).toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
     expect(() => o.settle(CORE, claimed.capability)).toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
-    expect(Date.now() - started).toBeLessThan(6_000); // entry gate, not a late lock after reading mutable slots
+    expect(() => o.completeSettlement(CORE, 'resume')).toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
+    expect(Date.now() - started).toBeLessThan(8_000); // entry gate, not a late lock after reading mutable slots
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).toBe(claimed.dispatchId);
     rmSync(path);
   });

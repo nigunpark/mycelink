@@ -1,8 +1,9 @@
 """Opt-in Windows claim -> WSL snapshot/transport/broker tracer, not dispatch.
 
-The caller validates an actual Orchestrator claim under its state lock before
-this process starts. This process does NOT hold that lock; it cannot authorize
-application/settlement or prove cancellation races are closed.
+The opt-in Vitest caller holds a dedicated Codex lifecycle mutex across this
+tracer's launch and broker seal. It revalidates the host claim before entering;
+this script still uses test-only always-true predicates and is NOT production
+broker authorization, gate/apply/settle, or revocation of a running model.
 """
 import argparse
 import hashlib
