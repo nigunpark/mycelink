@@ -27374,6 +27374,7 @@ import { existsSync as existsSync36, mkdirSync as mkdirSync21, readFileSync as r
 import { createHash as createHash35 } from "node:crypto";
 import { basename as basename14, dirname as dirname17, join as join49, resolve as resolve21 } from "node:path";
 import { randomBytes as randomBytes7, randomUUID as randomUUID3 } from "node:crypto";
+import { spawnSync as spawnSync10 } from "node:child_process";
 
 // src/engine/criterion-ledger.ts
 import { createHash as createHash23 } from "node:crypto";
@@ -33561,6 +33562,160 @@ var Orchestrator = class _Orchestrator {
       }) + "\n");
       return { phase: "red-committed", testPath, commit };
     });
+  }
+  /** Host-owned exact RED gate; an ambiguous running journal is never replayed. */
+  runExperimentalWslCodexRedGate(nodeId, claimId, dispatchId, proposedPaths, capability) {
+    const journal = join49(
+      this.paths.featureDir,
+      "wsl-codex-transactions",
+      createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
+    );
+    let worktree = "";
+    let commit = "";
+    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      const claim = this.state().nodes[nodeId]?.claim;
+      if (!claim?.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256))
+        throw new CapabilityError("CAPABILITY_INVALID", "RED gate requires the current host capability");
+      if (!existsSync36(journal)) throw new Error("WSL_RED_JOURNAL_MISSING");
+      const record = JSON.parse(readFileSync31(journal, "utf8"));
+      if (record["phase"] !== "red-committed" || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["testPath"] !== "string" || !grant.allowed_paths.includes(record["testPath"]) || typeof record["commit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["commit"]))
+        throw new Error("WSL_RED_JOURNAL_INVALID_OR_ALREADY_GATED");
+      worktree = grant.worktree;
+      commit = record["commit"];
+      if (runGit(worktree, ["rev-parse", "HEAD"]).stdout.trim() !== commit || runGit(worktree, ["rev-parse", "HEAD^"]).stdout.trim() !== grant.base_sha || runGit(worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim() !== "" || runGit(worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== record["testPath"] || createHash35("sha256").update(runGit(worktree, ["show", `${commit}:${record["testPath"]}`]).stdout).digest("hex") !== record["proposalSha256"])
+        throw new Error("WSL_RED_COMMIT_DRIFT");
+      writeTextAtomic(journal, JSON.stringify({ ...record, phase: "red-gate-running" }) + "\n");
+    });
+    const gate = this.gateCommands(nodeId, capability).find((entry) => entry.gate === "red");
+    if (!gate || gate.argv[0] !== "node") throw new Error("WSL_RED_GATE_UNDECLARED");
+    const result = spawnSync10(gate.argv[0], gate.argv.slice(1), {
+      cwd: worktree,
+      encoding: "utf8",
+      timeout: 6e4,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true
+    });
+    if (result.error || result.status !== 0) throw new Error(`WSL_RED_GATE_REJECTED:${result.status ?? "spawn"}`);
+    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      const record = JSON.parse(readFileSync31(journal, "utf8"));
+      if (record["phase"] !== "red-gate-running" || record["commit"] !== commit || grant.worktree !== worktree || runGit(worktree, ["rev-parse", "HEAD"]).stdout.trim() !== commit || runGit(worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim() !== "")
+        throw new Error("WSL_RED_GATE_POST_DRIFT");
+      writeTextAtomic(journal, JSON.stringify({
+        ...record,
+        phase: "red-gated",
+        gate: "red",
+        exitCode: 0,
+        argvSha256: createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex")
+      }) + "\n");
+    });
+    return { phase: "red-gated", gate: "red", exitCode: 0, argv: gate.argv, commit };
+  }
+  /** Apply only the implementation from independently sealed proposal bytes after a controller RED gate. */
+  applyExperimentalWslCodexGreenImplementation(nodeId, claimId, dispatchId, proposedPaths, implementationPath) {
+    const journal = join49(
+      this.paths.featureDir,
+      "wsl-codex-transactions",
+      createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
+    );
+    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+      if (!existsSync36(journal)) throw new Error("WSL_GREEN_JOURNAL_MISSING");
+      const record = JSON.parse(readFileSync31(journal, "utf8"));
+      if (record["phase"] !== "red-gated" || record["gate"] !== "red" || record["exitCode"] !== 0 || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["commit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["commit"]) || typeof record["testPath"] !== "string" || implementationPath === record["testPath"] || !grant.allowed_paths.includes(implementationPath) || grant.allowed_paths.length !== 2)
+        throw new Error("WSL_GREEN_JOURNAL_INVALID_OR_ALREADY_APPLIED");
+      const parent = record["commit"];
+      assertImmutableWslApplyBase(grant.worktree, parent, grant.allowed_paths);
+      if (runGit(grant.worktree, ["rev-parse", `${parent}^`]).stdout.trim() !== grant.base_sha || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", parent]).stdout.trim() !== record["testPath"] || createHash35("sha256").update(runGit(grant.worktree, ["show", `${parent}:${record["testPath"]}`]).stdout).digest("hex") !== record["proposalSha256"])
+        throw new Error("WSL_GREEN_RED_COMMIT_DRIFT");
+      const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+      const content = turn.proposals[implementationPath];
+      if (typeof content !== "string" || !content.trim() || Buffer.byteLength(content) > 512 * 1024 || createHash35("sha256").update(turn.proposals[record["testPath"]] ?? "").digest("hex") !== record["proposalSha256"])
+        throw new Error("WSL_GREEN_PROPOSAL_DRIFT");
+      const prior = runGit(grant.worktree, ["show", `${grant.base_sha}:${implementationPath}`], { allowFail: true });
+      if (prior.exitCode === 0 && prior.stdout === content) throw new Error("WSL_GREEN_IMPLEMENTATION_UNCHANGED");
+      if (prior.exitCode !== 0 && existsSync36(join49(grant.worktree, ...implementationPath.split("/"))))
+        throw new Error("WSL_GREEN_IMPLEMENTATION_SOURCE_DRIFT");
+      assertImmutableWslApplyBase(grant.worktree, parent, grant.allowed_paths);
+      writeTextAtomic(journal, JSON.stringify({
+        ...record,
+        phase: "green-intent",
+        implementationPath,
+        implementationSha256: createHash35("sha256").update(content).digest("hex")
+      }) + "\n");
+      const destination = join49(grant.worktree, ...implementationPath.split("/"));
+      writeTextAtomic(destination, content);
+      if (readFileSync31(destination, "utf8") !== content || runGit(grant.worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trimEnd() !== `${prior.exitCode === 0 ? " M" : "??"} ${implementationPath}`)
+        throw new Error("WSL_GREEN_WRITE_DRIFT");
+      runGit(grant.worktree, ["add", "--", implementationPath]);
+      if (runGit(grant.worktree, ["diff", "--cached", "--name-only"]).stdout.trim() !== implementationPath)
+        throw new Error("WSL_GREEN_STAGE_DRIFT");
+      runGit(grant.worktree, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", `feat: WSL Codex GREEN ${nodeId}`]);
+      const commit = runGit(grant.worktree, ["rev-parse", "HEAD"]).stdout.trim();
+      if (!/^[0-9a-f]{40}$/.test(commit) || runGit(grant.worktree, ["rev-parse", "HEAD^"]).stdout.trim() !== parent || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== implementationPath)
+        throw new Error("WSL_GREEN_COMMIT_DRIFT");
+      writeTextAtomic(journal, JSON.stringify({
+        ...record,
+        phase: "green-committed",
+        implementationPath,
+        implementationSha256: createHash35("sha256").update(content).digest("hex"),
+        greenCommit: commit
+      }) + "\n");
+      return { phase: "green-committed", implementationPath, parent, commit };
+    });
+  }
+  /** Run declared GREEN then regression, journaling each transition outside the lifecycle lock. */
+  runExperimentalWslCodexGreenGates(nodeId, claimId, dispatchId, proposedPaths, capability) {
+    const journal = join49(
+      this.paths.featureDir,
+      "wsl-codex-transactions",
+      createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
+    );
+    const declared = this.gateCommands(nodeId, capability);
+    const receipts = [];
+    for (const [gateName, before, running, after] of [
+      ["green", "green-committed", "green-gate-running", "green-gated"],
+      ["regression", "green-gated", "regression-gate-running", "gates-complete"]
+    ]) {
+      const gate = declared.find((entry) => entry.gate === gateName);
+      if (!gate || gate.argv[0] !== "node") throw new Error("WSL_GREEN_GATE_UNDECLARED");
+      let worktree = "";
+      let commit = "";
+      this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+        const claim = this.state().nodes[nodeId]?.claim;
+        if (!claim?.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256))
+          throw new CapabilityError("CAPABILITY_INVALID", "GREEN gate requires the current host capability");
+        if (!existsSync36(journal)) throw new Error("WSL_GREEN_JOURNAL_MISSING");
+        const record = JSON.parse(readFileSync31(journal, "utf8"));
+        if (record["phase"] !== before || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["greenCommit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["greenCommit"]) || typeof record["commit"] !== "string" || runGit(grant.worktree, ["rev-parse", `${record["greenCommit"]}^`]).stdout.trim() !== record["commit"] || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", record["greenCommit"]]).stdout.trim() !== record["implementationPath"])
+          throw new Error("WSL_GREEN_JOURNAL_INVALID_OR_ALREADY_GATED");
+        worktree = grant.worktree;
+        commit = record["greenCommit"];
+        assertImmutableWslApplyBase(worktree, commit, grant.allowed_paths);
+        if (createHash35("sha256").update(runGit(worktree, ["show", `${commit}:${record["implementationPath"]}`]).stdout).digest("hex") !== record["implementationSha256"])
+          throw new Error("WSL_GREEN_COMMIT_DRIFT");
+        writeTextAtomic(journal, JSON.stringify({ ...record, phase: running }) + "\n");
+      });
+      const result = spawnSync10(gate.argv[0], gate.argv.slice(1), {
+        cwd: worktree,
+        encoding: "utf8",
+        timeout: 6e4,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true
+      });
+      if (result.error || result.status !== 0) throw new Error(`WSL_${gateName.toUpperCase()}_GATE_REJECTED:${result.status ?? "spawn"}`);
+      this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+        const record = JSON.parse(readFileSync31(journal, "utf8"));
+        if (record["phase"] !== running || record["greenCommit"] !== commit || grant.worktree !== worktree)
+          throw new Error("WSL_GREEN_GATE_POST_DRIFT");
+        assertImmutableWslApplyBase(worktree, commit, grant.allowed_paths);
+        writeTextAtomic(journal, JSON.stringify({
+          ...record,
+          phase: after,
+          [`${gateName}Gate`]: { exitCode: 0, argvSha256: createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex") }
+        }) + "\n");
+      });
+      receipts.push({ gate: gateName, exitCode: 0, argv: gate.argv, commit });
+    }
+    return receipts;
   }
   graph() {
     return loadGraph(this.controlRoot, this.featureId);
