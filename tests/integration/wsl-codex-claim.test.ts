@@ -175,6 +175,86 @@ describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
 });
 
 describe('experimental WSL claim policy binding (not launch authorization)', () => {
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] !== '1')(
+    'registers an authenticated isolated Linux Codex turn and scoped bridge under the live host generation', async () => {
+      const { p, o } = await fixture();
+      const ticket = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const stage = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']);
+      try {
+        const script = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u',
+          join(process.cwd(), 'scripts', 'wsl-codex-turn.py').replace(/\\/g, '/')],
+        { encoding: 'utf8', timeout: 10_000 });
+        expect(script.status, script.stderr).toBe(0);
+        const launched = o.startExperimentalWslCodexGeneration(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
+            '--manifest', stage.manifest, '--claim', ticket.claimId, '--generation', ticket.dispatchId!,
+            '--prompt', 'Print the word OK.']);
+        expect(launched.claim).toBe(ticket.claimId);
+        let outcome: { exit_code: number; revoked: boolean } | undefined;
+        for (let i = 0; i < 100 && !outcome; i++) {
+          try { outcome = wslCodexProcessResult(p.featureDir, ticket.claimId, ticket.dispatchId!); }
+          catch { await new Promise(resolve => setTimeout(resolve, 750)); }
+        }
+        expect(outcome).toEqual({ exit_code: 0, revoked: false });
+        const transport = `/var/lib/mycelink-codex/transport/${ticket.claimId}/${ticket.dispatchId}/worker.json`;
+        const published = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+          'import json,sys; x=json.load(open(sys.argv[1])); print(json.dumps({"claim":x["claim"],"generation":x["generation"],"events":[json.loads(line).get("type") for line in x["proposals"]["codex-out"].splitlines() if line.startswith("{")],"status":x["proposals"]["status"]}))', transport],
+        { encoding: 'utf8', timeout: 10_000 });
+        expect(published.status, published.stderr).toBe(0);
+        expect(JSON.parse(published.stdout)).toMatchObject({ claim: ticket.claimId,
+          generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']) });
+      } finally {
+        stage.dispose();
+      }
+    }, 150_000);
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] !== '1')(
+    'revokes the registered model and scoped bridge before host cancellation succeeds', async () => {
+      const { p, o } = await fixture();
+      const ticket = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const stage = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']);
+      try {
+        const runtimeNames = () => {
+          const check = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+            'from pathlib import Path; print("\\n".join(sorted(p.name for p in Path("/var/lib/mycelink-codex/claims").glob("turn-*"))))'],
+          { encoding: 'utf8', timeout: 10_000 });
+          expect(check.status, check.stderr).toBe(0);
+          return check.stdout.trim();
+        };
+        const before = runtimeNames();
+        const script = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u',
+          join(process.cwd(), 'scripts', 'wsl-codex-turn.py').replace(/\\/g, '/')],
+        { encoding: 'utf8', timeout: 10_000 });
+        expect(script.status, script.stderr).toBe(0);
+        const launched = o.startExperimentalWslCodexGeneration(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
+            '--manifest', stage.manifest, '--claim', ticket.claimId, '--generation', ticket.dispatchId!,
+            '--prompt', 'Inspect all files in this repository and provide a long detailed explanation.']);
+        // Root-only pending transport is created only after bridge readiness
+        // and the worker's SO_PEERCRED/claim identity check have succeeded.
+        const pending = `/var/lib/mycelink-codex/transport/${ticket.claimId}/${ticket.dispatchId}/worker.pending`;
+        let observed = false;
+        for (let i = 0; i < 60 && !observed; i++) {
+          observed = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'test', '-f', pending],
+            { timeout: 10_000 }).status === 0;
+          if (!observed) await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        expect(observed, 'isolated worker never verified the scoped bridge').toBe(true);
+        const io: CliIo = { out: () => undefined, err: (message) => { throw new Error(message); } };
+        expect(await main([...asController(['feature', 'cancel', FEATURE_ID], p.control), '--control-root', p.control], io)).toBe(0);
+        expect(wslCodexProcessResult(p.featureDir, ticket.claimId, ticket.dispatchId!)).toEqual({ exit_code: 1, revoked: true });
+        const members = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+          'from pathlib import Path; import sys; pgid=int(sys.argv[1]); print("\\n".join(p.name for p in Path("/proc").iterdir() if p.name.isdigit() and (lambda f: f[0]!="Z" and int(f[2])==pgid)( (p/"stat").read_text().rsplit(")",1)[1].strip().split() )))', String(launched.pgid)],
+        { encoding: 'utf8', timeout: 10_000 });
+        expect(members.status, members.stderr).toBe(0);
+        expect(members.stdout.trim()).toBe('');
+        expect(runtimeNames(), 'revocation leaked the private API bridge runtime').toBe(before);
+        expect(loadState(p.featureDir)!.data.feature_state).toBe('CANCELLED');
+      } finally {
+        stage.dispose();
+      }
+    }, 90_000);
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'reads only root-attested supervisor exit status after a registered turn', async () => {
       const { p } = await fixture();
