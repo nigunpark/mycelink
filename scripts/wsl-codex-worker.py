@@ -333,6 +333,57 @@ def run_bounded(command, identity, timeout_sec, attest_isolation=False):
     return isolation
 
 
+def publish_failure(fd, role, reason, directory, expected_paths=(), phase='isolated-command'):
+    """Root-only non-authorizing diagnostics: bounded event TYPES, never text."""
+    events = []
+    agent_messages = 0
+    matching_proposals = 0
+    for name in ('codex-out', 'review-out'):
+        try:
+            stream = os.open(directory / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
+            continue
+        try:
+            info = os.fstat(stream)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                continue
+            with os.fdopen(os.dup(stream), 'rb') as source:
+                for line in source.read(MAX_FILE + 1).splitlines():
+                    try:
+                        event = json.loads(line)
+                        kind = event.get('type')
+                        if isinstance(kind, str) and re.fullmatch(r'[a-z.]{1,60}', kind):
+                            events.append(kind)
+                        item = event.get('item')
+                        if (name == 'codex-out' and kind == 'item.completed' and
+                                isinstance(item, dict) and item.get('type') == 'agent_message' and
+                                isinstance(item.get('text'), str)):
+                            agent_messages += 1
+                            try:
+                                proposal = json.loads(item['text'])
+                                if (isinstance(proposal, dict) and set(proposal) == set(expected_paths) and
+                                        all(isinstance(value, str) for value in proposal.values())):
+                                    matching_proposals += 1
+                            except ValueError:
+                                pass
+                    except (ValueError, AttributeError, TypeError):
+                        continue
+        finally:
+            os.close(stream)
+    match = re.fullmatch(r'isolated command failed \((-?\d+)\)', str(reason))
+    record = {'phase': phase, 'exception': type(reason).__name__,
+              'exitCode': int(match.group(1)) if match else None,
+              'events': events[:512], 'agentMessages': agent_messages,
+              'matchingProposals': matching_proposals}
+    failure_fd = os.open(role + '.failure.json', os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                         0o600, dir_fd=fd)
+    with os.fdopen(failure_fd, 'w') as output:
+        json.dump(record, output)
+        output.flush()
+        os.fsync(output.fileno())
+    os.fsync(fd)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
@@ -346,6 +397,7 @@ def main():
     parser.add_argument('--role', choices=('worker', 'reviewer'), required=True)
     parser.add_argument('--bridge-socket')
     parser.add_argument('--codex-install')
+    parser.add_argument('--expected-proposal-path', action='append', default=[])
     parser.add_argument('--attest-isolation', action='store_true')
     parser.add_argument('--timeout-sec', type=int, default=20)
     parser.add_argument('command', nargs=argparse.REMAINDER)
@@ -408,32 +460,49 @@ def main():
         command.extend(['--clearenv', '--setenv', 'HOME', '/home',
                         '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin',
                         '--chdir', '/work', '--', *sandbox_command])
-        isolation = run_bounded(command, identity, args.timeout_sec, args.attest_isolation)
-        proposals = proposals_from(proposal)
-        own_slot = 'result.json' if args.role == 'worker' else 'verdict.json'
-        foreign_slot = 'verdict.json' if args.role == 'worker' else 'result.json'
-        if foreign_slot in proposals:
-            raise ValueError('wrong-role result channel')
-        raw_submission = proposals.pop(own_slot, None)
-        submission = None
-        if raw_submission is not None:
-            submission = json.loads(raw_submission)
-            if not isinstance(submission, dict):
-                raise ValueError('result channel requires a JSON object')
-        record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
-                  'source_files': count, 'source_hashes': source_hashes,
-                  'proposals': proposals, 'submission': submission}
-        if isolation is not None:
-            record['isolation'] = isolation
-        # A pre-existing target (including a hardlink/symlink) must not be overwritten.
-        if transport_fd is not None:
-            publish_transport(transport_fd, args.role, record)
-        else:
-            fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, 'w') as output:
-                json.dump(record, output, sort_keys=True)
-                output.flush()
-                os.fsync(output.fileno())
+        try:
+            isolation = run_bounded(command, identity, args.timeout_sec, args.attest_isolation)
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+            if transport_fd is not None:
+                publish_failure(transport_fd, args.role, error, proposal, args.expected_proposal_path)
+            raise
+        try:
+            proposals = proposals_from(proposal)
+        except (ValueError, OSError) as error:
+            if transport_fd is not None:
+                publish_failure(transport_fd, args.role, error, proposal, args.expected_proposal_path,
+                                phase='proposal-validation')
+            raise
+        try:
+            own_slot = 'result.json' if args.role == 'worker' else 'verdict.json'
+            foreign_slot = 'verdict.json' if args.role == 'worker' else 'result.json'
+            if foreign_slot in proposals:
+                raise ValueError('wrong-role result channel')
+            raw_submission = proposals.pop(own_slot, None)
+            submission = None
+            if raw_submission is not None:
+                submission = json.loads(raw_submission)
+                if not isinstance(submission, dict):
+                    raise ValueError('result channel requires a JSON object')
+            record = {'claim': args.claim, 'generation': args.generation, 'role': args.role,
+                      'source_files': count, 'source_hashes': source_hashes,
+                      'proposals': proposals, 'submission': submission}
+            if isolation is not None:
+                record['isolation'] = isolation
+            # A pre-existing target (including a hardlink/symlink) must not be overwritten.
+            if transport_fd is not None:
+                publish_transport(transport_fd, args.role, record)
+            else:
+                fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'w') as output:
+                    json.dump(record, output, sort_keys=True)
+                    output.flush()
+                    os.fsync(output.fileno())
+        except (OSError, ValueError, TypeError) as error:
+            if transport_fd is not None:
+                publish_failure(transport_fd, args.role, error, proposal, args.expected_proposal_path,
+                                phase='submission-publication')
+            raise
     finally:
         shutil.rmtree(stage)
         if transport_fd is not None:

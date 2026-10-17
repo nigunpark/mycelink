@@ -163,10 +163,17 @@ PY
             '--transport-dir', str(transport), '--claim', args.claim,
             '--generation', args.generation, '--role', 'worker', '--timeout-sec', '80',
             '--attest-isolation', '--bridge-socket', str(socket), '--codex-install', str(WORKER),
+            *[part for name in args.proposal_path for part in ('--expected-proposal-path', name)],
             '--', '/bin/sh', '-c', script]
         completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, timeout=100, check=False)
         if completed.returncode != 0:
+            failure = transport / args.claim / args.generation / 'turn-failure.json'
+            fd = os.open(failure, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'w') as output:
+                json.dump({'stage': 'worker', 'exitCode': completed.returncode}, output)
+                output.flush()
+                os.fsync(output.fileno())
             raise ValueError('registered isolated Codex worker failed')
         # The root-owned launcher envelope is provisional. The trusted broker
         # still has to consume and seal it before any apply or settlement.

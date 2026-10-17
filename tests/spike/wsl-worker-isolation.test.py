@@ -38,6 +38,27 @@ class WorkerIsolationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.trusted_executable(executable)
 
+    def test_failed_command_leaves_root_only_failure_phase_without_publish(self):
+        with tempfile.TemporaryDirectory(prefix='mycelink-failure-phase-') as temp:
+            base = pathlib.Path(temp)
+            source = base / 'source'
+            source.mkdir()
+            transport = base / 'transport'
+            transport.mkdir(mode=0o700)
+            run = subprocess.run(['python3', str(LAUNCHER), '--experimental-unrestricted-source',
+                '--source', str(source), '--transport-dir', str(transport), '--claim', 'failphase',
+                '--generation', 'g1', '--role', 'worker', '--', '/bin/sh', '-c', 'exit 7'],
+                text=True, capture_output=True, timeout=20)
+            self.assertNotEqual(run.returncode, 0)
+            slot = transport / 'failphase' / 'g1'
+            self.assertTrue((slot / 'worker.pending').is_file())
+            self.assertFalse((slot / 'worker.json').exists())
+            failure = slot / 'worker.failure.json'
+            self.assertTrue(failure.exists(), run.stderr)
+            self.assertEqual(json.loads(failure.read_text())['phase'], 'isolated-command')
+            self.assertEqual(failure.stat().st_uid, 0)
+            self.assertEqual(failure.stat().st_mode & 0o777, 0o600)
+
     def test_root_attests_mount_network_and_role_slot_before_untrusted_command(self):
         with tempfile.TemporaryDirectory(prefix='mycelink-isolation-proof-') as temp:
             base = pathlib.Path(temp)

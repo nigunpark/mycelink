@@ -185,12 +185,23 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
   }, 180_000);
 
   it.skipIf(!authenticated)('routes model-driven MCP and built-in shell tools through the same isolated generation', async () => {
-    for (const [prompt, path, probe] of [
-      ['Use the configured MCP tool to inspect the fixture, then follow the test-first change request. ' + implement, 'mcpCalls', 'mcp'],
-      ['Use the built-in shell to inspect the fixture, then follow the test-first change request. ' + implement, 'builtinCalls', 'builtin'],
+    for (const [path, probe] of [
+      ['mcpCalls', 'mcp'],
+      ['builtinCalls', 'builtin'],
     ] as const) {
       const { o, ticket, request } = await claim(probe);
-      const receipt = await transaction(o, { ...request(prompt), isolationProbe: probe });
+      // The controller prepends the exact tool instruction once. Duplicating
+      // a second free-form tool demand makes the built-in turn ambiguous.
+      let receipt: TransactionReceipt;
+      try {
+        receipt = await transaction(o, { ...request(implement), isolationProbe: probe });
+      } catch (error) {
+        const root = `/var/lib/mycelink-codex/transport/${ticket.claimId}/${ticket.dispatchId}`;
+        const stage = execFileSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
+          'import os,sys,json; r=sys.argv[1]; names=("worker.pending","worker.json","reviewer.pending","reviewer.json"); p=os.path.join(r,"worker.failure.json"); q=os.path.join(r,"turn-failure.json"); print(json.dumps({"files":{n:os.path.isfile(os.path.join(r,n)) for n in names},"workerFailure":json.load(open(p)) if os.path.isfile(p) else None,"turnFailure":json.load(open(q)) if os.path.isfile(q) else None}))', root],
+        { encoding: 'utf8' }).trim();
+        throw new Error(`WSL_CODEX_PROBE_${probe}_FAILED:${stage}:${String(error)}`);
+      }
       expect(receipt).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId, settlement: { outcome: 'DONE' } });
       expect(receipt.model[path]).toBeGreaterThan(0); // actual tool invocation, not text mentioning it
       expect(receipt.model.apiRequests).toBeGreaterThan(0);
