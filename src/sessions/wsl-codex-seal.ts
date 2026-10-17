@@ -49,6 +49,7 @@ function sealRegisteredWslCodexRole(featureDir: string, controlRoot: string,
 
 export type WslCodexVerifiedTurn = {
   proposals: Record<string, string>;
+  seals: { worker: string; reviewer: string };
   worker: { status: string; events: string[]; transcript: unknown[] };
   reviewer: { verdict: string };
   isolation?: { hostMountDenied: boolean; directEgressDenied: boolean; otherRoleSlotDenied: boolean };
@@ -79,6 +80,9 @@ export function readRegisteredWslCodexTurn(featureDir: string, controlRoot: stri
   const turn = parsed as Record<string, unknown>;
   if (!turn['proposals'] || typeof turn['proposals'] !== 'object' || Array.isArray(turn['proposals']) ||
       !Object.entries(turn['proposals']).every(([path, value]) => grant.allowed_paths.includes(path) && typeof value === 'string') ||
+      !turn['seals'] || typeof turn['seals'] !== 'object' || Array.isArray(turn['seals']) ||
+      !/^[0-9a-f]{64}$/.test((turn['seals'] as Record<string, string>)['worker'] ?? '') ||
+      !/^[0-9a-f]{64}$/.test((turn['seals'] as Record<string, string>)['reviewer'] ?? '') ||
       !turn['worker'] || typeof turn['worker'] !== 'object' || (turn['worker'] as Record<string, unknown>)['status'] !== '0' ||
       !turn['reviewer'] || typeof turn['reviewer'] !== 'object' || (turn['reviewer'] as Record<string, unknown>)['verdict'] !== 'PASS')
     throw new Error('WSL_CODEX_BROKER_RECEIPT_INVALID');

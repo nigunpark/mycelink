@@ -29421,7 +29421,7 @@ function readRegisteredWslCodexTurn(featureDir, controlRoot, grant) {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
   const turn = parsed;
-  if (!turn["proposals"] || typeof turn["proposals"] !== "object" || Array.isArray(turn["proposals"]) || !Object.entries(turn["proposals"]).every(([path, value]) => grant.allowed_paths.includes(path) && typeof value === "string") || !turn["worker"] || typeof turn["worker"] !== "object" || turn["worker"]["status"] !== "0" || !turn["reviewer"] || typeof turn["reviewer"] !== "object" || turn["reviewer"]["verdict"] !== "PASS")
+  if (!turn["proposals"] || typeof turn["proposals"] !== "object" || Array.isArray(turn["proposals"]) || !Object.entries(turn["proposals"]).every(([path, value]) => grant.allowed_paths.includes(path) && typeof value === "string") || !turn["seals"] || typeof turn["seals"] !== "object" || Array.isArray(turn["seals"]) || !/^[0-9a-f]{64}$/.test(turn["seals"]["worker"] ?? "") || !/^[0-9a-f]{64}$/.test(turn["seals"]["reviewer"] ?? "") || !turn["worker"] || typeof turn["worker"] !== "object" || turn["worker"]["status"] !== "0" || !turn["reviewer"] || typeof turn["reviewer"] !== "object" || turn["reviewer"]["verdict"] !== "PASS")
     throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
   return turn;
 }
@@ -33964,7 +33964,9 @@ var Orchestrator = class _Orchestrator {
           const record = JSON.parse(readFileSync31(journal, "utf8"));
           if (record["phase"] !== "red-committed" || record["base"] !== grant.base_sha || typeof record["workerSealHash"] !== "string" || !/^[a-f0-9]{64}$/.test(record["workerSealHash"]) || typeof record["reviewerSealHash"] !== "string" || !/^[a-f0-9]{64}$/.test(record["reviewerSealHash"]))
             throw new Error("WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE");
-          readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+          const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+          if (record["workerSealHash"] !== turn.seals.worker || record["reviewerSealHash"] !== turn.seals.reviewer)
+            throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
           return { worker: record["workerSealHash"], reviewer: record["reviewerSealHash"] };
         });
         workerSealHash = seals.worker;
@@ -34153,6 +34155,11 @@ var Orchestrator = class _Orchestrator {
       const liveClaim = this.state().nodes[nodeId]?.claim;
       if (!liveClaim || liveClaim.claim_id !== claimId || liveClaim.dispatch_id !== generation || !liveClaim.worktree || typeof record["base"] !== "string" || JSON.stringify(receipt?.["sourceSha256"]) !== JSON.stringify(immutableGitSource(liveClaim.worktree, record["base"]).hashes))
         throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
+      this.withLiveWslCodexClaim(nodeId, claimId, generation, ["tests/run.mjs", "src/publish.js"], (grant) => {
+        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        if (receipt["workerSeal"] !== turn.seals.worker || receipt["reviewerSeal"] !== turn.seals.reviewer || record["workerSealHash"] !== turn.seals.worker || record["reviewerSealHash"] !== turn.seals.reviewer)
+          throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
+      });
     }
     if (record["phase"] === "settled") {
       const runtime = this.state().nodes[nodeId];

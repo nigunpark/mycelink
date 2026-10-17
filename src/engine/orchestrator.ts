@@ -1868,7 +1868,10 @@ export class Orchestrator {
               typeof record['workerSealHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(record['workerSealHash']) ||
               typeof record['reviewerSealHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(record['reviewerSealHash']))
             throw new Error('WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE');
-          readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+          const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+          if (record['workerSealHash'] !== turn.seals.worker ||
+              record['reviewerSealHash'] !== turn.seals.reviewer)
+            throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
           return { worker: record['workerSealHash'], reviewer: record['reviewerSealHash'] };
         });
         workerSealHash = seals.worker;
@@ -2051,6 +2054,12 @@ export class Orchestrator {
           JSON.stringify(receipt?.['sourceSha256']) !==
             JSON.stringify(immutableGitSource(liveClaim.worktree, record['base']).hashes))
         throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+      this.withLiveWslCodexClaim(nodeId, claimId, generation, ['tests/run.mjs', 'src/publish.js'], grant => {
+        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        if (receipt['workerSeal'] !== turn.seals.worker || receipt['reviewerSeal'] !== turn.seals.reviewer ||
+            record['workerSealHash'] !== turn.seals.worker || record['reviewerSealHash'] !== turn.seals.reviewer)
+          throw new Error('WSL_CODEX_RECONCILE_RECEIPT_INVALID');
+      });
     }
     if (record['phase'] === 'settled') {
       const runtime = this.state().nodes[nodeId];

@@ -301,6 +301,14 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     const journal = join(p.featureDir, 'wsl-codex-transactions',
       createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
     const originalJournal = readFileSync(journal, 'utf8');
+    const forgedSeal = JSON.parse(originalJournal);
+    forgedSeal.receipt.workerSeal = '0'.repeat(64);
+    forgedSeal.receiptSha256 = createHash('sha256').update(JSON.stringify(forgedSeal.receipt)).digest('hex');
+    writeFileSync(journal, JSON.stringify(forgedSeal));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    writeFileSync(journal, originalJournal);
     const beforeSettlementForged = JSON.parse(originalJournal);
     beforeSettlementForged.receipt.sourceSha256['tests/run.mjs'] = '0'.repeat(64);
     beforeSettlementForged.receiptSha256 = createHash('sha256').update(JSON.stringify(beforeSettlementForged.receipt)).digest('hex');
@@ -336,6 +344,15 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(escrow).not.toContain(ticket.capability);
     const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
       adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    const journal = join(p.featureDir, 'wsl-codex-transactions', scopeDigest + '.json');
+    const originalJournal = readFileSync(journal, 'utf8');
+    const forged = JSON.parse(originalJournal);
+    forged.workerSealHash = '0'.repeat(64);
+    writeFileSync(journal, JSON.stringify(forged));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    writeFileSync(journal, originalJournal);
     const receipt = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(receipt.settlement).toMatchObject({ outcome: 'DONE', usageSessions: 1 });
     const after = git(p.core, ['rev-parse', ticket.branch!]);

@@ -207,8 +207,8 @@ def read_proposals(slot, *, claim, generation, allowed_paths, role='worker'):
         os.close(root)
 
 
-def read_root_isolation(slot, *, claim, generation, role):
-    """Read only the root-generated attestation in the role-bound seal."""
+def read_root_receipt(slot, *, claim, generation, role):
+    """Read only the root-generated receipt in the role-bound seal."""
     directory = os.open(slot, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         if os.fstat(directory).st_uid != 0 or os.fstat(directory).st_mode & 0o022:
@@ -222,7 +222,7 @@ def read_root_isolation(slot, *, claim, generation, role):
                 receipt = json.loads(stream.read(512 * 1024 + 1))
             if (receipt.get('claim'), receipt.get('generation'), receipt.get('role')) != (claim, generation, role):
                 raise ValueError('wrong isolation generation or role')
-            return receipt.get('isolation')
+            return receipt
         finally:
             os.close(fd)
     finally:
@@ -240,14 +240,21 @@ def read_verified_turn(worker_slot, reviewer_slot, *, claim, generation, allowed
         raise ValueError('worker proposal does not cover exact requested paths')
     if read_proposals(reviewer_slot, claim=claim, generation=generation, allowed_paths=allowed_paths, role='reviewer'):
         raise ValueError('reviewer proposed worker files')
-    worker_isolation = read_root_isolation(worker_slot, claim=claim, generation=generation, role='worker')
-    reviewer_isolation = read_root_isolation(reviewer_slot, claim=claim, generation=generation, role='reviewer')
+    worker_receipt = read_root_receipt(worker_slot, claim=claim, generation=generation, role='worker')
+    reviewer_receipt = read_root_receipt(reviewer_slot, claim=claim, generation=generation, role='reviewer')
+    worker_isolation = worker_receipt.get('isolation')
+    reviewer_isolation = reviewer_receipt.get('isolation')
+    seals = {'worker': worker_receipt.get('submission_sha256'),
+             'reviewer': reviewer_receipt.get('submission_sha256')}
+    if any(not isinstance(value, str) or re.fullmatch('[0-9a-f]{64}', value) is None
+           for value in seals.values()):
+        raise ValueError('invalid root seal digest')
     if worker_isolation is None and reviewer_isolation is None:
-        return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer}
+        return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer, 'seals': seals}
     expected = {'hostMountDenied': True, 'directEgressDenied': True, 'otherRoleSlotDenied': True}
     if worker_isolation != expected or reviewer_isolation != expected:
         raise ValueError('role isolation receipts disagree or do not deny access')
-    return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer, 'isolation': expected}
+    return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer, 'isolation': expected, 'seals': seals}
 
 
 def sync_directory(path):
