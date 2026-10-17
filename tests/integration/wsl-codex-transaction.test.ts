@@ -404,6 +404,22 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
   }, 120_000);
 
+  it.skipIf(!authenticated)('refuses a rotated generation while reconciling a committed RED test', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'first-apply' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_FIRST_APPLY/);
+    const head = git(p.core, ['rev-parse', ticket.branch!]);
+    o.resumeDispatch(CORE);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).not.toBe(ticket.dispatchId);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/REVOK|STALE|GENERATION|ESCROW/);
+    expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(head);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    assertNoSettlement(p.featureDir);
+  }, 180_000);
+
   it.skipIf(!authenticated)('rejects ambiguous gate and apply journal phases without replaying commits or usage', async () => {
     const { p, o, ticket, request } = await claim();
     await expect(transaction(o, { ...request(implement), interruptAfter: 'first-apply' }))
