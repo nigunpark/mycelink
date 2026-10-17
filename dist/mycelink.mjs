@@ -15549,7 +15549,7 @@ import {
   lstatSync as lstatSync6,
   mkdirSync as mkdirSync7,
   openSync as openSync8,
-  readFileSync as readFileSync12,
+  readFileSync as readFileSync13,
   writeSync as writeSync4
 } from "node:fs";
 import { join as join19, resolve as resolve10 } from "node:path";
@@ -19595,9 +19595,9 @@ function reapStaleTemps(file, now3 = Date.now()) {
     const full = join13(dir, entry);
     try {
       const pid = tempPid(entry);
-      const ownerGone = pid !== null && pid !== process.pid && !isPidAlive(pid);
+      const ownerGone2 = pid !== null && pid !== process.pid && !isPidAlive(pid);
       const age = now3 - statSync3(full).mtimeMs;
-      if (ownerGone || age >= STALE_TEMP_MS || age < 0) {
+      if (ownerGone2 || age >= STALE_TEMP_MS || age < 0) {
         rmSync5(full, { force: true });
         reaped++;
       }
@@ -21195,10 +21195,157 @@ function validateGraph(value, context = {}) {
 import { join as join17 } from "node:path";
 
 // src/state/codex-lifecycle.ts
-import { closeSync as closeSync7, existsSync as existsSync13, mkdirSync as mkdirSync6, openSync as openSync7, readFileSync as readFileSync10, rmSync as rmSync7, statSync as statSync4, writeSync as writeSync3 } from "node:fs";
+import { closeSync as closeSync7, existsSync as existsSync13, mkdirSync as mkdirSync6, openSync as openSync7, readFileSync as readFileSync11, rmSync as rmSync7, writeSync as writeSync3 } from "node:fs";
 import { dirname as dirname7, join as join16, resolve as resolve9 } from "node:path";
-import { hostname as hostname2 } from "node:os";
+import { hostname as hostname3 } from "node:os";
 import { randomBytes as randomBytes4 } from "node:crypto";
+
+// src/util/process-identity.ts
+import { spawnSync as spawnSync6 } from "node:child_process";
+import { readFileSync as readFileSync10 } from "node:fs";
+import { hostname as hostname2 } from "node:os";
+var clockTicks = null;
+function linuxClockTicks() {
+  if (clockTicks === null) {
+    const r = spawnSync6("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5e3 });
+    const n = Number((r.stdout ?? "").trim());
+    clockTicks = Number.isInteger(n) && n > 0 ? n : 100;
+  }
+  return clockTicks;
+}
+function linuxBootTimeMs() {
+  try {
+    const line = readFileSync10("/proc/stat", "utf8").split("\n").find((l) => l.startsWith("btime "));
+    const seconds = Number(line?.slice(6).trim());
+    return Number.isFinite(seconds) ? seconds * 1e3 : null;
+  } catch {
+    return null;
+  }
+}
+function linuxBootId() {
+  try {
+    return readFileSync10("/proc/sys/kernel/random/boot_id", "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+function linuxInfo(pid) {
+  let raw;
+  try {
+    raw = readFileSync10(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return null;
+  }
+  const fields = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
+  const state = fields[0] ?? "";
+  const ppid = Number(fields[1]);
+  const ticks = fields[19];
+  if (ticks === void 0 || !/^\d+$/.test(ticks)) return null;
+  const boot = linuxBootTimeMs();
+  return {
+    pid,
+    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
+    start: ticks,
+    startedAt: boot === null ? null : boot + Number(ticks) / linuxClockTicks() * 1e3,
+    zombie: state === "Z" || state === "X"
+  };
+}
+function darwinInfo(pid) {
+  const r = spawnSync6("ps", ["-o", "ppid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1e4 });
+  const line = (r.stdout ?? "").trim();
+  if (r.status !== 0 || line === "") return null;
+  const parts = line.split(/\s+/);
+  const ppid = Number(parts[0]);
+  const lstart = parts.slice(2).join(" ");
+  const startedAt = Date.parse(lstart);
+  return {
+    pid,
+    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
+    start: lstart,
+    startedAt: Number.isNaN(startedAt) ? null : startedAt,
+    zombie: (parts[1] ?? "").startsWith("Z")
+  };
+}
+function windowsSnapshot() {
+  const script = "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
+  const r = spawnSync6("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    timeout: 6e4,
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  if (r.status !== 0) return null;
+  const table = /* @__PURE__ */ new Map();
+  for (const line of (r.stdout ?? "").split(/\r?\n/)) {
+    const [pidText, ppidText, created] = line.trim().split("|");
+    const pid = Number(pidText);
+    if (!Number.isInteger(pid) || pid <= 0 || created === void 0 || created === "") continue;
+    const ppid = Number(ppidText);
+    const startedAt = Date.parse(created);
+    table.set(pid, { pid, ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null, start: created, startedAt: Number.isNaN(startedAt) ? null : startedAt, zombie: false });
+  }
+  return table;
+}
+function snapshot2() {
+  return process.platform === "win32" ? windowsSnapshot() : null;
+}
+function info(pid, table = null) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === "win32") return (table ?? windowsSnapshot())?.get(pid) ?? null;
+  if (process.platform === "linux") return linuxInfo(pid);
+  if (process.platform === "darwin") return darwinInfo(pid);
+  return null;
+}
+function identityOf(found) {
+  return {
+    pid: found.pid,
+    start: found.start,
+    boot: process.platform === "linux" ? linuxBootId() : null,
+    host: hostname2(),
+    platform: process.platform
+  };
+}
+function processIdentity(pid) {
+  const found = info(pid);
+  return found === null || found.zombie ? null : identityOf(found);
+}
+function processStartedAt(pid) {
+  const found = info(pid);
+  return found === null || found.zombie ? null : found.startedAt;
+}
+function isProcessAlive(identity2) {
+  if (identity2.host !== hostname2()) return null;
+  if (identity2.boot !== null && process.platform === "linux" && identity2.boot !== linuxBootId()) return false;
+  const found = info(identity2.pid);
+  return found !== null && !found.zombie && found.start === identity2.start;
+}
+function startedBefore(parent, child) {
+  if (process.platform === "linux") return Number(parent.start) <= Number(child.start);
+  if (parent.startedAt === null || child.startedAt === null) return true;
+  return parent.startedAt <= child.startedAt;
+}
+function ancestry(pid, max = 32, table = snapshot2()) {
+  const chain = [];
+  let current = info(pid, table);
+  while (current !== null && current.ppid !== null && chain.length < max) {
+    const parent = info(current.ppid, table);
+    if (parent === null || !startedBefore(parent, current) || chain.includes(parent.pid)) break;
+    chain.push(parent.pid);
+    current = parent;
+  }
+  return chain;
+}
+function sessionHolder(env = process.env) {
+  const raw = env["CLAUDE_PID"];
+  if (raw === void 0 || !/^[1-9]\d{0,9}$/.test(raw)) return null;
+  const pid = Number(raw);
+  const table = snapshot2();
+  if (!ancestry(process.pid, 32, table).includes(pid)) return null;
+  const found = info(pid, table);
+  return found === null || found.zombie ? null : identityOf(found);
+}
+
+// src/state/codex-lifecycle.ts
 var held = /* @__PURE__ */ new Set();
 var sleep = (ms) => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -21208,7 +21355,7 @@ var enabledPath = (featureDir) => join16(featureDir, "CODEX-LIFECYCLE.enabled");
 var codexLifecycleEnabled = (featureDir) => existsSync13(enabledPath(featureDir));
 function ownerOf(file) {
   try {
-    const o = JSON.parse(readFileSync10(file, "utf8"));
+    const o = JSON.parse(readFileSync11(file, "utf8"));
     if (!Number.isSafeInteger(o.pid) || typeof o.host !== "string" || typeof o.token !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(o.token)) return null;
     return o;
   } catch {
@@ -21230,23 +21377,42 @@ function create(file, owner) {
   }
   return true;
 }
+function ownerGone(owner, host) {
+  if (owner.host !== host) return false;
+  if (!isPidAlive(owner.pid)) return true;
+  const identity2 = owner.identity;
+  if (!identity2 || identity2.host !== owner.host || identity2.pid !== owner.pid || typeof identity2.start !== "string" || identity2.platform !== process.platform) return false;
+  const now3 = processIdentity(owner.pid);
+  return now3 !== null && (now3.start !== identity2.start || now3.boot !== identity2.boot);
+}
 function withCodexLifecycleLock(featureDir, fn, options = {}) {
   const file = resolve9(codexLifecycleLockPath(featureDir));
-  if (held.has(file)) return fn();
+  const syncResult = () => {
+    const result = fn();
+    if (result !== null && typeof result === "object" && "then" in result) {
+      throw new Error("CODEX_LIFECYCLE_ASYNC_FORBIDDEN");
+    }
+    return result;
+  };
+  if (held.has(file)) return syncResult();
   const deadline = Date.now() + (options.timeoutMs ?? 15e3);
-  const me = { pid: process.pid, host: hostname2(), token: randomBytes4(16).toString("hex"), acquired_at: (/* @__PURE__ */ new Date()).toISOString() };
+  const me = {
+    pid: process.pid,
+    host: hostname3(),
+    token: randomBytes4(16).toString("hex"),
+    acquired_at: (/* @__PURE__ */ new Date()).toISOString(),
+    identity: processIdentity(process.pid)
+  };
   for (; ; ) {
     if (create(file, me)) break;
     const owner = ownerOf(file);
-    if (owner && owner.host === me.host && !isPidAlive(owner.pid)) {
+    if (owner && ownerGone(owner, me.host)) {
       const recovery = `${file}.recovery`;
       if (create(recovery, me)) {
         try {
           const again = ownerOf(file);
-          if (again?.token === owner.token && again.pid === owner.pid && !isPidAlive(again.pid)) {
-            const before = statSync4(file);
-            const after = statSync4(file);
-            if (before.ino === after.ino && before.dev === after.dev) rmSync7(file);
+          if (again?.token === owner.token && again.pid === owner.pid && ownerGone(again, me.host)) {
+            rmSync7(file);
           }
         } finally {
           if (ownerOf(recovery)?.token === me.token) rmSync7(recovery);
@@ -21259,7 +21425,7 @@ function withCodexLifecycleLock(featureDir, fn, options = {}) {
   }
   held.add(file);
   try {
-    return fn();
+    return syncResult();
   } finally {
     held.delete(file);
     if (ownerOf(file)?.token === me.token) rmSync7(file);
@@ -21500,9 +21666,12 @@ function loadState(featureDir) {
   return doc;
 }
 function saveState(featureDir, state) {
-  const problems = validateAgainstSchema("state", state);
-  if (problems.length > 0) throw new StateSchemaError(problems);
-  return writeDocAtomic(stateFilePath(featureDir), state);
+  const write2 = () => {
+    const problems = validateAgainstSchema("state", state);
+    if (problems.length > 0) throw new StateSchemaError(problems);
+    return writeDocAtomic(stateFilePath(featureDir), state);
+  };
+  return codexLifecycleEnabled(featureDir) ? withCodexLifecycleLock(featureDir, () => withLock(stateLockPath(featureDir), write2), { timeoutMs: 2e3 }) : write2();
 }
 function mutateState(featureDir, mutate, options = {}) {
   const update = () => withLock(
@@ -21524,7 +21693,7 @@ function mutateState(featureDir, mutate, options = {}) {
 
 // src/engine/acceptance.ts
 import { createHash as createHash12 } from "node:crypto";
-import { existsSync as existsSync14, readFileSync as readFileSync11 } from "node:fs";
+import { existsSync as existsSync14, readFileSync as readFileSync12 } from "node:fs";
 import { join as join18 } from "node:path";
 var ACCEPTANCE_FILE = "ACCEPTANCE.json";
 var ACCEPTANCE_SCHEMA = "mycelink-acceptance/1";
@@ -21646,7 +21815,7 @@ function manifestProblems(value, options = {}) {
 function loadAcceptanceManifest(controlRoot, featureId) {
   const file = join18(featurePaths(controlRoot, featureId).featureDir, ACCEPTANCE_FILE);
   if (!existsSync14(file)) return null;
-  const bytes2 = readFileSync11(file);
+  const bytes2 = readFileSync12(file);
   let parsed;
   try {
     parsed = JSON.parse(bytes2.toString("utf8"));
@@ -21728,7 +21897,7 @@ function normalizeConfig(parsed) {
 function loadConfig(controlRoot) {
   const file = controlPaths(controlRoot).config;
   if (!existsSync15(file)) return { ...DEFAULT_CONFIG };
-  const parsed = JSON.parse(readFileSync12(file, "utf8"));
+  const parsed = JSON.parse(readFileSync13(file, "utf8"));
   return normalizeConfig(parsed);
 }
 function loadRepositories(controlRoot) {
@@ -21736,7 +21905,7 @@ function loadRepositories(controlRoot) {
   if (!existsSync15(paths.repositoriesManifest)) {
     throw new WorkspaceError(`No repositories.yaml at ${paths.repositoriesManifest}`);
   }
-  const parsed = import_yaml.default.parse(readFileSync12(paths.repositoriesManifest, "utf8"));
+  const parsed = import_yaml.default.parse(readFileSync13(paths.repositoriesManifest, "utf8"));
   const result = validateRepositories(parsed);
   if (!result.ok) {
     throw new WorkspaceError(
@@ -21762,7 +21931,7 @@ function loadGraph(controlRoot, featureId) {
   if (!existsSync15(paths.graph)) {
     throw new WorkspaceError(`No PORTFOLIO-GRAPH.yaml for feature "${featureId}" at ${paths.graph}`);
   }
-  return import_yaml.default.parse(readFileSync12(paths.graph, "utf8"));
+  return import_yaml.default.parse(readFileSync13(paths.graph, "utf8"));
 }
 function validateFeatureGraph(controlRoot, featureId) {
   const graph = loadGraph(controlRoot, featureId);
@@ -21839,7 +22008,7 @@ function ensureScratchIgnored(controlRoot) {
     if (opened.nlink !== 1n) refuse2("it has more than one name (hard link)");
     if (!namesOpenedFile(file, opened)) refuse2(isLink3() ? "it is a link" : "it was replaced while it was opened");
     if (opened.size > 1024n * 1024n) refuse2("it is larger than 1 MiB");
-    const text = created ? "" : readFileSync12(fd, "utf8");
+    const text = created ? "" : readFileSync13(fd, "utf8");
     const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
     if (present) return;
     const prefix = text === "" || text.endsWith("\n") ? "" : "\n";
@@ -21997,151 +22166,6 @@ function assertClaimCapability(nodeId, runtime, raw) {
       `the capability presented is not the one for ${nodeId}'s current claim (stale, rotated or for another node).`
     );
   }
-}
-
-// src/util/process-identity.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
-import { readFileSync as readFileSync13 } from "node:fs";
-import { hostname as hostname3 } from "node:os";
-var clockTicks = null;
-function linuxClockTicks() {
-  if (clockTicks === null) {
-    const r = spawnSync6("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5e3 });
-    const n = Number((r.stdout ?? "").trim());
-    clockTicks = Number.isInteger(n) && n > 0 ? n : 100;
-  }
-  return clockTicks;
-}
-function linuxBootTimeMs() {
-  try {
-    const line = readFileSync13("/proc/stat", "utf8").split("\n").find((l) => l.startsWith("btime "));
-    const seconds = Number(line?.slice(6).trim());
-    return Number.isFinite(seconds) ? seconds * 1e3 : null;
-  } catch {
-    return null;
-  }
-}
-function linuxBootId() {
-  try {
-    return readFileSync13("/proc/sys/kernel/random/boot_id", "utf8").trim() || null;
-  } catch {
-    return null;
-  }
-}
-function linuxInfo(pid) {
-  let raw;
-  try {
-    raw = readFileSync13(`/proc/${pid}/stat`, "utf8");
-  } catch {
-    return null;
-  }
-  const fields = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
-  const state = fields[0] ?? "";
-  const ppid = Number(fields[1]);
-  const ticks = fields[19];
-  if (ticks === void 0 || !/^\d+$/.test(ticks)) return null;
-  const boot = linuxBootTimeMs();
-  return {
-    pid,
-    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
-    start: ticks,
-    startedAt: boot === null ? null : boot + Number(ticks) / linuxClockTicks() * 1e3,
-    zombie: state === "Z" || state === "X"
-  };
-}
-function darwinInfo(pid) {
-  const r = spawnSync6("ps", ["-o", "ppid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1e4 });
-  const line = (r.stdout ?? "").trim();
-  if (r.status !== 0 || line === "") return null;
-  const parts = line.split(/\s+/);
-  const ppid = Number(parts[0]);
-  const lstart = parts.slice(2).join(" ");
-  const startedAt = Date.parse(lstart);
-  return {
-    pid,
-    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
-    start: lstart,
-    startedAt: Number.isNaN(startedAt) ? null : startedAt,
-    zombie: (parts[1] ?? "").startsWith("Z")
-  };
-}
-function windowsSnapshot() {
-  const script = "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
-  const r = spawnSync6("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8",
-    timeout: 6e4,
-    windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024
-  });
-  if (r.status !== 0) return null;
-  const table = /* @__PURE__ */ new Map();
-  for (const line of (r.stdout ?? "").split(/\r?\n/)) {
-    const [pidText, ppidText, created] = line.trim().split("|");
-    const pid = Number(pidText);
-    if (!Number.isInteger(pid) || pid <= 0 || created === void 0 || created === "") continue;
-    const ppid = Number(ppidText);
-    const startedAt = Date.parse(created);
-    table.set(pid, { pid, ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null, start: created, startedAt: Number.isNaN(startedAt) ? null : startedAt, zombie: false });
-  }
-  return table;
-}
-function snapshot2() {
-  return process.platform === "win32" ? windowsSnapshot() : null;
-}
-function info(pid, table = null) {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  if (process.platform === "win32") return (table ?? windowsSnapshot())?.get(pid) ?? null;
-  if (process.platform === "linux") return linuxInfo(pid);
-  if (process.platform === "darwin") return darwinInfo(pid);
-  return null;
-}
-function identityOf(found) {
-  return {
-    pid: found.pid,
-    start: found.start,
-    boot: process.platform === "linux" ? linuxBootId() : null,
-    host: hostname3(),
-    platform: process.platform
-  };
-}
-function processIdentity(pid) {
-  const found = info(pid);
-  return found === null || found.zombie ? null : identityOf(found);
-}
-function processStartedAt(pid) {
-  const found = info(pid);
-  return found === null || found.zombie ? null : found.startedAt;
-}
-function isProcessAlive(identity2) {
-  if (identity2.host !== hostname3()) return null;
-  if (identity2.boot !== null && process.platform === "linux" && identity2.boot !== linuxBootId()) return false;
-  const found = info(identity2.pid);
-  return found !== null && !found.zombie && found.start === identity2.start;
-}
-function startedBefore(parent, child) {
-  if (process.platform === "linux") return Number(parent.start) <= Number(child.start);
-  if (parent.startedAt === null || child.startedAt === null) return true;
-  return parent.startedAt <= child.startedAt;
-}
-function ancestry(pid, max = 32, table = snapshot2()) {
-  const chain = [];
-  let current = info(pid, table);
-  while (current !== null && current.ppid !== null && chain.length < max) {
-    const parent = info(current.ppid, table);
-    if (parent === null || !startedBefore(parent, current) || chain.includes(parent.pid)) break;
-    chain.push(parent.pid);
-    current = parent;
-  }
-  return chain;
-}
-function sessionHolder(env = process.env) {
-  const raw = env["CLAUDE_PID"];
-  if (raw === void 0 || !/^[1-9]\d{0,9}$/.test(raw)) return null;
-  const pid = Number(raw);
-  const table = snapshot2();
-  if (!ancestry(process.pid, 32, table).includes(pid)) return null;
-  const found = info(pid, table);
-  return found === null || found.zombie ? null : identityOf(found);
 }
 
 // src/engine/settler.ts
@@ -31155,7 +31179,7 @@ import { basename as basename12, isAbsolute as isAbsolute11, join as join45 } fr
 import { createHash as createHash32 } from "node:crypto";
 
 // src/hooks/fence.ts
-import { existsSync as existsSync31, lstatSync as lstatSync15, readFileSync as readFileSync29, readdirSync as readdirSync17, realpathSync as realpathSync4, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync31, lstatSync as lstatSync15, readFileSync as readFileSync29, readdirSync as readdirSync17, realpathSync as realpathSync4, statSync as statSync4 } from "node:fs";
 import { basename as basename11, dirname as dirname16, isAbsolute as isAbsolute10, join as join44, resolve as resolve20 } from "node:path";
 
 // src/security/shell.ts
@@ -32295,7 +32319,7 @@ function realish(path) {
 }
 var isControlRoot = (dir) => {
   try {
-    return statSync5(join44(dir, "mycelink.config.json")).isFile();
+    return statSync4(join44(dir, "mycelink.config.json")).isFile();
   } catch {
     return false;
   }
@@ -32371,7 +32395,7 @@ function reviewerDecision(input) {
   const m = VERDICT_FILE2.exec(real);
   if (m === null) return deny(`${value.replace(/\\/g, "/")} is not the verdict file of a review`);
   try {
-    if (!statSync5(dirname16(real)).isDirectory()) return deny("that review generation was never opened");
+    if (!statSync4(dirname16(real)).isDirectory()) return deny("that review generation was never opened");
   } catch {
     return deny("that review generation was never opened");
   }
@@ -32476,7 +32500,7 @@ function decide(input, env) {
       home: env["HOME"] ?? env["USERPROFILE"] ?? null,
       exists: (d) => {
         try {
-          return statSync5(d).isDirectory();
+          return statSync4(d).isDirectory();
         } catch {
           return false;
         }
@@ -43318,7 +43342,7 @@ import { resolve as resolve26 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync40, mkdirSync as mkdirSync24, readFileSync as readFileSync35, readdirSync as readdirSync24, statSync as statSync6 } from "node:fs";
+import { existsSync as existsSync40, mkdirSync as mkdirSync24, readFileSync as readFileSync35, readdirSync as readdirSync24, statSync as statSync5 } from "node:fs";
 import { join as join51, relative as relative9, resolve as resolve25 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
@@ -43459,7 +43483,7 @@ function listPages(root) {
   const walk2 = (dir) => {
     for (const entry of readdirSync24(dir).sort()) {
       const full = join51(dir, entry);
-      if (statSync6(full).isDirectory()) {
+      if (statSync5(full).isDirectory()) {
         if (entry === "archive") continue;
         walk2(full);
       } else if (entry.endsWith(".md") && entry !== "SCHEMA.md" && entry !== "index.md") {
@@ -44075,14 +44099,14 @@ function listAdapters() {
 registerAdapter(eccAdapter);
 
 // src/sessions/preflight.ts
-import { accessSync, constants as constants7, existsSync as existsSync41, statSync as statSync7 } from "node:fs";
+import { accessSync, constants as constants7, existsSync as existsSync41, statSync as statSync6 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
 import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join52 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
 var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
   try {
-    if (!existsSync41(p) || !statSync7(p).isFile()) return false;
+    if (!existsSync41(p) || !statSync6(p).isFile()) return false;
     if (process.platform !== "win32") accessSync(p, constants7.X_OK);
     return true;
   } catch {
@@ -44127,7 +44151,7 @@ function preflightAdapter(input, env = process.env) {
       ok: false,
       adapter: "fake-claude",
       executable: script,
-      resolved: isRunnableFile(script) || existsSync41(script) && statSync7(script).isFile() ? script : null,
+      resolved: isRunnableFile(script) || existsSync41(script) && statSync6(script).isFile() ? script : null,
       version: null,
       auth: "not-checked"
     };

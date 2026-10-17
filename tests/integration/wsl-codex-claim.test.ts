@@ -12,7 +12,7 @@ import { main, type CliIo } from '../../src/cli/cli.js';
 import { asController } from '../helpers/authority.js';
 import { Orchestrator } from '../../src/engine/orchestrator.js';
 import { FakeInProcessAdapter } from '../../src/sessions/fake-adapter.js';
-import { loadState, mutateState } from '../../src/state/feature-state.js';
+import { loadState, mutateState, saveState } from '../../src/state/feature-state.js';
 
 const CORE = `${FEATURE_ID}.core.publish.impl`;
 afterAll(() => cleanupTmpRoots());
@@ -103,6 +103,35 @@ describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
     expect(Date.now() - started).toBeLessThan(6_000); // entry gate, not a late lock after reading mutable slots
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.claim?.dispatch_id).toBe(claimed.dispatchId);
     rmSync(path);
+  });
+
+  it('fences checkpoint restoration through the direct saveState path', async () => {
+    const { p } = await fixture();
+    enableCodexLifecycle(p.featureDir);
+    const original = loadState(p.featureDir)!.data;
+    const path = codexLifecycleLockPath(p.featureDir);
+    writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), token: 'other-process', acquired_at: '2000-01-01T00:00:00.000Z' }));
+    expect(() => saveState(p.featureDir, { ...original, feature_state: 'CANCELLED' }))
+      .toThrow(/CODEX_LIFECYCLE_LOCK_BUSY/);
+    expect(loadState(p.featureDir)!.data.feature_state).toBe(original.feature_state);
+    rmSync(path);
+  });
+
+  it('rejects asynchronous lifecycle callbacks instead of releasing a lock across an unresolved operation', async () => {
+    const { p } = await fixture();
+    enableCodexLifecycle(p.featureDir);
+    expect(() => withCodexLifecycleLock(p.featureDir, async () => 'late'))
+      .toThrow(/CODEX_LIFECYCLE_ASYNC_FORBIDDEN/);
+  });
+
+  it('recovers a dead process identity even when its pid was reused', async () => {
+    const { p } = await fixture();
+    enableCodexLifecycle(p.featureDir);
+    const path = codexLifecycleLockPath(p.featureDir);
+    writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), token: 'reused',
+      identity: { pid: process.pid, host: hostname(), platform: process.platform, boot: null, start: 'not-this-process' },
+      acquired_at: '2000-01-01T00:00:00.000Z' }));
+    expect(withCodexLifecycleLock(p.featureDir, () => 'recovered', { timeoutMs: 4_000 })).toBe('recovered');
   });
 
   it('recovers an orphaned owner and permits nested state mutation in the same transaction', async () => {

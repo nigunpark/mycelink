@@ -105,9 +105,16 @@ export function loadState(featureDir: string): AtomicDoc<FeatureState_> | null {
 }
 
 export function saveState(featureDir: string, state: FeatureState_): AtomicDoc<FeatureState_> {
-  const problems = validateAgainstSchema('state', state);
-  if (problems.length > 0) throw new StateSchemaError(problems);
-  return writeDocAtomic(stateFilePath(featureDir), state);
+  const write = (): AtomicDoc<FeatureState_> => {
+    const problems = validateAgainstSchema('state', state);
+    if (problems.length > 0) throw new StateSchemaError(problems);
+    return writeDocAtomic(stateFilePath(featureDir), state);
+  };
+  // Checkpoint restore writes through saveState rather than mutateState. It
+  // must not bypass an opted-in Codex broker's cancellation/settle mutex.
+  return codexLifecycleEnabled(featureDir)
+    ? withCodexLifecycleLock(featureDir, () => withLock(stateLockPath(featureDir), write), { timeoutMs: 2_000 })
+    : write();
 }
 
 /**
