@@ -13,10 +13,12 @@ import re
 import shlex
 import shutil
 import signal
+import socket as socket_module
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 ROOT = Path('/var/lib/mycelink-codex')
@@ -33,6 +35,29 @@ def private_directory(path):
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
         raise ValueError('private directory must be root-owned and inaccessible')
+
+
+def root_audit_stream(channel, path):
+    """Persist fixed-shape bridge metadata before acknowledging admission."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as ledger, channel.makefile('rb') as stream:
+        while True:
+            line = stream.readline(257)
+            if not line:
+                break
+            if len(line) > 256 or not line.endswith(b'\n'):
+                raise ValueError('invalid bridge audit record')
+            record = json.loads(line)
+            if (not isinstance(record, dict) or set(record) != {'event', 'method', 'path'} or
+                record['method'] not in ('GET', 'POST', 'CONNECT', '<other>') or
+                record['path'] not in ('/v1/responses', '/v1/models', '<other>') or
+                not isinstance(record['event'], str) or
+                not re.fullmatch(r'(?:admit|deny|upstream-[0-9]{3})', record['event'])):
+                raise ValueError('invalid bridge audit metadata')
+            ledger.write(line)
+            ledger.flush()
+            os.fsync(ledger.fileno())
+            channel.sendall(b'1')
 
 
 def run(args):
@@ -69,9 +94,12 @@ def run(args):
     if reviewer.pw_uid == worker.pw_uid:
         raise ValueError('independent reviewer principal required')
     bridge = None
+    audit_parent = None
+    audit_thread = None
+    audit_errors = []
     try:
         def stop_bridge():
-            nonlocal bridge
+            nonlocal bridge, audit_parent, audit_thread
             if bridge is not None and bridge.poll() is None:
                 bridge.terminate()
                 try:
@@ -80,21 +108,50 @@ def run(args):
                     bridge.kill()
                     bridge.wait(timeout=3)
             bridge = None
+            if audit_thread is not None:
+                audit_thread.join(timeout=5)
+                if audit_thread.is_alive():
+                    raise ValueError('root bridge audit did not drain')
+                audit_thread = None
+            if audit_parent is not None:
+                audit_parent.close()
+                audit_parent = None
+            if audit_errors:
+                raise ValueError('root bridge audit failed')
 
         def start_bridge(role, identity):
-            nonlocal bridge
+            nonlocal bridge, audit_parent, audit_thread
             bridge_dir = runtime / role
             bridge_dir.mkdir(mode=0o700)
             os.chown(bridge_dir, principal.pw_uid, identity.pw_gid)
             bridge_dir.chmod(0o2711)
             socket = bridge_dir / 'bridge.sock'
-            bridge = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('wsl-codex-api-bridge.py')),
-                '--socket', str(socket), '--auth', str(AUTH), '--worker-gid', str(identity.pw_gid),
-                '--worker-uid', str(identity.pw_uid), '--role', role,
-                '--claim', args.claim, '--generation', args.generation,
-                '--model', 'gpt-6.1-sol', '--max-output-tokens', '4096', '--total-output-tokens', '131072',
-                '--lease-seconds', '120'], preexec_fn=drop, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+            audit_dir = ROOT / 'audits'
+            for directory in (audit_dir, audit_dir / args.claim, audit_dir / args.claim / args.generation):
+                private_directory(directory)
+            audit_path = audit_dir / args.claim / args.generation / (role + '.jsonl')
+            if audit_path.exists() or audit_path.is_symlink():
+                raise ValueError('bridge audit already exists for role and generation')
+            audit_parent, audit_child = socket_module.socketpair()
+            try:
+                bridge = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('wsl-codex-api-bridge.py')),
+                    '--socket', str(socket), '--auth', str(AUTH), '--worker-gid', str(identity.pw_gid),
+                    '--worker-uid', str(identity.pw_uid), '--role', role,
+                    '--claim', args.claim, '--generation', args.generation,
+                    '--model', 'gpt-6.1-sol', '--max-output-tokens', '4096', '--total-output-tokens', '131072',
+                    '--lease-seconds', '120', '--audit-fd', str(audit_child.fileno())], preexec_fn=drop,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    close_fds=True, pass_fds=(audit_child.fileno(),))
+            finally:
+                audit_child.close()
+            def record_audit():
+                try:
+                    root_audit_stream(audit_parent, audit_path)
+                except (OSError, ValueError, json.JSONDecodeError) as error:
+                    audit_errors.append(type(error).__name__)
+                    audit_parent.close()
+            audit_thread = threading.Thread(target=record_audit, daemon=True)
+            audit_thread.start()
             for _ in range(100):
                 if socket.is_socket():
                     return socket

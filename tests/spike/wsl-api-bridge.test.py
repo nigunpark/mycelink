@@ -135,6 +135,72 @@ class BridgePolicyTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_audit_records_admission_and_completion_even_on_upstream_error(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            def unavailable(*args):
+                raise OSError('upstream unavailable')
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'), unavailable,
+                allowed_model='assigned-model', max_output_tokens=128)
+            events = []
+            server.audit = lambda event, method, path: events.append((event, method, path))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', b'{"model":"assigned-model"}',
+                             {'Content-Type': 'application/json'})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 502)
+                response.read()
+                conn.close()
+                self.assertEqual(events, [
+                    ('admit', 'POST', '/v1/responses'),
+                    ('upstream-502', 'POST', '/v1/responses'),
+                ])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_synchronous_audit_channel_persists_each_event_before_ack(self):
+        bridge = load_bridge()
+        turn_path = BRIDGE_PATH.with_name('wsl-codex-turn.py')
+        spec = importlib.util.spec_from_file_location('wsl_codex_turn_audit', turn_path)
+        turn = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(turn)
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = pathlib.Path(temp) / 'audit.jsonl'
+            parent, child = socket.socketpair()
+            writer = threading.Thread(target=turn.root_audit_stream, args=(parent, ledger), daemon=True)
+            writer.start()
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'),
+                lambda *args: (200, b'{}', 'application/json'),
+                allowed_model='assigned-model', max_output_tokens=128)
+            audited = bridge.attach_audit(server, child.fileno())
+            service = threading.Thread(target=server.serve_forever, daemon=True)
+            service.start()
+            try:
+                conn = UnixHTTP(server.server_address)
+                conn.request('POST', '/v1/responses', b'{"model":"assigned-model"}',
+                             {'Content-Type': 'application/json'})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                response.read()
+                conn.close()
+                self.assertEqual([json.loads(line)['event'] for line in ledger.read_text().splitlines()],
+                                 ['admit', 'upstream-200'])
+                self.assertEqual(ledger.stat().st_uid, os.getuid())
+                self.assertEqual(ledger.stat().st_mode & 0o777, 0o600)
+            finally:
+                server.shutdown()
+                server.server_close()
+                service.join(timeout=5)
+                audited.close()
+                child.close()
+                writer.join(timeout=5)
+                parent.close()
+
     def test_expired_generation_lease_refuses_api_without_upstream_call(self):
         import time
         bridge = load_bridge()

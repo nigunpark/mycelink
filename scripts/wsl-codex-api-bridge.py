@@ -175,6 +175,9 @@ class Request(BaseHTTPRequestHandler):
         output_reservation = payload['max_output_tokens'] if self.server.allowed_model is not None else 0
         if not self.server.reserve_request(len(body), output_reservation):
             return self.refuse()
+        audit = getattr(self.server, 'audit', None)
+        if audit:
+            audit('admit', 'POST', '/v1/responses')
         # No Authorization, Host, Cookie, forwarding, or caller-selected destination.
         headers = {'Content-Type': 'application/json'}
         if self.headers.get('Accept') == 'text/event-stream':
@@ -243,6 +246,23 @@ def make_server(path, upstream, expected_uid=None, claim=None, generation=None, 
                   (request_budget * max_output_tokens if allowed_model is not None else 1),
                   lease_seconds)
 
+def attach_audit(server, fd):
+    """Wait for the root supervisor to durably acknowledge each scoped event."""
+    channel = socket.socket(fileno=os.dup(fd))
+    channel.settimeout(3)
+    lock = threading.Lock()
+    def audit(event, method, path):
+        record = json.dumps({'event': event, 'method': method, 'path': path},
+                            separators=(',', ':')).encode() + b'\n'
+        if len(record) > 256:
+            raise ValueError('oversized audit record')
+        with lock:
+            channel.sendall(record)
+            if channel.recv(1) != b'1':
+                raise OSError('root audit acknowledgement missing')
+    server.audit = audit
+    return channel
+
 
 def trusted_upstream(auth_path):
     """Read the original WSL login only in this trusted process, per request."""
@@ -310,6 +330,7 @@ def main():
     parser.add_argument('--max-output-tokens', required=True, type=int)
     parser.add_argument('--total-output-tokens', required=True, type=int)
     parser.add_argument('--lease-seconds', type=int, default=300)
+    parser.add_argument('--audit-fd', type=int, required=True)
     args = parser.parse_args()
     bridge_principal(args.role, args.worker_uid, args.worker_gid)
     server = make_server(args.socket, trusted_upstream(args.auth), expected_uid=args.worker_uid,
@@ -317,12 +338,14 @@ def main():
                          allowed_model=args.model, max_output_tokens=args.max_output_tokens,
                          total_output_tokens=args.total_output_tokens,
                          lease_seconds=args.lease_seconds)
+    channel = attach_audit(server, args.audit_fd)
     try:
         os.chown(args.socket, os.getuid(), args.worker_gid)
         os.chmod(args.socket, 0o660)
         server.serve_forever()
     finally:
         server.server_close()
+        channel.close()
         os.unlink(args.socket)
 
 
