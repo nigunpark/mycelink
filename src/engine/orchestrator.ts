@@ -103,6 +103,7 @@ import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, un
 import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive } from '../sessions/wsl-codex-process.js';
+import { stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
 import {
   acquireResource,
   listLeases,
@@ -1327,6 +1328,26 @@ export class Orchestrator {
       this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
       return result;
     });
+  }
+
+  /**
+   * Stage verified Git-object bytes atomically with a live host-claim check.
+   * A caller MUST re-enter the lifecycle mutex after its model turn; this
+   * staging receipt is not a broker/settlement authorization or worker lease.
+   */
+  stageExperimentalWslCodexClaimSource(nodeId: string, claimId: string, dispatchId: string,
+    proposedPaths: readonly string[]): ReturnType<typeof stageImmutableWslCodexSource> {
+    let staged: ReturnType<typeof stageImmutableWslCodexSource> | undefined;
+    try {
+      return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+        staged = stageImmutableWslCodexSource(grant.worktree, grant.base_sha, grant.claim, grant.generation);
+        return staged;
+      });
+    } catch (error) {
+      // A post-stage generation recheck may reject an already-created stage.
+      if (staged) staged.dispose();
+      throw error;
+    }
   }
 
   /**

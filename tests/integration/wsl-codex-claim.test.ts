@@ -13,7 +13,6 @@ import { asController } from '../helpers/authority.js';
 import { Orchestrator } from '../../src/engine/orchestrator.js';
 import { FakeInProcessAdapter } from '../../src/sessions/fake-adapter.js';
 import { loadState, mutateState, saveState } from '../../src/state/feature-state.js';
-import { stageImmutableWslCodexSource } from '../../src/sessions/wsl-codex-source.js';
 
 const CORE = `${FEATURE_ID}.core.publish.impl`;
 afterAll(() => cleanupTmpRoots());
@@ -175,6 +174,23 @@ describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
 });
 
 describe('experimental WSL claim policy binding (not launch authorization)', () => {
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'stages immutable Git source only while the live claim mutex is held and refuses a revoked claim', async () => {
+      const { p, o } = await fixture();
+      const ticket = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const lease = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']);
+      try {
+        const immutable = readFileSync(join(ticket.worktree!, 'tests', 'run.mjs'));
+        expect(lease.hashes['tests/run.mjs']).toBe(createHash('sha256').update(immutable).digest('hex'));
+        const io: CliIo = { out: () => undefined, err: (text) => { throw new Error(text); } };
+        expect(await main([...asController(['feature', 'cancel', FEATURE_ID], p.control), '--control-root', p.control], io)).toBe(0);
+        expect(() => o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']))
+          .toThrow(/WSL_CLAIM_STALE/);
+      } finally {
+        lease.dispose();
+      }
+    }, 40_000);
   it('derives exact allowed names only from a live host claim and graph policy', async () => {
     const { p, o } = await fixture();
     const claimed = o.claim(CORE, { mode: 'host' });
@@ -341,7 +357,7 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(result.status, result.stderr).toBe(0);
         return result.stdout.trim();
       };
-      const stage = stageImmutableWslCodexSource(bound.worktree, bound.base_sha, bound.claim, bound.generation);
+      const stage = o.stageExperimentalWslCodexClaimSource(CORE, claimed.claimId, claimed.dispatchId!, ['src/publish.js']);
       const digest = stage.hashes['tests/run.mjs']!;
       // A later hostile DrvFS edit cannot change what the isolated worker sees.
       writeFileSync(join(bound.worktree, 'tests', 'run.mjs'), 'throw new Error("mutable host bytes");\n');
