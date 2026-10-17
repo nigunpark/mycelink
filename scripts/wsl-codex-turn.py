@@ -40,6 +40,10 @@ def run(args):
         raise ValueError('trusted root and generation identifiers required')
     if not 1 <= len(args.prompt.encode('utf-8')) <= 16_384:
         raise ValueError('prompt outside bounded turn')
+    if args.proposal_path and (not re.fullmatch(r'[A-Za-z0-9_./-]{1,240}', args.proposal_path) or
+        any(not part or part.startswith('.') or part.endswith(('.', ' ')) or part.casefold() in ('mycelink', 'result.json', 'verdict.json', '_receipt.json')
+            for part in args.proposal_path.split('/'))):
+        raise ValueError('unsafe proposed source path')
     if not args.source.startswith(str(ROOT / 'claims/source-')) or not args.source.endswith('/snapshot'):
         raise ValueError('immutable staged source required')
     if args.manifest != args.source[:-len('/snapshot')] + '/manifest.json':
@@ -93,8 +97,9 @@ OPENAI_API_KEY=placeholder timeout 65s /usr/local/bin/node /opt/node_modules/@op
   ''' + shlex.quote(args.prompt) + ''' >/proposal/codex-out 2>/proposal/codex-err
 status=$?
 if test "$status" -ne 0; then exit "$status"; fi
-/usr/bin/python3 - <<'PY' || exit 1
+MYCELINK_PROPOSAL_PATH=''' + shlex.quote(args.proposal_path or '') + ''' /usr/bin/python3 - <<'PY' || exit 1
 import json
+import os
 from pathlib import Path
 root = Path('/proposal')
 raw = (root / 'codex-out').read_bytes()
@@ -107,6 +112,21 @@ if events.count('turn.completed') != 1 or 'turn.failed' in events:
 result = json.dumps({'status': '0', 'events': events, 'transcript': transcript}, ensure_ascii=False)
 if len(result.encode()) > 2 * 1024 * 1024:
     raise ValueError('Codex result exceeds sealed submission budget')
+name = os.environ['MYCELINK_PROPOSAL_PATH']
+if name:
+    final = [item['item']['text'] for item in transcript
+             if item.get('type') == 'item.completed' and
+             isinstance(item.get('item'), dict) and item['item'].get('type') == 'agent_message']
+    if len(final) != 1:
+        raise ValueError('missing unique model proposal')
+    proposal = json.loads(final[0])
+    if not isinstance(proposal, dict) or set(proposal) != {name} or not isinstance(proposal[name], str):
+        raise ValueError('model proposal exceeds exact controller path grant')
+    if len(proposal[name].encode()) > 2 * 1024 * 1024:
+        raise ValueError('model proposal exceeds file budget')
+    target = root / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(proposal[name])
 (root / 'result.json').write_text(result)
 (root / 'codex-out').unlink()
 (root / 'codex-err').unlink()
@@ -129,12 +149,19 @@ PY
         submission = data['submission']
         if (data['claim'], data['generation'], data['role']) != (args.claim, args.generation, 'worker'):
             raise ValueError('wrong generation transport')
-        if (not isinstance(submission, dict) or data['proposals'] != {} or
+        if (not isinstance(submission, dict) or
+            set(data['proposals']) != ({args.proposal_path} if args.proposal_path else set()) or
             submission.get('status') != '0' or
             not isinstance(submission.get('transcript'), list) or
             [item.get('type') for item in submission['transcript']] != submission.get('events') or
             submission['events'].count('turn.completed') != 1 or 'turn.failed' in submission['events']):
             raise ValueError('Linux Codex turn did not complete as a role-owned submission')
+        if args.proposal_path:
+            final = [item['item']['text'] for item in submission['transcript']
+                     if item.get('type') == 'item.completed' and
+                     isinstance(item.get('item'), dict) and item['item'].get('type') == 'agent_message']
+            if len(final) != 1 or json.loads(final[0]) != data['proposals']:
+                raise ValueError('model proposal did not match role-owned source output')
     finally:
         if bridge is not None and bridge.poll() is None:
             bridge.terminate()
@@ -150,6 +177,7 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ('source', 'manifest', 'claim', 'generation', 'prompt'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--proposal-path')
     run(parser.parse_args())
 
 

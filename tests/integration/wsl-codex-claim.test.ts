@@ -189,7 +189,8 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         const launched = o.startExperimentalWslCodexGeneration(CORE, ticket.claimId, ticket.dispatchId!,
           ['src/publish.js'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
             '--manifest', stage.manifest, '--claim', ticket.claimId, '--generation', ticket.dispatchId!,
-            '--prompt', 'Print the word OK.']);
+            '--proposal-path', 'src/publish.js',
+            '--prompt', 'Respond only with this JSON object, no markdown: {"src/publish.js":"JOB_RESULT_V2\\n"}']);
         expect(launched.claim).toBe(ticket.claimId);
         let outcome: { exit_code: number; revoked: boolean } | undefined;
         for (let i = 0; i < 100 && !outcome; i++) {
@@ -203,7 +204,21 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         { encoding: 'utf8', timeout: 10_000 });
         expect(published.status, published.stderr).toBe(0);
         expect(JSON.parse(published.stdout)).toMatchObject({ claim: ticket.claimId,
-          generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']), proposals: {} });
+          generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']),
+          proposals: { 'src/publish.js': 'JOB_RESULT_V2\n' } });
+        const configFile = join(p.control, 'mycelink.config.json');
+        const configured = readFileSync(configFile);
+        rmSync(configFile); // a missing host fence self-test cannot seal even a completed model turn
+        try {
+          expect(() => o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']))
+            .toThrow(/WSL_CODEX_BROKER_DENIED/);
+        } finally {
+          writeFileSync(configFile, configured);
+        }
+        const seal = o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']);
+        expect(seal).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!,
+          role: 'worker', sha256: { 'src/publish.js': createHash('sha256').update('JOB_RESULT_V2\n').digest('hex') } });
+        expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
       } finally {
         stage.dispose();
       }

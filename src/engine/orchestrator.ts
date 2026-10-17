@@ -104,6 +104,7 @@ import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
 import { stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
+import { sealRegisteredWslCodexWorker, type WslCodexWorkerSeal } from '../sessions/wsl-codex-seal.js';
 import {
   acquireResource,
   listLeases,
@@ -1371,6 +1372,17 @@ export class Orchestrator {
       if (launched) revokeWslCodexProcesses(this.paths.featureDir);
       throw error;
     }
+  }
+
+  /**
+   * Experimental broker consumption of a registered, completed Linux worker.
+   * Rechecks the live host generation under the lifecycle mutex and derives
+   * exact source hashes from Git objects. This does NOT apply or settle work.
+   */
+  sealExperimentalWslCodexWorker(nodeId: string, claimId: string, dispatchId: string,
+    proposedPaths: readonly string[]): WslCodexWorkerSeal {
+    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths,
+      (grant) => sealRegisteredWslCodexWorker(this.paths.featureDir, this.controlRoot, grant));
   }
 
   graph(): PortfolioGraph {
