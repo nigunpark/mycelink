@@ -27375,7 +27375,7 @@ import { existsSync as existsSync36, mkdirSync as mkdirSync21, readFileSync as r
 import { createHash as createHash35 } from "node:crypto";
 import { basename as basename14, dirname as dirname17, join as join49, resolve as resolve21 } from "node:path";
 import { randomBytes as randomBytes7, randomUUID as randomUUID3 } from "node:crypto";
-import { spawnSync as spawnSync10 } from "node:child_process";
+import { spawnSync as spawnSync11 } from "node:child_process";
 
 // src/engine/criterion-ledger.ts
 import { createHash as createHash23 } from "node:crypto";
@@ -29430,6 +29430,37 @@ function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
 }
 function sealRegisteredWslCodexReviewer(featureDir, controlRoot, grant) {
   return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "reviewer");
+}
+
+// src/sessions/wsl-codex-escrow.ts
+import { spawnSync as spawnSync10 } from "node:child_process";
+var PREFIX = '$ErrorActionPreference="Stop"; Add-Type -AssemblyName System.Security; $v=[Console]::In.ReadToEnd() | ConvertFrom-Json; $e=[Text.Encoding]::UTF8.GetBytes([string]$v.scope); ';
+var PROTECT = PREFIX + "$p=[Text.Encoding]::UTF8.GetBytes([string]$v.value); [Convert]::ToBase64String([System.Security.Cryptography.ProtectedData]::Protect($p,$e,[System.Security.Cryptography.DataProtectionScope]::CurrentUser))";
+var UNPROTECT = PREFIX + "$p=[Convert]::FromBase64String([string]$v.value); [Text.Encoding]::UTF8.GetString([System.Security.Cryptography.ProtectedData]::Unprotect($p,$e,[System.Security.Cryptography.DataProtectionScope]::CurrentUser))";
+function dpapi(command, value, scope) {
+  if (process.platform !== "win32" || !scope || scope.length > 512 || !value || value.length > 4096)
+    throw new Error("WSL_CODEX_ESCROW_UNAVAILABLE");
+  const response = spawnSync10("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+    input: JSON.stringify({ value, scope }),
+    encoding: "utf8",
+    timeout: 15e3,
+    windowsHide: true,
+    maxBuffer: 8192
+  });
+  if (response.error || response.status !== 0 || !response.stdout?.trim())
+    throw new Error("WSL_CODEX_ESCROW_DENIED");
+  return response.stdout.trim();
+}
+function protectExperimentalWslCapability(capability, scope) {
+  const encrypted = dpapi(PROTECT, capability, scope);
+  if (!/^[A-Za-z0-9+/=]{100,8192}$/.test(encrypted) || encrypted.includes(capability))
+    throw new Error("WSL_CODEX_ESCROW_INVALID");
+  return encrypted;
+}
+function unprotectExperimentalWslCapability(encrypted, scope) {
+  if (!/^[A-Za-z0-9+/=]{100,8192}$/.test(encrypted))
+    throw new Error("WSL_CODEX_ESCROW_INVALID");
+  return dpapi(UNPROTECT, encrypted, scope);
 }
 
 // src/e2e/runner.ts
@@ -33340,6 +33371,7 @@ var SettleInProgressError = class extends Error {
 function errorText(err) {
   return err instanceof Error ? err.message : String(err);
 }
+var WSL_CODEX_INTERNAL_RECONCILE = /* @__PURE__ */ Symbol("trusted WSL Codex reconciliation");
 var Orchestrator = class _Orchestrator {
   controlRoot;
   featureId;
@@ -33593,7 +33625,7 @@ var Orchestrator = class _Orchestrator {
     });
     const gate = this.gateCommands(nodeId, capability).find((entry) => entry.gate === "red");
     if (!gate || gate.argv[0] !== "node") throw new Error("WSL_RED_GATE_UNDECLARED");
-    const result = spawnSync10(gate.argv[0], gate.argv.slice(1), {
+    const result = spawnSync11(gate.argv[0], gate.argv.slice(1), {
       cwd: worktree,
       encoding: "utf8",
       timeout: 6e4,
@@ -33699,7 +33731,7 @@ var Orchestrator = class _Orchestrator {
           throw new Error("WSL_GREEN_COMMIT_DRIFT");
         writeTextAtomic(journal, JSON.stringify({ ...record, phase: running }) + "\n");
       });
-      const result = spawnSync10(gate.argv[0], gate.argv.slice(1), {
+      const result = spawnSync11(gate.argv[0], gate.argv.slice(1), {
         cwd: worktree,
         encoding: "utf8",
         timeout: 6e4,
@@ -33780,7 +33812,7 @@ var Orchestrator = class _Orchestrator {
    * Until terminal result construction is independently verified, never
    * manufacture a DONE receipt or let the normal dispatch call this path.
    */
-  async runExperimentalWslCodexTransaction(request) {
+  async runExperimentalWslCodexTransaction(request, internal) {
     if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1" || process.env["MYCELINK_LIVE_WSL_CODEX_AUTH"] !== "1")
       throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
     const { nodeId, claimId, generation, allowedPaths } = request;
@@ -33789,71 +33821,116 @@ var Orchestrator = class _Orchestrator {
     if (allowedPaths.length !== 2 || !allowedPaths.includes("tests/run.mjs") || !allowedPaths.includes("src/publish.js")) throw new Error("WSL_CODEX_TRANSACTION_PATH_DENIED");
     const capability = this.experimentalWslCapabilities.get(`${nodeId}\0${claimId}\0${generation}`);
     if (!capability) throw new Error("WSL_CODEX_CAPABILITY_UNAVAILABLE");
-    this.assertExperimentalWslCodexApplyBase(nodeId, claimId, generation, allowedPaths);
-    const stage = this.stageExperimentalWslCodexClaimSource(nodeId, claimId, generation, allowedPaths);
+    const escrowScope = `${this.featureId}\0${nodeId}\0${claimId}\0${generation}`;
+    const escrowFile = join49(
+      this.paths.featureDir,
+      "wsl-codex-transactions",
+      createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".cap"
+    );
+    const resuming = internal === WSL_CODEX_INTERNAL_RECONCILE;
+    if (!resuming) {
+      this.assertExperimentalWslCodexApplyBase(nodeId, claimId, generation, allowedPaths);
+      this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
+        if (existsSync36(escrowFile)) throw new Error("WSL_CODEX_ESCROW_ALREADY_ISSUED");
+        writeTextAtomic(escrowFile, protectExperimentalWslCapability(capability, escrowScope) + "\n");
+      });
+    }
+    const stage = resuming ? null : this.stageExperimentalWslCodexClaimSource(nodeId, claimId, generation, allowedPaths);
     try {
-      const script = join49(packageRoot(), "scripts", "wsl-codex-turn.py");
-      const translated = spawnSync10(
-        "wsl.exe",
-        [
-          "-d",
-          "Ubuntu",
-          "-u",
-          "root",
-          "--",
-          "wslpath",
-          "-u",
-          script.replace(/\\/g, "/")
-        ],
-        { encoding: "utf8", timeout: 1e4, windowsHide: true }
-      );
-      if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
-        throw new Error("WSL_CODEX_TURN_SCRIPT_UNAVAILABLE");
-      const modelPrompt = "Return only a JSON object keyed by the two exact paths tests/run.mjs and src/publish.js. The test file must be a valid node:test file that fails before the implementation exists; preserve the existing declared test behavior. No markdown. Task: " + request.prompt;
-      this.startExperimentalWslCodexGeneration(
-        nodeId,
-        claimId,
-        generation,
-        allowedPaths,
-        [
-          "/usr/bin/python3",
-          translated.stdout.trim(),
-          "--source",
-          stage.source,
-          "--manifest",
-          stage.manifest,
-          "--claim",
+      let workerSealHash;
+      let reviewerSealHash;
+      if (!resuming) {
+        const script = join49(packageRoot(), "scripts", "wsl-codex-turn.py");
+        const translated = spawnSync11(
+          "wsl.exe",
+          [
+            "-d",
+            "Ubuntu",
+            "-u",
+            "root",
+            "--",
+            "wslpath",
+            "-u",
+            script.replace(/\\/g, "/")
+          ],
+          { encoding: "utf8", timeout: 1e4, windowsHide: true }
+        );
+        if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
+          throw new Error("WSL_CODEX_TURN_SCRIPT_UNAVAILABLE");
+        const modelPrompt = "Return only a JSON object keyed by the two exact paths tests/run.mjs and src/publish.js. The test file must be a valid node:test file that fails before the implementation exists; preserve the existing declared test behavior. No markdown. Task: " + request.prompt;
+        this.startExperimentalWslCodexGeneration(
+          nodeId,
           claimId,
-          "--generation",
           generation,
-          "--proposal-path",
-          "tests/run.mjs",
-          "--proposal-path",
-          "src/publish.js",
-          "--review-prompt",
-          'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
-          "--prompt",
-          modelPrompt
-        ]
-      );
-      let outcome;
-      for (let i = 0; i < 160 && !outcome; i++) {
-        try {
-          outcome = wslCodexProcessResult(this.paths.featureDir, claimId, generation);
-        } catch {
-          await new Promise((resolve28) => setTimeout(resolve28, 750));
+          allowedPaths,
+          [
+            "/usr/bin/python3",
+            translated.stdout.trim(),
+            "--source",
+            stage.source,
+            "--manifest",
+            stage.manifest,
+            "--claim",
+            claimId,
+            "--generation",
+            generation,
+            "--proposal-path",
+            "tests/run.mjs",
+            "--proposal-path",
+            "src/publish.js",
+            "--review-prompt",
+            'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
+            "--prompt",
+            modelPrompt
+          ]
+        );
+        let outcome;
+        for (let i = 0; i < 160 && !outcome; i++) {
+          try {
+            outcome = wslCodexProcessResult(this.paths.featureDir, claimId, generation);
+          } catch {
+            await new Promise((resolve28) => setTimeout(resolve28, 750));
+          }
         }
+        if (!outcome || outcome.exit_code !== 0 || outcome.revoked)
+          throw new Error("WSL_CODEX_GENERATION_FAILED_OR_REVOKED");
+        await request.onPhase?.("model-complete");
+        const workerSeal = this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
+        const reviewerSeal = this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
+        workerSealHash = workerSeal.submission_sha256;
+        reviewerSealHash = reviewerSeal.submission_sha256;
+        const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
+        if (turn.worker.events.filter((event) => event === "turn.completed").length !== 1)
+          throw new Error("WSL_CODEX_MODEL_TRANSCRIPT_INVALID");
+        this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, "tests/run.mjs");
+        this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
+          const journal = join49(
+            this.paths.featureDir,
+            "wsl-codex-transactions",
+            createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
+          );
+          const record = JSON.parse(readFileSync31(journal, "utf8"));
+          if (record["phase"] !== "red-committed" || record["claimId"] !== claimId || record["dispatchId"] !== generation)
+            throw new Error("WSL_CODEX_RED_JOURNAL_INVALID");
+          writeTextAtomic(journal, JSON.stringify({ ...record, workerSealHash, reviewerSealHash }) + "\n");
+        });
+        if (request.interruptAfter === "first-apply") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_FIRST_APPLY");
+      } else {
+        const seals = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
+          const journal = join49(
+            this.paths.featureDir,
+            "wsl-codex-transactions",
+            createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
+          );
+          const record = JSON.parse(readFileSync31(journal, "utf8"));
+          if (record["phase"] !== "red-committed" || record["base"] !== grant.base_sha || typeof record["workerSealHash"] !== "string" || !/^[a-f0-9]{64}$/.test(record["workerSealHash"]) || typeof record["reviewerSealHash"] !== "string" || !/^[a-f0-9]{64}$/.test(record["reviewerSealHash"]))
+            throw new Error("WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE");
+          readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+          return { worker: record["workerSealHash"], reviewer: record["reviewerSealHash"] };
+        });
+        workerSealHash = seals.worker;
+        reviewerSealHash = seals.reviewer;
       }
-      if (!outcome || outcome.exit_code !== 0 || outcome.revoked)
-        throw new Error("WSL_CODEX_GENERATION_FAILED_OR_REVOKED");
-      await request.onPhase?.("model-complete");
-      const workerSeal = this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
-      const reviewerSeal = this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
-      const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
-      if (turn.worker.events.filter((event) => event === "turn.completed").length !== 1)
-        throw new Error("WSL_CODEX_MODEL_TRANSCRIPT_INVALID");
-      this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, "tests/run.mjs");
-      if (request.interruptAfter === "first-apply") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_FIRST_APPLY");
       this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability);
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, "src/publish.js");
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
@@ -33936,8 +34013,8 @@ var Orchestrator = class _Orchestrator {
         const receipt = {
           claim: claimId,
           generation,
-          workerSeal: workerSeal.submission_sha256,
-          reviewerSeal: reviewerSeal.submission_sha256,
+          workerSeal: workerSealHash,
+          reviewerSeal: reviewerSealHash,
           sourceSha256,
           // A completed authenticated turn proves a lower bound, not the
           // bridge's exact HTTP request count. Never call this an API audit.
@@ -33958,6 +34035,7 @@ var Orchestrator = class _Orchestrator {
       if (prior["phase"] !== "result-written" || prior["resultSha256"] !== verified.resultSha256)
         throw new Error("WSL_CODEX_RESULT_JOURNAL_INVALID");
       writeTextAtomic(verified.journal, JSON.stringify({ ...prior, phase: "settled" }) + "\n");
+      rmSync14(escrowFile, { force: true });
       return {
         ...verified.receipt,
         settlement: {
@@ -33967,7 +34045,7 @@ var Orchestrator = class _Orchestrator {
         }
       };
     } finally {
-      stage.dispose();
+      stage?.dispose();
       this.experimentalWslCapabilities.delete(`${nodeId}\0${claimId}\0${generation}`);
     }
   }
@@ -33990,7 +34068,33 @@ var Orchestrator = class _Orchestrator {
       throw new Error("WSL_CODEX_RECONCILE_JOURNAL_MISSING");
     }
     const record = JSON.parse(readFileSync31(journal, "utf8"));
-    if (record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== generation || typeof record["resultSha256"] !== "string" || !/^[a-f0-9]{64}$/.test(record["resultSha256"]))
+    if (record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== generation)
+      throw new Error("WSL_CODEX_RECONCILE_JOURNAL_INVALID");
+    if (record["phase"] === "red-committed") {
+      const allowedPaths = ["tests/run.mjs", "src/publish.js"];
+      const capability = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
+        const escrow = journal.slice(0, -".json".length) + ".cap";
+        if (!existsSync36(escrow) || !lstatSync17(escrow).isFile() || lstatSync17(escrow).isSymbolicLink())
+          throw new Error("WSL_CODEX_ESCROW_UNAVAILABLE");
+        const raw = unprotectExperimentalWslCapability(
+          readFileSync31(escrow, "utf8").trim(),
+          `${this.featureId}\0${nodeId}\0${claimId}\0${generation}`
+        );
+        const claim = this.state().nodes[nodeId]?.claim;
+        if (!claim?.capability_sha256 || !capabilityMatches(raw, claim.capability_sha256))
+          throw new Error("WSL_CODEX_ESCROW_CAPABILITY_INVALID");
+        return raw;
+      });
+      this.experimentalWslCapabilities.set(`${nodeId}\0${claimId}\0${generation}`, capability);
+      return this.runExperimentalWslCodexTransaction({
+        nodeId,
+        claimId,
+        generation,
+        allowedPaths,
+        prompt: ""
+      }, WSL_CODEX_INTERNAL_RECONCILE);
+    }
+    if (typeof record["resultSha256"] !== "string" || !/^[a-f0-9]{64}$/.test(record["resultSha256"]))
       throw new Error("WSL_CODEX_RECONCILE_JOURNAL_INVALID");
     const receipt = record["receipt"];
     if (!receipt || receipt["claim"] !== claimId || receipt["generation"] !== generation || typeof receipt["workerSeal"] !== "string" || typeof receipt["reviewerSeal"] !== "string" || !Array.isArray(receipt["gates"]) || receipt["gates"].length !== 3 || receipt["gates"].some((gate, index) => !gate || typeof gate !== "object" || gate.gate !== ["red", "green", "regression"][index] || gate.exitCode !== 0 || !Array.isArray(gate.argv) || gate.argv[0] !== "node") || record["receiptSha256"] !== createHash35("sha256").update(JSON.stringify(receipt)).digest("hex"))
@@ -34022,6 +34126,7 @@ var Orchestrator = class _Orchestrator {
     if (settled.outcome !== "DONE" || this.state().nodes[nodeId]?.state !== "DONE")
       throw new Error(`WSL_CODEX_RECONCILE_SETTLEMENT_REFUSED:${settled.outcome}`);
     writeTextAtomic(journal, JSON.stringify({ ...record, phase: "settled" }) + "\n");
+    rmSync14(journal.slice(0, -".json".length) + ".cap", { force: true });
     return { ...receipt, settlement: {
       outcome: "DONE",
       idempotent: false,

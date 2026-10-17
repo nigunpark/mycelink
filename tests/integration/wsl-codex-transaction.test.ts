@@ -162,6 +162,7 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       phase: 'settled', claimId: ticket.claimId, dispatchId: ticket.dispatchId,
       resultSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
+    expect(() => readFileSync(journal.replace(/\.json$/, '.cap'))).toThrow();
   }, 180_000);
 
   it.skipIf(!authenticated)('routes model-driven MCP and built-in shell tools through the same isolated generation', async () => {
@@ -266,10 +267,15 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     const { p, o, ticket, request } = await claim();
     await expect(transaction(o, { ...request(implement), interruptAfter: 'first-apply' }))
       .rejects.toThrow(/INTERRUPT|CRASH/);
-    const receipt = await o.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
+    const scopeDigest = createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex');
+    const escrow = readFileSync(join(p.featureDir, 'wsl-codex-transactions', scopeDigest + '.cap'), 'utf8');
+    expect(escrow).not.toContain(ticket.capability);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    const receipt = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(receipt.settlement).toMatchObject({ outcome: 'DONE', usageSessions: 1 });
     const after = git(p.core, ['rev-parse', ticket.branch!]);
-    const again = await o.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
+    const again = await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!);
     expect(again.settlement).toMatchObject({ outcome: 'DONE', idempotent: true, usageSessions: 1 });
     expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(after);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(1);
