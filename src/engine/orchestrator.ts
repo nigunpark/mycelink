@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { packageRoot } from '../util/paths.js';
 import type {
   AdoptedBase,
   CapsuleRegistryEntry,
@@ -1245,6 +1246,10 @@ export class Orchestrator {
   private readonly settleFault: ((point: SettleFaultPoint) => void) | undefined;
   /** The controller copy of the answer the settle in progress concluded, by node: its receipt records it (PCM-101 final). */
   private readonly concludedAnswers = new Map<string, { file: string; sha256: string }>();
+  // Experimental controller-only handoff: the host ticket's raw capability
+  // cannot be reconstructed from STATE's hash after this process exits.
+  // Never serialize this map or pass it to the Linux worker/reviewer.
+  private readonly experimentalWslCapabilities = new Map<string, string>();
   private readonly capsuleFault: ((point: string) => void) | undefined;
   private preflightResult: PreflightResult | null = null;
 
@@ -1712,6 +1717,83 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Opt-in trusted host transaction. The controller owns launch, both seals,
+   * Git changes and verifier argv; nothing from the worker can authorize them.
+   * Until terminal result construction is independently verified, never
+   * manufacture a DONE receipt or let the normal dispatch call this path.
+   */
+  async runExperimentalWslCodexTransaction(request: {
+    nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
+    isolationProbe?: 'mcp' | 'builtin';
+    refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
+    interruptAfter?: 'first-apply'; onPhase?: (phase: 'model-complete') => Promise<void>;
+  }): Promise<never> {
+    if (process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1' ||
+        process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] !== '1')
+      throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
+    const { nodeId, claimId, generation, allowedPaths } = request;
+    if (request.refusalFixture || request.isolationProbe)
+      throw new Error('WSL_CODEX_PROBE_NOT_IMPLEMENTED');
+    if (allowedPaths.length !== 2 || !allowedPaths.includes('tests/run.mjs') ||
+        !allowedPaths.includes('src/publish.js')) throw new Error('WSL_CODEX_TRANSACTION_PATH_DENIED');
+    const capability = this.experimentalWslCapabilities.get(`${nodeId}\0${claimId}\0${generation}`);
+    if (!capability) throw new Error('WSL_CODEX_CAPABILITY_UNAVAILABLE');
+    // Refuse a mutable checkout before even staging the Linux source.
+    this.assertExperimentalWslCodexApplyBase(nodeId, claimId, generation, allowedPaths);
+    const stage = this.stageExperimentalWslCodexClaimSource(nodeId, claimId, generation, allowedPaths);
+    try {
+      const script = join(packageRoot(), 'scripts', 'wsl-codex-turn.py');
+      const translated = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--',
+        'wslpath', '-u', script.replace(/\\/g, '/')],
+      { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+      if (translated.status !== 0 || !translated.stdout?.trim().startsWith('/mnt/'))
+        throw new Error('WSL_CODEX_TURN_SCRIPT_UNAVAILABLE');
+      const modelPrompt = 'Return only a JSON object keyed by the two exact paths tests/run.mjs and src/publish.js. ' +
+        'The test file must be a valid node:test file that fails before the implementation exists; ' +
+        'preserve the existing declared test behavior. No markdown. Task: ' + request.prompt;
+      this.startExperimentalWslCodexGeneration(nodeId, claimId, generation, allowedPaths,
+        ['/usr/bin/python3', translated.stdout.trim(), '--source', stage.source,
+          '--manifest', stage.manifest, '--claim', claimId, '--generation', generation,
+          '--proposal-path', 'tests/run.mjs', '--proposal-path', 'src/publish.js',
+          '--review-prompt', 'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
+          '--prompt', modelPrompt]);
+      let outcome: { exit_code: number; revoked: boolean } | undefined;
+      for (let i = 0; i < 160 && !outcome; i++) {
+        try { outcome = wslCodexProcessResult(this.paths.featureDir, claimId, generation); }
+        catch { await new Promise(resolve => setTimeout(resolve, 750)); }
+      }
+      if (!outcome || outcome.exit_code !== 0 || outcome.revoked)
+        throw new Error('WSL_CODEX_GENERATION_FAILED_OR_REVOKED');
+      await request.onPhase?.('model-complete');
+      // The callback observes a phase, not authority: each operation below
+      // re-enters the live claim mutex after a possible cancel or resume.
+      this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
+      this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
+      const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
+      if (turn.worker.events.filter(event => event === 'turn.completed').length !== 1)
+        throw new Error('WSL_CODEX_MODEL_TRANSCRIPT_INVALID');
+      this.applyExperimentalWslCodexRedTest(nodeId, claimId, generation, allowedPaths, 'tests/run.mjs');
+      if (request.interruptAfter === 'first-apply') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_FIRST_APPLY');
+      this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability);
+      this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, 'src/publish.js');
+      this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
+      this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
+      // `node tests/run.mjs` currently produces no normalized test results
+      // record: readGateTests returns null even after a valid RED gate. The
+      // criterion judge cannot authenticate an id from raw TAP text. Refuse
+      // settlement instead of fabricating a passing test or a DONE receipt.
+      if (!readGateTests(this.controlRoot, this.state().nodes[nodeId]?.evidence.red)?.length)
+        throw new Error('WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE');
+      throw new Error('WSL_CODEX_RESULT_SETTLEMENT_NOT_IMPLEMENTED');
+    } finally {
+      stage.dispose();
+      // An unfinished transaction has no settlement authority to carry into
+      // another request. A future reconciler needs its own trusted escrow.
+      this.experimentalWslCapabilities.delete(`${nodeId}\0${claimId}\0${generation}`);
+    }
+  }
+
   graph(): PortfolioGraph {
     return loadGraph(this.controlRoot, this.featureId);
   }
@@ -1935,6 +2017,10 @@ export class Orchestrator {
     if (worktree !== null) this.revalidateCompletions(nodeId, claimId);
 
     this.event('node.claimed', nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
+    if (mode === 'host' && dispatchId && process.platform === 'win32' &&
+        process.env['MYCELINK_LIVE_WSL_WORKER'] === '1' && process.env['MYCELINK_LIVE_WSL_CODEX_AUTH'] === '1') {
+      this.experimentalWslCapabilities.set(`${nodeId}\0${claimId}\0${dispatchId}`, capability.raw);
+    }
     return {
       claimId,
       capability: capability.raw,

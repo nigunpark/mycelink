@@ -98,12 +98,21 @@ function assertNoSettlement(featureDir: string) {
 }
 
 describe('trusted Windows claim to WSL Codex transaction (production dispatch stays disabled)', () => {
+  it.skipIf(!authenticated)('fails closed after real sealed gates when RED test identity has no normalized results record', async () => {
+    const { p, o, ticket, request } = await claim();
+    const base = git(ticket.worktree!, ['rev-parse', 'HEAD']);
+    await expect(transaction(o, request(implement))).rejects.toThrow(/WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE/);
+    expect(git(ticket.worktree!, ['log', '--format=%H', `${base}..HEAD`]).split('\n').filter(Boolean)).toHaveLength(2);
+    assertNoSettlement(p.featureDir);
+  }, 180_000);
+
   it('requires a controller-owned whole-transaction entry point instead of adapting a writable worker', async () => {
     const { p, o, request } = await claim();
     // The normal (no WSL/auth opt-in) run is RED specifically for the absent
     // controller. Once implemented, this test runs only when live opt-in is set.
     if (!authenticated) {
       expect(typeof o.runExperimentalWslCodexTransaction, 'WSL_CODEX_TRANSACTION_NOT_IMPLEMENTED').toBe('function');
+      await expect(transaction(o, request(implement))).rejects.toThrow(/WSL_CODEX_EXPERIMENT_NOT_ENABLED/);
       assertNoSettlement(p.featureDir);
       return;
     }
