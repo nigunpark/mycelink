@@ -351,6 +351,47 @@ class BridgePolicyTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_revocation_during_admitted_upstream_refuses_its_late_response(self):
+        bridge = load_bridge()
+        with tempfile.TemporaryDirectory() as temp:
+            admitted = threading.Event()
+            finish = threading.Event()
+            def upstream(path, body, headers):
+                admitted.set()
+                if not finish.wait(5):
+                    raise TimeoutError('test upstream timed out')
+                return 200, b'{"secret":"late"}', 'application/json'
+            server = bridge.make_server(str(pathlib.Path(temp) / 'broker.sock'), upstream,
+                                        allowed_model='assigned-model', max_output_tokens=128)
+            service = threading.Thread(target=server.serve_forever, daemon=True)
+            service.start()
+            observed = []
+            def client():
+                conn = UnixHTTP(server.server_address)
+                try:
+                    conn.request('POST', '/v1/responses', b'{"model":"assigned-model"}',
+                                 {'Content-Type': 'application/json'})
+                    response = conn.getresponse()
+                    observed.append((response.status, response.read()))
+                finally:
+                    conn.close()
+            caller = threading.Thread(target=client)
+            caller.start()
+            try:
+                self.assertTrue(admitted.wait(3), 'upstream never admitted request')
+                server.revoke()
+                finish.set()
+                caller.join(5)
+                self.assertFalse(caller.is_alive())
+                self.assertEqual(observed, [(403, b'')])
+                self.assertEqual(server.request_budget, 63)  # no refund after admission
+            finally:
+                finish.set()
+                caller.join(5)
+                server.shutdown()
+                server.server_close()
+                service.join(timeout=5)
+
     def test_untrusted_upstream_content_type_cannot_inject_response_headers(self):
         bridge = load_bridge()
         with tempfile.TemporaryDirectory() as temp:

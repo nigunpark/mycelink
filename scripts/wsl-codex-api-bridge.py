@@ -188,16 +188,22 @@ class Request(BaseHTTPRequestHandler):
         if not isinstance(content_type, str) or not re.fullmatch(
             r'(?:application/json|text/event-stream)(?:; charset=[A-Za-z0-9_-]+)?', content_type):
             status, payload, content_type = 502, b'', 'application/json'
-        audit = getattr(self.server, 'audit', None)
-        if audit:
-            audit(f'upstream-{status}', 'POST', '/v1/responses')
-        self.send_response(status)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(payload)))
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(payload)
-        self.close_connection = True
+        # A revoke may race an admitted HTTPS request. Serialize the response
+        # against revoke: after revoke returns no late upstream bytes can be
+        # delivered to the worker, even if that request consumed its budget.
+        with self.server.budget_lock:
+            if self.server.revoked or time.monotonic() >= self.server.expires_at:
+                return self.refuse()
+            audit = getattr(self.server, 'audit', None)
+            if audit:
+                audit(f'upstream-{status}', 'POST', '/v1/responses')
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(payload)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(payload)
+            self.close_connection = True
 
     def do_GET(self):
         if self.path != '/internal/identity' or self.server.claim is None:
