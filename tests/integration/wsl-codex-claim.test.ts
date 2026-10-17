@@ -12,6 +12,7 @@ import { main, type CliIo } from '../../src/cli/cli.js';
 import { asController } from '../helpers/authority.js';
 import { Orchestrator } from '../../src/engine/orchestrator.js';
 import { FakeInProcessAdapter } from '../../src/sessions/fake-adapter.js';
+import { startExperimentalWslProcess, wslCodexProcessResult } from '../../src/sessions/wsl-codex-process.js';
 import { loadState, mutateState, saveState } from '../../src/state/feature-state.js';
 
 const CORE = `${FEATURE_ID}.core.publish.impl`;
@@ -174,6 +175,21 @@ describe('dedicated Codex lifecycle mutex (dispatch remains disabled)', () => {
 });
 
 describe('experimental WSL claim policy binding (not launch authorization)', () => {
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'reads only root-attested supervisor exit status after a registered turn', async () => {
+      const { p } = await fixture();
+      const claim = 'probe-' + createHash('sha256').update(p.featureDir).digest('hex').slice(0, 16);
+      const generation = 'generation1';
+      startExperimentalWslProcess(p.featureDir, claim, generation, ['/bin/sh', '-c', 'exit 23']);
+      let outcome: { exit_code: number; revoked: boolean } | undefined;
+      for (let i = 0; i < 25 && !outcome; i++) {
+        try { outcome = wslCodexProcessResult(p.featureDir, claim, generation); }
+        catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+      }
+      expect(outcome).toEqual({ exit_code: 23, revoked: false });
+      expect(wslCodexProcessResult(p.featureDir, claim, generation)).toEqual(outcome);
+    }, 40_000,
+  );
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'stages immutable Git source only while the live claim mutex is held and refuses a revoked claim', async () => {
       const { p, o } = await fixture();

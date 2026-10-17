@@ -110,6 +110,36 @@ def status(token, claim, generation):
         os.close(guard)
 
 
+def result(token, claim, generation):
+    path = location(token)
+    name = slot_name(claim, generation)
+    guard = lock(path)
+    try:
+        if (path / (name + '.json')).exists():
+            raise ValueError('WSL generation still active or unreconciled')
+        used = path / (name + '.used')
+        if not used.is_file() or used.is_symlink() or used.stat().st_uid != 0:
+            raise ValueError('WSL generation was never registered')
+        outcome = path / (name + '.result')
+        info = outcome.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077 or info.st_nlink != 1:
+            raise ValueError('unsafe process result')
+        fd = os.open(outcome, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            if (os.fstat(fd).st_ino, os.fstat(fd).st_dev) != (info.st_ino, info.st_dev):
+                raise ValueError('process result replaced')
+            data = json.loads(os.read(fd, 4097))
+        finally:
+            os.close(fd)
+        if (not isinstance(data, dict) or set(data) != {'exit_code', 'revoked'} or
+            type(data['exit_code']) is not int or not 0 <= data['exit_code'] <= 255 or
+            type(data['revoked']) is not bool):
+            raise ValueError('invalid process result')
+        return data
+    finally:
+        os.close(guard)
+
+
 def revoke(token):
     path = location(token)
     guard = lock(path)
@@ -124,6 +154,18 @@ def revoke(token):
                 raise ValueError('process identity stale; manual reconciliation required')
             if os.getpgid(pid) != data['pgid']:
                 raise ValueError('process group identity changed')
+        for slot, _ in entries:
+            # Persist revocation intent before signalling; the supervisor is
+            # deliberately outside the child session and cannot infer SIGTERM.
+            marker = slot.with_suffix('.revoked')
+            fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.fsync(fd)
+            os.close(fd)
+        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         for _, data in entries:
             # The registered leader is in a dedicated process group. Signal
             # that group; its root supervisor reaps the leader and removes the
@@ -198,13 +240,15 @@ def run(token, claim, generation, command, ready_fd=None):
         finally:
             os.close(guard)
         raise
+    exit_code = None
     try:
         while child.poll() is None:
             try:
                 child.wait(timeout=.05)
             except subprocess.TimeoutExpired:
                 pass
-        return 1 if stopped or child.returncode < 0 else child.returncode
+        exit_code = 1 if stopped or child.returncode < 0 else child.returncode
+        return exit_code
     finally:
         if child.poll() is None:
             stop(None, None)
@@ -212,7 +256,24 @@ def run(token, claim, generation, command, ready_fd=None):
         guard = lock(path)
         try:
             if slot.exists() and record(slot) == data:
-                slot.unlink()
+                if exit_code is None:
+                    raise ValueError('cannot attest unfinished WSL command')
+                # Publish root-observed termination before removing the live slot.
+                # Interrupted publication retains the slot and cannot be settled.
+                revoked = stopped or (path / (name + '.revoked')).exists()
+                exit_code = 1 if revoked else exit_code
+                fd = os.open(path / (name + '.result'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'w') as output:
+                    json.dump({'exit_code': exit_code, 'revoked': revoked}, output)
+                    output.flush()
+                    os.fsync(output.fileno())
+                directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                    slot.unlink()
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
         finally:
             os.close(guard)
 
@@ -260,10 +321,10 @@ def start(token, claim, generation, command):
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='action', required=True)
-    for action in ('run', 'start', 'status', 'revoke'):
+    for action in ('run', 'start', 'status', 'result', 'revoke'):
         command = sub.add_parser(action)
         command.add_argument('token')
-        if action in ('run', 'start', 'status'):
+        if action in ('run', 'start', 'status', 'result'):
             command.add_argument('claim')
             command.add_argument('generation')
             if action in ('run', 'start'):
@@ -276,6 +337,9 @@ def main():
         return 0
     if args.action == 'status':
         print(json.dumps(status(args.token, args.claim, args.generation)))
+        return 0
+    if args.action == 'result':
+        print(json.dumps(result(args.token, args.claim, args.generation)))
         return 0
     command = args.command[1:] if args.command and args.command[0] == '--' else args.command
     if not command or not command[0].startswith('/'):

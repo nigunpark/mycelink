@@ -80,6 +80,40 @@ class ProcessRegistryTest(unittest.TestCase):
         finally:
             subprocess.run(['python3', str(SCRIPT), 'revoke', token], capture_output=True, timeout=12)
 
+    def test_supervisor_records_terminated_command_exit_without_trusting_worker_report(self):
+        token, claim, generation = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+        launched = subprocess.run(['python3', str(SCRIPT), 'start', token, claim, generation,
+                                   '--', '/bin/sh', '-c', 'exit 17'], text=True, capture_output=True, timeout=10)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        for _ in range(100):
+            observed = subprocess.run(['python3', str(SCRIPT), 'result', token, claim, generation],
+                                      text=True, capture_output=True, timeout=10)
+            if observed.returncode == 0:
+                break
+            time.sleep(.03)
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertEqual(json.loads(observed.stdout), {'exit_code': 17, 'revoked': False})
+        self.assertEqual(json.loads(subprocess.check_output(['python3', str(SCRIPT), 'result', token, claim, generation])),
+                         {'exit_code': 17, 'revoked': False})
+
+    def test_result_refuses_unfinished_and_unregistered_generation(self):
+        token, claim, generation = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+        fresh = subprocess.run(['python3', str(SCRIPT), 'result', token, claim, generation], capture_output=True)
+        self.assertNotEqual(fresh.returncode, 0)
+        try:
+            launched = subprocess.run(['python3', str(SCRIPT), 'start', token, claim, generation,
+                                       '--', '/bin/sleep', '60'], text=True, capture_output=True, timeout=10)
+            self.assertEqual(launched.returncode, 0, launched.stderr)
+            running = subprocess.run(['python3', str(SCRIPT), 'result', token, claim, generation], capture_output=True)
+            self.assertNotEqual(running.returncode, 0)
+            self.assertEqual(subprocess.run(['python3', str(SCRIPT), 'revoke', token], capture_output=True).returncode, 0)
+            ended = subprocess.run(['python3', str(SCRIPT), 'result', token, claim, generation],
+                                   text=True, capture_output=True)
+            self.assertEqual(ended.returncode, 0, ended.stderr)
+            self.assertEqual(json.loads(ended.stdout), {'exit_code': 1, 'revoked': True})
+        finally:
+            subprocess.run(['python3', str(SCRIPT), 'revoke', token], capture_output=True, timeout=12)
+
     def test_registration_failure_does_not_leave_an_unregistered_live_process(self):
         spec = importlib.util.spec_from_file_location('registry_under_test', SCRIPT)
         module = importlib.util.module_from_spec(spec)

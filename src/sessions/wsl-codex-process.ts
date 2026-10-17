@@ -63,6 +63,27 @@ export function wslCodexProcessActive(featureDir: string, claim: string, generat
   }
 }
 
+/** Root-supervisor termination evidence; never accepts worker-reported exit text. */
+export function wslCodexProcessResult(featureDir: string, claim: string, generation: string):
+  { exit_code: number; revoked: boolean } {
+  const script = wslProcessScript();
+  const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', script,
+    'result', wslCodexFeatureToken(featureDir), claim, generation],
+    { encoding: 'utf8', timeout: 12_000, windowsHide: true });
+  if (result.status !== 0 || result.error) throw new Error('WSL_CODEX_RESULT_UNCONFIRMED');
+  try {
+    const parsed: unknown = JSON.parse(result.stdout);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid result');
+    const value = parsed as Record<string, unknown>;
+    if (Object.keys(value).length !== 2 || !Number.isSafeInteger(value['exit_code']) ||
+      (value['exit_code'] as number) < 0 || (value['exit_code'] as number) > 255 ||
+      typeof value['revoked'] !== 'boolean') throw new Error('invalid result');
+    return value as { exit_code: number; revoked: boolean };
+  } catch {
+    throw new Error('WSL_CODEX_RESULT_UNCONFIRMED');
+  }
+}
+
 export function revokeWslCodexProcesses(featureDir: string): void {
   const script = wslProcessScript();
   const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', script,
