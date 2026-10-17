@@ -2078,6 +2078,31 @@ export class Orchestrator {
         if (!lstatSync(slot).isFile() || lstatSync(slot).isSymbolicLink() ||
             createHash('sha256').update(readFileSync(slot)).digest('hex') !== record['resultSha256'])
           throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+        let result: Record<string, unknown>;
+        try { result = JSON.parse(readFileSync(slot, 'utf8')) as Record<string, unknown>; }
+        catch { throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT'); }
+        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
+        for (const transcript of [turn.worker.transcript, (turn.reviewer as { transcript?: unknown[] }).transcript]) {
+          if (!Array.isArray(transcript)) throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+          const completed = transcript.filter((event): event is Record<string, unknown> =>
+            !!event && typeof event === 'object' && !Array.isArray(event) &&
+            (event as Record<string, unknown>)['type'] === 'turn.completed');
+          if (completed.length !== 1) throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+          const counts = completed[0]!['usage'] as Record<string, unknown> | undefined;
+          if (!counts || !Number.isSafeInteger(counts['input_tokens']) || !Number.isSafeInteger(counts['output_tokens']) ||
+              (counts['input_tokens'] as number) <= 0 || (counts['output_tokens'] as number) <= 0)
+            throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
+          usage.input_tokens += counts['input_tokens'] as number;
+          usage.output_tokens += counts['output_tokens'] as number;
+          usage.model_turns++;
+        }
+        if (!Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens) ||
+            JSON.stringify(result['usage']) !== JSON.stringify(usage) ||
+            result['commit_sha'] !== record['greenCommit'] ||
+            result['node_id'] !== nodeId || result['claim_id'] !== claimId ||
+            result['dispatch_id'] !== generation || result['outcome'] !== 'SUBMITTED')
+          throw new Error('WSL_CODEX_RECONCILE_RESULT_DRIFT');
         const captured = this.attestSlot(nodeId, claim);
         // Capture redacts and re-serializes the result; its controller-copy
         // hash deliberately differs from the original slot's journal hash.

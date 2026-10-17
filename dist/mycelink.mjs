@@ -34177,6 +34177,27 @@ var Orchestrator = class _Orchestrator {
         const slot = join49(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
         if (!lstatSync17(slot).isFile() || lstatSync17(slot).isSymbolicLink() || createHash35("sha256").update(readFileSync31(slot)).digest("hex") !== record["resultSha256"])
           throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
+        let result;
+        try {
+          result = JSON.parse(readFileSync31(slot, "utf8"));
+        } catch {
+          throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
+        }
+        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
+        const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
+        for (const transcript of [turn.worker.transcript, turn.reviewer.transcript]) {
+          if (!Array.isArray(transcript)) throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
+          const completed = transcript.filter((event) => !!event && typeof event === "object" && !Array.isArray(event) && event["type"] === "turn.completed");
+          if (completed.length !== 1) throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
+          const counts = completed[0]["usage"];
+          if (!counts || !Number.isSafeInteger(counts["input_tokens"]) || !Number.isSafeInteger(counts["output_tokens"]) || counts["input_tokens"] <= 0 || counts["output_tokens"] <= 0)
+            throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
+          usage.input_tokens += counts["input_tokens"];
+          usage.output_tokens += counts["output_tokens"];
+          usage.model_turns++;
+        }
+        if (!Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens) || JSON.stringify(result["usage"]) !== JSON.stringify(usage) || result["commit_sha"] !== record["greenCommit"] || result["node_id"] !== nodeId || result["claim_id"] !== claimId || result["dispatch_id"] !== generation || result["outcome"] !== "SUBMITTED")
+          throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
         const captured = this.attestSlot(nodeId, claim);
         if (!captured) throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
         mutateState(this.paths.featureDir, (state) => this.recordCapture(state, nodeId, captured, claimId));

@@ -309,6 +309,21 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       .rejects.toThrow(/RECEIPT_INVALID/);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
     writeFileSync(journal, originalJournal);
+    const resultSlot = join(ticket.worktree!, '.mycelink-worker',
+      loadState(p.featureDir)!.data.nodes[CORE]!.claim!.result_file!);
+    const originalResult = readFileSync(resultSlot, 'utf8');
+    const forgedUsage = JSON.parse(originalResult);
+    forgedUsage.usage.input_tokens += 5000;
+    const alteredResult = JSON.stringify(forgedUsage) + '\n';
+    const alteredJournal = JSON.parse(originalJournal);
+    alteredJournal.resultSha256 = createHash('sha256').update(alteredResult).digest('hex');
+    writeFileSync(resultSlot, alteredResult);
+    writeFileSync(journal, JSON.stringify(alteredJournal));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RESULT_DRIFT|RECEIPT_INVALID/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    writeFileSync(resultSlot, originalResult);
+    writeFileSync(journal, originalJournal);
     const beforeSettlementForged = JSON.parse(originalJournal);
     beforeSettlementForged.receipt.sourceSha256['tests/run.mjs'] = '0'.repeat(64);
     beforeSettlementForged.receiptSha256 = createHash('sha256').update(JSON.stringify(beforeSettlementForged.receipt)).digest('hex');
