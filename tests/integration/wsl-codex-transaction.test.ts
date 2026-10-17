@@ -431,4 +431,19 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     }
     expect((await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!)).settlement.usageSessions).toBe(1);
   }, 180_000);
+
+  it.skipIf(!authenticated)('refuses cancellation after result-written without settling its anchored result', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'result-written' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_RESULT_WRITTEN/);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    const io: CliIo = { out: () => undefined, err: (message) => { throw new Error(message); } };
+    expect(await main([...asController(['feature', 'cancel', FEATURE_ID], p.control), '--control-root', p.control], io)).toBe(0);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/CANCEL|REVOK|STALE|RECEIPT_INVALID/);
+    assertNoSettlement(p.featureDir);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+  }, 180_000);
 });
