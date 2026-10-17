@@ -199,11 +199,11 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(outcome).toEqual({ exit_code: 0, revoked: false });
         const transport = `/var/lib/mycelink-codex/transport/${ticket.claimId}/${ticket.dispatchId}/worker.json`;
         const published = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', '-c',
-          'import json,sys; x=json.load(open(sys.argv[1])); print(json.dumps({"claim":x["claim"],"generation":x["generation"],"events":[json.loads(line).get("type") for line in x["proposals"]["codex-out"].splitlines() if line.startswith("{")],"status":x["proposals"]["status"]}))', transport],
+          'import json,sys; x=json.load(open(sys.argv[1])); print(json.dumps({"claim":x["claim"],"generation":x["generation"],"events":x["submission"]["events"],"status":x["submission"]["status"],"proposals":x["proposals"]}))', transport],
         { encoding: 'utf8', timeout: 10_000 });
         expect(published.status, published.stderr).toBe(0);
         expect(JSON.parse(published.stdout)).toMatchObject({ claim: ticket.claimId,
-          generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']) });
+          generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']), proposals: {} });
       } finally {
         stage.dispose();
       }

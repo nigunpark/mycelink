@@ -92,8 +92,25 @@ OPENAI_API_KEY=placeholder timeout 65s /usr/local/bin/node /opt/node_modules/@op
   -c 'openai_base_url="http://127.0.0.1:18547/v1"' \\
   ''' + shlex.quote(args.prompt) + ''' >/proposal/codex-out 2>/proposal/codex-err
 status=$?
-printf '%s' "$status" > /proposal/status
-exit "$status"
+if test "$status" -ne 0; then exit "$status"; fi
+/usr/bin/python3 - <<'PY' || exit 1
+import json
+from pathlib import Path
+root = Path('/proposal')
+raw = (root / 'codex-out').read_bytes()
+if len(raw) > 2 * 1024 * 1024:
+    raise ValueError('Codex turn exceeds worker result budget')
+transcript = [json.loads(line) for line in raw.splitlines() if line]
+events = [item.get('type') for item in transcript]
+if events.count('turn.completed') != 1 or 'turn.failed' in events:
+    raise ValueError('Codex turn did not complete exactly once')
+result = json.dumps({'status': '0', 'events': events, 'transcript': transcript}, ensure_ascii=False)
+if len(result.encode()) > 2 * 1024 * 1024:
+    raise ValueError('Codex result exceeds sealed submission budget')
+(root / 'result.json').write_text(result)
+(root / 'codex-out').unlink()
+(root / 'codex-err').unlink()
+PY
 '''
         command = ['/usr/bin/python3', str(Path(__file__).with_name('wsl-codex-worker.py')),
             '--source', args.source, '--source-files', args.manifest,
@@ -109,13 +126,15 @@ exit "$status"
         # still has to consume and seal it before any apply or settlement.
         envelope = transport / args.claim / args.generation / 'worker.json'
         data = json.loads(envelope.read_text())
-        proposal = data['proposals']
+        submission = data['submission']
         if (data['claim'], data['generation'], data['role']) != (args.claim, args.generation, 'worker'):
             raise ValueError('wrong generation transport')
-        events = [json.loads(line).get('type') for line in proposal['codex-out'].splitlines()
-                  if line.startswith('{')]
-        if proposal['status'] != '0' or 'turn.completed' not in events:
-            raise ValueError('Linux Codex turn did not complete')
+        if (not isinstance(submission, dict) or data['proposals'] != {} or
+            submission.get('status') != '0' or
+            not isinstance(submission.get('transcript'), list) or
+            [item.get('type') for item in submission['transcript']] != submission.get('events') or
+            submission['events'].count('turn.completed') != 1 or 'turn.failed' in submission['events']):
+            raise ValueError('Linux Codex turn did not complete as a role-owned submission')
     finally:
         if bridge is not None and bridge.poll() is None:
             bridge.terminate()
