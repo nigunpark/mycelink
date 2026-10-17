@@ -33746,7 +33746,7 @@ var Orchestrator = class _Orchestrator {
     });
   }
   /** Run declared GREEN then regression, journaling each transition outside the lifecycle lock. */
-  runExperimentalWslCodexGreenGates(nodeId, claimId, dispatchId, proposedPaths, capability) {
+  runExperimentalWslCodexGreenGates(nodeId, claimId, dispatchId, proposedPaths, capability, interruptAfterRunning) {
     const journal = join49(
       this.paths.featureDir,
       "wsl-codex-transactions",
@@ -33777,6 +33777,8 @@ var Orchestrator = class _Orchestrator {
           throw new Error("WSL_GREEN_COMMIT_DRIFT");
         writeTextAtomic(journal, JSON.stringify({ ...record, phase: running }) + "\n");
       });
+      if (interruptAfterRunning === gateName)
+        throw new Error(`WSL_CODEX_INTERRUPTED_AFTER_${gateName.toUpperCase()}_GATE_RUNNING`);
       const result = spawnSync11(gate.argv[0], gate.argv.slice(1), {
         cwd: worktree,
         encoding: "utf8",
@@ -34041,7 +34043,14 @@ var Orchestrator = class _Orchestrator {
         "src/publish.js",
         request.interruptAfter === "green-intent"
       );
-      this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
+      this.runExperimentalWslCodexGreenGates(
+        nodeId,
+        claimId,
+        generation,
+        allowedPaths,
+        capability,
+        request.interruptAfter === "green-gate-running" ? "green" : request.interruptAfter === "regression-gate-running" ? "regression" : void 0
+      );
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
       if (request.interruptAfter === "gates-complete") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_GATES_COMPLETE");
       const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {

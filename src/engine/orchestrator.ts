@@ -1593,7 +1593,8 @@ export class Orchestrator {
 
   /** Run declared GREEN then regression, journaling each transition outside the lifecycle lock. */
   runExperimentalWslCodexGreenGates(nodeId: string, claimId: string, dispatchId: string,
-    proposedPaths: readonly string[], capability: string):
+    proposedPaths: readonly string[], capability: string,
+    interruptAfterRunning?: 'green' | 'regression'):
     { gate: 'green' | 'regression'; exitCode: 0; argv: string[]; commit: string }[] {
     const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
       createHash('sha256').update(`${nodeId}\0${claimId}\0${dispatchId}`).digest('hex') + '.json');
@@ -1628,6 +1629,8 @@ export class Orchestrator {
           throw new Error('WSL_GREEN_COMMIT_DRIFT');
         writeTextAtomic(journal, JSON.stringify({ ...record, phase: running }) + '\n');
       });
+      if (interruptAfterRunning === gateName)
+        throw new Error(`WSL_CODEX_INTERRUPTED_AFTER_${gateName.toUpperCase()}_GATE_RUNNING`);
       const result = spawnSync(gate.argv[0], gate.argv.slice(1), {
         cwd: worktree, encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024, windowsHide: true,
       });
@@ -1733,7 +1736,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'red-intent' | 'first-apply' | 'red-gate-running' | 'green-intent' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'red-intent' | 'first-apply' | 'red-gate-running' | 'green-intent' | 'green-gate-running' | 'regression-gate-running' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1885,7 +1888,9 @@ export class Orchestrator {
         request.interruptAfter === 'red-gate-running');
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, 'src/publish.js',
         request.interruptAfter === 'green-intent');
-      this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
+      this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability,
+        request.interruptAfter === 'green-gate-running' ? 'green'
+          : request.interruptAfter === 'regression-gate-running' ? 'regression' : undefined);
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
       if (request.interruptAfter === 'gates-complete') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_GATES_COMPLETE');
       const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, grant => {
