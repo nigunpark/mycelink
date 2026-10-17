@@ -198,6 +198,13 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
     }
   }, 240_000);
 
+  it.skipIf(!authenticated)('observes a model-driven MCP tool before refusing missing OS isolation attestation', async () => {
+    const { p, o, request } = await claim('mcp');
+    await expect(transaction(o, { ...request('Use the configured probe MCP inspect_fixture tool, then ' + implement), isolationProbe: 'mcp' }))
+      .rejects.toThrow(/WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE/);
+    assertNoSettlement(p.featureDir);
+  }, 180_000);
+
   it.skipIf(!authenticated)('observes a real built-in shell invocation before refusing missing OS isolation attestation', async () => {
     const { p, o, request } = await claim('builtin');
     await expect(transaction(o, { ...request(implement), isolationProbe: 'builtin' }))
