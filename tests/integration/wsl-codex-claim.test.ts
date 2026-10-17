@@ -248,6 +248,8 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
           ['src/publish.js', 'tests/run.mjs'], ticket.capability);
         expect(redGate).toMatchObject({ phase: 'red-gated', gate: 'red', exitCode: 0, commit: redApply.commit });
         expect(redGate.argv.slice(2, 6)).toEqual(['tdd', 'red', FEATURE_ID, CORE]);
+        expect(JSON.stringify(redGate)).not.toContain(ticket.capability);
+        expect(redGate.argv).not.toContain('--capability');
         expect(() => o.runExperimentalWslCodexRedGate(CORE, ticket.claimId, ticket.dispatchId!,
           ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/JOURNAL|ALREADY/);
         const greenApply = o.applyExperimentalWslCodexGreenImplementation(CORE, ticket.claimId, ticket.dispatchId!,
@@ -265,6 +267,8 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
           { gate: 'regression', exitCode: 0, commit: greenApply.commit },
         ]);
         expect(postGates.every((entry) => entry.argv.slice(2, 3)[0] === 'tdd')).toBe(true);
+        expect(JSON.stringify(postGates)).not.toContain(ticket.capability);
+        expect(postGates.every((entry) => !entry.argv.includes('--capability'))).toBe(true);
         expect(() => o.runExperimentalWslCodexGreenGates(CORE, ticket.claimId, ticket.dispatchId!,
           ['src/publish.js', 'tests/run.mjs'], ticket.capability)).toThrow(/JOURNAL|ALREADY/);
         const completed = o.verifyExperimentalWslCodexCompletedGates(CORE, ticket.claimId, ticket.dispatchId!,

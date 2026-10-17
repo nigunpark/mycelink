@@ -33612,7 +33612,7 @@ var Orchestrator = class _Orchestrator {
         argvSha256: createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex")
       }) + "\n");
     });
-    return { phase: "red-gated", gate: "red", exitCode: 0, argv: gate.argv, commit };
+    return { phase: "red-gated", gate: "red", exitCode: 0, argv: gate.argv.slice(0, -2), commit };
   }
   /** Apply only the implementation from independently sealed proposal bytes after a controller RED gate. */
   applyExperimentalWslCodexGreenImplementation(nodeId, claimId, dispatchId, proposedPaths, implementationPath) {
@@ -33717,7 +33717,7 @@ var Orchestrator = class _Orchestrator {
           [`${gateName}Gate`]: { exitCode: 0, argvSha256: createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex") }
         }) + "\n");
       });
-      receipts.push({ gate: gateName, exitCode: 0, argv: gate.argv, commit });
+      receipts.push({ gate: gateName, exitCode: 0, argv: gate.argv.slice(0, -2), commit });
     }
     return receipts;
   }
