@@ -1484,7 +1484,7 @@ export class Orchestrator {
 
   /** Host-owned exact RED gate; an ambiguous running journal is never replayed. */
   runExperimentalWslCodexRedGate(nodeId: string, claimId: string, dispatchId: string,
-    proposedPaths: readonly string[], capability: string):
+    proposedPaths: readonly string[], capability: string, interruptAfterRunning = false):
     { phase: 'red-gated'; gate: 'red'; exitCode: 0; argv: string[]; commit: string } {
     const journal = join(this.paths.featureDir, 'wsl-codex-transactions',
       createHash('sha256').update(`${nodeId}\0${claimId}\0${dispatchId}`).digest('hex') + '.json');
@@ -1512,6 +1512,7 @@ export class Orchestrator {
         throw new Error('WSL_RED_COMMIT_DRIFT');
       writeTextAtomic(journal, JSON.stringify({ ...record, phase: 'red-gate-running' }) + '\n');
     });
+    if (interruptAfterRunning) throw new Error('WSL_CODEX_INTERRUPTED_AFTER_RED_GATE_RUNNING');
     // The CLI gate needs its own STATE lock; do not hold the lifecycle mutex
     // while it runs. Never persist the capability-bearing argv in the journal.
     const gate = this.gateCommands(nodeId, capability).find((entry) => entry.gate === 'red');
@@ -1731,7 +1732,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'red-intent' | 'first-apply' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'red-intent' | 'first-apply' | 'red-gate-running' | 'gates-complete' | 'result-intent' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1879,7 +1880,8 @@ export class Orchestrator {
         workerSealHash = seals.worker;
         reviewerSealHash = seals.reviewer;
       }
-      this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability);
+      this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability,
+        request.interruptAfter === 'red-gate-running');
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, 'src/publish.js');
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);

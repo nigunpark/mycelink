@@ -33645,7 +33645,7 @@ var Orchestrator = class _Orchestrator {
     });
   }
   /** Host-owned exact RED gate; an ambiguous running journal is never replayed. */
-  runExperimentalWslCodexRedGate(nodeId, claimId, dispatchId, proposedPaths, capability) {
+  runExperimentalWslCodexRedGate(nodeId, claimId, dispatchId, proposedPaths, capability, interruptAfterRunning = false) {
     const journal = join49(
       this.paths.featureDir,
       "wsl-codex-transactions",
@@ -33667,6 +33667,7 @@ var Orchestrator = class _Orchestrator {
         throw new Error("WSL_RED_COMMIT_DRIFT");
       writeTextAtomic(journal, JSON.stringify({ ...record, phase: "red-gate-running" }) + "\n");
     });
+    if (interruptAfterRunning) throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RED_GATE_RUNNING");
     const gate = this.gateCommands(nodeId, capability).find((entry) => entry.gate === "red");
     if (!gate || gate.argv[0] !== "node") throw new Error("WSL_RED_GATE_UNDECLARED");
     const result = spawnSync11(gate.argv[0], gate.argv.slice(1), {
@@ -34023,7 +34024,14 @@ var Orchestrator = class _Orchestrator {
         workerSealHash = seals.worker;
         reviewerSealHash = seals.reviewer;
       }
-      this.runExperimentalWslCodexRedGate(nodeId, claimId, generation, allowedPaths, capability);
+      this.runExperimentalWslCodexRedGate(
+        nodeId,
+        claimId,
+        generation,
+        allowedPaths,
+        capability,
+        request.interruptAfter === "red-gate-running"
+      );
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, "src/publish.js");
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
