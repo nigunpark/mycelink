@@ -10,7 +10,7 @@ export function wslCodexFeatureToken(featureDir: string): string {
   return createHash('sha256').update(realpathSync(featureDir).replace(/\\/g, '/').toLowerCase()).digest('hex');
 }
 
-export function revokeWslCodexProcesses(featureDir: string): void {
+function wslProcessScript(): string {
   if (process.platform !== 'win32') throw new Error('WSL_CODEX_REVOKE_UNAVAILABLE');
   const script = join(packageRoot(), 'scripts', 'wsl-codex-process.py');
   if (!existsSync(script)) throw new Error('WSL_CODEX_REVOKE_SCRIPT_MISSING');
@@ -19,7 +19,38 @@ export function revokeWslCodexProcesses(featureDir: string): void {
   if (linuxPath.status !== 0 || !linuxPath.stdout?.trim().startsWith('/mnt/')) {
     throw new Error('WSL_CODEX_REVOKE_PATH_UNAVAILABLE');
   }
-  const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', linuxPath.stdout.trim(),
+  return linuxPath.stdout.trim();
+}
+
+/** Only a trusted caller holding the live-claim mutex may use this experimental tracer. */
+export function startExperimentalWslProcess(featureDir: string, claim: string, generation: string,
+  command: readonly string[]): { claim: string; generation: string; pid: number; pgid: number; start: string } {
+  if (process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1') throw new Error('WSL_CODEX_EXPERIMENT_NOT_ENABLED');
+  if (command.length === 0 || !command[0]?.startsWith('/')) throw new Error('WSL_CODEX_COMMAND_UNSAFE');
+  const script = wslProcessScript();
+  const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', script,
+    'start', wslCodexFeatureToken(featureDir), claim, generation, '--', ...command],
+    { encoding: 'utf8', timeout: 15_000, windowsHide: true });
+  try {
+    if (result.status !== 0) throw new Error('WSL_CODEX_START_UNCONFIRMED');
+    const receipt = JSON.parse(result.stdout) as { claim?: unknown; generation?: unknown; pid?: unknown; pgid?: unknown; start?: unknown };
+    if (receipt.claim !== claim || receipt.generation !== generation ||
+      !Number.isSafeInteger(receipt.pid) || (receipt.pid as number) <= 1 ||
+      receipt.pgid !== receipt.pid || typeof receipt.start !== 'string' || !/^\d+$/.test(receipt.start)) {
+      throw new Error('WSL_CODEX_START_RECEIPT_INVALID');
+    }
+    return receipt as { claim: string; generation: string; pid: number; pgid: number; start: string };
+  } catch (error) {
+    // A failed or malformed readiness response may nevertheless have started
+    // a process. Never hand out an unconfirmed grant without revoking the slot.
+    revokeWslCodexProcesses(featureDir);
+    throw error;
+  }
+}
+
+export function revokeWslCodexProcesses(featureDir: string): void {
+  const script = wslProcessScript();
+  const result = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', script,
     'revoke', wslCodexFeatureToken(featureDir)], { encoding: 'utf8', timeout: 12_000, windowsHide: true });
   if (result.status !== 0) throw new Error('WSL_CODEX_REVOKE_UNCONFIRMED');
 }

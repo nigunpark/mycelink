@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import fcntl
+import select
 
 ROOT = Path('/var/lib/mycelink-codex/processes')
 TOKEN = re.compile(r'^[0-9a-f]{32,64}$')
@@ -118,7 +119,7 @@ def revoke(token):
         time.sleep(.02)
 
 
-def run(token, claim, generation, command):
+def run(token, claim, generation, command, ready_fd=None):
     path = location(token)
     name = slot_name(claim, generation)
     guard = lock(path)
@@ -161,7 +162,23 @@ def run(token, claim, generation, command):
         if child.poll() is None and proc_start(child.pid) == start:
             os.killpg(child.pid, signal.SIGTERM)
     signal.signal(signal.SIGTERM, stop)
-    print(json.dumps(data), flush=True)
+    try:
+        if ready_fd is None:
+            print(json.dumps(data), flush=True)
+        else:
+            os.write(ready_fd, (json.dumps(data) + '\n').encode())
+            os.close(ready_fd)
+    except BaseException:
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGKILL)
+            child.wait(timeout=3)
+        guard = lock(path)
+        try:
+            if slot.exists() and record(slot) == data:
+                slot.unlink()
+        finally:
+            os.close(guard)
+        raise
     try:
         while child.poll() is None:
             try:
@@ -181,13 +198,53 @@ def run(token, claim, generation, command):
             os.close(guard)
 
 
+def start(token, claim, generation, command):
+    """Return only a registered ready receipt, leaving the root supervisor alive."""
+    # Validate before fork, so malformed tokens never create an invisible child.
+    slot_name(claim, generation)
+    location(token)
+    read_fd, write_fd = os.pipe2(os.O_CLOEXEC)
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        try:
+            os.setsid()
+            devnull = os.open('/dev/null', os.O_RDWR)
+            for stream in (0, 1, 2):
+                os.dup2(devnull, stream)
+            os.close(devnull)
+            code = run(token, claim, generation, command, ready_fd=write_fd)
+        except BaseException as exc:
+            try:
+                os.write(write_fd, ('ERROR: ' + str(exc)[:200] + '\n').encode())
+            except OSError:
+                pass
+            code = 1
+        os._exit(code)
+    os.close(write_fd)
+    try:
+        readable, _, _ = select.select([read_fd], [], [], 10)
+        message = os.read(read_fd, 4096).decode() if readable else ''
+    finally:
+        os.close(read_fd)
+    if not message.startswith('{') or not message.endswith('\n'):
+        # Parent never attests readiness. Attempt fail-closed revocation of an
+        # already-registered child, and refuse the generation in all cases.
+        try:
+            revoke(token)
+        except (OSError, ValueError):
+            pass
+        raise ValueError('WSL process readiness not confirmed: ' + message[:200])
+    print(message, end='', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='action', required=True)
-    for action in ('run', 'revoke'):
+    for action in ('run', 'start', 'revoke'):
         command = sub.add_parser(action)
         command.add_argument('token')
-        if action == 'run':
+        if action in ('run', 'start'):
             command.add_argument('claim')
             command.add_argument('generation')
             command.add_argument('command', nargs=argparse.REMAINDER)
@@ -200,6 +257,9 @@ def main():
     command = args.command[1:] if args.command and args.command[0] == '--' else args.command
     if not command or not command[0].startswith('/'):
         raise ValueError('explicit absolute isolated worker command required')
+    if args.action == 'start':
+        start(args.token, args.claim, args.generation, command)
+        return 0
     return run(args.token, args.claim, args.generation, command)
 
 if __name__ == '__main__':

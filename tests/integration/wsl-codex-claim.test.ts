@@ -250,6 +250,44 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
     }, 45_000,
   );
   it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'binds a real host claim to registered WSL readiness under the lifecycle mutex before cancellation', async () => {
+      const { p, o } = await fixture();
+      const claimed = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const grant = o.startExperimentalWslCodexGeneration(CORE, claimed.claimId, claimed.dispatchId!,
+        ['src/new.ts'], ['/bin/sleep', '60']);
+      expect(grant).toMatchObject({ claim: claimed.claimId, generation: claimed.dispatchId,
+        pid: expect.any(Number) });
+      const io: CliIo = { out: () => undefined, err: (text) => { throw new Error(text); } };
+      expect(await main([...asController(['feature', 'cancel', FEATURE_ID, '--control-root', p.control], p.control)], io)).toBe(0);
+      expect(loadState(p.featureDir)!.data.feature_state).toBe('CANCELLED');
+      expect(() => o.startExperimentalWslCodexGeneration(CORE, claimed.claimId, claimed.dispatchId!,
+        ['src/new.ts'], ['/bin/sleep', '60'])).toThrow(/WSL_CLAIM_STALE/);
+    }, 45_000,
+  );
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
+    'revokes the Linux worker before a host dispatch resume can rotate its ticket', async () => {
+      const { p, o } = await fixture();
+      const claimed = o.claim(CORE, { mode: 'host' });
+      enableCodexLifecycle(p.featureDir);
+      const grant = o.startExperimentalWslCodexGeneration(CORE, claimed.claimId, claimed.dispatchId!,
+        ['src/new.ts'], ['/bin/sleep', '60']);
+      const token = createHash('sha256').update(realpathSync(p.featureDir).replace(/\\/g, '/').toLowerCase()).digest('hex');
+      const linuxScript = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u',
+        join(process.cwd(), 'scripts', 'wsl-codex-process.py').replace(/\\/g, '/')], { encoding: 'utf8', timeout: 10_000 });
+      try {
+        expect(spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'test', '-e', `/proc/${grant.pid}`],
+          { timeout: 10_000 }).status).toBe(0);
+        o.resumeDispatch(CORE);
+        expect(spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'test', '-e', `/proc/${grant.pid}`],
+          { timeout: 10_000 }).status).not.toBe(0);
+      } finally {
+        spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'python3', linuxScript.stdout.trim(), 'revoke', token],
+          { timeout: 10_000 });
+      }
+    }, 45_000,
+  );
+  it.skipIf(process.platform !== 'win32' || process.env['MYCELINK_LIVE_WSL_WORKER'] !== '1')(
     'does not report cancellation or mutate the claim when WSL revocation cannot be proven', async () => {
       const { p, o } = await fixture();
       const claimed = o.claim(CORE, { mode: 'host' });

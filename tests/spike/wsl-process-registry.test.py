@@ -55,6 +55,23 @@ class ProcessRegistryTest(unittest.TestCase):
             run.stdout.close()
             run.stderr.close()
 
+    def test_detached_start_returns_registered_ready_receipt_before_turn_finishes(self):
+        token, claim, generation = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+        try:
+            begun = time.monotonic()
+            launched = subprocess.run(['python3', str(SCRIPT), 'start', token, claim, generation,
+                                       '--', '/bin/sleep', '60'], text=True, capture_output=True, timeout=10)
+            self.assertEqual(launched.returncode, 0, launched.stderr)
+            self.assertLess(time.monotonic() - begun, 5)
+            record = json.loads(launched.stdout)
+            self.assertEqual((record['claim'], record['generation']), (claim, generation))
+            self.assertTrue(Path(f"/proc/{record['pid']}").exists())
+            stopped = subprocess.run(['python3', str(SCRIPT), 'revoke', token], text=True, capture_output=True, timeout=12)
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            self.assertFalse(Path(f"/proc/{record['pid']}").exists())
+        finally:
+            subprocess.run(['python3', str(SCRIPT), 'revoke', token], capture_output=True, timeout=12)
+
     def test_registration_failure_does_not_leave_an_unregistered_live_process(self):
         spec = importlib.util.spec_from_file_location('registry_under_test', SCRIPT)
         module = importlib.util.module_from_spec(spec)

@@ -102,6 +102,7 @@ import { statusForOutcome } from '../sessions/adapter.js';
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, unlinkSync } from 'node:fs';
 import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
+import { startExperimentalWslProcess, revokeWslCodexProcesses } from '../sessions/wsl-codex-process.js';
 import {
   acquireResource,
   listLeases,
@@ -1326,6 +1327,29 @@ export class Orchestrator {
       this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
       return result;
     });
+  }
+
+  /**
+   * Opt-in Windows/WSL process-readiness tracer. Not a production dispatch:
+   * command is trusted test/controller input, never a prompt or worker value.
+   * The live claim and both readiness checks are inside the lifecycle mutex.
+   */
+  startExperimentalWslCodexGeneration(nodeId: string, claimId: string, dispatchId: string,
+    proposedPaths: readonly string[], command: readonly string[]):
+    { claim: string; generation: string; pid: number; pgid: number; start: string } {
+    let launched = false;
+    try {
+      return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
+        const receipt = startExperimentalWslProcess(this.paths.featureDir, grant.claim, grant.generation, command);
+        launched = true;
+        return receipt;
+      });
+    } catch (error) {
+      // A post-readiness lease/epoch recheck may fail after Linux launch;
+      // before surfacing it, revoke the process rather than orphan it.
+      if (launched) revokeWslCodexProcesses(this.paths.featureDir);
+      throw error;
+    }
   }
 
   graph(): PortfolioGraph {
@@ -5578,7 +5602,10 @@ export class Orchestrator {
    * claim, worktree, branch and any result already in the slot are kept.
    */
   resumeDispatch(nodeId: string): DispatchResult {
-    const run = (): DispatchResult => this.resumeDispatchLocked(nodeId);
+    const run = (): DispatchResult => {
+      if (codexLifecycleEnabled(this.paths.featureDir)) revokeWslCodexProcesses(this.paths.featureDir);
+      return this.resumeDispatchLocked(nodeId);
+    };
     return codexLifecycleEnabled(this.paths.featureDir)
       ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2_000 }) : run();
   }
