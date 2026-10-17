@@ -441,6 +441,13 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
         .rejects.toThrow(/RECEIPT_INVALID/);
       writeFileSync(journal, authentic);
     }
+    const original = readFileSync(journal, 'utf8');
+    const forgedResultHash = JSON.parse(original);
+    forgedResultHash.resultSha256 = '0'.repeat(64);
+    writeFileSync(journal, JSON.stringify(forgedResultHash));
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/RECEIPT_INVALID/);
+    writeFileSync(journal, original);
     expect((await recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!)).settlement.usageSessions).toBe(1);
   }, 180_000);
 
