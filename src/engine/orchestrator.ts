@@ -104,7 +104,7 @@ import type { PreflightResult } from '../sessions/preflight.js';
 import { expandAllowedProposalPaths } from '../sessions/wsl-codex-policy.js';
 import { startExperimentalWslProcess, revokeWslCodexProcesses, wslCodexProcessActive, wslCodexProcessResult } from '../sessions/wsl-codex-process.js';
 import { stageImmutableWslCodexSource } from '../sessions/wsl-codex-source.js';
-import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, type WslCodexWorkerSeal } from '../sessions/wsl-codex-seal.js';
+import { sealRegisteredWslCodexWorker, sealRegisteredWslCodexReviewer, readRegisteredWslCodexTurn, type WslCodexWorkerSeal, type WslCodexVerifiedTurn } from '../sessions/wsl-codex-seal.js';
 import {
   acquireResource,
   listLeases,
@@ -1390,6 +1390,12 @@ export class Orchestrator {
     proposedPaths: readonly string[]): WslCodexWorkerSeal {
     return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths,
       (grant) => sealRegisteredWslCodexReviewer(this.paths.featureDir, this.controlRoot, grant));
+  }
+
+  readExperimentalWslCodexSealedTurn(nodeId: string, claimId: string, dispatchId: string,
+    proposedPaths: readonly string[]): WslCodexVerifiedTurn {
+    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths,
+      (grant) => readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant));
   }
 
   graph(): PortfolioGraph {

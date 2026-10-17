@@ -36,6 +36,67 @@ class SealedProposalTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 p.read_submission(slot, claim='c1', generation='g1', role='reviewer')
 
+    def test_controller_reads_only_hash_verified_worker_proposal_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            report = base / 'report.json'
+            slot = base / 'sealed'
+            report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': 'worker',
+                'proposals': {'tests/publish.test.mjs': 'SAFE'}, 'submission': {'status': 'ok'}}))
+            p = policy()
+            p.seal(report, slot, claim='c1', generation='g1', role='worker',
+                   allowed_paths={'tests/publish.test.mjs'})
+            self.assertEqual(p.read_proposals(slot, claim='c1', generation='g1',
+                allowed_paths={'tests/publish.test.mjs'}), {'tests/publish.test.mjs': 'SAFE'})
+            (slot / 'tests' / 'publish.test.mjs').write_text('EVIL')
+            with self.assertRaises(ValueError):
+                p.read_proposals(slot, claim='c1', generation='g1',
+                    allowed_paths={'tests/publish.test.mjs'})
+            with self.assertRaises(ValueError):
+                p.read_proposals(slot, claim='c1', generation='g2',
+                    allowed_paths={'tests/publish.test.mjs'})
+
+    def test_controller_rejects_reviewer_denial_and_unsealed_proposal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            p = policy()
+            worker = base / 'worker'
+            reviewer = base / 'reviewer'
+            for role, slot, proposal, verdict in (
+                ('worker', worker, {'src/publish.js': 'SAFE'}, {'status': '0'}),
+                ('reviewer', reviewer, {}, {'verdict': 'FAIL'})):
+                report = base / (role + '.json')
+                report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': role,
+                    'proposals': proposal, 'submission': verdict}))
+                p.seal(report, slot, claim='c1', generation='g1', role=role,
+                       allowed_paths={'src/publish.js'})
+            with self.assertRaises(ValueError):
+                p.read_verified_turn(worker, reviewer, claim='c1', generation='g1',
+                    allowed_paths={'src/publish.js'})
+            (reviewer / 'verdict.json').write_text('{"verdict":"PASS"}')
+            with self.assertRaises(ValueError):
+                p.read_verified_turn(worker, reviewer, claim='c1', generation='g1',
+                    allowed_paths={'src/publish.js'})
+
+    def test_controller_accepts_only_two_matching_sealed_roles(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            p = policy()
+            for role, proposals, submission in (
+                ('worker', {'src/publish.js': 'SAFE'}, {'status': '0'}),
+                ('reviewer', {}, {'verdict': 'PASS'})):
+                report = base / (role + '.json')
+                report.write_text(json.dumps({'claim': 'c1', 'generation': 'g1', 'role': role,
+                    'proposals': proposals, 'submission': submission}))
+                p.seal(report, base / role, claim='c1', generation='g1', role=role,
+                    allowed_paths={'src/publish.js'})
+            self.assertEqual(p.read_verified_turn(base / 'worker', base / 'reviewer',
+                claim='c1', generation='g1', allowed_paths={'src/publish.js'})['proposals'],
+                {'src/publish.js': 'SAFE'})
+            with self.assertRaises(ValueError):
+                p.read_verified_turn(base / 'worker', base / 'reviewer',
+                    claim='c1', generation='g2', allowed_paths={'src/publish.js'})
+
     def test_reserved_result_names_cannot_hide_in_allowed_subdirectories(self):
         with tempfile.TemporaryDirectory() as temp:
             base = pathlib.Path(temp)

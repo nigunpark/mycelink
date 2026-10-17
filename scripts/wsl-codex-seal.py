@@ -61,6 +61,15 @@ def run(args):
         return process.result(args.feature_token, args.claim, args.generation) == {'exit_code': 0, 'revoked': False}
     broker = broker_module.PolicyBroker(sealed, claim=args.claim, generation=args.generation,
         allowed_paths=frozenset(paths), current=current, hook_ready=lambda: hook_ready(args.control_root))
+    if args.read:
+        if not broker._live():
+            raise ValueError('broker generation or hook no longer live')
+        verified = load('policy').read_verified_turn(sealed / 'worker', sealed / 'reviewer',
+            claim=args.claim, generation=args.generation, allowed_paths=frozenset(paths))
+        if not broker._live():
+            raise ValueError('broker generation revoked during sealed read')
+        print(json.dumps(verified))
+        return
     if args.role == 'reviewer':
         # A reviewer cannot become an independent authority without the
         # controller having first consumed the registered worker publication.
@@ -82,6 +91,7 @@ def main():
     for name in ('feature-token', 'claim', 'generation', 'control-root'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--role', choices=('worker', 'reviewer'), default='worker')
+    parser.add_argument('--read', action='store_true')
     run(parser.parse_args())
 
 

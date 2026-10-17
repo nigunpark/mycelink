@@ -29348,6 +29348,61 @@ function sealRegisteredWslCodexRole(featureDir, controlRoot, grant, role) {
   }
   return receipt;
 }
+function readRegisteredWslCodexTurn(featureDir, controlRoot, grant) {
+  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
+    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
+  const outcome = wslCodexProcessResult(featureDir, grant.claim, grant.generation);
+  if (outcome.exit_code !== 0 || outcome.revoked) throw new Error("WSL_CODEX_GENERATION_NOT_SUCCESSFUL");
+  const script = join38(packageRoot(), "scripts", "wsl-codex-seal.py");
+  const translated = spawnSync9(
+    "wsl.exe",
+    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
+    { encoding: "utf8", timeout: 1e4, windowsHide: true }
+  );
+  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
+    throw new Error("WSL_CODEX_BROKER_SCRIPT_UNAVAILABLE");
+  const hashes = immutableGitSource(grant.worktree, grant.base_sha).hashes;
+  const response = spawnSync9(
+    "wsl.exe",
+    [
+      "-d",
+      "Ubuntu",
+      "-u",
+      "root",
+      "--",
+      "python3",
+      translated.stdout.trim(),
+      "--feature-token",
+      wslCodexFeatureToken(featureDir),
+      "--claim",
+      grant.claim,
+      "--generation",
+      grant.generation,
+      "--control-root",
+      controlRoot.replace(/\\/g, "/"),
+      "--read"
+    ],
+    {
+      encoding: "utf8",
+      input: JSON.stringify({ source_hashes: hashes, allowed_paths: grant.allowed_paths }),
+      maxBuffer: 36 * 1024 * 1024,
+      timeout: 45e3,
+      windowsHide: true
+    }
+  );
+  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_BROKER_DENIED");
+  let parsed;
+  try {
+    parsed = JSON.parse(response.stdout);
+  } catch {
+    throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
+  const turn = parsed;
+  if (!turn["proposals"] || typeof turn["proposals"] !== "object" || Array.isArray(turn["proposals"]) || !Object.entries(turn["proposals"]).every(([path, value]) => grant.allowed_paths.includes(path) && typeof value === "string") || !turn["worker"] || typeof turn["worker"] !== "object" || turn["worker"]["status"] !== "0" || !turn["reviewer"] || typeof turn["reviewer"] !== "object" || turn["reviewer"]["verdict"] !== "PASS")
+    throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
+  return turn;
+}
 function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
   return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "worker");
 }
@@ -33401,6 +33456,15 @@ var Orchestrator = class _Orchestrator {
       dispatchId,
       proposedPaths,
       (grant) => sealRegisteredWslCodexReviewer(this.paths.featureDir, this.controlRoot, grant)
+    );
+  }
+  readExperimentalWslCodexSealedTurn(nodeId, claimId, dispatchId, proposedPaths) {
+    return this.withLiveWslCodexClaim(
+      nodeId,
+      claimId,
+      dispatchId,
+      proposedPaths,
+      (grant) => readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant)
     );
   }
   graph() {

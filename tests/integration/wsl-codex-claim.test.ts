@@ -225,6 +225,11 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         const review = o.sealExperimentalWslCodexReviewer(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
         expect(review).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!, role: 'reviewer' });
         expect(review.submission_sha256).not.toBe(seal.submission_sha256);
+        const verified = o.readExperimentalWslCodexSealedTurn(CORE, ticket.claimId, ticket.dispatchId!,
+          ['src/publish.js', 'tests/publish.test.mjs']);
+        expect(verified.proposals).toEqual({ 'src/publish.js': 'JOB_RESULT_V2\n',
+          'tests/publish.test.mjs': "import assert from 'node:assert/strict';\nassert.ok(true);\n" });
+        expect(verified.reviewer.verdict).toBe('PASS');
         expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
       } finally {
         stage.dispose();

@@ -143,6 +143,77 @@ def read_submission(slot, *, claim, generation, role):
         os.close(root)
 
 
+def read_proposals(slot, *, claim, generation, allowed_paths, role='worker'):
+    """Return exact root-sealed role bytes for trusted controller staging only.
+
+    Pin every directory and file inode; never re-open a path following a link
+    after verifying it. This is not an authorization to apply or settle.
+    """
+    root = os.open(slot, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(root)
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('untrusted sealed slot')
+        receipt_fd = os.open('_receipt.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+        try:
+            info = os.fstat(receipt_fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                raise ValueError('untrusted sealed receipt')
+            with os.fdopen(os.dup(receipt_fd), 'rb') as stream:
+                receipt = json.loads(stream.read(MAX_FILE + 1))
+        finally:
+            os.close(receipt_fd)
+        if role not in ('worker', 'reviewer') or (receipt.get('claim'), receipt.get('generation'), receipt.get('role')) != (claim, generation, role):
+            raise ValueError('wrong generation or role')
+        hashes = receipt.get('sha256')
+        if (not isinstance(hashes, dict) or len(hashes) > 4096 or
+            any(not safe_name(name) or name not in allowed_paths or
+                not isinstance(digest, str) or re.fullmatch('[0-9a-f]{64}', digest) is None
+                for name, digest in hashes.items())):
+            raise ValueError('unallowed proposal receipt')
+        proposals = {}
+        for name, digest in hashes.items():
+            directory = root
+            opened = []
+            try:
+                for part in name.split('/')[:-1]:
+                    directory = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+                    opened.append(directory)
+                    info = os.fstat(directory)
+                    if info.st_uid != 0 or info.st_mode & 0o022:
+                        raise ValueError('untrusted proposal directory')
+                fd = os.open(name.split('/')[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                try:
+                    info = os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                        raise ValueError('untrusted proposal inode')
+                    with os.fdopen(os.dup(fd), 'rb') as stream:
+                        raw = stream.read(MAX_FILE + 1)
+                    if len(raw) > MAX_FILE or len(raw) != info.st_size or hashlib.sha256(raw).hexdigest() != digest:
+                        raise ValueError('sealed proposal changed')
+                    proposals[name] = raw.decode('utf-8')
+                finally:
+                    os.close(fd)
+            finally:
+                for directory in reversed(opened):
+                    os.close(directory)
+        return proposals
+    finally:
+        os.close(root)
+
+
+def read_verified_turn(worker_slot, reviewer_slot, *, claim, generation, allowed_paths):
+    """Both role-bound seals must agree before proposals enter controller memory."""
+    worker = read_submission(worker_slot, claim=claim, generation=generation, role='worker')
+    reviewer = read_submission(reviewer_slot, claim=claim, generation=generation, role='reviewer')
+    if worker.get('status') != '0' or reviewer.get('verdict') != 'PASS':
+        raise ValueError('worker or independent reviewer denied')
+    proposals = read_proposals(worker_slot, claim=claim, generation=generation, allowed_paths=allowed_paths)
+    if read_proposals(reviewer_slot, claim=claim, generation=generation, allowed_paths=allowed_paths, role='reviewer'):
+        raise ValueError('reviewer proposed worker files')
+    return {'proposals': proposals, 'worker': worker, 'reviewer': reviewer}
+
+
 def sync_directory(path):
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
