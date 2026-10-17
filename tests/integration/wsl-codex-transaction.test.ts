@@ -36,7 +36,7 @@ type TransactionRequest = {
   /** Fixture hook/broker refusal must be enforced by the trusted consumer. */
   refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
   /** Fixture-only interruption; the controller owns the journal and recovery. */
-  interruptAfter?: 'first-apply' | 'result-written' | 'post-settle';
+  interruptAfter?: 'first-apply' | 'gates-complete' | 'result-written' | 'post-settle';
   /** Observation only: a test may pause the turn, never authorize a gate. */
   onPhase?: (phase: 'model-complete') => Promise<void>;
 };
@@ -445,5 +445,22 @@ describe('trusted Windows claim to WSL Codex transaction (production dispatch st
       .rejects.toThrow(/CANCEL|REVOK|STALE|RECEIPT_INVALID/);
     assertNoSettlement(p.featureDir);
     expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+  }, 180_000);
+
+  it.skipIf(!authenticated)('does not replay or settle a crash after gates-complete without a result', async () => {
+    const { p, o, ticket, request } = await claim();
+    await expect(transaction(o, { ...request(implement), interruptAfter: 'gates-complete' }))
+      .rejects.toThrow(/INTERRUPTED_AFTER_GATES_COMPLETE/);
+    const journal = join(p.featureDir, 'wsl-codex-transactions',
+      createHash('sha256').update(`${CORE}\0${ticket.claimId}\0${ticket.dispatchId!}`).digest('hex') + '.json');
+    expect(JSON.parse(readFileSync(journal, 'utf8')).phase).toBe('gates-complete');
+    const head = git(p.core, ['rev-parse', ticket.branch!]);
+    const recovered = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID,
+      adapter: new FakeInProcessAdapter({}), preflight: () => ({ ok: false, adapter: 'codex-cli' }) }) as TransactionController;
+    await expect(recovered.reconcileExperimentalWslCodexTransaction(CORE, ticket.claimId, ticket.dispatchId!))
+      .rejects.toThrow(/AMBIGUOUS_PHASE|JOURNAL_INVALID/);
+    expect(git(p.core, ['rev-parse', ticket.branch!])).toBe(head);
+    expect(loadState(p.featureDir)!.data.nodes[CORE]!.usage.sessions).toBe(0);
+    assertNoSettlement(p.featureDir);
   }, 180_000);
 });

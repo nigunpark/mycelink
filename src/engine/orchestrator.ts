@@ -1730,7 +1730,7 @@ export class Orchestrator {
     nodeId: string; claimId: string; generation: string; allowedPaths: string[]; prompt: string;
     isolationProbe?: 'mcp' | 'builtin';
     refusalFixture?: 'hook-exit-nonzero' | 'broker-denied' | 'unsealed-transport';
-    interruptAfter?: 'first-apply' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
+    interruptAfter?: 'first-apply' | 'gates-complete' | 'result-written' | 'post-settle'; onPhase?: (phase: 'model-complete') => Promise<void>;
   }, internal?: symbol): Promise<{ claim: string; generation: string; workerSeal: string; reviewerSeal: string;
     sourceSha256: Record<string, string>;
     model: { platform: 'linux'; apiRequests: number; mcpCalls: number; builtinCalls: number };
@@ -1881,6 +1881,7 @@ export class Orchestrator {
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, 'src/publish.js');
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
+      if (request.interruptAfter === 'gates-complete') throw new Error('WSL_CODEX_INTERRUPTED_AFTER_GATES_COMPLETE');
       const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, grant => {
         const current = this.state().nodes[nodeId];
         const red = current?.evidence.red;

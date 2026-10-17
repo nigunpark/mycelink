@@ -34019,6 +34019,7 @@ var Orchestrator = class _Orchestrator {
       this.applyExperimentalWslCodexGreenImplementation(nodeId, claimId, generation, allowedPaths, "src/publish.js");
       this.runExperimentalWslCodexGreenGates(nodeId, claimId, generation, allowedPaths, capability);
       const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
+      if (request.interruptAfter === "gates-complete") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_GATES_COMPLETE");
       const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
         const current = this.state().nodes[nodeId];
         const red = current?.evidence.red;
