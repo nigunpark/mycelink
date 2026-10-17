@@ -142,9 +142,9 @@ if names:
     final = [item['item']['text'] for item in transcript
              if item.get('type') == 'item.completed' and
              isinstance(item.get('item'), dict) and item['item'].get('type') == 'agent_message']
-    if len(final) != 1:
-        raise ValueError('missing unique model proposal')
-    proposal = json.loads(final[0])
+    if not final:
+        raise ValueError('missing model proposal')
+    proposal = json.loads(final[-1])
     if not isinstance(proposal, dict) or set(proposal) != set(names) or any(not isinstance(proposal[name], str) for name in names):
         raise ValueError('model proposal exceeds exact controller path grant')
     for name in names:
@@ -193,7 +193,7 @@ PY
             final = [item['item']['text'] for item in submission['transcript']
                      if item.get('type') == 'item.completed' and
                      isinstance(item.get('item'), dict) and item['item'].get('type') == 'agent_message']
-            if len(final) != 1 or json.loads(final[0]) != data['proposals']:
+            if not final or json.loads(final[-1]) != data['proposals']:
                 raise ValueError('model proposal did not match role-owned source output')
         if args.review_prompt:
             # The reviewer receives only the immutable source and this bounded
