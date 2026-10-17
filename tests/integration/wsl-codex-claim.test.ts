@@ -180,17 +180,17 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
       const { p, o } = await fixture();
       const ticket = o.claim(CORE, { mode: 'host' });
       enableCodexLifecycle(p.featureDir);
-      const stage = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']);
+      const stage = o.stageExperimentalWslCodexClaimSource(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
       try {
         const script = spawnSync('wsl.exe', ['-d', 'Ubuntu', '-u', 'root', '--', 'wslpath', '-u',
           join(process.cwd(), 'scripts', 'wsl-codex-turn.py').replace(/\\/g, '/')],
         { encoding: 'utf8', timeout: 10_000 });
         expect(script.status, script.stderr).toBe(0);
         const launched = o.startExperimentalWslCodexGeneration(CORE, ticket.claimId, ticket.dispatchId!,
-          ['src/publish.js'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
+          ['src/publish.js', 'tests/publish.test.mjs'], ['/usr/bin/python3', script.stdout.trim(), '--source', stage.source,
             '--manifest', stage.manifest, '--claim', ticket.claimId, '--generation', ticket.dispatchId!,
-            '--proposal-path', 'src/publish.js',
-            '--prompt', 'Respond only with this JSON object, no markdown: {"src/publish.js":"JOB_RESULT_V2\\n"}']);
+            '--proposal-path', 'src/publish.js', '--proposal-path', 'tests/publish.test.mjs',
+            '--prompt', 'Respond only with this JSON object, no markdown: {"src/publish.js":"JOB_RESULT_V2\\n","tests/publish.test.mjs":"import assert from \'node:assert/strict\';\\nassert.ok(true);\\n"}']);
         expect(launched.claim).toBe(ticket.claimId);
         let outcome: { exit_code: number; revoked: boolean } | undefined;
         for (let i = 0; i < 100 && !outcome; i++) {
@@ -205,17 +205,18 @@ describe('experimental WSL claim policy binding (not launch authorization)', () 
         expect(published.status, published.stderr).toBe(0);
         expect(JSON.parse(published.stdout)).toMatchObject({ claim: ticket.claimId,
           generation: ticket.dispatchId, status: '0', events: expect.arrayContaining(['turn.completed']),
-          proposals: { 'src/publish.js': 'JOB_RESULT_V2\n' } });
+          proposals: { 'src/publish.js': 'JOB_RESULT_V2\n',
+            'tests/publish.test.mjs': "import assert from 'node:assert/strict';\nassert.ok(true);\n" } });
         const configFile = join(p.control, 'mycelink.config.json');
         const configured = readFileSync(configFile);
         rmSync(configFile); // a missing host fence self-test cannot seal even a completed model turn
         try {
-          expect(() => o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']))
+          expect(() => o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']))
             .toThrow(/WSL_CODEX_BROKER_DENIED/);
         } finally {
           writeFileSync(configFile, configured);
         }
-        const seal = o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js']);
+        const seal = o.sealExperimentalWslCodexWorker(CORE, ticket.claimId, ticket.dispatchId!, ['src/publish.js', 'tests/publish.test.mjs']);
         expect(seal).toMatchObject({ claim: ticket.claimId, generation: ticket.dispatchId!,
           role: 'worker', sha256: { 'src/publish.js': createHash('sha256').update('JOB_RESULT_V2\n').digest('hex') } });
         expect(loadState(p.featureDir)!.data.nodes[CORE]!.state).not.toBe('DONE');
