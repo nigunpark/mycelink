@@ -32254,6 +32254,7 @@ function zoneOf(path, f) {
   return null;
 }
 function roleOf(input, env) {
+  if (input.provider === "codex") return "controller";
   if (typeof env["MYCELINK_NODE_ID"] === "string" && env["MYCELINK_NODE_ID"] !== "") return "worker";
   if (typeof input.agent_id === "string" && input.agent_id !== "") {
     const type = String(input.agent_type ?? "");
@@ -32362,6 +32363,9 @@ function unjudged(input, env, err) {
 function decide(input, env) {
   const tool = input.tool_name ?? "";
   const cwd = typeof input.cwd === "string" && input.cwd !== "" ? input.cwd : process.cwd();
+  if (input.provider === "codex" && tool !== "Bash" && tool !== "apply_patch" && controlRoots([cwd, env["MYCELINK_CONTROL_ROOT"]], []).length > 0) {
+    return { ok: false, reason: `Blocked: unclassified Codex ${tool} call has no verified effect or agent-role fence.` };
+  }
   if ((tool === "apply_patch" || tool.startsWith("mcp__")) && controlRoots([cwd, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], []).length > 0) {
     return { ok: false, reason: `Blocked: unclassified Codex ${tool} call cannot be judged by the Mycelink fence.` };
   }
@@ -32440,6 +32444,9 @@ function decide(input, env) {
   }
   for (const w of writes2) {
     const path = norm(realish(w.path));
+    if (/(^|\/)\.codex\/config\.toml$|(^|\/)\.codex-plugin\//i.test(path)) {
+      return { ok: false, reason: `Blocked: ${w.path.replace(/\\/g, "/")} is protected Codex host configuration (${w.action}).` };
+    }
     for (const f of fenced) {
       const zone = zoneOf(path, f);
       if (zone === null) continue;
@@ -42675,6 +42682,54 @@ function recordAgentTask(call, env) {
   }
 }
 
+// src/hooks/claude-protocol.ts
+function normalizeClaudeHook(raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const input = raw;
+  if (typeof input["tool_name"] !== "string" || input["tool_name"] === "") return null;
+  return input;
+}
+
+// src/hooks/codex-protocol.ts
+function normalizeCodexHook(raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const input = raw;
+  if (typeof input["turn_id"] !== "string" || typeof input["tool_name"] !== "string" || input["tool_name"] === "" || input["hook_event_name"] !== "PreToolUse" || typeof input["cwd"] !== "string" || input["cwd"] === "" || input["tool_input"] === null || typeof input["tool_input"] !== "object" || Array.isArray(input["tool_input"])) return null;
+  if (["Bash", "shell", "apply_patch"].includes(input["tool_name"]) && typeof input["tool_input"]["command"] !== "string") return null;
+  return {
+    provider: "codex",
+    tool_name: input["tool_name"] === "shell" ? "Bash" : input["tool_name"],
+    tool_input: input["tool_input"],
+    cwd: input["cwd"],
+    ...typeof input["session_id"] === "string" ? { session_id: input["session_id"] } : {},
+    ...typeof input["tool_use_id"] === "string" ? { tool_use_id: input["tool_use_id"] } : {},
+    ...typeof input["transcript_path"] === "string" ? { transcript_path: input["transcript_path"] } : {}
+  };
+}
+function codexFenceOutput(reason) {
+  return JSON.stringify({ hookSpecificOutput: {
+    hookEventName: "PreToolUse",
+    permissionDecision: "deny",
+    permissionDecisionReason: reason
+  } });
+}
+
+// src/hooks/protocol.ts
+function hookProvider(input) {
+  return input !== null && typeof input === "object" && !Array.isArray(input) && "turn_id" in input ? "codex" : "claude";
+}
+function normalizeHookCall(input) {
+  if (hookProvider(input) === "codex") {
+    const call2 = normalizeCodexHook(input);
+    return call2 === null ? null : { provider: "codex", call: call2 };
+  }
+  const call = normalizeClaudeHook(input);
+  return call === null ? null : { provider: "claude", call };
+}
+function codexDecisionOutput(decision) {
+  return decision.ok ? null : codexFenceOutput(decision.reason);
+}
+
 // src/hooks/entrypoint.ts
 var MAX_BLOCK_BYTES = 1024;
 var MANAGED_PATTERNS = [
@@ -42693,7 +42748,9 @@ var MANAGED_PATTERNS = [
   // Security-relevant configuration: shell mode, permission bypass, and the
   // hook registration itself. A model must not be able to switch these off.
   "**/mycelink.config.json",
-  "**/.claude/settings.json"
+  "**/.claude/settings.json",
+  "**/.codex/config.toml",
+  "**/.codex-plugin/**"
 ];
 var WHY_WORKTREE = "worker worktrees are created by mycelink";
 var WHY_INTEGRATION = "integration goes through mycelink branch integrate";
@@ -42879,6 +42936,7 @@ function recordHolders(call) {
 function controllerFence(io) {
   let decision;
   let call = null;
+  let provider = "claude";
   try {
     const raw = io.stdin ?? readAllStdinSync();
     let input;
@@ -42887,10 +42945,17 @@ function controllerFence(io) {
     } catch {
       input = null;
     }
-    call = input !== null && typeof input === "object" && !Array.isArray(input) ? input : null;
-    decision = call !== null && typeof call.tool_name === "string" ? fenceDecision(call) : unjudged(call !== null && typeof call.cwd === "string" ? { cwd: call.cwd } : {}, process.env, new Error("unreadable hook input"));
+    provider = hookProvider(input);
+    const normalized = normalizeHookCall(input);
+    call = normalized?.call ?? null;
+    decision = call !== null ? fenceDecision(call) : unjudged(input !== null && typeof input === "object" && "cwd" in input && typeof input.cwd === "string" ? { cwd: input.cwd } : {}, process.env, new Error("unreadable hook input"));
   } catch (err) {
     decision = unjudged({}, process.env, err);
+  }
+  if (provider === "codex") {
+    const output = codexDecisionOutput(decision);
+    if (output !== null) io.out(output);
+    return 0;
   }
   if (!decision.ok) return block(io, decision.reason);
   if (decision.launch !== void 0) {
