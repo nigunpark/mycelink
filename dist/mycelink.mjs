@@ -10320,7 +10320,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve28.call(this, root, ref);
+      let _sch = resolve27.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -10347,7 +10347,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve28(root, ref) {
+    function resolve27(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -11177,7 +11177,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve28(baseURI, relativeURI, options) {
+    function resolve27(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -11546,7 +11546,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve28,
+      resolve: resolve27,
       resolveComponent,
       equal,
       serialize,
@@ -15361,9 +15361,9 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync47, lstatSync as lstatSync19, mkdirSync as mkdirSync26, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync6 } from "node:fs";
-import { createHash as createHash41 } from "node:crypto";
-import { dirname as dirname21, join as join58, resolve as resolve27 } from "node:path";
+import { existsSync as existsSync43, lstatSync as lstatSync18, mkdirSync as mkdirSync25, readFileSync as readFileSync38, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
+import { createHash as createHash39 } from "node:crypto";
+import { dirname as dirname20, join as join54, resolve as resolve26 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -15542,17 +15542,17 @@ function safeSegment(value) {
 // src/workspace/workspace.ts
 var import_yaml = __toESM(require_dist(), 1);
 import {
-  closeSync as closeSync8,
+  closeSync as closeSync7,
   constants as constants4,
-  existsSync as existsSync15,
+  existsSync as existsSync14,
   fstatSync as fstatSync5,
   lstatSync as lstatSync6,
-  mkdirSync as mkdirSync7,
-  openSync as openSync8,
-  readFileSync as readFileSync13,
-  writeSync as writeSync4
+  mkdirSync as mkdirSync6,
+  openSync as openSync7,
+  readFileSync as readFileSync11,
+  writeSync as writeSync3
 } from "node:fs";
-import { join as join19, resolve as resolve10 } from "node:path";
+import { join as join18, resolve as resolve9 } from "node:path";
 
 // src/graph/validate.ts
 import { createHash as createHash11 } from "node:crypto";
@@ -19595,9 +19595,9 @@ function reapStaleTemps(file, now3 = Date.now()) {
     const full = join13(dir, entry);
     try {
       const pid = tempPid(entry);
-      const ownerGone2 = pid !== null && pid !== process.pid && !isPidAlive(pid);
+      const ownerGone = pid !== null && pid !== process.pid && !isPidAlive(pid);
       const age = now3 - statSync3(full).mtimeMs;
-      if (ownerGone2 || age >= STALE_TEMP_MS || age < 0) {
+      if (ownerGone || age >= STALE_TEMP_MS || age < 0) {
         rmSync5(full, { force: true });
         reaped++;
       }
@@ -21192,245 +21192,7 @@ function validateGraph(value, context = {}) {
 }
 
 // src/state/feature-state.ts
-import { join as join17 } from "node:path";
-
-// src/state/codex-lifecycle.ts
-import { closeSync as closeSync7, existsSync as existsSync13, mkdirSync as mkdirSync6, openSync as openSync7, readFileSync as readFileSync11, rmSync as rmSync7, writeSync as writeSync3 } from "node:fs";
-import { dirname as dirname7, join as join16, resolve as resolve9 } from "node:path";
-import { hostname as hostname3 } from "node:os";
-import { randomBytes as randomBytes4 } from "node:crypto";
-
-// src/util/process-identity.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
-import { readFileSync as readFileSync10 } from "node:fs";
-import { hostname as hostname2 } from "node:os";
-var clockTicks = null;
-function linuxClockTicks() {
-  if (clockTicks === null) {
-    const r = spawnSync6("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5e3 });
-    const n = Number((r.stdout ?? "").trim());
-    clockTicks = Number.isInteger(n) && n > 0 ? n : 100;
-  }
-  return clockTicks;
-}
-function linuxBootTimeMs() {
-  try {
-    const line = readFileSync10("/proc/stat", "utf8").split("\n").find((l) => l.startsWith("btime "));
-    const seconds = Number(line?.slice(6).trim());
-    return Number.isFinite(seconds) ? seconds * 1e3 : null;
-  } catch {
-    return null;
-  }
-}
-function linuxBootId() {
-  try {
-    return readFileSync10("/proc/sys/kernel/random/boot_id", "utf8").trim() || null;
-  } catch {
-    return null;
-  }
-}
-function linuxInfo(pid) {
-  let raw;
-  try {
-    raw = readFileSync10(`/proc/${pid}/stat`, "utf8");
-  } catch {
-    return null;
-  }
-  const fields = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
-  const state = fields[0] ?? "";
-  const ppid = Number(fields[1]);
-  const ticks = fields[19];
-  if (ticks === void 0 || !/^\d+$/.test(ticks)) return null;
-  const boot = linuxBootTimeMs();
-  return {
-    pid,
-    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
-    start: ticks,
-    startedAt: boot === null ? null : boot + Number(ticks) / linuxClockTicks() * 1e3,
-    zombie: state === "Z" || state === "X"
-  };
-}
-function darwinInfo(pid) {
-  const r = spawnSync6("ps", ["-o", "ppid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1e4 });
-  const line = (r.stdout ?? "").trim();
-  if (r.status !== 0 || line === "") return null;
-  const parts = line.split(/\s+/);
-  const ppid = Number(parts[0]);
-  const lstart = parts.slice(2).join(" ");
-  const startedAt = Date.parse(lstart);
-  return {
-    pid,
-    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
-    start: lstart,
-    startedAt: Number.isNaN(startedAt) ? null : startedAt,
-    zombie: (parts[1] ?? "").startsWith("Z")
-  };
-}
-function windowsSnapshot() {
-  const script = "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
-  const r = spawnSync6("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8",
-    timeout: 6e4,
-    windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024
-  });
-  if (r.status !== 0) return null;
-  const table = /* @__PURE__ */ new Map();
-  for (const line of (r.stdout ?? "").split(/\r?\n/)) {
-    const [pidText, ppidText, created] = line.trim().split("|");
-    const pid = Number(pidText);
-    if (!Number.isInteger(pid) || pid <= 0 || created === void 0 || created === "") continue;
-    const ppid = Number(ppidText);
-    const startedAt = Date.parse(created);
-    table.set(pid, { pid, ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null, start: created, startedAt: Number.isNaN(startedAt) ? null : startedAt, zombie: false });
-  }
-  return table;
-}
-function snapshot2() {
-  return process.platform === "win32" ? windowsSnapshot() : null;
-}
-function info(pid, table = null) {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  if (process.platform === "win32") return (table ?? windowsSnapshot())?.get(pid) ?? null;
-  if (process.platform === "linux") return linuxInfo(pid);
-  if (process.platform === "darwin") return darwinInfo(pid);
-  return null;
-}
-function identityOf(found) {
-  return {
-    pid: found.pid,
-    start: found.start,
-    boot: process.platform === "linux" ? linuxBootId() : null,
-    host: hostname2(),
-    platform: process.platform
-  };
-}
-function processIdentity(pid) {
-  const found = info(pid);
-  return found === null || found.zombie ? null : identityOf(found);
-}
-function processStartedAt(pid) {
-  const found = info(pid);
-  return found === null || found.zombie ? null : found.startedAt;
-}
-function isProcessAlive(identity2) {
-  if (identity2.host !== hostname2()) return null;
-  if (identity2.boot !== null && process.platform === "linux" && identity2.boot !== linuxBootId()) return false;
-  const found = info(identity2.pid);
-  return found !== null && !found.zombie && found.start === identity2.start;
-}
-function startedBefore(parent, child) {
-  if (process.platform === "linux") return Number(parent.start) <= Number(child.start);
-  if (parent.startedAt === null || child.startedAt === null) return true;
-  return parent.startedAt <= child.startedAt;
-}
-function ancestry(pid, max = 32, table = snapshot2()) {
-  const chain = [];
-  let current = info(pid, table);
-  while (current !== null && current.ppid !== null && chain.length < max) {
-    const parent = info(current.ppid, table);
-    if (parent === null || !startedBefore(parent, current) || chain.includes(parent.pid)) break;
-    chain.push(parent.pid);
-    current = parent;
-  }
-  return chain;
-}
-function sessionHolder(env = process.env) {
-  const raw = env["CLAUDE_PID"];
-  if (raw === void 0 || !/^[1-9]\d{0,9}$/.test(raw)) return null;
-  const pid = Number(raw);
-  const table = snapshot2();
-  if (!ancestry(process.pid, 32, table).includes(pid)) return null;
-  const found = info(pid, table);
-  return found === null || found.zombie ? null : identityOf(found);
-}
-
-// src/state/codex-lifecycle.ts
-var held = /* @__PURE__ */ new Set();
-var sleep = (ms) => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-};
-var codexLifecycleLockPath = (featureDir) => join16(featureDir, "CODEX-LIFECYCLE.lock");
-var enabledPath = (featureDir) => join16(featureDir, "CODEX-LIFECYCLE.enabled");
-var codexLifecycleEnabled = (featureDir) => existsSync13(enabledPath(featureDir));
-function ownerOf(file) {
-  try {
-    const o = JSON.parse(readFileSync11(file, "utf8"));
-    if (!Number.isSafeInteger(o.pid) || typeof o.host !== "string" || typeof o.token !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(o.token)) return null;
-    return o;
-  } catch {
-    return null;
-  }
-}
-function create(file, owner) {
-  let fd;
-  try {
-    fd = openSync7(file, "wx");
-  } catch (err) {
-    if (["EEXIST", "EACCES", "EPERM", "EBUSY"].includes(err.code ?? "")) return false;
-    throw err;
-  }
-  try {
-    writeSync3(fd, JSON.stringify(owner));
-  } finally {
-    closeSync7(fd);
-  }
-  return true;
-}
-function ownerGone(owner, host) {
-  if (owner.host !== host) return false;
-  if (!isPidAlive(owner.pid)) return true;
-  const identity2 = owner.identity;
-  if (!identity2 || identity2.host !== owner.host || identity2.pid !== owner.pid || typeof identity2.start !== "string" || identity2.platform !== process.platform) return false;
-  const now3 = processIdentity(owner.pid);
-  return now3 !== null && (now3.start !== identity2.start || now3.boot !== identity2.boot);
-}
-function withCodexLifecycleLock(featureDir, fn, options = {}) {
-  const file = resolve9(codexLifecycleLockPath(featureDir));
-  const syncResult = () => {
-    const result = fn();
-    if (result !== null && typeof result === "object" && "then" in result) {
-      throw new Error("CODEX_LIFECYCLE_ASYNC_FORBIDDEN");
-    }
-    return result;
-  };
-  if (held.has(file)) return syncResult();
-  const deadline = Date.now() + (options.timeoutMs ?? 15e3);
-  const me = {
-    pid: process.pid,
-    host: hostname3(),
-    token: randomBytes4(16).toString("hex"),
-    acquired_at: (/* @__PURE__ */ new Date()).toISOString(),
-    identity: processIdentity(process.pid)
-  };
-  for (; ; ) {
-    if (create(file, me)) break;
-    const owner = ownerOf(file);
-    if (owner && ownerGone(owner, me.host)) {
-      const recovery = `${file}.recovery`;
-      if (create(recovery, me)) {
-        try {
-          const again = ownerOf(file);
-          if (again?.token === owner.token && again.pid === owner.pid && ownerGone(again, me.host)) {
-            rmSync7(file);
-          }
-        } finally {
-          if (ownerOf(recovery)?.token === me.token) rmSync7(recovery);
-        }
-        continue;
-      }
-    }
-    if (Date.now() >= deadline) throw new Error(`CODEX_LIFECYCLE_LOCK_BUSY: ${file}`);
-    sleep(10);
-  }
-  held.add(file);
-  try {
-    return syncResult();
-  } finally {
-    held.delete(file);
-    if (ownerOf(file)?.token === me.token) rmSync7(file);
-  }
-}
+import { join as join16 } from "node:path";
 
 // src/state/orchestration.ts
 var MAX_CLOSED_LEASES = 64;
@@ -21552,8 +21314,8 @@ function syncLeases(s, at = (/* @__PURE__ */ new Date()).toISOString()) {
   for (const [id, rt] of Object.entries(s.nodes)) {
     const c = rt.claim;
     if (c === null) continue;
-    const held2 = o.leases.some((l) => l.status === "active" && l.node_id === id && l.claim_id === c.claim_id && l.dispatch_id === (c.dispatch_id ?? null) && l.capability_sha256 === (c.capability_sha256 ?? null));
-    if (held2) continue;
+    const held = o.leases.some((l) => l.status === "active" && l.node_id === id && l.claim_id === c.claim_id && l.dispatch_id === (c.dispatch_id ?? null) && l.capability_sha256 === (c.capability_sha256 ?? null));
+    if (held) continue;
     issueLease(
       s,
       {
@@ -21647,10 +21409,10 @@ function initialState(graph, graphHash, budget = DEFAULT_BUDGET, now3 = (/* @__P
   };
 }
 function stateFilePath(featureDir) {
-  return join17(featureDir, "STATE.json");
+  return join16(featureDir, "STATE.json");
 }
 function stateLockPath(featureDir) {
-  return join17(featureDir, "STATE.json.lock");
+  return join16(featureDir, "STATE.json.lock");
 }
 var StateSchemaError = class extends Error {
   constructor(problems) {
@@ -21671,7 +21433,7 @@ function saveState(featureDir, state) {
     if (problems.length > 0) throw new StateSchemaError(problems);
     return writeDocAtomic(stateFilePath(featureDir), state);
   };
-  return codexLifecycleEnabled(featureDir) ? withCodexLifecycleLock(featureDir, () => withLock(stateLockPath(featureDir), write2), { timeoutMs: 2e3 }) : write2();
+  return write2();
 }
 function mutateState(featureDir, mutate, options = {}) {
   const update = () => withLock(
@@ -21688,13 +21450,13 @@ function mutateState(featureDir, mutate, options = {}) {
     },
     { timeoutMs: options.lockTimeoutMs ?? 15e3, pollMs: 10, purpose: "STATE.json mutation" }
   );
-  return codexLifecycleEnabled(featureDir) ? withCodexLifecycleLock(featureDir, update, { timeoutMs: options.lockTimeoutMs }) : update();
+  return update();
 }
 
 // src/engine/acceptance.ts
 import { createHash as createHash12 } from "node:crypto";
-import { existsSync as existsSync14, readFileSync as readFileSync12 } from "node:fs";
-import { join as join18 } from "node:path";
+import { existsSync as existsSync13, readFileSync as readFileSync10 } from "node:fs";
+import { join as join17 } from "node:path";
 var ACCEPTANCE_FILE = "ACCEPTANCE.json";
 var ACCEPTANCE_SCHEMA = "mycelink-acceptance/1";
 var KINDS = ["new-behavior", "compatibility", "declaration"];
@@ -21813,9 +21575,9 @@ function manifestProblems(value, options = {}) {
   return problems;
 }
 function loadAcceptanceManifest(controlRoot, featureId) {
-  const file = join18(featurePaths(controlRoot, featureId).featureDir, ACCEPTANCE_FILE);
-  if (!existsSync14(file)) return null;
-  const bytes2 = readFileSync12(file);
+  const file = join17(featurePaths(controlRoot, featureId).featureDir, ACCEPTANCE_FILE);
+  if (!existsSync13(file)) return null;
+  const bytes2 = readFileSync10(file);
   let parsed;
   try {
     parsed = JSON.parse(bytes2.toString("utf8"));
@@ -21896,16 +21658,16 @@ function normalizeConfig(parsed) {
 }
 function loadConfig(controlRoot) {
   const file = controlPaths(controlRoot).config;
-  if (!existsSync15(file)) return { ...DEFAULT_CONFIG };
-  const parsed = JSON.parse(readFileSync13(file, "utf8"));
+  if (!existsSync14(file)) return { ...DEFAULT_CONFIG };
+  const parsed = JSON.parse(readFileSync11(file, "utf8"));
   return normalizeConfig(parsed);
 }
 function loadRepositories(controlRoot) {
   const paths = controlPaths(controlRoot);
-  if (!existsSync15(paths.repositoriesManifest)) {
+  if (!existsSync14(paths.repositoriesManifest)) {
     throw new WorkspaceError(`No repositories.yaml at ${paths.repositoriesManifest}`);
   }
-  const parsed = import_yaml.default.parse(readFileSync13(paths.repositoriesManifest, "utf8"));
+  const parsed = import_yaml.default.parse(readFileSync11(paths.repositoriesManifest, "utf8"));
   const result = validateRepositories(parsed);
   if (!result.ok) {
     throw new WorkspaceError(
@@ -21924,14 +21686,14 @@ function loadWorkspace(controlRoot) {
 function repositoryPath(ws, name) {
   const repo = ws.repositories.repositories.find((r) => r.name === name);
   if (!repo) throw new WorkspaceError(`Repository "${name}" is not declared in repositories.yaml`);
-  return resolve10(ws.paths.controlRoot, repo.path);
+  return resolve9(ws.paths.controlRoot, repo.path);
 }
 function loadGraph(controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
-  if (!existsSync15(paths.graph)) {
+  if (!existsSync14(paths.graph)) {
     throw new WorkspaceError(`No PORTFOLIO-GRAPH.yaml for feature "${featureId}" at ${paths.graph}`);
   }
-  return import_yaml.default.parse(readFileSync13(paths.graph, "utf8"));
+  return import_yaml.default.parse(readFileSync11(paths.graph, "utf8"));
 }
 function validateFeatureGraph(controlRoot, featureId) {
   const graph = loadGraph(controlRoot, featureId);
@@ -21962,17 +21724,17 @@ function initControlRepo(controlRoot, config = {}) {
     paths.worktreesDir,
     paths.integrationDir
   ]) {
-    mkdirSync7(dir, { recursive: true });
+    mkdirSync6(dir, { recursive: true });
   }
   createExclusive(paths.config, JSON.stringify({ ...NEW_CONFIG_DEFAULTS, ...config }, null, 2) + "\n");
-  createExclusive(join19(paths.featuresDir, ".gitkeep"), "");
+  createExclusive(join18(paths.featuresDir, ".gitkeep"), "");
   ensureScratchIgnored(paths.controlRoot);
   return paths;
 }
 var SCRATCH_IGNORE_ENTRY = "/.mycelink/";
 var EQUIVALENT_SCRATCH_ENTRIES = /* @__PURE__ */ new Set([".mycelink", ".mycelink/", "/.mycelink", "/.mycelink/"]);
 function ensureScratchIgnored(controlRoot) {
-  const file = join19(controlRoot, ".gitignore");
+  const file = join18(controlRoot, ".gitignore");
   const refuse2 = (why) => {
     throw new WorkspaceError(`Refusing to update ${file}: ${why}.`);
   };
@@ -21988,14 +21750,14 @@ function ensureScratchIgnored(controlRoot) {
   let fd;
   let created = false;
   try {
-    fd = openSync8(file, constants4.O_RDWR | constants4.O_APPEND | nofollow | nonblock);
+    fd = openSync7(file, constants4.O_RDWR | constants4.O_APPEND | nofollow | nonblock);
   } catch (err) {
     const code = err.code;
     if (code === "ELOOP" || code === "EMLINK") refuse2("it is a link");
     if (code === "EISDIR") refuse2("it is not a regular file");
     if (code !== "ENOENT") throw err;
     try {
-      fd = openSync8(file, constants4.O_WRONLY | constants4.O_CREAT | constants4.O_EXCL | nofollow | nonblock, 438);
+      fd = openSync7(file, constants4.O_WRONLY | constants4.O_CREAT | constants4.O_EXCL | nofollow | nonblock, 438);
       created = true;
     } catch (createErr) {
       if (createErr.code !== "EEXIST") throw createErr;
@@ -22008,14 +21770,14 @@ function ensureScratchIgnored(controlRoot) {
     if (opened.nlink !== 1n) refuse2("it has more than one name (hard link)");
     if (!namesOpenedFile(file, opened)) refuse2(isLink3() ? "it is a link" : "it was replaced while it was opened");
     if (opened.size > 1024n * 1024n) refuse2("it is larger than 1 MiB");
-    const text = created ? "" : readFileSync13(fd, "utf8");
+    const text = created ? "" : readFileSync11(fd, "utf8");
     const present = text.split(/\r?\n/).some((line) => EQUIVALENT_SCRATCH_ENTRIES.has(line.trim()));
     if (present) return;
     const prefix = text === "" || text.endsWith("\n") ? "" : "\n";
-    writeSync4(fd, `${prefix}${SCRATCH_IGNORE_ENTRY}
+    writeSync3(fd, `${prefix}${SCRATCH_IGNORE_ENTRY}
 `);
   } finally {
-    closeSync8(fd);
+    closeSync7(fd);
   }
 }
 function initFeatureDirs(controlRoot, featureId) {
@@ -22030,15 +21792,15 @@ function initFeatureDirs(controlRoot, featureId) {
     paths.scenariosDir,
     paths.metricsDir
   ]) {
-    mkdirSync7(dir, { recursive: true });
+    mkdirSync6(dir, { recursive: true });
   }
   return paths;
 }
 
 // src/engine/acceptance-review.ts
 import { createHash as createHash16 } from "node:crypto";
-import { existsSync as existsSync17, readFileSync as readFileSync15 } from "node:fs";
-import { join as join21 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync14 } from "node:fs";
+import { join as join20 } from "node:path";
 
 // src/engine/portfolio.ts
 var IntegrationBranchMovedError = class extends Error {
@@ -22100,11 +21862,11 @@ function registeredRepositories(workspace) {
 import { createHash as createHash14 } from "node:crypto";
 
 // src/engine/authority.ts
-import { existsSync as existsSync16, readdirSync as readdirSync4, readFileSync as readFileSync14 } from "node:fs";
-import { join as join20 } from "node:path";
+import { existsSync as existsSync15, readdirSync as readdirSync4, readFileSync as readFileSync13 } from "node:fs";
+import { join as join19 } from "node:path";
 
 // src/engine/capability.ts
-import { createHash as createHash13, randomBytes as randomBytes5, timingSafeEqual } from "node:crypto";
+import { createHash as createHash13, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
 var CAPABILITY_ENV = "MYCELINK_CLAIM_TOKEN";
 var CAPABILITY_FORMAT = /^[0-9a-f]{64}$/;
 var CapabilityError = class extends Error {
@@ -22124,7 +21886,7 @@ var RoleDeniedError = class extends Error {
   }
 };
 function newCapability() {
-  const raw = randomBytes5(32).toString("hex");
+  const raw = randomBytes4(32).toString("hex");
   return { raw, sha256: capabilityHash(raw) };
 }
 function capabilityHash(raw) {
@@ -22168,14 +21930,159 @@ function assertClaimCapability(nodeId, runtime, raw) {
   }
 }
 
+// src/util/process-identity.ts
+import { spawnSync as spawnSync6 } from "node:child_process";
+import { readFileSync as readFileSync12 } from "node:fs";
+import { hostname as hostname2 } from "node:os";
+var clockTicks = null;
+function linuxClockTicks() {
+  if (clockTicks === null) {
+    const r = spawnSync6("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5e3 });
+    const n = Number((r.stdout ?? "").trim());
+    clockTicks = Number.isInteger(n) && n > 0 ? n : 100;
+  }
+  return clockTicks;
+}
+function linuxBootTimeMs() {
+  try {
+    const line = readFileSync12("/proc/stat", "utf8").split("\n").find((l) => l.startsWith("btime "));
+    const seconds = Number(line?.slice(6).trim());
+    return Number.isFinite(seconds) ? seconds * 1e3 : null;
+  } catch {
+    return null;
+  }
+}
+function linuxBootId() {
+  try {
+    return readFileSync12("/proc/sys/kernel/random/boot_id", "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+function linuxInfo(pid) {
+  let raw;
+  try {
+    raw = readFileSync12(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return null;
+  }
+  const fields = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
+  const state = fields[0] ?? "";
+  const ppid = Number(fields[1]);
+  const ticks = fields[19];
+  if (ticks === void 0 || !/^\d+$/.test(ticks)) return null;
+  const boot = linuxBootTimeMs();
+  return {
+    pid,
+    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
+    start: ticks,
+    startedAt: boot === null ? null : boot + Number(ticks) / linuxClockTicks() * 1e3,
+    zombie: state === "Z" || state === "X"
+  };
+}
+function darwinInfo(pid) {
+  const r = spawnSync6("ps", ["-o", "ppid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1e4 });
+  const line = (r.stdout ?? "").trim();
+  if (r.status !== 0 || line === "") return null;
+  const parts = line.split(/\s+/);
+  const ppid = Number(parts[0]);
+  const lstart = parts.slice(2).join(" ");
+  const startedAt = Date.parse(lstart);
+  return {
+    pid,
+    ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null,
+    start: lstart,
+    startedAt: Number.isNaN(startedAt) ? null : startedAt,
+    zombie: (parts[1] ?? "").startsWith("Z")
+  };
+}
+function windowsSnapshot() {
+  const script = "foreach ($p in ([wmisearcher]'SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process').Get()) { $c = ''; if ($p.CreationDate) { $c = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationDate).ToUniversalTime().ToString('o') }; '{0}|{1}|{2}' -f $p.ProcessId, $p.ParentProcessId, $c }";
+  const r = spawnSync6("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    timeout: 6e4,
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  if (r.status !== 0) return null;
+  const table = /* @__PURE__ */ new Map();
+  for (const line of (r.stdout ?? "").split(/\r?\n/)) {
+    const [pidText, ppidText, created] = line.trim().split("|");
+    const pid = Number(pidText);
+    if (!Number.isInteger(pid) || pid <= 0 || created === void 0 || created === "") continue;
+    const ppid = Number(ppidText);
+    const startedAt = Date.parse(created);
+    table.set(pid, { pid, ppid: Number.isInteger(ppid) && ppid > 0 ? ppid : null, start: created, startedAt: Number.isNaN(startedAt) ? null : startedAt, zombie: false });
+  }
+  return table;
+}
+function snapshot2() {
+  return process.platform === "win32" ? windowsSnapshot() : null;
+}
+function info(pid, table = null) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === "win32") return (table ?? windowsSnapshot())?.get(pid) ?? null;
+  if (process.platform === "linux") return linuxInfo(pid);
+  if (process.platform === "darwin") return darwinInfo(pid);
+  return null;
+}
+function identityOf(found) {
+  return {
+    pid: found.pid,
+    start: found.start,
+    boot: process.platform === "linux" ? linuxBootId() : null,
+    host: hostname2(),
+    platform: process.platform
+  };
+}
+function processIdentity(pid) {
+  const found = info(pid);
+  return found === null || found.zombie ? null : identityOf(found);
+}
+function processStartedAt(pid) {
+  const found = info(pid);
+  return found === null || found.zombie ? null : found.startedAt;
+}
+function isProcessAlive(identity2) {
+  if (identity2.host !== hostname2()) return null;
+  if (identity2.boot !== null && process.platform === "linux" && identity2.boot !== linuxBootId()) return false;
+  const found = info(identity2.pid);
+  return found !== null && !found.zombie && found.start === identity2.start;
+}
+function startedBefore(parent, child) {
+  if (process.platform === "linux") return Number(parent.start) <= Number(child.start);
+  if (parent.startedAt === null || child.startedAt === null) return true;
+  return parent.startedAt <= child.startedAt;
+}
+function ancestry(pid, max = 32, table = snapshot2()) {
+  const chain = [];
+  let current = info(pid, table);
+  while (current !== null && current.ppid !== null && chain.length < max) {
+    const parent = info(current.ppid, table);
+    if (parent === null || !startedBefore(parent, current) || chain.includes(parent.pid)) break;
+    chain.push(parent.pid);
+    current = parent;
+  }
+  return chain;
+}
+function sessionHolder(env = process.env) {
+  const raw = env["CLAUDE_PID"];
+  if (raw === void 0 || !/^[1-9]\d{0,9}$/.test(raw)) return null;
+  const pid = Number(raw);
+  const table = snapshot2();
+  if (!ancestry(process.pid, 32, table).includes(pid)) return null;
+  const found = info(pid, table);
+  return found === null || found.zombie ? null : identityOf(found);
+}
+
 // src/engine/settler.ts
-import { hostname as hostname4 } from "node:os";
+import { hostname as hostname3 } from "node:os";
 var SETTLE_STALE_MS = 2 * 60 * 60 * 1e3;
 function settlerMarker() {
   const me = processIdentity(process.pid);
   return {
     pid: process.pid,
-    host: hostname4(),
+    host: hostname3(),
     started_at: (/* @__PURE__ */ new Date()).toISOString(),
     ...me !== null ? { start: me.start, boot: me.boot } : {}
   };
@@ -22183,7 +22090,7 @@ function settlerMarker() {
 function settlerAlive(marker) {
   const written = Date.parse(marker.started_at);
   if (Number.isNaN(written) || Date.now() - written > SETTLE_STALE_MS) return false;
-  if (marker.host !== hostname4()) return true;
+  if (marker.host !== hostname3()) return true;
   if (marker.pid === process.pid && marker.start === void 0) return true;
   if (marker.start !== void 0) {
     return isProcessAlive({ pid: marker.pid, start: marker.start, boot: marker.boot ?? null, host: marker.host, platform: process.platform }) === true;
@@ -22194,8 +22101,8 @@ function settlerAlive(marker) {
 }
 
 // src/sessions/registry.ts
-import { dirname as dirname8 } from "node:path";
-import { mkdirSync as mkdirSync8 } from "node:fs";
+import { dirname as dirname7 } from "node:path";
+import { mkdirSync as mkdirSync7 } from "node:fs";
 function lockPath(registryFile) {
   return registryFile + ".lock";
 }
@@ -22208,7 +22115,7 @@ function save(file, data) {
   if (problems.length > 0) {
     throw new Error("Session registry invalid: " + problems.map((p) => p.detail).join("; "));
   }
-  mkdirSync8(dirname8(file), { recursive: true });
+  mkdirSync7(dirname7(file), { recursive: true });
   writeDocAtomic(file, data);
 }
 function recordSpawn(file, handle, info2) {
@@ -22317,13 +22224,13 @@ var AuthorityError = class extends Error {
   }
 };
 function authorityFile(controlRoot) {
-  return join20(controlPaths(controlRoot).workDir, "controller-authority.json");
+  return join19(controlPaths(controlRoot).workDir, "controller-authority.json");
 }
 function readRecord(controlRoot) {
   const file = authorityFile(controlRoot);
-  if (!existsSync16(file)) return null;
+  if (!existsSync15(file)) return null;
   try {
-    const parsed = JSON.parse(readFileSync14(file, "utf8"));
+    const parsed = JSON.parse(readFileSync13(file, "utf8"));
     if (parsed.schema !== "mycelink-controller-authority/1" || typeof parsed.sha256 !== "string" || !AUTHORITY_FORMAT.test(parsed.sha256)) {
       return null;
     }
@@ -22334,14 +22241,14 @@ function readRecord(controlRoot) {
 }
 function liveClaims(controlRoot) {
   const dir = controlPaths(controlRoot).featuresDir;
-  if (!existsSync16(dir)) return [];
+  if (!existsSync15(dir)) return [];
   const out = [];
   for (const feature of readdirSync4(dir).sort()) {
-    const file = join20(dir, feature, "STATE.json");
-    if (!existsSync16(file)) continue;
+    const file = join19(dir, feature, "STATE.json");
+    if (!existsSync15(file)) continue;
     let nodes = {};
     try {
-      const doc = JSON.parse(readFileSync14(file, "utf8"));
+      const doc = JSON.parse(readFileSync13(file, "utf8"));
       nodes = doc.data?.nodes ?? doc.nodes ?? {};
     } catch {
       out.push(`${feature}:(unreadable STATE.json)`);
@@ -22353,13 +22260,13 @@ function liveClaims(controlRoot) {
 }
 function liveWork(controlRoot) {
   const dir = controlPaths(controlRoot).featuresDir;
-  if (!existsSync16(dir)) return [];
+  if (!existsSync15(dir)) return [];
   const out = [];
   for (const feature of readdirSync4(dir).sort()) {
-    const featureDir = join20(dir, feature);
+    const featureDir = join19(dir, feature);
     try {
-      const registry = join20(featureDir, "sessions", "registry.json");
-      if (existsSync16(registry)) {
+      const registry = join19(featureDir, "sessions", "registry.json");
+      if (existsSync15(registry)) {
         for (const s of liveSessions(registry)) {
           if (typeof s.pid !== "number" || !isPidAlive(s.pid)) continue;
           const started = processStartedAt(s.pid);
@@ -22368,9 +22275,9 @@ function liveWork(controlRoot) {
           out.push(`${feature}:session ${s.session_id}`);
         }
       }
-      const stateFile = join20(featureDir, "STATE.json");
-      if (existsSync16(stateFile)) {
-        const doc = JSON.parse(readFileSync14(stateFile, "utf8"));
+      const stateFile = join19(featureDir, "STATE.json");
+      if (existsSync15(stateFile)) {
+        const doc = JSON.parse(readFileSync13(stateFile, "utf8"));
         for (const [id, rt] of Object.entries(doc.data?.nodes ?? {})) {
           const settling = rt.claim?.settling;
           if (settling && settlerAlive(settling)) out.push(`${feature}:settle of ${id}`);
@@ -22384,7 +22291,7 @@ function liveWork(controlRoot) {
 }
 function openControllerAuthority(controlRoot, options = {}) {
   const paths = controlPaths(controlRoot);
-  if (!existsSync16(paths.config)) {
+  if (!existsSync15(paths.config)) {
     throw new Error(`NOT_A_CONTROL_REPOSITORY: ${controlRoot} has no mycelink.config.json; run mycelink init first.`);
   }
   const takeover = options.takeover === true;
@@ -22397,15 +22304,15 @@ function openControllerAuthority(controlRoot, options = {}) {
     );
   }
   return withLock(
-    join20(paths.workDir, "controller-authority.lock"),
+    join19(paths.workDir, "controller-authority.lock"),
     () => {
-      const previous = existsSync16(authorityFile(controlRoot)) ? readRecord(controlRoot) : null;
+      const previous = existsSync15(authorityFile(controlRoot)) ? readRecord(controlRoot) : null;
       if (recover) {
         if (previous === null) {
           throw new AuthorityError("CONTROLLER_AUTHORITY_REQUIRED", "no controller key was ever opened for this control repository; run controller open.");
         }
         assertRecoverable(controlRoot, previous, holder);
-      } else if (!takeover && existsSync16(authorityFile(controlRoot))) {
+      } else if (!takeover && existsSync15(authorityFile(controlRoot))) {
         if (options.current === void 0 || options.current === "") {
           throw new AuthorityError(
             "CONTROLLER_AUTHORITY_EXISTS",
@@ -23017,7 +22924,7 @@ function lineageProblems(review, readReceipt) {
 // src/engine/acceptance-review.ts
 function readJsonOrNull(file) {
   try {
-    return JSON.parse(readFileSync15(file, "utf8"));
+    return JSON.parse(readFileSync14(file, "utf8"));
   } catch {
     return null;
   }
@@ -23835,9 +23742,9 @@ function passFor(reviews, inputsSha256) {
   return [...reviews].reverse().find((r) => r.overall === "PASS" && r.outcome !== "REGRESSION" && r.inputs_sha256 === inputsSha256) ?? null;
 }
 function receiptProblem(controlRoot, record) {
-  const file = join21(controlRoot, ...record.receipt_path.split("/"));
-  if (!existsSync17(file)) return `${record.receipt_path} is missing`;
-  const bytes2 = readFileSync15(file);
+  const file = join20(controlRoot, ...record.receipt_path.split("/"));
+  if (!existsSync16(file)) return `${record.receipt_path} is missing`;
+  const bytes2 = readFileSync14(file);
   if (sha2568(bytes2) !== record.receipt_sha256) return `${record.receipt_path} hashes to ${sha2568(bytes2).slice(0, 12)}, not ${record.receipt_sha256.slice(0, 12)} as STATE.json pins`;
   try {
     const r = JSON.parse(bytes2.toString("utf8"));
@@ -23862,7 +23769,7 @@ function reviewGateProblems(controlRoot, featureId, options = {}) {
   const problems = [];
   if (review.blocked !== null) problems.push(`${review.blocked.code}: ${review.blocked.detail}`);
   if (review.blocked?.code !== "REVIEW_LINEAGE_INVALID") {
-    const broken = lineageProblems(review, (rel) => readJsonOrNull(join21(controlRoot, ...rel.split("/"))));
+    const broken = lineageProblems(review, (rel) => readJsonOrNull(join20(controlRoot, ...rel.split("/"))));
     if (broken.length > 0) problems.push(`REVIEW_LINEAGE_INVALID: ${broken.slice(0, 3).join("; ")}`);
   }
   let inputs;
@@ -23909,7 +23816,7 @@ function reviewGateProblems(controlRoot, featureId, options = {}) {
   return problems;
 }
 function fileSha256(file) {
-  return sha2568(readFileSync15(file));
+  return sha2568(readFileSync14(file));
 }
 function nextReviewId(featureId, state) {
   const used = (state.acceptance_review?.reviews ?? []).map((r) => r.review_id);
@@ -23923,14 +23830,14 @@ function nextReviewId(featureId, state) {
   return `${featureId}-R${String(max + 1).padStart(3, "0")}`;
 }
 function reviewSlot(controlRoot, featureId, reviewId, dispatchId) {
-  const dir = join21(controlRoot, ".mycelink", REVIEWS_DIR, featureId, reviewId, dispatchId);
-  return { dir, verdict: join21(dir, VERDICT_FILE), attestation: join21(dir, ATTESTATION_FILE) };
+  const dir = join20(controlRoot, ".mycelink", REVIEWS_DIR, featureId, reviewId, dispatchId);
+  return { dir, verdict: join20(dir, VERDICT_FILE), attestation: join20(dir, ATTESTATION_FILE) };
 }
 
 // src/engine/review-revision.ts
 import { createHash as createHash17 } from "node:crypto";
-import { existsSync as existsSync18, readFileSync as readFileSync16 } from "node:fs";
-import { join as join22 } from "node:path";
+import { existsSync as existsSync17, readFileSync as readFileSync15 } from "node:fs";
+import { join as join21 } from "node:path";
 var sha2569 = (data) => createHash17("sha256").update(data).digest("hex");
 function revisionChain(record) {
   const first = record.original ?? null;
@@ -24071,10 +23978,10 @@ function rebaseProblems(r, chain, gapsOf) {
   return problems;
 }
 function readReceiptFile(controlRoot, rel) {
-  const file = join22(controlRoot, ...rel.split("/"));
-  if (!existsSync18(file)) return null;
+  const file = join21(controlRoot, ...rel.split("/"));
+  if (!existsSync17(file)) return null;
   try {
-    const bytes2 = readFileSync16(file);
+    const bytes2 = readFileSync15(file);
     return { sha256: sha2569(bytes2), json: JSON.parse(bytes2.toString("utf8")) };
   } catch {
     return null;
@@ -24155,12 +24062,12 @@ function revisionTrustProblems(review, nodes, read) {
   return problems;
 }
 function nodeOrderProblems(review, nodeId, rt, read) {
-  const held2 = reviewOrderOf(rt);
-  if (held2 === null) return [];
-  const rec = [...review.reviews].reverse().find((r) => r.review_id === held2.brief.origin?.review_id);
-  if (rec === void 0) return [`${nodeId}'s order names ${held2.brief.origin?.review_id}, which is not a settled review`];
-  const problems = orderBindingProblems(rec, held2.brief, read).map((p) => `${nodeId}: ${p}`);
-  if (stableStringify(held2.brief.rebases ?? []) !== stableStringify(held2.entry?.rebases ?? [])) problems.push(`${nodeId}: the order's rebase records are not its rework history entry's`);
+  const held = reviewOrderOf(rt);
+  if (held === null) return [];
+  const rec = [...review.reviews].reverse().find((r) => r.review_id === held.brief.origin?.review_id);
+  if (rec === void 0) return [`${nodeId}'s order names ${held.brief.origin?.review_id}, which is not a settled review`];
+  const problems = orderBindingProblems(rec, held.brief, read).map((p) => `${nodeId}: ${p}`);
+  if (stableStringify(held.brief.rebases ?? []) !== stableStringify(held.entry?.rebases ?? [])) problems.push(`${nodeId}: the order's rebase records are not its rework history entry's`);
   return problems;
 }
 function reviewRevisionProblems(controlRoot, state) {
@@ -24200,8 +24107,8 @@ function orderViews(graph, state, reviewId, challengedNow, parentGaps) {
 
 // src/engine/review-challenge.ts
 import { createHash as createHash18 } from "node:crypto";
-import { existsSync as existsSync19, mkdirSync as mkdirSync9, readFileSync as readFileSync17 } from "node:fs";
-import { dirname as dirname9, join as join23 } from "node:path";
+import { existsSync as existsSync18, mkdirSync as mkdirSync8, readFileSync as readFileSync16 } from "node:fs";
+import { dirname as dirname8, join as join22 } from "node:path";
 var REVIEW_CHALLENGE_SCHEMA = "mycelink-review-challenge/1";
 var MAX_CHALLENGE_ROUNDS = 2;
 var CHALLENGES_DIR = "challenges";
@@ -24531,7 +24438,7 @@ function judgeChallenge(args) {
   if (tampered !== null) return fail("REVIEW_CHALLENGE_STALE", "/review_id", `${c.review_id}: ${tampered}`);
   let receipt;
   try {
-    receipt = JSON.parse(readFileSync17(join23(args.controlRoot, ...record.receipt_path.split("/")), "utf8"));
+    receipt = JSON.parse(readFileSync16(join22(args.controlRoot, ...record.receipt_path.split("/")), "utf8"));
   } catch {
     return fail("REVIEW_CHALLENGE_STALE", "/review_id", `${record.receipt_path} cannot be read`);
   }
@@ -24628,8 +24535,8 @@ function judgeChallenge(args) {
   const files = [];
   const kept = [];
   for (const f of snapshot3?.files ?? []) {
-    const copy = join23(args.controlRoot, ...f.copy.split("/"));
-    if (!existsSync19(copy) || sha25610(readFileSync17(copy)) !== f.sha256) return fail("REVIEW_CHALLENGE_TESTS_UNBOUND", "", `the red gate's copy of ${f.path} is missing or changed`);
+    const copy = join22(args.controlRoot, ...f.copy.split("/"));
+    if (!existsSync18(copy) || sha25610(readFileSync16(copy)) !== f.sha256) return fail("REVIEW_CHALLENGE_TESTS_UNBOUND", "", `the red gate's copy of ${f.path} is missing or changed`);
     files.push({ ...f });
     kept.push({ path: f.path, blob: f.blob, copy: f.copy, sha256: f.sha256 });
   }
@@ -24670,7 +24577,7 @@ function judgeChallenge(args) {
   }
   const sourceOf = (path) => {
     const file = kept.find((f) => f.path === path);
-    return file === void 0 ? null : readFileSync17(join23(args.controlRoot, ...file.copy.split("/")), "utf8");
+    return file === void 0 ? null : readFileSync16(join22(args.controlRoot, ...file.copy.split("/")), "utf8");
   };
   const entries = [
     ...(snapshot3?.tests ?? []).map((t) => ({ path: t.path, before: contentAt(args.repoPath, base, t.path), after: t.blob === null ? null : sourceOf(t.path) })),
@@ -24721,7 +24628,7 @@ function judgeChallenge(args) {
         if (loc === null || loc.path !== t.path || file === void 0) {
           return fail("REVIEW_CHALLENGE_ASSERTION_OUTSIDE", `${where}/assertions/${m}`, `${ref} is not a location in ${t.path}, the file of ${cl.test_id}`);
         }
-        const source = readFileSync17(join23(args.controlRoot, ...file.copy.split("/")), "utf8");
+        const source = readFileSync16(join22(args.controlRoot, ...file.copy.split("/")), "utf8");
         const problem = assertionProblem(source, t.path, t.full_name, loc.from, loc.to);
         if (problem === "ASSERTION_OUTSIDE") return fail("REVIEW_CHALLENGE_ASSERTION_OUTSIDE", `${where}/assertions/${m}`, `${ref} is not inside ${t.full_name}'s own block`);
         if (problem === "ASSERTION_WEAK") return fail("REVIEW_CHALLENGE_ASSERTION_WEAK", `${where}/assertions/${m}`, `${ref} holds no assertion on what the code did (a constant, or no assertion): ${cl.clause} needs a concrete one`);
@@ -24749,12 +24656,12 @@ function challengeDir(featureId, id) {
 function archiveChallenge(args) {
   const { controlRoot, judged } = args;
   const rel = challengeDir(args.featureId, args.id);
-  const dir = join23(controlRoot, ...rel.split("/"));
-  mkdirSync9(join23(dir, "gate"), { recursive: true });
+  const dir = join22(controlRoot, ...rel.split("/"));
+  mkdirSync8(join22(dir, "gate"), { recursive: true });
   const copy = (from, to) => {
-    const bytes2 = readFileSync17(join23(controlRoot, ...from.split("/")));
-    const target = join23(dir, ...to.split("/"));
-    mkdirSync9(dirname9(target), { recursive: true });
+    const bytes2 = readFileSync16(join22(controlRoot, ...from.split("/")));
+    const target = join22(dir, ...to.split("/"));
+    mkdirSync8(dirname8(target), { recursive: true });
     const current = readRegular(target)?.bytes ?? null;
     if (current === null || sha25610(current) !== sha25610(bytes2)) writeTextAtomic(target, bytes2);
     return sha25610(bytes2);
@@ -24816,9 +24723,9 @@ function archiveChallenge(args) {
     normalization: judged.normalization,
     ...args.partial !== void 0 && args.partial !== null ? { partial: { done: [...args.partial.done], unresolved: args.partial.unresolved.map((u) => ({ criterion: u.criterion, outcome: u.outcome, reason: u.reason })) } } : {}
   };
-  const file = join23(dir, "challenge.json");
+  const file = join22(dir, "challenge.json");
   const body = JSON.stringify(receipt, null, 2) + "\n";
-  if (!existsSync19(file) || readFileSync17(file, "utf8") !== body) writeTextAtomic(file, body);
+  if (!existsSync18(file) || readFileSync16(file, "utf8") !== body) writeTextAtomic(file, body);
   return {
     receipt_path: `${rel}/challenge.json`,
     receipt_sha256: sha25610(body),
@@ -24828,7 +24735,7 @@ function archiveChallenge(args) {
 }
 function readChallengeReceipt(controlRoot, receiptPath) {
   try {
-    return JSON.parse(readFileSync17(join23(controlRoot, ...receiptPath.split("/")), "utf8"));
+    return JSON.parse(readFileSync16(join22(controlRoot, ...receiptPath.split("/")), "utf8"));
   } catch {
     return null;
   }
@@ -24836,12 +24743,12 @@ function readChallengeReceipt(controlRoot, receiptPath) {
 
 // src/engine/review-transport.ts
 import { createHash as createHash19 } from "node:crypto";
-import { closeSync as closeSync10, lstatSync as lstatSync8, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync3 } from "node:fs";
-import { basename as basename4, dirname as dirname11, isAbsolute as isAbsolute6, join as join25 } from "node:path";
+import { closeSync as closeSync9, lstatSync as lstatSync8, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync3 } from "node:fs";
+import { basename as basename4, dirname as dirname10, isAbsolute as isAbsolute6, join as join24 } from "node:path";
 
 // src/engine/provider-interrupt.ts
-import { closeSync as closeSync9, existsSync as existsSync20, lstatSync as lstatSync7, readdirSync as readdirSync5, readFileSync as readFileSync18, readSync as readSync2 } from "node:fs";
-import { basename as basename3, dirname as dirname10, isAbsolute as isAbsolute5, join as join24 } from "node:path";
+import { closeSync as closeSync8, existsSync as existsSync19, lstatSync as lstatSync7, readdirSync as readdirSync5, readFileSync as readFileSync17, readSync as readSync2 } from "node:fs";
+import { basename as basename3, dirname as dirname9, isAbsolute as isAbsolute5, join as join23 } from "node:path";
 
 // src/sessions/provider-failure.ts
 var TRANSIENT_PROVIDER_CLASSES = ["provider-refusal", "rate-limit", "server-error", "network"];
@@ -25005,7 +24912,7 @@ function tail(file, max = TAIL_BYTES) {
     const text = buf.toString("utf8");
     return start === 0 ? text : text.slice(text.indexOf("\n") + 1);
   } finally {
-    closeSync9(fd);
+    closeSync8(fd);
   }
 }
 function transcriptFailure(file, since) {
@@ -25018,7 +24925,7 @@ function transcriptFailure(file, since) {
 }
 function launchOf(file) {
   try {
-    const r = JSON.parse(readFileSync18(file, "utf8"));
+    const r = JSON.parse(readFileSync17(file, "utf8"));
     const s = r["session_id"];
     const tx = r["transcript_path"];
     const u = r["tool_use_id"];
@@ -25029,7 +24936,7 @@ function launchOf(file) {
   }
 }
 function subagentTranscript(l) {
-  const dir = join24(dirname10(l.transcript_path), l.session_id, "subagents");
+  const dir = join23(dirname9(l.transcript_path), l.session_id, "subagents");
   let names2 = [];
   try {
     if (!lstatSync7(dir).isDirectory()) return null;
@@ -25039,10 +24946,10 @@ function subagentTranscript(l) {
   }
   for (const n of names2.slice(0, 500)) {
     try {
-      const meta = JSON.parse(readFileSync18(join24(dir, n), "utf8"));
+      const meta = JSON.parse(readFileSync17(join23(dir, n), "utf8"));
       if (meta["toolUseId"] !== l.tool_use_id) continue;
-      const tx = join24(dir, n.replace(/\.meta\.json$/, ".jsonl"));
-      return existsSync20(tx) ? tx : null;
+      const tx = join23(dir, n.replace(/\.meta\.json$/, ".jsonl"));
+      return existsSync19(tx) ? tx : null;
     } catch {
       continue;
     }
@@ -25067,7 +24974,7 @@ function holderFailure(args) {
 }
 function launchFiles(dir) {
   try {
-    return readdirSync5(dir).filter((n) => /^launch-[A-Za-z0-9_-]{1,128}\.json$/.test(n)).sort().map((n) => join24(dir, n));
+    return readdirSync5(dir).filter((n) => /^launch-[A-Za-z0-9_-]{1,128}\.json$/.test(n)).sort().map((n) => join23(dir, n));
   } catch {
     return [];
   }
@@ -25329,7 +25236,7 @@ var DEFAULT_REVIEWER_TIMEOUT_MS = 20 * 6e4;
 var sha25611 = (data) => createHash19("sha256").update(data).digest("hex");
 var slash4 = (p) => p.replace(/\\/g, "/");
 function generationDir(controlRoot, open) {
-  return join25(controlRoot, ...dirname11(open.slot).split("/"));
+  return join24(controlRoot, ...dirname10(open.slot).split("/"));
 }
 function readRegular2(file, max) {
   return readRegular(file, max)?.bytes ?? null;
@@ -25347,7 +25254,7 @@ function linesWith(file, needles, max) {
   if (opened === null) return null;
   const { fd } = opened;
   if (opened.size > max) {
-    closeSync10(fd);
+    closeSync9(fd);
     return { lines: [], tooLarge: true };
   }
   const out = [];
@@ -25376,7 +25283,7 @@ function linesWith(file, needles, max) {
     }
     if (carry.length > 0) take(carry);
   } finally {
-    closeSync10(fd);
+    closeSync9(fd);
   }
   return { lines: out, tooLarge: false };
 }
@@ -25483,7 +25390,7 @@ function agentCallStanding(sessionFile, U, S) {
   };
 }
 function boundAgent(file, U) {
-  const bytes2 = readRegular2(join25(dirname11(file), `agent-${U}.json`), MAX_RECORD_BYTES);
+  const bytes2 = readRegular2(join24(dirname10(file), `agent-${U}.json`), MAX_RECORD_BYTES);
   if (bytes2 === null) return null;
   const r = parseLine(bytes2.toString("utf8"));
   return r !== null && r["tool_use_id"] === U && typeof r["agent_id"] === "string" && AGENT_ID.test(r["agent_id"]) ? r["agent_id"] : null;
@@ -25492,7 +25399,7 @@ function metaOwner(subagents, U) {
   if (!isDirectoryNoLink(subagents)) return { agent: null };
   const metas = readdirSync6(subagents).filter((n) => /^agent-[A-Za-z0-9_-]{1,64}\.meta\.json$/.test(n)).slice(0, MAX_SUBAGENT_ENTRIES);
   const owners = metas.filter((n) => {
-    const b = readRegular2(join25(subagents, n), MAX_RECORD_BYTES);
+    const b = readRegular2(join24(subagents, n), MAX_RECORD_BYTES);
     return b !== null && parseLine(b.toString("utf8"))?.["toolUseId"] === U;
   });
   if (owners.length > 1) return { code: "REVIEW_TRANSCRIPT_INVALID", detail: `${owners.length} subagents name the call ${U}` };
@@ -25502,11 +25409,11 @@ function finalAnswer(controlRoot, open, file, checked, record, agent, completion
   const L = checked.launch;
   const U = L.tool_use_id;
   const S = L.session_id;
-  const sessionDir = join25(dirname11(L.transcript_path), S);
-  const subagents = join25(sessionDir, "subagents");
+  const sessionDir = join24(dirname10(L.transcript_path), S);
+  const subagents = join24(sessionDir, "subagents");
   if (!isDirectoryNoLink(sessionDir) || !isDirectoryNoLink(subagents)) return { kind: "rejected", code: "REVIEW_TRANSCRIPT_MISSING", detail: `the session ${S} keeps no subagent transcripts beside its own` };
-  const metaFile = join25(subagents, `agent-${agent}.meta.json`);
-  const txFile = join25(subagents, `agent-${agent}.jsonl`);
+  const metaFile = join24(subagents, `agent-${agent}.meta.json`);
+  const txFile = join24(subagents, `agent-${agent}.jsonl`);
   if (fileKind(metaFile) !== "file" || fileKind(txFile) !== "file") return { kind: "rejected", code: fileKind(metaFile) === "missing" || fileKind(txFile) === "missing" ? "REVIEW_TRANSCRIPT_MISSING" : "REVIEW_TRANSCRIPT_INVALID", detail: `agent ${agent} completed, but its transcript or meta is not a regular file of its session` };
   const meta = parseLine((readRegular2(metaFile, MAX_RECORD_BYTES) ?? Buffer.from("")).toString("utf8"));
   if (meta === null) return { kind: "rejected", code: "REVIEW_TRANSCRIPT_INVALID", detail: `the meta of agent ${agent} is unreadable` };
@@ -25627,7 +25534,7 @@ function launchLifecycle(controlRoot, open, file, options) {
   const ofCall = record.notifications.filter((n) => n.tool_use_id === U || n.tool_use_id === null && agent !== null && n.task_id === agent);
   if (agent === null && ofCall.length > 0) agent = ofCall[0].task_id;
   if (agent === null) {
-    const owner = metaOwner(join25(dirname11(L.transcript_path), S, "subagents"), U);
+    const owner = metaOwner(join24(dirname10(L.transcript_path), S, "subagents"), U);
     if ("code" in owner) return { state: "REJECTED", code: owner.code, detail: owner.detail };
     agent = owner.agent;
   }
@@ -25656,7 +25563,7 @@ function launchLifecycle(controlRoot, open, file, options) {
     holder_alive: alive,
     launch: { path: slash4(file.slice(controlRoot.length + 1)), sha256: checked.sha256 }
   };
-  const subagentTx = agent === null ? null : join25(dirname11(L.transcript_path), S, "subagents", `agent-${agent}.jsonl`);
+  const subagentTx = agent === null ? null : join24(dirname10(L.transcript_path), S, "subagents", `agent-${agent}.jsonl`);
   const providerFailure = () => subagentTx !== null && fileKind(subagentTx) === "file" ? transcriptFailure(subagentTx, L.at) : null;
   if (!completed) {
     if (record.resultError && lastNote === void 0) return { state: "LOST", reason: "launch-failed", status: null, detail: `the Agent call ${U} answered an error: no reviewer was started`, task };
@@ -25691,7 +25598,7 @@ function reviewerLifecycle(controlRoot, open, options = {}) {
   const names2 = launchNames(controlRoot, open);
   if (names2.length === 0) return { state: "MISSING", detail: `no launch of ${REVIEWER_AGENT} from the host session is recorded for ${open.review_id} generation ${open.dispatch_id}` };
   const dir = generationDir(controlRoot, open);
-  const outcomes = names2.slice(0, MAX_LAUNCHES).map((n) => launchLifecycle(controlRoot, open, join25(dir, n), options));
+  const outcomes = names2.slice(0, MAX_LAUNCHES).map((n) => launchLifecycle(controlRoot, open, join24(dir, n), options));
   const found = outcomes.filter((o) => o.state === "COMPLETED" && (options.agentId === void 0 || o.output.evidence.agent_id === options.agentId));
   if (found.length > 0) {
     const verdicts = new Set(found.map((f) => f.output.extraction.ok ? `json:${stableStringify(f.output.extraction.value)}` : `text:${f.output.text.trim()}`));
@@ -25728,26 +25635,26 @@ function safeGenerationDir(controlRoot, open) {
   if (!/^\.mycelink\/reviews\/[^/]+\/[^/]+\/[0-9a-f-]{36}\/verdict\.json$/.test(open.slot)) return { ok: false, detail: `${open.slot} is not a verdict file of the control root's review area` };
   try {
     const real = realpathSync3.native(dir);
-    const expected = join25(realpathSync3.native(controlRoot), ...dirname11(open.slot).split("/"));
-    if (!isDirectoryNoLink(dir) || fold3(real) !== fold3(expected)) return { ok: false, detail: `the generation's directory ${dirname11(open.slot)} is not a plain directory of the control root's review area` };
+    const expected = join24(realpathSync3.native(controlRoot), ...dirname10(open.slot).split("/"));
+    if (!isDirectoryNoLink(dir) || fold3(real) !== fold3(expected)) return { ok: false, detail: `the generation's directory ${dirname10(open.slot)} is not a plain directory of the control root's review area` };
   } catch {
-    return { ok: false, detail: `the generation's directory ${dirname11(open.slot)} does not exist` };
+    return { ok: false, detail: `the generation's directory ${dirname10(open.slot)} does not exist` };
   }
   return { ok: true, dir };
 }
 function writeIngestedVerdict(args) {
   const safe3 = safeGenerationDir(args.controlRoot, args.open);
   if (!safe3.ok) return { written: false, reason: "unsafe", detail: safe3.detail };
-  const verdict = join25(safe3.dir, VERDICT_FILE);
+  const verdict = join24(safe3.dir, VERDICT_FILE);
   if (fileKind(verdict) !== "missing") return { written: false, reason: "exists" };
   if (createExclusive(verdict, args.content) === "exists") return { written: false, reason: "exists" };
-  writeTextAtomic(join25(safe3.dir, ATTESTATION_FILE), JSON.stringify(args.attestation, null, 2) + "\n");
+  writeTextAtomic(join24(safe3.dir, ATTESTATION_FILE), JSON.stringify(args.attestation, null, 2) + "\n");
   return { written: true };
 }
 function writeIngestAttestation(controlRoot, open, attestation) {
   const safe3 = safeGenerationDir(controlRoot, open);
   if (!safe3.ok) return false;
-  writeTextAtomic(join25(safe3.dir, ATTESTATION_FILE), JSON.stringify(attestation, null, 2) + "\n");
+  writeTextAtomic(join24(safe3.dir, ATTESTATION_FILE), JSON.stringify(attestation, null, 2) + "\n");
   return true;
 }
 
@@ -26142,13 +26049,13 @@ function computeReady(graph, state) {
   return ready;
 }
 function inFlightResources(graph, state) {
-  const held2 = {};
+  const held = {};
   for (const node of graph.nodes) {
     const runtime = state.nodes[node.id];
     if (!runtime || !IN_FLIGHT_STATES.has(runtime.state)) continue;
-    for (const res of node.required_resources) held2[res] = (held2[res] ?? 0) + 1;
+    for (const res of node.required_resources) held[res] = (held[res] ?? 0) + 1;
   }
-  return held2;
+  return held;
 }
 function generationAttempts(runtime) {
   const base = runtime.rework_brief?.attempt_base ?? 0;
@@ -26162,7 +26069,7 @@ function countInFlight(graph, state) {
   }
   return n;
 }
-function conflictWith(graph, node, runtime, occupied, held2, writerSlots, writerConcurrency) {
+function conflictWith(graph, node, runtime, occupied, held, writerSlots, writerConcurrency) {
   const id = node.id;
   const used = generationAttempts(runtime);
   if (used >= node.worker.max_attempts) {
@@ -26195,7 +26102,7 @@ function conflictWith(graph, node, runtime, occupied, held2, writerSlots, writer
   }
   const blockingResource = node.required_resources.find((res) => {
     const capacity = graph.resources[res]?.capacity ?? 0;
-    return (held2[res] ?? 0) + 1 > capacity;
+    return (held[res] ?? 0) + 1 > capacity;
   });
   if (blockingResource !== void 0) {
     return {
@@ -26216,11 +26123,11 @@ function inFlightNodes(graph, state) {
   });
 }
 function heldUnits(graph, state, options) {
-  const held2 = { ...inFlightResources(graph, state) };
+  const held = { ...inFlightResources(graph, state) };
   for (const [res, n] of Object.entries(options.heldResources ?? {})) {
-    held2[res] = (held2[res] ?? 0) + n;
+    held[res] = (held[res] ?? 0) + n;
   }
-  return held2;
+  return held;
 }
 function canSchedule(graph, state, nodeId, options) {
   const node = graph.nodes.find((n) => n.id === nodeId);
@@ -26250,7 +26157,7 @@ function canSchedule(graph, state, nodeId, options) {
 }
 function scheduleBatch(graph, state, options) {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const held2 = heldUnits(graph, state, options);
+  const held = heldUnits(graph, state, options);
   const occupied = inFlightNodes(graph, state);
   let writerSlots = options.writerConcurrency - countInFlight(graph, state);
   const scheduled = [];
@@ -26259,12 +26166,12 @@ function scheduleBatch(graph, state, options) {
     const node = byId.get(id);
     const runtime = state.nodes[id];
     if (!node || !runtime) continue;
-    const conflict = conflictWith(graph, node, runtime, occupied, held2, writerSlots, options.writerConcurrency);
+    const conflict = conflictWith(graph, node, runtime, occupied, held, writerSlots, options.writerConcurrency);
     if (conflict !== null) {
       deferred.push(conflict);
       continue;
     }
-    for (const res of node.required_resources) held2[res] = (held2[res] ?? 0) + 1;
+    for (const res of node.required_resources) held[res] = (held[res] ?? 0) + 1;
     writerSlots--;
     occupied.push(node);
     scheduled.push({ node_id: id, repository: node.repository, resources: [...node.required_resources] });
@@ -26273,8 +26180,8 @@ function scheduleBatch(graph, state, options) {
 }
 
 // src/resources/leases.ts
-import { join as join26 } from "node:path";
-import { hostname as hostname5 } from "node:os";
+import { join as join25 } from "node:path";
+import { hostname as hostname4 } from "node:os";
 import { randomUUID as randomUUID2 } from "node:crypto";
 var ResourceBusyError = class extends Error {
   resource;
@@ -26292,10 +26199,10 @@ var ResourceBusyError = class extends Error {
 };
 var DEFAULT_TTL_MS = 2 * 60 * 60 * 1e3;
 function leaseFilePath(featureDir) {
-  return join26(featureDir, "leases.json");
+  return join25(featureDir, "leases.json");
 }
 function lockPath2(featureDir) {
-  return join26(featureDir, "leases.json.lock");
+  return join25(featureDir, "leases.json.lock");
 }
 function load(featureDir) {
   const doc = readDoc(leaseFilePath(featureDir));
@@ -26313,7 +26220,7 @@ function save2(featureDir, file, alsoKnown = []) {
 function expired(lease, now3) {
   if (Date.parse(lease.acquired_at) + lease.ttl_ms <= now3) return true;
   if (lease.claim_id !== void 0) return false;
-  if (lease.host === hostname5() && !isPidAlive(lease.pid)) return true;
+  if (lease.host === hostname4() && !isPidAlive(lease.pid)) return true;
   return false;
 }
 function prune(file, now3) {
@@ -26343,13 +26250,13 @@ function acquireResource(featureDir, resource, options) {
           return existing;
         }
       }
-      const held2 = kept.filter((l) => l.resource === resource);
-      if (held2.length + 1 > capacity) {
+      const held = kept.filter((l) => l.resource === resource);
+      if (held.length + 1 > capacity) {
         save2(featureDir, { ...file, leases: kept });
         throw new ResourceBusyError(
           resource,
           capacity,
-          held2.map((l) => `${l.node_id}/${l.owner}`)
+          held.map((l) => `${l.node_id}/${l.owner}`)
         );
       }
       const lease = {
@@ -26358,7 +26265,7 @@ function acquireResource(featureDir, resource, options) {
         node_id: options.nodeId,
         owner: options.owner,
         pid: options.pid ?? process.pid,
-        host: hostname5(),
+        host: hostname4(),
         acquired_at: new Date(now3).toISOString(),
         ttl_ms: options.ttlMs ?? DEFAULT_TTL_MS,
         ...options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {},
@@ -26438,14 +26345,14 @@ function listLeases(featureDir, now3 = Date.now()) {
 
 // src/evidence/runner.ts
 import { createHash as createHash21 } from "node:crypto";
-import { lstatSync as lstatSync11, mkdirSync as mkdirSync11, mkdtempSync as mkdtempSync3, readdirSync as readdirSync8, rmSync as rmSync9 } from "node:fs";
+import { lstatSync as lstatSync11, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync3, readdirSync as readdirSync8, rmSync as rmSync8 } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
-import { join as join29, resolve as resolve12 } from "node:path";
+import { join as join28, resolve as resolve11 } from "node:path";
 
 // src/evidence/store.ts
 import { createHash as createHash20 } from "node:crypto";
-import { closeSync as closeSync11, constants as constants5, fstatSync as fstatSync6, lstatSync as lstatSync9, mkdirSync as mkdirSync10, openSync as openSync9, readFileSync as readFileSync19 } from "node:fs";
-import { basename as basename5, join as join27 } from "node:path";
+import { closeSync as closeSync10, constants as constants5, fstatSync as fstatSync6, lstatSync as lstatSync9, mkdirSync as mkdirSync9, openSync as openSync8, readFileSync as readFileSync18 } from "node:fs";
+import { basename as basename5, join as join26 } from "node:path";
 var MAX_ALTERNATES = 32;
 var MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
 var EvidenceStoreError = class extends Error {
@@ -26465,7 +26372,7 @@ function artifactAt(file, sha) {
 function artifactState(file, sha) {
   let fd;
   try {
-    fd = openSync9(file, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
+    fd = openSync8(file, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
   } catch (err) {
     if (err.code !== "ENOENT") return "other";
     try {
@@ -26478,9 +26385,9 @@ function artifactState(file, sha) {
     const st = fstatSync6(fd, { bigint: true });
     if (st.isFile() && st.nlink > 1n) return "linked";
     if (!st.isFile() || st.nlink !== 1n || st.size > BigInt(MAX_ARTIFACT_BYTES) || !namesOpenedFile(file, st)) return "other";
-    return sha25612(readFileSync19(fd)) === sha ? "same" : "other";
+    return sha25612(readFileSync18(fd)) === sha ? "same" : "other";
   } finally {
-    closeSync11(fd);
+    closeSync10(fd);
   }
 }
 var LINKED_WAITS = 100;
@@ -26496,9 +26403,9 @@ function settledAt(file, sha) {
 function writeImmutable(dir, stem2, ext, content) {
   const bytes2 = typeof content === "string" ? Buffer.from(content, "utf8") : content;
   const sha = sha25612(bytes2);
-  mkdirSync10(dir, { recursive: true });
+  mkdirSync9(dir, { recursive: true });
   for (let n = 0; n <= MAX_ALTERNATES; n++) {
-    const file = join27(dir, contentName(stem2, sha, ext, n));
+    const file = join26(dir, contentName(stem2, sha, ext, n));
     for (let look = 0; look < 2; look++) {
       const at = settledAt(file, sha);
       if (at === "same") return { file, sha256: sha, created: false };
@@ -26512,9 +26419,9 @@ function keepExactCopy(source, expected, dir) {
   if (artifactAt(source, expected) !== "same") return null;
   const bytes2 = readRegular(source, MAX_ARTIFACT_BYTES)?.bytes ?? null;
   if (bytes2 === null || sha25612(bytes2) !== expected) return null;
-  mkdirSync10(dir, { recursive: true });
+  mkdirSync9(dir, { recursive: true });
   const name = basename5(source);
-  const target = join27(dir, name);
+  const target = join26(dir, name);
   for (let look = 0; look < 2; look++) {
     const at = settledAt(target, expected);
     if (at === "same") return { file: target, sha256: expected, created: false };
@@ -26527,7 +26434,7 @@ function keepExactCopy(source, expected, dir) {
 
 // src/evidence/junit-attribution.ts
 import { lstatSync as lstatSync10, readdirSync as readdirSync7 } from "node:fs";
-import { isAbsolute as isAbsolute7, join as join28, relative as relative5, resolve as resolve11 } from "node:path";
+import { isAbsolute as isAbsolute7, join as join27, relative as relative5, resolve as resolve10 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var MAX_SCOPE_ENTRIES = 5e4;
 var MAX_SCOPE_BYTES = 64 * 1024 * 1024;
@@ -26548,7 +26455,7 @@ function testFiles(root, scope) {
     for (const name of names2) {
       if (++entries > MAX_SCOPE_ENTRIES) return null;
       if (name === "node_modules" || name.startsWith(".")) continue;
-      const full = join28(dir, name);
+      const full = join27(dir, name);
       let st;
       try {
         st = lstatSync10(full);
@@ -26599,11 +26506,11 @@ function stackFiles(text, root, known) {
 }
 function ownPath(root, name) {
   if (!new RegExp(`\\.${SOURCE_EXT}$`).test(name)) return null;
-  return repoRelative(root, isAbsolute7(name) || /^[A-Za-z]:[\\/]/.test(name) ? name : resolve11(root, name));
+  return repoRelative(root, isAbsolute7(name) || /^[A-Za-z]:[\\/]/.test(name) ? name : resolve10(root, name));
 }
 function attributeByDeclaration({ root, scope }) {
   return (tests) => {
-    const files = testFiles(resolve11(root), resolve11(scope));
+    const files = testFiles(resolve10(root), resolve10(scope));
     if (files === null) return tests.map(() => null);
     const byRel = new Map(files.map((f) => [f.rel, f]));
     const known = new Set(byRel.keys());
@@ -26692,9 +26599,9 @@ function stripBaselineFailures(output, baseline) {
   return { text: kept.join("\n"), matched };
 }
 function runVerification(args) {
-  const cwd = resolve12(args.cwd);
-  const evidenceDir = resolve12(args.evidenceDir);
-  mkdirSync11(evidenceDir, { recursive: true });
+  const cwd = resolve11(args.cwd);
+  const evidenceDir = resolve11(args.evidenceDir);
+  mkdirSync10(evidenceDir, { recursive: true });
   const startedAt = /* @__PURE__ */ new Date();
   const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
@@ -26728,9 +26635,9 @@ function runVerification(args) {
   }
   const nodeJUnit = args.shellScript === void 0 && args.command?.length === 4 && args.command[0] === "node" && args.command[1] === "--test-reporter=junit" && args.command[2] === "--test-reporter-destination=${REPORT}" && /^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(args.command[3] ?? "") && !args.command[3]?.split("/").includes("..");
   const report = args.report ?? (nodeJUnit ? { format: "junit-xml" } : null);
-  const scratch = report !== null && report.dir === void 0 ? mkdtempSync3(join29(tmpdir3(), "mycelink-report-")) : null;
-  const reportFile = scratch === null ? null : join29(scratch, report.format === "vitest-json" ? "report.json" : "report.xml");
-  const reportDir = report?.dir !== void 0 ? resolve12(cwd, report.dir) : null;
+  const scratch = report !== null && report.dir === void 0 ? mkdtempSync3(join28(tmpdir3(), "mycelink-report-")) : null;
+  const reportFile = scratch === null ? null : join28(scratch, report.format === "vitest-json" ? "report.json" : "report.xml");
+  const reportDir = report?.dir !== void 0 ? resolve11(cwd, report.dir) : null;
   if (reportDir !== null) clearReportDir(cwd, reportDir);
   const argv = args.shellScript !== void 0 || reportFile === null ? command : command.map((part) => part.split("${REPORT}").join(reportFile));
   let exitCode;
@@ -26757,7 +26664,7 @@ function runVerification(args) {
   const finishedAt = /* @__PURE__ */ new Date();
   output = redactText(output);
   const results = report === null ? null : failedStep !== null ? [] : readReport(report, reportFile, reportDir, cwd, args.module?.path ?? null);
-  if (scratch !== null) rmSync9(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  if (scratch !== null) rmSync8(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   const expectExit = args.expectExit ?? 0;
   const label = args.label ?? args.kind;
   const stored = writeImmutable(evidenceDir, safe2(label), ".log", output);
@@ -26838,8 +26745,8 @@ function clearReportDir(cwd, dir) {
   } catch {
     return;
   }
-  if (st.isSymbolicLink() || !st.isDirectory()) rmSync9(dir, { force: true });
-  else rmSync9(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  if (st.isSymbolicLink() || !st.isDirectory()) rmSync8(dir, { force: true });
+  else rmSync8(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 }
 var MAX_REPORT_BYTES = 64 * 1024 * 1024;
 function readReport(report, file, dir, cwd, modulePath) {
@@ -26849,7 +26756,7 @@ function readReport(report, file, dir, cwd, modulePath) {
     if (text === null) return [];
     try {
       if (report.format === "vitest-json") return parseVitestJson(text, { root: cwd });
-      const scope = modulePath !== null && isInsideReal(cwd, resolve12(cwd, modulePath)) ? resolve12(cwd, modulePath) : cwd;
+      const scope = modulePath !== null && isInsideReal(cwd, resolve11(cwd, modulePath)) ? resolve11(cwd, modulePath) : cwd;
       return parseJUnit(text, { root: cwd, attribute: attributeByDeclaration({ root: cwd, scope }) });
     } catch {
       return [];
@@ -26864,7 +26771,7 @@ function readReport(report, file, dir, cwd, modulePath) {
   }
   const out = [];
   for (const name of names2) {
-    const text = read(join29(dir, name));
+    const text = read(join28(dir, name));
     if (text === null) continue;
     try {
       out.push(...report.format === "junit-xml" ? parseJUnit(text, { root: cwd, moduleDir: modulePath }) : parseVitestJson(text, { root: cwd }));
@@ -26887,12 +26794,12 @@ function safeHead(cwd) {
 // src/git/candidate.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash22 } from "node:crypto";
-import { existsSync as existsSync22, lstatSync as lstatSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync20, readdirSync as readdirSync9, readlinkSync as readlinkSync2 } from "node:fs";
-import { basename as basename6, join as join31, relative as relative6, resolve as resolve14 } from "node:path";
+import { existsSync as existsSync21, lstatSync as lstatSync12, mkdirSync as mkdirSync12, readFileSync as readFileSync19, readdirSync as readdirSync9, readlinkSync as readlinkSync2 } from "node:fs";
+import { basename as basename6, join as join30, relative as relative6, resolve as resolve13 } from "node:path";
 
 // src/git/integrate.ts
-import { existsSync as existsSync21, mkdirSync as mkdirSync12, rmSync as rmSync10 } from "node:fs";
-import { join as join30, resolve as resolve13 } from "node:path";
+import { existsSync as existsSync20, mkdirSync as mkdirSync11, rmSync as rmSync9 } from "node:fs";
+import { join as join29, resolve as resolve12 } from "node:path";
 var IntegrationConflictError = class extends Error {
   conflicts;
   nodeBranch;
@@ -26914,24 +26821,24 @@ var DirtyWorktreeError = class extends Error {
   }
 };
 function integrationWorktreeDir(root, repoName, featureId) {
-  return resolve13(join30(root, `integration__${repoName}__${featureId}`));
+  return resolve12(join29(root, `integration__${repoName}__${featureId}`));
 }
 function baseName2(p) {
-  const parts = resolve13(p).split(/[\\/]/);
+  const parts = resolve12(p).split(/[\\/]/);
   return parts[parts.length - 1] ?? "repo";
 }
 function ensureIntegrationWorktree(args) {
-  const repo = resolve13(args.repoPath);
+  const repo = resolve12(args.repoPath);
   const repoName = args.repositoryName ?? baseName2(repo);
   const branch = integrationBranchName(args.featureId);
   const target = integrationWorktreeDir(args.integrationRoot, repoName, args.featureId);
-  mkdirSync12(args.integrationRoot, { recursive: true });
+  mkdirSync11(args.integrationRoot, { recursive: true });
   const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
-  if (registered && !existsSync21(target)) {
+  if (registered && !existsSync20(target)) {
     runGit(repo, ["worktree", "prune"], { allowFail: true });
   }
-  if (!existsSync21(target)) {
-    if (existsSync21(target)) rmSync10(target, { recursive: true, force: true });
+  if (!existsSync20(target)) {
+    if (existsSync20(target)) rmSync9(target, { recursive: true, force: true });
     if (branchExists(repo, branch)) {
       runGit(repo, ["worktree", "add", target, branch]);
     } else {
@@ -26943,7 +26850,7 @@ function ensureIntegrationWorktree(args) {
   return { path: target, branch };
 }
 function planIntegration(args) {
-  const repo = resolve13(args.repoPath);
+  const repo = resolve12(args.repoPath);
   if (!branchExists(repo, args.nodeBranch)) {
     throw new Error(`Node branch "${args.nodeBranch}" does not exist in ${repo}.`);
   }
@@ -26998,7 +26905,7 @@ function applyIntegration(plan) {
   }
 }
 function fastForwardIntegration(args) {
-  const repo = resolve13(args.repoPath);
+  const repo = resolve12(args.repoPath);
   const branch = integrationBranchName(args.featureId);
   const head = resolveRef(repo, `refs/heads/${branch}`);
   if (head === args.to) return;
@@ -27006,7 +26913,7 @@ function fastForwardIntegration(args) {
     throw new Error(`INTEGRATION_BRANCH_MOVED: ${branch} is at ${head.slice(0, 12)}, not ${args.from.slice(0, 12)}.`);
   }
   if (!isAncestor(repo, args.from, args.to)) throw new Error(`${args.to.slice(0, 12)} is not a fast-forward of ${branch} at ${args.from.slice(0, 12)}.`);
-  const checkout2 = listWorktrees(repo).find((w) => w.branch === branch && !w.prunable && existsSync21(w.path))?.path ?? null;
+  const checkout2 = listWorktrees(repo).find((w) => w.branch === branch && !w.prunable && existsSync20(w.path))?.path ?? null;
   if (checkout2 === null) {
     runGit(repo, ["update-ref", `refs/heads/${branch}`, args.to, args.from]);
     return;
@@ -27035,15 +26942,15 @@ var CandidateSchemaError = class extends Error {
   }
 };
 function candidatesDir(featureDir) {
-  return join31(featureDir, "candidates");
+  return join30(featureDir, "candidates");
 }
 function candidateFile(featureDir, id) {
   assertCandidateId(id);
-  return join31(candidatesDir(featureDir), `${id}.yaml`);
+  return join30(candidatesDir(featureDir), `${id}.yaml`);
 }
 function listCandidates(featureDir) {
   const dir = candidatesDir(featureDir);
-  if (!existsSync22(dir)) return [];
+  if (!existsSync21(dir)) return [];
   return readdirSync9(dir).filter((f) => f.endsWith(".yaml")).map((f) => f.replace(/\.yaml$/, "")).sort();
 }
 function nextCandidateId(featureDir, featureId) {
@@ -27057,11 +26964,11 @@ function nextCandidateId(featureDir, featureId) {
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
 function sha256File(file) {
-  return createHash22("sha256").update(readFileSync20(file)).digest("hex");
+  return createHash22("sha256").update(readFileSync19(file)).digest("hex");
 }
 function dirtyPathsOutside(repo, exemptDir) {
-  const root = resolve14(repo);
-  const exempt = resolve14(exemptDir);
+  const root = resolve13(repo);
+  const exempt = resolve13(exemptDir);
   const rel = relative6(root, exempt).replace(/\\/g, "/");
   const isUnderRepo = rel !== "" && !rel.startsWith("..");
   return dirtyPaths(root).filter((p) => {
@@ -27083,7 +26990,7 @@ var BOOKKEEPING = [
 ];
 var STRUCTURED = /\.(ya?ml|json)$/;
 function canonicalHash(file) {
-  const text = readFileSync20(file, "utf8");
+  const text = readFileSync19(file, "utf8");
   let value;
   try {
     value = file.endsWith(".json") ? JSON.parse(text) : import_yaml2.default.parse(text);
@@ -27093,19 +27000,19 @@ function canonicalHash(file) {
   return createHash22("sha256").update(stableStringify(value)).digest("hex");
 }
 function textHash(file) {
-  const bytes2 = readFileSync20(file);
+  const bytes2 = readFileSync19(file);
   return createHash22("sha256").update(bytes2.toString("latin1").replace(/\r\n/g, "\n"), "latin1").digest("hex");
 }
 function controlInputs(controlRepo, featureId) {
   assertFeatureId(featureId);
-  const control = resolve14(controlRepo);
+  const control = resolve13(controlRepo);
   const listed = runGit(control, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]).stdout.split("\0").filter((p) => p !== "");
   const out = [];
   for (const rel of new Set(listed)) {
     const path = rel.replace(/\\/g, "/");
     if (BOOKKEEPING.some((rx) => rx.test(path))) continue;
     if (path.startsWith("features/") && !path.startsWith(`features/${featureId}/`)) continue;
-    const full = join31(control, ...path.split("/"));
+    const full = join30(control, ...path.split("/"));
     let st;
     try {
       st = lstatSync12(full);
@@ -27125,9 +27032,9 @@ function computeManifestHash(manifest) {
   return createHash22("sha256").update(stableStringify(manifest)).digest("hex");
 }
 function createCandidate(args) {
-  const control = resolve14(args.controlRepo);
+  const control = resolve13(args.controlRepo);
   const presetId = args.candidateId;
-  if (presetId !== void 0 && existsSync22(candidateFile(args.featureDir, presetId))) {
+  if (presetId !== void 0 && existsSync21(candidateFile(args.featureDir, presetId))) {
     throw new CandidateImmutableError(presetId, candidateFile(args.featureDir, presetId));
   }
   const controlDirt = dirtyPathsOutside(control, args.featureDir);
@@ -27136,7 +27043,7 @@ function createCandidate(args) {
   }
   const repositories = {};
   for (const repo of args.repositories) {
-    const path = resolve14(repo.path);
+    const path = resolve13(repo.path);
     if (!isWorktreeClean(path)) {
       throw new DirtyWorktreeError(path, dirtyPaths(path));
     }
@@ -27153,21 +27060,21 @@ function createCandidate(args) {
     };
   }
   const contracts = args.contracts.map((rel) => {
-    const full = join31(control, rel);
-    if (!existsSync22(full)) {
+    const full = join30(control, rel);
+    if (!existsSync21(full)) {
       throw new Error(`Contract "${rel}" does not exist in the control repository.`);
     }
     return { path: rel.replace(/\\/g, "/"), sha256: sha256File(full) };
   });
   const artifacts = (args.artifacts ?? []).map((a) => {
-    if (!existsSync22(a.path)) {
+    if (!existsSync21(a.path)) {
       throw new Error(`Artifact "${a.name}" is missing at ${a.path}.`);
     }
     return { name: a.name, path: a.path.replace(/\\/g, "/"), sha256: sha256File(a.path) };
   });
   const id = args.candidateId ?? nextCandidateId(args.featureDir, args.featureId);
   const file = candidateFile(args.featureDir, id);
-  if (existsSync22(file)) throw new CandidateImmutableError(id, file);
+  if (existsSync21(file)) throw new CandidateImmutableError(id, file);
   const body = {
     schema_version: 1,
     candidate_id: id,
@@ -27185,14 +27092,14 @@ function createCandidate(args) {
   const manifest = { ...body, manifest_sha256: computeManifestHash(body) };
   const problems = validateAgainstSchema("candidate", manifest);
   if (problems.length > 0) throw new CandidateSchemaError(problems);
-  mkdirSync13(candidatesDir(args.featureDir), { recursive: true });
+  mkdirSync12(candidatesDir(args.featureDir), { recursive: true });
   writeTextAtomic(file, import_yaml2.default.stringify(manifest, { lineWidth: 0 }));
   return manifest;
 }
 function loadCandidate(featureDir, id) {
   const file = candidateFile(featureDir, id);
-  if (!existsSync22(file)) throw new Error(`Candidate "${id}" not found at ${file}.`);
-  const manifest = import_yaml2.default.parse(readFileSync20(file, "utf8"));
+  if (!existsSync21(file)) throw new Error(`Candidate "${id}" not found at ${file}.`);
+  const manifest = import_yaml2.default.parse(readFileSync19(file, "utf8"));
   const problems = validateAgainstSchema("candidate", manifest);
   if (problems.length > 0) throw new CandidateSchemaError(problems);
   if (manifest.candidate_id !== id) {
@@ -27200,7 +27107,7 @@ function loadCandidate(featureDir, id) {
       `CANDIDATE_ID_MISMATCH: ${file} records candidate "${manifest.candidate_id}", not "${id}".`
     );
   }
-  const featureId = basename6(resolve14(featureDir));
+  const featureId = basename6(resolve13(featureDir));
   if (manifest.feature_id !== featureId || !id.startsWith(`${featureId}-C`)) {
     throw new Error(
       `CANDIDATE_FEATURE_MISMATCH: ${file} belongs to feature "${manifest.feature_id}", not "${featureId}".`
@@ -27219,7 +27126,7 @@ function verifyCandidate(manifest, context) {
       detail: `Manifest content hash is ${recomputed} but the manifest records ${manifest_sha256}; it was edited after creation.`
     });
   }
-  const control = resolve14(context.controlRepo);
+  const control = resolve13(context.controlRepo);
   if (manifest.control_inputs === void 0) {
     const controlHead = resolveRef(control, "HEAD");
     if (controlHead !== manifest.control_commit) {
@@ -27276,7 +27183,7 @@ function verifyCandidate(manifest, context) {
       });
       continue;
     }
-    const path = resolve14(ref.path);
+    const path = resolve13(ref.path);
     const actual = runGit(path, ["rev-parse", "--verify", "--quiet", `refs/heads/${bound.branch}`], {
       allowFail: true
     });
@@ -27305,8 +27212,8 @@ function verifyCandidate(manifest, context) {
     }
   }
   for (const contract of manifest.contracts) {
-    const full = join31(control, contract.path);
-    if (!existsSync22(full)) {
+    const full = join30(control, contract.path);
+    if (!existsSync21(full)) {
       problems.push({
         code: "CONTRACT_MISSING",
         path: `/contracts`,
@@ -27324,7 +27231,7 @@ function verifyCandidate(manifest, context) {
     }
   }
   for (const artifact of manifest.artifacts ?? []) {
-    if (!existsSync22(artifact.path)) {
+    if (!existsSync21(artifact.path)) {
       problems.push({
         code: "ARTIFACT_MISSING",
         path: "/artifacts",
@@ -27344,8 +27251,8 @@ function verifyCandidate(manifest, context) {
 }
 
 // src/engine/feature-lock.ts
-import { mkdirSync as mkdirSync14 } from "node:fs";
-import { join as join32 } from "node:path";
+import { mkdirSync as mkdirSync13 } from "node:fs";
+import { join as join31 } from "node:path";
 var FeatureBusyError = class extends Error {
   code = "FEATURE_BUSY";
   constructor(purpose, cause) {
@@ -27354,11 +27261,11 @@ var FeatureBusyError = class extends Error {
   }
 };
 function withFeatureLock(featureDir, purpose, fn, timeoutMs = 2e3) {
-  const dir = join32(featureDir, "deliveries");
-  mkdirSync14(dir, { recursive: true });
+  const dir = join31(featureDir, "deliveries");
+  mkdirSync13(dir, { recursive: true });
   let handle;
   try {
-    handle = acquireLock(join32(dir, "deliver.lock"), { timeoutMs, pollMs: 50, purpose });
+    handle = acquireLock(join31(dir, "deliver.lock"), { timeoutMs, pollMs: 50, purpose });
   } catch (err) {
     if (err instanceof LockTimeoutError) throw new FeatureBusyError(purpose, err);
     throw err;
@@ -27371,16 +27278,15 @@ function withFeatureLock(featureDir, purpose, fn, timeoutMs = 2e3) {
 }
 
 // src/engine/orchestrator.ts
-import { existsSync as existsSync36, mkdirSync as mkdirSync21, readFileSync as readFileSync31, readdirSync as readdirSync19, rmSync as rmSync14, writeFileSync as writeFileSync9 } from "node:fs";
-import { createHash as createHash35 } from "node:crypto";
-import { basename as basename14, dirname as dirname17, join as join49, resolve as resolve21 } from "node:path";
-import { randomBytes as randomBytes7, randomUUID as randomUUID3 } from "node:crypto";
-import { spawnSync as spawnSync11 } from "node:child_process";
+import { existsSync as existsSync32, mkdirSync as mkdirSync20, readFileSync as readFileSync30, readdirSync as readdirSync19, rmSync as rmSync13, writeFileSync as writeFileSync9 } from "node:fs";
+import { createHash as createHash33 } from "node:crypto";
+import { basename as basename14, dirname as dirname16, join as join45, resolve as resolve20 } from "node:path";
+import { randomBytes as randomBytes6, randomUUID as randomUUID3 } from "node:crypto";
 
 // src/engine/criterion-ledger.ts
 import { createHash as createHash23 } from "node:crypto";
-import { existsSync as existsSync23, mkdirSync as mkdirSync15, readFileSync as readFileSync21 } from "node:fs";
-import { basename as basename7, join as join33 } from "node:path";
+import { existsSync as existsSync22, mkdirSync as mkdirSync14, readFileSync as readFileSync20 } from "node:fs";
+import { basename as basename7, join as join32 } from "node:path";
 var COMPLETION_SCHEMA = "mycelink-criterion-completion/1";
 var MAX_LEDGER_RECORDS = 256;
 var sha25613 = (text) => createHash23("sha256").update(text).digest("hex");
@@ -27634,16 +27540,16 @@ function completionsOf(g) {
 }
 function writeCompletionArchive(controlRoot, records, copies) {
   for (const c of copies) {
-    const src = join33(controlRoot, ...c.from.split("/"));
-    const dst = join33(controlRoot, ...c.to.split("/"));
+    const src = join32(controlRoot, ...c.from.split("/"));
+    const dst = join32(controlRoot, ...c.to.split("/"));
     if (artifactAt(src, c.sha256) !== "same" || artifactAt(dst, c.sha256) !== "missing") continue;
-    mkdirSync15(join33(dst, ".."), { recursive: true });
-    createExclusive(dst, readFileSync21(src));
+    mkdirSync14(join32(dst, ".."), { recursive: true });
+    createExclusive(dst, readFileSync20(src));
   }
   for (const r of records) {
     if (r.archive === null) continue;
-    const file = join33(controlRoot, ...r.archive.split("/"), "record.json");
-    mkdirSync15(join33(file, ".."), { recursive: true });
+    const file = join32(controlRoot, ...r.archive.split("/"), "record.json");
+    mkdirSync14(join32(file, ".."), { recursive: true });
     writeTextAtomic(file, JSON.stringify(r, null, 2) + "\n");
   }
 }
@@ -27668,7 +27574,7 @@ function migratedLedger(args) {
         let record = full === null || output === null ? null : { ...structuredClone(full), output_path: output };
         if (record?.results) {
           const copy = `${output?.slice(0, output.lastIndexOf("/"))}/${basename7(record.results.path)}`;
-          const where = [copy, record.results.path].find((p) => existsSync23(join33(args.controlRoot, ...p.split("/"))) && sha25613(readFileSync21(join33(args.controlRoot, ...p.split("/")))) === record?.results?.sha256);
+          const where = [copy, record.results.path].find((p) => existsSync22(join32(args.controlRoot, ...p.split("/"))) && sha25613(readFileSync20(join32(args.controlRoot, ...p.split("/")))) === record?.results?.sha256);
           record = where === void 0 ? null : { ...record, results: { ...record.results, path: where } };
         }
         red = { output_sha256: primary.output_sha256, record };
@@ -27742,9 +27648,9 @@ function ledgerOf(args) {
 
 // src/engine/proof-units.ts
 import { createHash as createHash24 } from "node:crypto";
-import { mkdtempSync as mkdtempSync4, rmSync as rmSync11, writeFileSync as writeFileSync5 } from "node:fs";
+import { mkdtempSync as mkdtempSync4, rmSync as rmSync10, writeFileSync as writeFileSync5 } from "node:fs";
 import { tmpdir as tmpdir4 } from "node:os";
-import { join as join34 } from "node:path";
+import { join as join33 } from "node:path";
 var REPROOF_TRAILER = "Mycelink-Reproof";
 var REPROOF_IDENTITY = { name: "Mycelink Settle", email: "settle@mycelink.invalid" };
 var sha25614 = (bytes2) => createHash24("sha256").update(bytes2).digest("hex");
@@ -27759,7 +27665,7 @@ function readBlob(repoPath, blob) {
   return runGit(repoPath, ["cat-file", "blob", blob]).stdout;
 }
 function writeBlob(repoPath, path, bytes2, scratch) {
-  const file = join34(scratch, `blob-${sha25614(path).slice(0, 12)}`);
+  const file = join33(scratch, `blob-${sha25614(path).slice(0, 12)}`);
   writeFileSync5(file, bytes2);
   return runGit(repoPath, ["hash-object", "-w", `--path=${path}`, file]).stdout.trim();
 }
@@ -27775,9 +27681,9 @@ function merge2(repoPath, path, ours, base, theirs, scratch) {
 ${added}`;
   }
   if (base === null) return null;
-  const o = join34(scratch, `ours-${sha25614(path).slice(0, 12)}`);
-  const b = join34(scratch, `base-${sha25614(path).slice(0, 12)}`);
-  const t = join34(scratch, `theirs-${sha25614(path).slice(0, 12)}`);
+  const o = join33(scratch, `ours-${sha25614(path).slice(0, 12)}`);
+  const b = join33(scratch, `base-${sha25614(path).slice(0, 12)}`);
+  const t = join33(scratch, `theirs-${sha25614(path).slice(0, 12)}`);
   writeFileSync5(o, ours);
   writeFileSync5(b, base);
   writeFileSync5(t, theirs);
@@ -27785,7 +27691,7 @@ ${added}`;
   return r.exitCode === 0 ? r.stdout : null;
 }
 function planProofUnit(repoPath, head, files) {
-  const scratch = mkdtempSync4(join34(tmpdir4(), "mycelink-reproof-"));
+  const scratch = mkdtempSync4(join33(tmpdir4(), "mycelink-reproof-"));
   try {
     const out = [];
     const conflicts = [];
@@ -27817,12 +27723,12 @@ function planProofUnit(repoPath, head, files) {
     }
     return out.length === 0 ? { kind: "none" } : { kind: "commit", files: out };
   } finally {
-    rmSync11(scratch, { recursive: true, force: true });
+    rmSync10(scratch, { recursive: true, force: true });
   }
 }
 function commitProofUnit(repoPath, head, plan, message) {
-  const scratch = mkdtempSync4(join34(tmpdir4(), "mycelink-reproof-index-"));
-  const env = { GIT_INDEX_FILE: join34(scratch, "index") };
+  const scratch = mkdtempSync4(join33(tmpdir4(), "mycelink-reproof-index-"));
+  const env = { GIT_INDEX_FILE: join33(scratch, "index") };
   try {
     runGit(repoPath, ["read-tree", head], { env });
     for (const f of plan.files) runGit(repoPath, ["update-index", "--add", "--cacheinfo", `${f.mode},${f.blob},${f.path}`], { env });
@@ -27830,7 +27736,7 @@ function commitProofUnit(repoPath, head, plan, message) {
     const who = { GIT_AUTHOR_NAME: REPROOF_IDENTITY.name, GIT_AUTHOR_EMAIL: REPROOF_IDENTITY.email, GIT_COMMITTER_NAME: REPROOF_IDENTITY.name, GIT_COMMITTER_EMAIL: REPROOF_IDENTITY.email };
     return runGit(repoPath, ["-c", "commit.gpgsign=false", "commit-tree", tree, "-p", head, "-m", message.subject, "-m", message.body, "-m", `${REPROOF_TRAILER}: ${[...message.criteria].join(", ")}`], { env: who }).stdout.trim();
   } finally {
-    rmSync11(scratch, { recursive: true, force: true });
+    rmSync10(scratch, { recursive: true, force: true });
   }
 }
 
@@ -27906,23 +27812,23 @@ function verificationReceipt(args) {
 
 // src/sessions/worker-protocol.ts
 import {
-  closeSync as closeSync12,
+  closeSync as closeSync11,
   constants as constants6,
-  existsSync as existsSync24,
+  existsSync as existsSync23,
   fstatSync as fstatSync7,
   lstatSync as lstatSync13,
-  mkdirSync as mkdirSync16,
+  mkdirSync as mkdirSync15,
   mkdtempSync as mkdtempSync5,
-  openSync as openSync10,
+  openSync as openSync9,
   readdirSync as readdirSync10,
   readSync as readSync4,
   renameSync as renameSync3,
   rmdirSync,
-  rmSync as rmSync12,
+  rmSync as rmSync11,
   unlinkSync,
   writeFileSync as writeFileSync6
 } from "node:fs";
-import { dirname as dirname12, join as join35, resolve as resolve15 } from "node:path";
+import { dirname as dirname11, join as join34, resolve as resolve14 } from "node:path";
 import { createHash as createHash27 } from "node:crypto";
 
 // src/sessions/context-pack.ts
@@ -28156,10 +28062,10 @@ function buildContextPack(args) {
     const candidate = keep3 > 0 ? { ...base, memory: memory.slice(0, keep3) } : { ...base };
     if (packBytes(candidate) <= args.maxBytes) return accept(candidate);
   }
-  const held2 = base.correction;
-  if (held2 !== void 0) {
-    for (let keep3 = held2.candidates.length - 1; keep3 >= 3; keep3--) {
-      const candidate = { ...base, correction: { ...held2, candidates: held2.candidates.slice(0, keep3) } };
+  const held = base.correction;
+  if (held !== void 0) {
+    for (let keep3 = held.candidates.length - 1; keep3 >= 3; keep3--) {
+      const candidate = { ...base, correction: { ...held, candidates: held.candidates.slice(0, keep3) } };
       if (packBytes(candidate) <= args.maxBytes) return accept(candidate);
     }
   }
@@ -28228,7 +28134,7 @@ function loadPromptPack(file, expected, env = process.env) {
   };
   let fd;
   try {
-    fd = openSync10(file, "r");
+    fd = openSync9(file, "r");
   } catch (err) {
     const missing = err.code === "ENOENT";
     return fail(missing ? "context pack is missing" : "context pack is unreadable");
@@ -28240,7 +28146,7 @@ function loadPromptPack(file, expected, env = process.env) {
     if (st.size > MAX_PROMPT_PACK_BYTES) fail(`context pack is ${st.size} bytes`);
     raw = readBounded(fd, MAX_PROMPT_PACK_BYTES + 1);
   } finally {
-    closeSync12(fd);
+    closeSync11(fd);
   }
   if (raw.length > MAX_PROMPT_PACK_BYTES) fail(`context pack is over ${MAX_PROMPT_PACK_BYTES} bytes`);
   let pack;
@@ -28884,21 +28790,21 @@ function removeLink(path) {
 }
 function prepareResultSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   assertResultFile(resultFile);
-  const dir = join35(cwd, WORKER_RESULT_DIR);
-  if (existsSync24(dir) || isLink(dir)) {
+  const dir = join34(cwd, WORKER_RESULT_DIR);
+  if (existsSync23(dir) || isLink(dir)) {
     const st = lstatSync13(dir);
     if (st.isSymbolicLink()) removeLink(dir);
-    else if (!st.isDirectory()) rmSync12(dir, { force: true });
+    else if (!st.isDirectory()) rmSync11(dir, { force: true });
   }
-  mkdirSync16(dir, { recursive: true });
+  mkdirSync15(dir, { recursive: true });
   if (!isInsideReal(cwd, dir)) {
     throw new WorkerProtocolError("WORKER_PROTOCOL_INVALID", "result slot resolves outside the worktree");
   }
-  const ignore = join35(dir, ".gitignore");
-  rmSync12(ignore, { force: true, recursive: true });
+  const ignore = join34(dir, ".gitignore");
+  rmSync11(ignore, { force: true, recursive: true });
   writeFileSync6(ignore, "*\n", { encoding: "utf8", flag: "wx" });
-  const file = join35(dir, resultFile);
-  rmSync12(file, { force: true });
+  const file = join34(dir, resultFile);
+  rmSync11(file, { force: true });
   return file;
 }
 function isLink(path) {
@@ -28916,16 +28822,16 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
   const captureFailed = (what, err) => fail(
     `RESULT_CAPTURE_FAILED: could not move ${what} into quarantine (${err.code ?? "error"})`
   );
-  mkdirSync16(dirname12(controllerPath), { recursive: true });
-  const bases = [dirname12(controllerPath)];
-  const fallback = options.fallbackQuarantineDir === void 0 ? dirname12(resolve15(cwd)) : options.fallbackQuarantineDir;
-  if (fallback !== null && resolve15(fallback) !== resolve15(dirname12(controllerPath))) bases.push(fallback);
+  mkdirSync15(dirname11(controllerPath), { recursive: true });
+  const bases = [dirname11(controllerPath)];
+  const fallback = options.fallbackQuarantineDir === void 0 ? dirname11(resolve14(cwd)) : options.fallbackQuarantineDir;
+  if (fallback !== null && resolve14(fallback) !== resolve14(dirname11(controllerPath))) bases.push(fallback);
   let quarantine = null;
   let lastError = null;
   for (const base of bases) {
-    const candidate = mkdtempSync5(join35(base, RESULT_QUARANTINE_PREFIX));
+    const candidate = mkdtempSync5(join34(base, RESULT_QUARANTINE_PREFIX));
     try {
-      retrySync(() => renameSync3(join35(cwd, WORKER_RESULT_DIR), join35(candidate, "slot")));
+      retrySync(() => renameSync3(join34(cwd, WORKER_RESULT_DIR), join34(candidate, "slot")));
       quarantine = candidate;
       break;
     } catch (err) {
@@ -28936,15 +28842,15 @@ function collectWorkerResult(cwd, expected, controllerPath, env = process.env, o
     }
   }
   if (quarantine === null) return captureFailed("the result slot", lastError);
-  const capturedDir = join35(quarantine, "slot");
-  const captured = join35(quarantine, WORKER_RESULT_FILE);
+  const capturedDir = join34(quarantine, "slot");
+  const captured = join34(quarantine, WORKER_RESULT_FILE);
   try {
     const dirSt = lstatSync13(capturedDir);
     if (dirSt.isSymbolicLink() || !dirSt.isDirectory()) {
       return fail("RESULT_PATH_ESCAPE: the result slot was replaced by a link");
     }
     try {
-      retrySync(() => renameSync3(join35(capturedDir, resultFile), captured));
+      retrySync(() => renameSync3(join34(capturedDir, resultFile), captured));
     } catch (err) {
       if (err.code === "ENOENT") return fail("RESULT_MISSING");
       return captureFailed("the result", err);
@@ -28959,7 +28865,7 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
   const notRegular = () => fail("RESULT_PATH_ESCAPE: the result is not a regular file");
   let fd;
   try {
-    fd = openSync10(captured, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0) | (constants6.O_NONBLOCK ?? 0));
+    fd = openSync9(captured, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0) | (constants6.O_NONBLOCK ?? 0));
   } catch {
     return notRegular();
   }
@@ -28992,7 +28898,7 @@ function readCapturedResult(captured, expected, controllerPath, env, capabilityS
     writeTextAtomic(controllerPath, JSON.stringify(result, null, 2) + "\n");
     return { result, failure: null };
   } finally {
-    closeSync12(fd);
+    closeSync11(fd);
   }
 }
 function removeTree(path) {
@@ -29004,7 +28910,7 @@ function removeTree(path) {
   }
   if (st.isSymbolicLink()) return retrySync(() => removeLink(path));
   if (!st.isDirectory()) return retrySync(() => unlinkSync(path));
-  for (const name of readdirSync10(path)) removeTree(join35(path, name));
+  for (const name of readdirSync10(path)) removeTree(join34(path, name));
   retrySync(() => rmdirSync(path));
 }
 function removeQuarantine(quarantine) {
@@ -29040,521 +28946,12 @@ function zeroObservationUsage() {
 }
 
 // src/engine/orchestrator.ts
-import { closeSync as closeSync14, constants as fsConstants, fstatSync as fstatSync8, fsyncSync as fsyncSync3, lstatSync as lstatSync17, openSync as openSync12, unlinkSync as unlinkSync3, writeSync as writeSync6 } from "node:fs";
-
-// src/sessions/wsl-codex-policy.ts
-function expandAllowedProposalPaths(proposals, fence) {
-  if (proposals.length > 4096) throw new Error("PROPOSAL_BUDGET_EXCEEDED");
-  const names2 = /* @__PURE__ */ new Set();
-  const folded = /* @__PURE__ */ new Set();
-  for (const name of proposals) {
-    const segments2 = name.split("/");
-    if (!/^[A-Za-z0-9_./-]{1,240}$/.test(name) || name.startsWith("/") || segments2.some((segment2) => segment2 === "" || segment2.startsWith(".") || segment2.endsWith(".") || segment2.endsWith(" ") || segment2 === "..")) {
-      throw new Error(`UNSAFE_PROPOSAL: ${name.slice(0, 80)}`);
-    }
-    if (segments2.some((segment2) => ["result.json", "verdict.json", "_receipt.json", "mycelink"].includes(segment2.toLowerCase()))) {
-      throw new Error(`RESERVED_PROPOSAL: ${name.slice(0, 80)}`);
-    }
-    if (folded.has(name.toLowerCase())) throw new Error(`ALIAS_PROPOSAL: ${name.slice(0, 80)}`);
-    folded.add(name.toLowerCase());
-    if (!fence.allowed.some((glob) => matchGlob(glob, name)) || fence.forbidden.some((glob) => matchGlob(glob, name))) {
-      throw new Error(`OWNERSHIP_VIOLATION: ${name.slice(0, 80)}`);
-    }
-    names2.add(name);
-  }
-  return [...names2].sort();
-}
-
-// src/sessions/wsl-codex-process.ts
-import { createHash as createHash28 } from "node:crypto";
-import { existsSync as existsSync25, realpathSync as realpathSync4 } from "node:fs";
-import { join as join36 } from "node:path";
-import { spawnSync as spawnSync7 } from "node:child_process";
-function wslCodexFeatureToken(featureDir) {
-  return createHash28("sha256").update(realpathSync4(featureDir).replace(/\\/g, "/").toLowerCase()).digest("hex");
-}
-function wslProcessScript() {
-  if (process.platform !== "win32") throw new Error("WSL_CODEX_REVOKE_UNAVAILABLE");
-  const script = join36(packageRoot(), "scripts", "wsl-codex-process.py");
-  if (!existsSync25(script)) throw new Error("WSL_CODEX_REVOKE_SCRIPT_MISSING");
-  const linuxPath = spawnSync7(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
-    { encoding: "utf8", timeout: 1e4, windowsHide: true }
-  );
-  if (linuxPath.status !== 0 || !linuxPath.stdout?.trim().startsWith("/mnt/")) {
-    throw new Error("WSL_CODEX_REVOKE_PATH_UNAVAILABLE");
-  }
-  return linuxPath.stdout.trim();
-}
-function startExperimentalWslProcess(featureDir, claim, generation, command) {
-  if (process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1") throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-  if (command.length === 0 || !command[0]?.startsWith("/")) throw new Error("WSL_CODEX_COMMAND_UNSAFE");
-  const script = wslProcessScript();
-  const result = spawnSync7(
-    "wsl.exe",
-    [
-      "-d",
-      "Ubuntu",
-      "-u",
-      "root",
-      "--",
-      "python3",
-      script,
-      "start",
-      wslCodexFeatureToken(featureDir),
-      claim,
-      generation,
-      "--",
-      ...command
-    ],
-    { encoding: "utf8", timeout: 15e3, windowsHide: true }
-  );
-  try {
-    if (result.status !== 0) throw new Error("WSL_CODEX_START_UNCONFIRMED");
-    const receipt = JSON.parse(result.stdout);
-    if (receipt.claim !== claim || receipt.generation !== generation || !Number.isSafeInteger(receipt.pid) || receipt.pid <= 1 || receipt.pgid !== receipt.pid || typeof receipt.start !== "string" || !/^\d+$/.test(receipt.start)) {
-      throw new Error("WSL_CODEX_START_RECEIPT_INVALID");
-    }
-    return receipt;
-  } catch (error) {
-    revokeWslCodexProcesses(featureDir);
-    throw error;
-  }
-}
-function wslCodexProcessActive(featureDir, claim, generation) {
-  const script = wslProcessScript();
-  const result = spawnSync7(
-    "wsl.exe",
-    [
-      "-d",
-      "Ubuntu",
-      "-u",
-      "root",
-      "--",
-      "python3",
-      script,
-      "status",
-      wslCodexFeatureToken(featureDir),
-      claim,
-      generation
-    ],
-    { encoding: "utf8", timeout: 12e3, windowsHide: true }
-  );
-  if (result.status !== 0) throw new Error("WSL_CODEX_STATUS_UNCONFIRMED");
-  try {
-    const response = JSON.parse(result.stdout);
-    if (Object.keys(response).length !== 1 || typeof response.active !== "boolean") throw new Error("invalid status");
-    return response.active;
-  } catch {
-    throw new Error("WSL_CODEX_STATUS_UNCONFIRMED");
-  }
-}
-function wslCodexProcessResult(featureDir, claim, generation) {
-  const script = wslProcessScript();
-  const result = spawnSync7(
-    "wsl.exe",
-    [
-      "-d",
-      "Ubuntu",
-      "-u",
-      "root",
-      "--",
-      "python3",
-      script,
-      "result",
-      wslCodexFeatureToken(featureDir),
-      claim,
-      generation
-    ],
-    { encoding: "utf8", timeout: 12e3, windowsHide: true }
-  );
-  if (result.status !== 0 || result.error) throw new Error("WSL_CODEX_RESULT_UNCONFIRMED");
-  try {
-    const parsed = JSON.parse(result.stdout);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid result");
-    const value = parsed;
-    if (Object.keys(value).length !== 2 || !Number.isSafeInteger(value["exit_code"]) || value["exit_code"] < 0 || value["exit_code"] > 255 || typeof value["revoked"] !== "boolean") throw new Error("invalid result");
-    return value;
-  } catch {
-    throw new Error("WSL_CODEX_RESULT_UNCONFIRMED");
-  }
-}
-function revokeWslCodexProcesses(featureDir) {
-  const script = wslProcessScript();
-  const result = spawnSync7("wsl.exe", [
-    "-d",
-    "Ubuntu",
-    "-u",
-    "root",
-    "--",
-    "python3",
-    script,
-    "revoke",
-    wslCodexFeatureToken(featureDir)
-  ], { encoding: "utf8", timeout: 12e3, windowsHide: true });
-  if (result.status !== 0) throw new Error("WSL_CODEX_REVOKE_UNCONFIRMED");
-}
-
-// src/sessions/wsl-codex-source.ts
-import { createHash as createHash29 } from "node:crypto";
-import { spawnSync as spawnSync8 } from "node:child_process";
-import { existsSync as existsSync26, lstatSync as lstatSync14 } from "node:fs";
-import { join as join37 } from "node:path";
-function gitBytes(cwd, args, limit = 34 * 1024 * 1024) {
-  const result = spawnSync8("git", [...args], { cwd, encoding: "buffer", maxBuffer: limit, timeout: 15e3, windowsHide: true });
-  if (result.status !== 0 || result.error) throw new Error("IMMUTABLE_GIT_SOURCE_UNAVAILABLE");
-  return result.stdout;
-}
-function immutableGitSource(worktree, base) {
-  if (!/^[0-9a-f]{40}$/.test(base)) throw new Error("IMMUTABLE_GIT_BASE_INVALID");
-  const tree = gitBytes(worktree, ["ls-tree", "-r", "-z", "--full-tree", base]);
-  const files = /* @__PURE__ */ Object.create(null);
-  const hashes = /* @__PURE__ */ Object.create(null);
-  let total = 0;
-  for (const entry of tree.toString("utf8").split("\0").filter(Boolean)) {
-    const match = /^(100644|100755) blob ([0-9a-f]{40})\t([^\0]+)$/.exec(entry);
-    if (!match) throw new Error("IMMUTABLE_GIT_TREE_UNSAFE");
-    const name = match[3];
-    const parts = name.split("/");
-    if (parts.some((p) => p.startsWith("."))) continue;
-    if (!/^[A-Za-z0-9_./-]{1,240}$/.test(name) || parts.some((p) => !p || p.endsWith(".") || p.endsWith(" ")) || Object.keys(files).some((p) => p.toLowerCase() === name.toLowerCase())) throw new Error("IMMUTABLE_GIT_PATH_UNSAFE");
-    const bytes2 = gitBytes(worktree, ["cat-file", "blob", match[2]], 2 * 1024 * 1024 + 1024);
-    total += bytes2.length;
-    if (bytes2.length > 2 * 1024 * 1024 || total > 32 * 1024 * 1024 || Object.keys(files).length >= 4096) {
-      throw new Error("IMMUTABLE_GIT_SOURCE_BUDGET");
-    }
-    files[name] = bytes2;
-    hashes[name] = createHash29("sha256").update(bytes2).digest("hex");
-  }
-  if (Object.keys(files).length === 0) throw new Error("IMMUTABLE_GIT_TREE_EMPTY");
-  return { files, hashes };
-}
-function assertImmutableWslApplyBase(worktree, base, allowedPaths) {
-  if (!/^[0-9a-f]{40}$/.test(base) || gitBytes(worktree, ["rev-parse", "HEAD"]).toString("utf8").trim() !== base || gitBytes(worktree, ["status", "--porcelain", "--untracked-files=all"]).length !== 0) {
-    throw new Error("SOURCE_DRIFT: checkout changed after immutable staging");
-  }
-  for (const name of allowedPaths) {
-    const parts = name.split("/");
-    if (!/^[A-Za-z0-9_./-]{1,240}$/.test(name) || parts.some((p) => !p || p === "." || p === ".."))
-      throw new Error("SOURCE_DRIFT: unsafe apply path");
-    let current = worktree;
-    for (const part of parts) {
-      current = join37(current, part);
-      try {
-        const entry = lstatSync14(current);
-        if (entry.isSymbolicLink()) throw new Error("SOURCE_DRIFT: apply path redirects through a symlink");
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-      }
-    }
-  }
-}
-function wslSourceScript() {
-  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1") {
-    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-  }
-  const script = join37(packageRoot(), "scripts", "wsl-codex-source.py");
-  if (!existsSync26(script)) throw new Error("WSL_CODEX_SOURCE_SCRIPT_MISSING");
-  const translated = spawnSync8(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
-    { encoding: "utf8", timeout: 1e4, windowsHide: true }
-  );
-  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/")) throw new Error("WSL_CODEX_SOURCE_SCRIPT_UNAVAILABLE");
-  return translated.stdout.trim();
-}
-function stageImmutableWslCodexSource(worktree, base, claim, generation) {
-  const data = immutableGitSource(worktree, base);
-  if (gitBytes(worktree, ["rev-parse", "HEAD"]).toString("utf8").trim() !== base || gitBytes(worktree, ["status", "--porcelain", "--untracked-files=all"]).length !== 0) {
-    throw new Error("SOURCE_DRIFT: claim worktree differs from immutable Git base");
-  }
-  const script = wslSourceScript();
-  const encoded = Object.fromEntries(Object.entries(data.files).map(([name, bytes2]) => [name, bytes2.toString("base64")]));
-  const result = spawnSync8(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "python3", script, "stage"],
-    {
-      input: JSON.stringify({ claim, generation, files: encoded, hashes: data.hashes }),
-      encoding: "utf8",
-      maxBuffer: 1024 * 1024,
-      timeout: 2e4,
-      windowsHide: true
-    }
-  );
-  if (result.status !== 0 || result.error) throw new Error("WSL_CODEX_SOURCE_STAGE_UNCONFIRMED");
-  let receipt;
-  try {
-    receipt = JSON.parse(result.stdout);
-  } catch {
-    throw new Error("WSL_CODEX_SOURCE_STAGE_UNCONFIRMED");
-  }
-  if (!receipt.source || !/^\/var\/lib\/mycelink-codex\/claims\/source-[A-Za-z0-9_-]+\/snapshot$/.test(receipt.source) || receipt.manifest !== `${receipt.source.slice(0, -"/snapshot".length)}/manifest.json`) {
-    throw new Error("WSL_CODEX_SOURCE_STAGE_UNCONFIRMED");
-  }
-  return {
-    source: receipt.source,
-    manifest: receipt.manifest,
-    hashes: data.hashes,
-    dispose: () => {
-      const removed = spawnSync8(
-        "wsl.exe",
-        ["-d", "Ubuntu", "-u", "root", "--", "python3", script, "remove", receipt.source.slice(0, -"/snapshot".length)],
-        { encoding: "utf8", timeout: 1e4, windowsHide: true }
-      );
-      if (removed.status !== 0 || removed.error) throw new Error("WSL_CODEX_SOURCE_CLEANUP_UNCONFIRMED");
-    }
-  };
-}
-
-// src/sessions/wsl-codex-seal.ts
-import { spawnSync as spawnSync9 } from "node:child_process";
-import { existsSync as existsSync27 } from "node:fs";
-import { join as join38 } from "node:path";
-function sealRegisteredWslCodexRole(featureDir, controlRoot, grant, role) {
-  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1") {
-    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-  }
-  const outcome = wslCodexProcessResult(featureDir, grant.claim, grant.generation);
-  if (outcome.exit_code !== 0 || outcome.revoked) throw new Error("WSL_CODEX_GENERATION_NOT_SUCCESSFUL");
-  const script = join38(packageRoot(), "scripts", "wsl-codex-seal.py");
-  if (!existsSync27(script)) throw new Error("WSL_CODEX_BROKER_SCRIPT_MISSING");
-  const translated = spawnSync9(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
-    { encoding: "utf8", timeout: 1e4, windowsHide: true }
-  );
-  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/")) {
-    throw new Error("WSL_CODEX_BROKER_SCRIPT_UNAVAILABLE");
-  }
-  const hashes = immutableGitSource(grant.worktree, grant.base_sha).hashes;
-  const response = spawnSync9(
-    "wsl.exe",
-    [
-      "-d",
-      "Ubuntu",
-      "-u",
-      "root",
-      "--",
-      "python3",
-      translated.stdout.trim(),
-      "--feature-token",
-      wslCodexFeatureToken(featureDir),
-      "--claim",
-      grant.claim,
-      "--generation",
-      grant.generation,
-      "--control-root",
-      controlRoot.replace(/\\/g, "/"),
-      "--role",
-      role
-    ],
-    {
-      encoding: "utf8",
-      input: JSON.stringify({ source_hashes: hashes, allowed_paths: grant.allowed_paths }),
-      maxBuffer: 1024 * 1024,
-      timeout: 45e3,
-      windowsHide: true
-    }
-  );
-  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_BROKER_DENIED");
-  let parsed;
-  try {
-    parsed = JSON.parse(response.stdout);
-  } catch {
-    throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
-  const receipt = parsed;
-  if (receipt["claim"] !== grant.claim || receipt["generation"] !== grant.generation || receipt["role"] !== role || !receipt["sha256"] || typeof receipt["sha256"] !== "object" || Array.isArray(receipt["sha256"]) || !Object.keys(receipt["sha256"]).every((path) => grant.allowed_paths.includes(path) && /^[0-9a-f]{64}$/.test(receipt["sha256"][path] ?? "")) || typeof receipt["submission_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(receipt["submission_sha256"])) {
-    throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
-  }
-  return receipt;
-}
-function readRegisteredWslCodexApiAudit(featureDir, claim, generation) {
-  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
-    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-  const outcome = wslCodexProcessResult(featureDir, claim, generation);
-  if (outcome.exit_code !== 0 || outcome.revoked) throw new Error("WSL_CODEX_GENERATION_NOT_SUCCESSFUL");
-  const script = join38(packageRoot(), "scripts", "wsl-codex-turn.py");
-  const translated = spawnSync9(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
-    { encoding: "utf8", timeout: 1e4, windowsHide: true }
-  );
-  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
-    throw new Error("WSL_CODEX_API_AUDIT_UNAVAILABLE");
-  const response = spawnSync9(
-    "wsl.exe",
-    [
-      "-d",
-      "Ubuntu",
-      "-u",
-      "root",
-      "--",
-      "python3",
-      translated.stdout.trim(),
-      "--claim",
-      claim,
-      "--generation",
-      generation,
-      "--audit-summary"
-    ],
-    { encoding: "utf8", timeout: 2e4, maxBuffer: 4096, windowsHide: true }
-  );
-  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_API_AUDIT_INVALID");
-  try {
-    const value = JSON.parse(response.stdout);
-    if (!value || Object.keys(value).sort().join(",") !== "reviewer,worker") throw new Error("roles");
-    for (const role of ["worker", "reviewer"]) {
-      const item = value[role];
-      if (!item || Object.keys(item).sort().join(",") !== "apiRequests,denied,sha256,upstream200" || !Number.isSafeInteger(item["apiRequests"]) || item["apiRequests"] < 1 || !Number.isSafeInteger(item["upstream200"]) || item["upstream200"] < 1 || item["upstream200"] > item["apiRequests"] || !Number.isSafeInteger(item["denied"]) || item["denied"] < 0 || typeof item["sha256"] !== "string" || !/^[a-f0-9]{64}$/.test(item["sha256"])) throw new Error("shape");
-    }
-    return value;
-  } catch {
-    throw new Error("WSL_CODEX_API_AUDIT_INVALID");
-  }
-}
-function readRegisteredWslCodexTurn(featureDir, controlRoot, grant) {
-  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
-    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-  const outcome = wslCodexProcessResult(featureDir, grant.claim, grant.generation);
-  if (outcome.exit_code !== 0 || outcome.revoked) throw new Error("WSL_CODEX_GENERATION_NOT_SUCCESSFUL");
-  const script = join38(packageRoot(), "scripts", "wsl-codex-seal.py");
-  const translated = spawnSync9(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
-    { encoding: "utf8", timeout: 1e4, windowsHide: true }
-  );
-  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
-    throw new Error("WSL_CODEX_BROKER_SCRIPT_UNAVAILABLE");
-  const hashes = immutableGitSource(grant.worktree, grant.base_sha).hashes;
-  const response = spawnSync9(
-    "wsl.exe",
-    [
-      "-d",
-      "Ubuntu",
-      "-u",
-      "root",
-      "--",
-      "python3",
-      translated.stdout.trim(),
-      "--feature-token",
-      wslCodexFeatureToken(featureDir),
-      "--claim",
-      grant.claim,
-      "--generation",
-      grant.generation,
-      "--control-root",
-      controlRoot.replace(/\\/g, "/"),
-      "--read"
-    ],
-    {
-      encoding: "utf8",
-      input: JSON.stringify({ source_hashes: hashes, allowed_paths: grant.allowed_paths }),
-      maxBuffer: 36 * 1024 * 1024,
-      timeout: 45e3,
-      windowsHide: true
-    }
-  );
-  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_BROKER_DENIED");
-  let parsed;
-  try {
-    parsed = JSON.parse(response.stdout);
-  } catch {
-    throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
-  const turn = parsed;
-  if (!turn["proposals"] || typeof turn["proposals"] !== "object" || Array.isArray(turn["proposals"]) || !Object.entries(turn["proposals"]).every(([path, value]) => grant.allowed_paths.includes(path) && typeof value === "string") || !turn["seals"] || typeof turn["seals"] !== "object" || Array.isArray(turn["seals"]) || !/^[0-9a-f]{64}$/.test(turn["seals"]["worker"] ?? "") || !/^[0-9a-f]{64}$/.test(turn["seals"]["reviewer"] ?? "") || !turn["worker"] || typeof turn["worker"] !== "object" || turn["worker"]["status"] !== "0" || !turn["reviewer"] || typeof turn["reviewer"] !== "object" || turn["reviewer"]["verdict"] !== "PASS")
-    throw new Error("WSL_CODEX_BROKER_RECEIPT_INVALID");
-  return turn;
-}
-function sealRegisteredWslCodexWorker(featureDir, controlRoot, grant) {
-  return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "worker");
-}
-function sealRegisteredWslCodexReviewer(featureDir, controlRoot, grant) {
-  return sealRegisteredWslCodexRole(featureDir, controlRoot, grant, "reviewer");
-}
-function wslCodexSettlementAnchor(featureDir, claim, generation, expected) {
-  if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1")
-    throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-  const script = join38(packageRoot(), "scripts", "wsl-codex-settlement.py");
-  const translated = spawnSync9(
-    "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "wslpath", "-u", script.replace(/\\/g, "/")],
-    { encoding: "utf8", timeout: 1e4, windowsHide: true }
-  );
-  if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
-    throw new Error("WSL_CODEX_SETTLEMENT_ANCHOR_UNAVAILABLE");
-  const args = [
-    "-d",
-    "Ubuntu",
-    "-u",
-    "root",
-    "--",
-    "python3",
-    translated.stdout.trim(),
-    "--feature-token",
-    wslCodexFeatureToken(featureDir),
-    "--claim",
-    claim,
-    "--generation",
-    generation
-  ];
-  if (expected) args.push("--write");
-  const response = spawnSync9("wsl.exe", args, {
-    encoding: "utf8",
-    input: expected ? JSON.stringify(expected) : void 0,
-    timeout: 2e4,
-    windowsHide: true
-  });
-  if (response.status !== 0 || response.error) throw new Error("WSL_CODEX_SETTLEMENT_ANCHOR_INVALID");
-  if (expected) return expected;
-  try {
-    const value = JSON.parse(response.stdout);
-    if (Object.keys(value).sort().join(",") !== "receiptSha256,resultSha256" || !/^[a-f0-9]{64}$/.test(String(value["receiptSha256"])) || !/^[a-f0-9]{64}$/.test(String(value["resultSha256"]))) throw new Error("invalid");
-    return value;
-  } catch {
-    throw new Error("WSL_CODEX_SETTLEMENT_ANCHOR_INVALID");
-  }
-}
-
-// src/sessions/wsl-codex-escrow.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
-var PREFIX = '$ErrorActionPreference="Stop"; Add-Type -AssemblyName System.Security; $v=[Console]::In.ReadToEnd() | ConvertFrom-Json; $e=[Text.Encoding]::UTF8.GetBytes([string]$v.scope); ';
-var PROTECT = PREFIX + "$p=[Text.Encoding]::UTF8.GetBytes([string]$v.value); [Convert]::ToBase64String([System.Security.Cryptography.ProtectedData]::Protect($p,$e,[System.Security.Cryptography.DataProtectionScope]::CurrentUser))";
-var UNPROTECT = PREFIX + "$p=[Convert]::FromBase64String([string]$v.value); [Text.Encoding]::UTF8.GetString([System.Security.Cryptography.ProtectedData]::Unprotect($p,$e,[System.Security.Cryptography.DataProtectionScope]::CurrentUser))";
-function dpapi(command, value, scope) {
-  if (process.platform !== "win32" || !scope || scope.length > 512 || !value || value.length > 4096)
-    throw new Error("WSL_CODEX_ESCROW_UNAVAILABLE");
-  const response = spawnSync10("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
-    input: JSON.stringify({ value, scope }),
-    encoding: "utf8",
-    timeout: 15e3,
-    windowsHide: true,
-    maxBuffer: 8192
-  });
-  if (response.error || response.status !== 0 || !response.stdout?.trim())
-    throw new Error("WSL_CODEX_ESCROW_DENIED");
-  return response.stdout.trim();
-}
-function protectExperimentalWslCapability(capability, scope) {
-  const encrypted = dpapi(PROTECT, capability, scope);
-  if (!/^[A-Za-z0-9+/=]{100,8192}$/.test(encrypted) || encrypted.includes(capability))
-    throw new Error("WSL_CODEX_ESCROW_INVALID");
-  return encrypted;
-}
-function unprotectExperimentalWslCapability(encrypted, scope) {
-  if (!/^[A-Za-z0-9+/=]{100,8192}$/.test(encrypted))
-    throw new Error("WSL_CODEX_ESCROW_INVALID");
-  return dpapi(UNPROTECT, encrypted, scope);
-}
+import { closeSync as closeSync13, constants as fsConstants, fstatSync as fstatSync8, lstatSync as lstatSync16, openSync as openSync11, unlinkSync as unlinkSync3 } from "node:fs";
 
 // src/e2e/runner.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-import { existsSync as existsSync28, mkdirSync as mkdirSync17, readFileSync as readFileSync22, readdirSync as readdirSync11 } from "node:fs";
-import { join as join39, resolve as resolve16 } from "node:path";
+import { existsSync as existsSync24, mkdirSync as mkdirSync16, readFileSync as readFileSync21, readdirSync as readdirSync11 } from "node:fs";
+import { join as join35, resolve as resolve15 } from "node:path";
 
 // src/e2e/scheduler.ts
 function conflictReason(a, b) {
@@ -29721,12 +29118,12 @@ function attributeFailure(scenario, graph, failureOutput) {
 
 // src/e2e/runner.ts
 function loadScenarios(scenariosDir) {
-  const dir = resolve16(scenariosDir);
-  if (!existsSync28(dir)) return [];
+  const dir = resolve15(scenariosDir);
+  if (!existsSync24(dir)) return [];
   const out = [];
   for (const file of readdirSync11(dir).sort()) {
     if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue;
-    const parsed = import_yaml3.default.parse(readFileSync22(join39(dir, file), "utf8"));
+    const parsed = import_yaml3.default.parse(readFileSync21(join35(dir, file), "utf8"));
     const problems = validateAgainstSchema("e2e-scenario", parsed);
     if (problems.length > 0) {
       throw new Error(
@@ -29745,17 +29142,17 @@ function isolationEnv(candidateId, scenario, root) {
     E2E_CANDIDATE_ID: candidateId,
     E2E_DATA_NAMESPACE: scenario.isolation.data_namespace === "unique" ? ns : "shared",
     E2E_ACCOUNT: scenario.isolation.account === "unique" ? `user_${ns}` : scenario.isolation.account,
-    E2E_BROWSER_PROFILE_DIR: scenario.isolation.browser_profile === "unique" ? join39(root, "profiles", slug) : join39(root, "profiles", "shared"),
-    E2E_TRACE_DIR: join39(root, "traces", slug),
-    E2E_SCREENSHOT_DIR: join39(root, "screenshots", slug)
+    E2E_BROWSER_PROFILE_DIR: scenario.isolation.browser_profile === "unique" ? join35(root, "profiles", slug) : join35(root, "profiles", "shared"),
+    E2E_TRACE_DIR: join35(root, "traces", slug),
+    E2E_SCREENSHOT_DIR: join35(root, "screenshots", slug)
   });
 }
 async function runE2E(args) {
   const selected = args.only && args.only.length > 0 ? args.scenarios.filter((s) => args.only.includes(s.id)) : args.scenarios;
   const plan = planShards(selected, args.resources);
   const owner = args.owner ?? "e2e-runner";
-  const evidenceRoot = resolve16(args.evidenceRoot, args.candidate.candidate_id);
-  mkdirSync17(evidenceRoot, { recursive: true });
+  const evidenceRoot = resolve15(args.evidenceRoot, args.candidate.candidate_id);
+  mkdirSync16(evidenceRoot, { recursive: true });
   const leases = [];
   const results = [];
   let preflightFailure = null;
@@ -29827,11 +29224,11 @@ async function runE2E(args) {
 async function runScenario(scenario, shardIndex, args, evidenceRoot) {
   const env = isolationEnv(args.candidate.candidate_id, scenario, evidenceRoot);
   for (const dir of [env["E2E_BROWSER_PROFILE_DIR"], env["E2E_TRACE_DIR"], env["E2E_SCREENSHOT_DIR"]]) {
-    if (dir) mkdirSync17(dir, { recursive: true });
+    if (dir) mkdirSync16(dir, { recursive: true });
   }
   const evidence = [];
-  const scenarioEvidenceDir = join39(evidenceRoot, scenario.id.replace(/[^A-Za-z0-9._-]/g, "_"));
-  mkdirSync17(scenarioEvidenceDir, { recursive: true });
+  const scenarioEvidenceDir = join35(evidenceRoot, scenario.id.replace(/[^A-Za-z0-9._-]/g, "_"));
+  mkdirSync16(scenarioEvidenceDir, { recursive: true });
   const run = (label, command) => runVerification({
     kind: "e2e",
     nodeId: scenario.id,
@@ -29859,7 +29256,7 @@ async function runScenario(scenario, shardIndex, args, evidenceRoot) {
           attribution: attributeFailure(
             scenario,
             args.graph,
-            readFileSync22(evidenceOutputFile(args.pathBase, setup), "utf8")
+            readFileSync21(evidenceOutputFile(args.pathBase, setup), "utf8")
           )
         };
       }
@@ -29872,7 +29269,7 @@ async function runScenario(scenario, shardIndex, args, evidenceRoot) {
       shard: shardIndex,
       passed,
       evidence,
-      attribution: passed ? null : attributeFailure(scenario, args.graph, readFileSync22(evidenceOutputFile(args.pathBase, test), "utf8"))
+      attribution: passed ? null : attributeFailure(scenario, args.graph, readFileSync21(evidenceOutputFile(args.pathBase, test), "utf8"))
     };
   } finally {
     if (scenario.cleanup_command && scenario.cleanup_command.length > 0) {
@@ -29882,7 +29279,7 @@ async function runScenario(scenario, shardIndex, args, evidenceRoot) {
 }
 
 // src/engine/criterion-coverage.ts
-import { createHash as createHash30 } from "node:crypto";
+import { createHash as createHash28 } from "node:crypto";
 var COVERAGE_SCHEMA = "mycelink-coverage/1";
 function standingRecords(ledger) {
   const out = /* @__PURE__ */ new Map();
@@ -29945,25 +29342,25 @@ function coverageManifest(args) {
     return { criterion, holds: completions.every((c) => c.holds), completions };
   });
   const body = { schema: COVERAGE_SCHEMA, repositories: args.heads.map((h) => ({ name: h.name, head_sha: h.head_sha })), criteria, holds: criteria.every((c) => c.holds) };
-  return { ...body, sha256: createHash30("sha256").update(stableStringify(body)).digest("hex") };
+  return { ...body, sha256: createHash28("sha256").update(stableStringify(body)).digest("hex") };
 }
 function lostCompletions(manifest) {
   return manifest.criteria.flatMap((c) => c.completions.filter((x) => !x.holds));
 }
 
 // src/git/stash.ts
-import { existsSync as existsSync29, readFileSync as readFileSync23, renameSync as renameSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join40, resolve as resolve17 } from "node:path";
-import { randomBytes as randomBytes6 } from "node:crypto";
+import { existsSync as existsSync25, readFileSync as readFileSync22, renameSync as renameSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join36, resolve as resolve16 } from "node:path";
+import { randomBytes as randomBytes5 } from "node:crypto";
 function commonDirOf(repoPath) {
-  const dotGit = join40(resolve17(repoPath), ".git");
+  const dotGit = join36(resolve16(repoPath), ".git");
   try {
-    if (existsSync29(join40(dotGit, "HEAD"))) return dotGit;
-    const text = readFileSync23(dotGit, "utf8");
+    if (existsSync25(join36(dotGit, "HEAD"))) return dotGit;
+    const text = readFileSync22(dotGit, "utf8");
     const m = /^gitdir: (.+)$/m.exec(text);
     if (!m) return null;
-    const gitdir = resolve17(repoPath, m[1].trim());
-    const common = existsSync29(join40(gitdir, "commondir")) ? resolve17(gitdir, readFileSync23(join40(gitdir, "commondir"), "utf8").trim()) : gitdir;
+    const gitdir = resolve16(repoPath, m[1].trim());
+    const common = existsSync25(join36(gitdir, "commondir")) ? resolve16(gitdir, readFileSync22(join36(gitdir, "commondir"), "utf8").trim()) : gitdir;
     return common;
   } catch {
     return null;
@@ -29972,7 +29369,7 @@ function commonDirOf(repoPath) {
 function stashLines(commonDir) {
   let bytes2;
   try {
-    bytes2 = readFileSync23(join40(commonDir, "logs", "refs", "stash"));
+    bytes2 = readFileSync22(join36(commonDir, "logs", "refs", "stash"));
   } catch {
     return [];
   }
@@ -30026,11 +29423,11 @@ function quarantineStash(repoPath, branch, archivePrefix) {
     const top = remaining.length > 0 ? remaining.at(-1).toString("latin1").split(" ")[1] ?? null : null;
     const moved = top === was ? null : top === null ? runGit(repoPath, ["update-ref", "-d", "refs/stash", was], { allowFail: true }) : runGit(repoPath, ["update-ref", "refs/stash", top, was ?? "0".repeat(top.length)], { allowFail: true });
     if (moved !== null && moved.exitCode !== 0) continue;
-    const log = join40(common, "logs", "refs", "stash");
+    const log = join36(common, "logs", "refs", "stash");
     if (remaining.length === 0) {
-      if (existsSync29(log)) unlinkSync2(log);
+      if (existsSync25(log)) unlinkSync2(log);
     } else {
-      const tmp = `${log}.${process.pid}.${randomBytes6(4).toString("hex")}.tmp`;
+      const tmp = `${log}.${process.pid}.${randomBytes5(4).toString("hex")}.tmp`;
       writeFileSync7(tmp, Buffer.concat(remaining.flatMap((l) => [l, Buffer.from("\n")])));
       renameSync4(tmp, log);
     }
@@ -30040,9 +29437,9 @@ function quarantineStash(repoPath, branch, archivePrefix) {
 }
 
 // src/state/event-log.ts
-import { appendFileSync, closeSync as closeSync13, existsSync as existsSync30, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync11, readFileSync as readFileSync24, readdirSync as readdirSync12, renameSync as renameSync5, writeSync as writeSync5 } from "node:fs";
-import { basename as basename8, dirname as dirname13, join as join41 } from "node:path";
-import { createHash as createHash31 } from "node:crypto";
+import { appendFileSync, closeSync as closeSync12, existsSync as existsSync26, fsyncSync as fsyncSync2, ftruncateSync, openSync as openSync10, readFileSync as readFileSync23, readdirSync as readdirSync12, renameSync as renameSync5, writeSync as writeSync4 } from "node:fs";
+import { basename as basename8, dirname as dirname12, join as join37 } from "node:path";
+import { createHash as createHash29 } from "node:crypto";
 var EventTooLargeError = class extends Error {
   bytes;
   limit;
@@ -30061,8 +29458,8 @@ function lockFileFor(log) {
   return log + ".lock";
 }
 function parseJsonl(file) {
-  if (!existsSync30(file)) return [];
-  const raw = readFileSync24(file, "utf8");
+  if (!existsSync26(file)) return [];
+  const raw = readFileSync23(file, "utf8");
   const out = [];
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
@@ -30078,10 +29475,10 @@ function parseJsonl(file) {
   return out;
 }
 function listRotatedSegments(log) {
-  const dir = dirname13(log);
+  const dir = dirname12(log);
   const base = basename8(log).replace(/\.jsonl$/, "");
-  if (!existsSync30(dir)) return [];
-  return readdirSync12(dir).filter((f) => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{5}\\.jsonl$`).test(f)).sort().map((f) => join41(dir, f));
+  if (!existsSync26(dir)) return [];
+  return readdirSync12(dir).filter((f) => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{5}\\.jsonl$`).test(f)).sort().map((f) => join37(dir, f));
 }
 function nextSegmentPath(log) {
   const existing = listRotatedSegments(log);
@@ -30089,24 +29486,24 @@ function nextSegmentPath(log) {
   return log.replace(/\.jsonl$/, "") + "." + String(n).padStart(5, "0") + ".jsonl";
 }
 function repairTornTail(log) {
-  if (!existsSync30(log)) return false;
-  const raw = readFileSync24(log, "utf8");
+  if (!existsSync26(log)) return false;
+  const raw = readFileSync23(log, "utf8");
   if (raw === "" || raw.endsWith("\n")) return false;
   const lastNewline = raw.lastIndexOf("\n");
   const keep3 = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
   retrySync(() => {
-    const fd = openSync11(log, "r+");
+    const fd = openSync10(log, "r+");
     try {
       ftruncateSync(fd, Buffer.byteLength(keep3, "utf8"));
       fsyncSync2(fd);
     } finally {
-      closeSync13(fd);
+      closeSync12(fd);
     }
   });
   return true;
 }
 function eventId(key, type) {
-  return createHash31("sha256").update(JSON.stringify([type, key])).digest("hex").slice(0, 24);
+  return createHash29("sha256").update(JSON.stringify([type, key])).digest("hex").slice(0, 24);
 }
 function findByKey(log, key) {
   for (const ev of parseJsonl(log)) {
@@ -30152,8 +29549,8 @@ function appendEvent(log, input, options = {}) {
       repairTornTail(log);
       const existing = findByKey(log, input.idempotency_key);
       if (existing) return { appended: false, event: existing };
-      if (existsSync30(log)) {
-        const size = Buffer.byteLength(readFileSync24(log, "utf8"), "utf8");
+      if (existsSync26(log)) {
+        const size = Buffer.byteLength(readFileSync23(log, "utf8"), "utf8");
         if (size + probe2 > maxBytes) {
           renameSync5(log, nextSegmentPath(log));
         }
@@ -30162,11 +29559,11 @@ function appendEvent(log, input, options = {}) {
       const line = JSON.stringify(event) + "\n";
       retrySync(() => appendFileSync(log, line, "utf8"));
       bestEffortSync(() => {
-        const fd = openSync11(log, "r+");
+        const fd = openSync10(log, "r+");
         try {
           fsyncSync2(fd);
         } finally {
-          closeSync13(fd);
+          closeSync12(fd);
         }
       });
       return { appended: true, event };
@@ -30237,10 +29634,10 @@ function assertDecisionRecorded(eventsLog, decisionId) {
 }
 
 // src/workspace/hook-settings.ts
-import { existsSync as existsSync31, readFileSync as readFileSync25 } from "node:fs";
-import { join as join42 } from "node:path";
+import { existsSync as existsSync27, readFileSync as readFileSync24 } from "node:fs";
+import { join as join38 } from "node:path";
 function mycelinkCliPath() {
-  return join42(packageRoot(), "bin", "mycelink.mjs");
+  return join38(packageRoot(), "bin", "mycelink.mjs");
 }
 function cmd(event, launcher) {
   return `node "${launcher.replace(/\\/g, "/")}" hook ${event}`;
@@ -30282,8 +29679,8 @@ function buildHookSettings(launcher = mycelinkCliPath()) {
   };
 }
 function installHooks(controlRoot, launcher = mycelinkCliPath()) {
-  const file = join42(controlRoot, ".claude", "settings.json");
-  const existing = existsSync31(file) ? JSON.parse(readFileSync25(file, "utf8")) : {};
+  const file = join38(controlRoot, ".claude", "settings.json");
+  const existing = existsSync27(file) ? JSON.parse(readFileSync24(file, "utf8")) : {};
   const ours = buildHookSettings(launcher);
   const merged = { ...existing.hooks ?? {} };
   for (const [event, matchers] of Object.entries(ours)) {
@@ -30297,10 +29694,10 @@ function isOurHook(command) {
   return /mycelink\.mjs" hook [a-z-]+$/.test(command);
 }
 function hookHealth(controlRoot) {
-  const file = join42(controlRoot, ".claude", "settings.json");
+  const file = join38(controlRoot, ".claude", "settings.json");
   let settings = {};
   try {
-    settings = existsSync31(file) ? JSON.parse(readFileSync25(file, "utf8")) : {};
+    settings = existsSync27(file) ? JSON.parse(readFileSync24(file, "utf8")) : {};
   } catch {
     return { ok: false, detail: `${file} is not valid JSON` };
   }
@@ -30309,7 +29706,7 @@ function hookHealth(controlRoot) {
     return { ok: false, detail: 'Mycelink hooks are not installed; run "mycelink init <control-repo>"' };
   }
   const launchers = new Set(commands.map((c) => /"([^"]+mycelink\.mjs)"/.exec(c)?.[1] ?? ""));
-  const missing = [...launchers].filter((l) => l === "" || !existsSync31(l));
+  const missing = [...launchers].filter((l) => l === "" || !existsSync27(l));
   if (missing.length > 0) {
     return {
       ok: false,
@@ -30320,7 +29717,7 @@ function hookHealth(controlRoot) {
 }
 
 // src/engine/regression-deferral.ts
-import { isAbsolute as isAbsolute8, resolve as resolve18 } from "node:path";
+import { isAbsolute as isAbsolute8, resolve as resolve17 } from "node:path";
 var slash5 = (p) => p.replace(/\\/g, "/").replace(/^\.\//, "");
 var uniq = (xs) => [...new Set(xs)].sort();
 function failingTestFiles(output, exitCode, root) {
@@ -30340,7 +29737,7 @@ function failingTestFiles(output, exitCode, root) {
     const files = [];
     for (const f of failures) {
       const at = f.location === null ? null : /^(.*):\d+:\d+$/.exec(f.location)?.[1] ?? null;
-      const rel = at === null ? null : repoRelative(root, isAbsolute8(at) || /^[A-Za-z]:[\\/]/.test(at) ? at : resolve18(root, at));
+      const rel = at === null ? null : repoRelative(root, isAbsolute8(at) || /^[A-Za-z]:[\\/]/.test(at) ? at : resolve17(root, at));
       if (rel === null || rel === ".." || rel.startsWith("../") || isAbsolute8(rel)) return none;
       files.push(slash5(rel));
     }
@@ -30522,13 +29919,13 @@ function evidenceReuse(uses, traced) {
 }
 
 // src/engine/evidence-integrity.ts
-import { createHash as createHash32 } from "node:crypto";
-import { lstatSync as lstatSync15, mkdirSync as mkdirSync18, readFileSync as readFileSync26, readdirSync as readdirSync13, rmSync as rmSync13 } from "node:fs";
-import { basename as basename9, dirname as dirname14, join as join43 } from "node:path";
+import { createHash as createHash30 } from "node:crypto";
+import { lstatSync as lstatSync14, mkdirSync as mkdirSync17, readFileSync as readFileSync25, readdirSync as readdirSync13, rmSync as rmSync12 } from "node:fs";
+import { basename as basename9, dirname as dirname13, join as join39 } from "node:path";
 var REPAIR_SCHEMA = "mycelink-evidence-repair/1";
 var REPAIRED_DIR = "repaired";
 var RECEIPTS_DIR = "repairs";
-var sha25615 = (b) => createHash32("sha256").update(b).digest("hex");
+var sha25615 = (b) => createHash30("sha256").update(b).digest("hex");
 var NONE = { generation: null, claim_id: null, commit_sha: null, module_sha256: null, plan_sha256: null, exit_code: null, output_sha256: null, bindings: [] };
 function liveGeneration(rt) {
   return rt.claim?.generation ?? rt.rework_brief?.generation ?? (rt.rework_history ?? []).filter(stoodRework).length;
@@ -30618,7 +30015,7 @@ function repairEntryProblem(controlRoot, featureId, r) {
   if (receipt.kind !== "file" || receipt.sha256 !== r.receipt_sha256) return `the receipt ${r.receipt_path} of ${r.repair_id} is ${receipt.kind === "file" ? "not the one STATE.json binds" : receipt.problem}`;
   let body;
   try {
-    body = JSON.parse(readFileSync26(receipt.path, "utf8"));
+    body = JSON.parse(readFileSync25(receipt.path, "utf8"));
   } catch {
     return `the receipt of ${r.repair_id} is not JSON`;
   }
@@ -30747,8 +30144,8 @@ function archivesFor(controlRoot, featureId, state, ref) {
   for (const [i, e] of (rt.rework_history ?? []).entries()) {
     const gen = { generation: e.generation ?? i, claim_id: e.claim_id ?? e.settlement?.claim_id ?? null };
     const dirs = /* @__PURE__ */ new Set();
-    for (const s of Object.values(e.evidence ?? {})) if (s && /\/replaced\/g\d+\//.test(s.output_path.replace(/\\/g, "/"))) dirs.add(dirname14(s.output_path.replace(/\\/g, "/")));
-    if (e.tdd_history && /\/replaced\/g\d+\//.test(e.tdd_history.output_path.replace(/\\/g, "/"))) dirs.add(dirname14(e.tdd_history.output_path.replace(/\\/g, "/")));
+    for (const s of Object.values(e.evidence ?? {})) if (s && /\/replaced\/g\d+\//.test(s.output_path.replace(/\\/g, "/"))) dirs.add(dirname13(s.output_path.replace(/\\/g, "/")));
+    if (e.tdd_history && /\/replaced\/g\d+\//.test(e.tdd_history.output_path.replace(/\\/g, "/"))) dirs.add(dirname13(e.tdd_history.output_path.replace(/\\/g, "/")));
     if (gate === "tdd-history") {
       if (e.tdd_history?.output_sha256 === want) take("replaced-generation", e.tdd_history.output_path, { ...gen, commit_sha: null, module_sha256: null, plan_sha256: null, exit_code: null, gate: "tdd-history", attested_by: `rework ${i}'s judged history` });
       continue;
@@ -30798,7 +30195,7 @@ function archivesFor(controlRoot, featureId, state, ref) {
 }
 function listing(controlRoot, rel) {
   try {
-    return readdirSync13(join43(controlRoot, ...rel.split("/"))).sort();
+    return readdirSync13(join39(controlRoot, ...rel.split("/"))).sort();
   } catch {
     return [];
   }
@@ -30841,7 +30238,7 @@ function repairId(featureId, nodeId, fromPath, sha) {
   return `ER-${sha25615(`${featureId}\0${nodeId ?? ""}\0${fromPath.replace(/\\/g, "/")}\0${sha}`).slice(0, 16)}`;
 }
 function repairedDir(controlRoot, featureId, nodeId) {
-  return nodeId === null ? join43(featurePaths(controlRoot, featureId).evidenceDir, REPAIRED_DIR) : join43(nodeEvidenceDir(controlRoot, featureId, nodeId), REPAIRED_DIR);
+  return nodeId === null ? join39(featurePaths(controlRoot, featureId).evidenceDir, REPAIRED_DIR) : join39(nodeEvidenceDir(controlRoot, featureId, nodeId), REPAIRED_DIR);
 }
 function stemOf(fromPath, nodeId) {
   let name = basename9(fromPath.replace(/\\/g, "/"));
@@ -30888,13 +30285,13 @@ function setPointer(s, loc, from, sha, to) {
   }
 }
 function sealReceipt(controlRoot, featureId, plan, toPath, found, reason, provenance, options) {
-  const dir = join43(featurePaths(controlRoot, featureId).evidenceDir, RECEIPTS_DIR);
-  const file = join43(dir, `${plan.repair_id}.json`);
+  const dir = join39(featurePaths(controlRoot, featureId).evidenceDir, RECEIPTS_DIR);
+  const file = join39(dir, `${plan.repair_id}.json`);
   const rel = (relativeInside(controlRoot, file) ?? file).replace(/\\/g, "/");
   const existing = observeEvidenceOutput(controlRoot, featureId, rel);
   if (existing.kind === "file") {
     try {
-      const body2 = JSON.parse(readFileSync26(existing.path, "utf8"));
+      const body2 = JSON.parse(readFileSync25(existing.path, "utf8"));
       const { sha256: seal, ...rest } = body2;
       const from = body2["from"];
       const to = body2["to"];
@@ -30919,7 +30316,7 @@ function sealReceipt(controlRoot, featureId, plan, toPath, found, reason, proven
     at: (/* @__PURE__ */ new Date()).toISOString()
   };
   const text = JSON.stringify({ ...body, sha256: sha25615(stableStringify(body)) }, null, 2) + "\n";
-  mkdirSync18(dir, { recursive: true });
+  mkdirSync17(dir, { recursive: true });
   if (createExclusive(file, text) === "exists") return sealReceipt(controlRoot, featureId, plan, toPath, found, reason, provenance, options);
   return { path: rel, sha256: sha25615(text) };
 }
@@ -30983,7 +30380,7 @@ function repairEvidence(controlRoot, featureId, options = {}) {
       for (const r of group) unrepairable.push({ key: r.key, node_id: r.node_id, path: r.path, sha256: r.sha256, live: r.live, code: "EVIDENCE_REPAIR_NO_SOURCE", detail: src.problem });
       continue;
     }
-    const bytes2 = readFileSync26(src.path);
+    const bytes2 = readFileSync25(src.path);
     if (sha25615(bytes2) !== plan.sha256) {
       for (const r of group) unrepairable.push({ key: r.key, node_id: r.node_id, path: r.path, sha256: r.sha256, live: r.live, code: "EVIDENCE_REPAIR_NO_SOURCE", detail: `EVIDENCE_REPAIR_NO_SOURCE: ${source.path} changed while it was read` });
       continue;
@@ -31075,17 +30472,17 @@ function reapEvidenceTemps(controlRoot, featureId, now3 = Date.now()) {
       return;
     }
     for (const name of names2) {
-      const file = join43(dir, name);
+      const file = join39(dir, name);
       let st;
       try {
-        st = lstatSync15(file);
+        st = lstatSync14(file);
       } catch {
         continue;
       }
       if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) walk2(file, depth2 + 1);
       else if (st.isFile() && WRITER_TEMP.test(name) && now3 - st.mtimeMs > TEMP_GRACE_MS) {
-        rmSync13(file, { force: true });
+        rmSync12(file, { force: true });
         removed.push(file);
       }
     }
@@ -31165,45 +30562,45 @@ function runSummary(runsFile, nodeId) {
 }
 
 // src/engine/review-packet.ts
-import { existsSync as existsSync32, mkdirSync as mkdirSync19, readFileSync as readFileSync27, readdirSync as readdirSync14, writeFileSync as writeFileSync8 } from "node:fs";
-import { createHash as createHash33 } from "node:crypto";
-import { join as join44, relative as relative7 } from "node:path";
+import { existsSync as existsSync28, mkdirSync as mkdirSync18, readFileSync as readFileSync26, readdirSync as readdirSync14, writeFileSync as writeFileSync8 } from "node:fs";
+import { createHash as createHash31 } from "node:crypto";
+import { join as join40, relative as relative7 } from "node:path";
 var MAX_TESTS_PER_GATE = 400;
 var MAX_REVIEW_FINDINGS = 32;
 var MAX_DIFF_BYTES = 4 * 1024 * 1024;
 var slash6 = (p) => p.replace(/\\/g, "/");
 function reviewDir(controlRoot, featureId, reviewId) {
-  return join44(controlRoot, ".mycelink", REVIEWS_DIR, featureId, reviewId);
+  return join40(controlRoot, ".mycelink", REVIEWS_DIR, featureId, reviewId);
 }
 function checkoutOf(controlRoot, featureId, reviewId, repository) {
-  return join44(reviewDir(controlRoot, featureId, reviewId), "checkout", repository);
+  return join40(reviewDir(controlRoot, featureId, reviewId), "checkout", repository);
 }
 function removeReviewCheckouts(controlRoot, featureId, reviewId, workspace) {
-  const root = join44(reviewDir(controlRoot, featureId, reviewId), "checkout");
-  if (!existsSync32(root)) return;
+  const root = join40(reviewDir(controlRoot, featureId, reviewId), "checkout");
+  if (!existsSync28(root)) return;
   for (const name of readdirSync14(root)) {
     const repo = workspace.repositories.repositories.find((r) => r.name === name);
-    if (repo !== void 0) removeWorkerWorktree(repositoryPath(workspace, name), join44(root, name));
+    if (repo !== void 0) removeWorkerWorktree(repositoryPath(workspace, name), join40(root, name));
   }
 }
 function checkout(repoPath, at, sha) {
-  if (existsSync32(at)) {
+  if (existsSync28(at)) {
     const head = runGit(at, ["rev-parse", "HEAD"], { allowFail: true });
     if (head.exitCode === 0 && head.stdout.trim() === sha) return;
     removeWorkerWorktree(repoPath, at);
   }
-  mkdirSync19(join44(at, ".."), { recursive: true });
+  mkdirSync18(join40(at, ".."), { recursive: true });
   runGit(repoPath, ["worktree", "prune"], { allowFail: true });
   runGit(repoPath, ["worktree", "add", "--detach", at, sha]);
   runGit(at, ["config", "core.autocrlf", "false"], { allowFail: true });
 }
 function featureBase(controlRoot, featureId, workspace, repository, head) {
   const repoPath = repositoryPath(workspace, repository);
-  const deliveries = join44(controlRoot, "features", featureId, "deliveries");
-  if (existsSync32(deliveries)) {
+  const deliveries = join40(controlRoot, "features", featureId, "deliveries");
+  if (existsSync28(deliveries)) {
     const firsts = readdirSync14(deliveries).filter((f) => f.endsWith(".json")).map((f) => {
       try {
-        return JSON.parse(readFileSync27(join44(deliveries, f), "utf8"));
+        return JSON.parse(readFileSync26(join40(deliveries, f), "utf8"));
       } catch {
         return null;
       }
@@ -31220,13 +30617,13 @@ function featureBase(controlRoot, featureId, workspace, repository, head) {
 function buildReviewPacket(args) {
   const { controlRoot, featureId, workspace, graph, state } = args;
   const dir = reviewDir(controlRoot, featureId, args.reviewId);
-  mkdirSync19(args.slotDir, { recursive: true });
+  mkdirSync18(args.slotDir, { recursive: true });
   const repositories = args.inputs.repositories.map((r) => {
     const repoPath = repositoryPath(workspace, r.name);
     const at = checkoutOf(controlRoot, featureId, args.reviewId, r.name);
     checkout(repoPath, at, r.head_sha);
     const base = featureBase(controlRoot, featureId, workspace, r.name, r.head_sha);
-    const diffFile = join44(dir, `${r.name}.diff`);
+    const diffFile = join40(dir, `${r.name}.diff`);
     {
       let diff = runGit(repoPath, ["diff", "--no-color", "--no-ext-diff", `${base}..${r.head_sha}`], { allowFail: true }).stdout;
       if (Buffer.byteLength(diff, "utf8") > MAX_DIFF_BYTES) diff = `${Buffer.from(diff, "utf8").subarray(0, MAX_DIFF_BYTES).toString("utf8")}
@@ -31279,13 +30676,13 @@ function buildReviewPacket(args) {
     for (const gate of ["red", "green", "regression"]) {
       const rec = rt.evidence[gate];
       if (rec === void 0) continue;
-      other.push({ id: `gate:${n.id}:${gate}`, kind: "gate", node: n.id, gate, exit_code: rec.exit_code, commit_sha: rec.commit_sha, output_path: slash6(join44(controlRoot, rec.output_path)), output_sha256: rec.output_sha256, results_path: rec.results ? slash6(join44(controlRoot, rec.results.path)) : null });
+      other.push({ id: `gate:${n.id}:${gate}`, kind: "gate", node: n.id, gate, exit_code: rec.exit_code, commit_sha: rec.commit_sha, output_path: slash6(join40(controlRoot, rec.output_path)), output_sha256: rec.output_sha256, results_path: rec.results ? slash6(join40(controlRoot, rec.results.path)) : null });
       if (n.node_type === "verification" || gate === "regression") continue;
       for (const t of (readGateTests(controlRoot, rec) ?? []).slice(0, MAX_TESTS_PER_GATE)) addTest(t.id, t.path, t.full_name, { node: n.id, gate, status: t.status });
     }
     if (n.node_type === "verification" && rt.evidence.regression !== void 0) {
       const rec = rt.evidence.regression;
-      other.push({ id: `receipt:${n.id}`, kind: "receipt", node: n.id, output_path: slash6(join44(controlRoot, rec.output_path)), output_sha256: rec.output_sha256, criteria: (rt.criteria ?? []).map((c) => c.criterion) });
+      other.push({ id: `receipt:${n.id}`, kind: "receipt", node: n.id, output_path: slash6(join40(controlRoot, rec.output_path)), output_sha256: rec.output_sha256, criteria: (rt.criteria ?? []).map((c) => c.criterion) });
     }
     for (const c of rt.criteria ?? []) {
       const reproof = c.reproof ?? null;
@@ -31306,7 +30703,7 @@ function buildReviewPacket(args) {
         output_sha256: c.output_sha256,
         carried: c.carried === true,
         evidence_ids: ids,
-        ...reproof !== null ? { reproof: { gate_output_sha256: reproof.gate_output_sha256, files: (record?.reproof?.files ?? []).map((x) => ({ path: x.path, archived: slash6(join44(controlRoot, ...x.archived.split("/"))) })) } } : {}
+        ...reproof !== null ? { reproof: { gate_output_sha256: reproof.gate_output_sha256, files: (record?.reproof?.files ?? []).map((x) => ({ path: x.path, archived: slash6(join40(controlRoot, ...x.archived.split("/"))) })) } } : {}
       });
     }
   }
@@ -31337,10 +30734,10 @@ function buildReviewPacket(args) {
     ...args.refinement ? { refinement: args.refinement } : {},
     ...args.reviewMemory !== void 0 ? { review_memory: args.reviewMemory } : {}
   };
-  const path = join44(args.slotDir, "packet.json");
+  const path = join40(args.slotDir, "packet.json");
   const body = JSON.stringify(packet, null, 2) + "\n";
   writeFileSync8(path, body);
-  return { packet, path, sha256: createHash33("sha256").update(body).digest("hex") };
+  return { packet, path, sha256: createHash31("sha256").update(body).digest("hex") };
 }
 function verdictContext(packet, workspace) {
   const known = /* @__PURE__ */ new Map();
@@ -31649,9 +31046,9 @@ function correctionBrief(packet) {
   ];
 }
 function loadPacket(file, sha25617) {
-  if (!existsSync32(file)) return null;
-  const bytes2 = readFileSync27(file);
-  if (createHash33("sha256").update(bytes2).digest("hex") !== sha25617) return null;
+  if (!existsSync28(file)) return null;
+  const bytes2 = readFileSync26(file);
+  if (createHash31("sha256").update(bytes2).digest("hex") !== sha25617) return null;
   try {
     return JSON.parse(bytes2.toString("utf8"));
   } catch {
@@ -31663,13 +31060,13 @@ function controlRelative(controlRoot, file) {
 }
 
 // src/hooks/provider-binding.ts
-import { existsSync as existsSync35, mkdirSync as mkdirSync20, readdirSync as readdirSync18, readFileSync as readFileSync30 } from "node:fs";
-import { basename as basename12, isAbsolute as isAbsolute11, join as join48 } from "node:path";
-import { createHash as createHash34 } from "node:crypto";
+import { existsSync as existsSync31, mkdirSync as mkdirSync19, readdirSync as readdirSync18, readFileSync as readFileSync29 } from "node:fs";
+import { basename as basename12, isAbsolute as isAbsolute11, join as join44 } from "node:path";
+import { createHash as createHash32 } from "node:crypto";
 
 // src/hooks/fence.ts
-import { existsSync as existsSync34, lstatSync as lstatSync16, readFileSync as readFileSync29, readdirSync as readdirSync17, realpathSync as realpathSync5, statSync as statSync4 } from "node:fs";
-import { basename as basename11, dirname as dirname16, isAbsolute as isAbsolute10, join as join47, resolve as resolve20 } from "node:path";
+import { existsSync as existsSync30, lstatSync as lstatSync15, readFileSync as readFileSync28, readdirSync as readdirSync17, realpathSync as realpathSync4, statSync as statSync4 } from "node:fs";
+import { basename as basename11, dirname as dirname15, isAbsolute as isAbsolute10, join as join43, resolve as resolve19 } from "node:path";
 
 // src/security/shell.ts
 import { posix } from "node:path";
@@ -32479,7 +31876,7 @@ function shellWrites(command, scope, depth2 = 0) {
   const scripts = /* @__PURE__ */ new Map();
   for (const cmd2 of readShell(command)) {
     const s = { vars, home: scope.home, cwd: dir };
-    const resolve28 = (word) => {
+    const resolve27 = (word) => {
       const v = evaluate(word, s);
       let p = v.literal;
       if (p === null) {
@@ -32493,7 +31890,7 @@ function shellWrites(command, scope, depth2 = 0) {
       const at = path ?? (dir === null ? null : absolute(".", dir, scope.home));
       if (at !== null) out.writes.push({ action, path: at });
     };
-    commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, depth2);
+    commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, depth2);
     for (const a of cmd2.assigns) {
       const v = evaluate(a.value, s);
       if (v.literal !== null) vars[a.name] = v.literal;
@@ -32504,20 +31901,20 @@ function shellWrites(command, scope, depth2 = 0) {
   }
   return out;
 }
-function commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, depth2) {
+function commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, depth2) {
   const redirected = cmd2.redirects.filter((r) => WRITE_REDIRECTS.has(r.op));
-  for (const r of redirected) write2("write", resolve28(r.target));
+  for (const r of redirected) write2("write", resolve27(r.target));
   const k = commandIndex(cmd2.words);
   const words = cmd2.words.slice(k).map((w) => ({ text: wordText(w), word: w }));
   const body = cmd2.heredocs.find((h) => h.data !== false)?.body;
   if (body !== void 0) {
     for (const r of redirected) {
-      const p = resolve28(r.target);
+      const p = resolve27(r.target);
       if (p !== null) scripts.set(p, body);
     }
     if (words[0] && posix2.basename(words[0].text) === "tee") {
       for (const w of words.slice(1)) if (!w.text.startsWith("-")) {
-        const p = resolve28(w.word);
+        const p = resolve27(w.word);
         if (p !== null) scripts.set(p, body);
       }
     }
@@ -32560,7 +31957,7 @@ function commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, dep
       const scriptOptions = name === "sed" ? /* @__PURE__ */ new Set(["-e", "-f", "--expression", "--file"]) : /* @__PURE__ */ new Set(["-e", "-E"]);
       const { operands: operands2, options: options2 } = operandsOf(args, scriptOptions);
       const files2 = options2.some(([o]) => scriptOptions.has(o)) ? operands2 : operands2.slice(1);
-      for (const w of files2) write2(`${name} -i`, resolve28(w.word));
+      for (const w of files2) write2(`${name} -i`, resolve27(w.word));
       return;
     }
     if (name === "sed") return;
@@ -32569,7 +31966,7 @@ function commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, dep
     const inplace = args.findIndex((w, i) => w.text === "-i" && args[i + 1]?.text === "inplace");
     if (inplace >= 0) {
       const operands2 = args.slice(inplace + 2).filter((w) => !w.text.startsWith("-"));
-      for (const w of operands2.slice(1)) write2(`${name} -i inplace`, resolve28(w.word));
+      for (const w of operands2.slice(1)) write2(`${name} -i inplace`, resolve27(w.word));
     }
     return;
   }
@@ -32577,19 +31974,19 @@ function commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, dep
     const at = args.findIndex((w) => w.text.startsWith("-") || w.text === "(" || w.text === "!");
     const expr = at < 0 ? [] : args.slice(at);
     if (expr.some((w) => ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"].includes(w.text))) {
-      for (const w of at < 0 ? args : args.slice(0, at)) write2("find", resolve28(w.word));
+      for (const w of at < 0 ? args : args.slice(0, at)) write2("find", resolve27(w.word));
     }
     return;
   }
   if (INTERPRETERS.test(name)) {
-    interpreterWrites(name.replace(/\.exe$/, ""), args, cmd2, resolve28, write2, out, scripts, scope, dir, depth2);
+    interpreterWrites(name.replace(/\.exe$/, ""), args, cmd2, resolve27, write2, out, scripts, scope, dir, depth2);
     return;
   }
   const sourced = name === "source" || name === ".";
   if (sourced || SHELLS2.has(name) && !args.some((w) => /^-[A-Za-z]*c[A-Za-z]*$/.test(w.text))) {
     const script = sourced ? args[0] : args.find((w) => !w.text.startsWith("-"));
     if (script === void 0) return;
-    const p = resolve28(script.word);
+    const p = resolve27(script.word);
     const body2 = p === null ? null : scripts.get(p) ?? scope.readFile?.(p) ?? null;
     if (body2 === null) {
       out.writes.push({ action: `${name} ${posix2.basename(script.text)}`, path: dir === null ? "." : absolute(".", dir, scope.home), unknown: true });
@@ -32611,10 +32008,10 @@ function commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, dep
   let files = MODE_FIRST.has(name) ? operands.slice(1) : operands;
   if (name === "patch") files = files.length ? files.slice(0, 1) : [{ text: ".", word: [{ text: ".", quoted: true }] }];
   else if (DESTINATION.has(name) && !(name === "install" && options.some(([o]) => o === "-d"))) files = target ? [] : files.slice(-1);
-  for (const w of files) write2(name, resolve28(w.word));
-  if (target) write2(name, target[2] ? resolve28(target[2]) : absolute(target[1] ?? "", dir, scope.home));
+  for (const w of files) write2(name, resolve27(w.word));
+  if (target) write2(name, target[2] ? resolve27(target[2]) : absolute(target[1] ?? "", dir, scope.home));
 }
-function interpreterWrites(name, args, cmd2, resolve28, write2, out, scripts, scope, dir, depth2) {
+function interpreterWrites(name, args, cmd2, resolve27, write2, out, scripts, scope, dir, depth2) {
   const codes = [];
   const inline = /^python/.test(name) ? ["-c"] : name === "deno" ? ["eval"] : ["-e", "-E", "--eval", "-p", "--print"];
   let script = null;
@@ -32641,7 +32038,7 @@ function interpreterWrites(name, args, cmd2, resolve28, write2, out, scripts, sc
   if (stdin) for (const w of cmd2.strings) codes.push({ action: `${name} -`, code: wordText(w) });
   const here = dir === null ? "." : absolute(".", dir, scope.home);
   if (script !== null) {
-    const p = resolve28(script.word);
+    const p = resolve27(script.word);
     const body = p === null ? null : scripts.get(p) ?? scope.readFile?.(p) ?? null;
     if (body !== null) codes.push({ action: `${name} ${posix2.basename(script.text)}`, code: body });
     else out.writes.push({ action: `${name} ${posix2.basename(script.text)}`, path: here, unknown: true });
@@ -32663,17 +32060,17 @@ function interpreterWrites(name, args, cmd2, resolve28, write2, out, scripts, sc
 }
 
 // src/hooks/red-bound.ts
-import { existsSync as existsSync33, readdirSync as readdirSync15 } from "node:fs";
-import { join as join45 } from "node:path";
+import { existsSync as existsSync29, readdirSync as readdirSync15 } from "node:fs";
+import { join as join41 } from "node:path";
 var fold = (p) => process.platform === "win32" ? p.toLowerCase() : p;
 function redBoundRefusal(root, target, norm2) {
   try {
-    const features = join45(root, "features");
-    if (!existsSync33(features)) return null;
+    const features = join41(root, "features");
+    if (!existsSync29(features)) return null;
     for (const entry of readdirSync15(features, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const featureDir = join45(features, entry.name);
-      if (!existsSync33(join45(featureDir, "STATE.json"))) continue;
+      const featureDir = join41(features, entry.name);
+      if (!existsSync29(join41(featureDir, "STATE.json"))) continue;
       const state = loadState(featureDir)?.data;
       if (!state) continue;
       for (const rt of Object.values(state.nodes)) {
@@ -32700,14 +32097,14 @@ function redBoundRefusal(root, target, norm2) {
 }
 
 // src/hooks/worker-binding.ts
-import { readFileSync as readFileSync28, readdirSync as readdirSync16 } from "node:fs";
-import { basename as basename10, dirname as dirname15, isAbsolute as isAbsolute9, join as join46, resolve as resolve19 } from "node:path";
+import { readFileSync as readFileSync27, readdirSync as readdirSync16 } from "node:fs";
+import { basename as basename10, dirname as dirname14, isAbsolute as isAbsolute9, join as join42, resolve as resolve18 } from "node:path";
 var ID4 = /^[A-Za-z0-9_-]{1,128}$/;
 var DISPATCH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var WORKER_TYPES = /* @__PURE__ */ new Set(["mycelink:module-worker", "module-worker"]);
 function readJson(file) {
   try {
-    const v = JSON.parse(readFileSync28(file, "utf8"));
+    const v = JSON.parse(readFileSync27(file, "utf8"));
     return v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
   } catch {
     return null;
@@ -32725,36 +32122,36 @@ function workerBinding(call, roots) {
   const session = call.session_id ?? "";
   const transcript = call.transcript_path ?? "";
   if (!ID4.test(agent) || !ID4.test(session) || !isAbsolute9(transcript) || basename10(transcript) !== `${session}.jsonl`) return { binding: null, problem: "the call names no subagent of a session with a transcript" };
-  const meta = readJson(join46(dirname15(transcript), session, "subagents", `agent-${agent}.meta.json`));
+  const meta = readJson(join42(dirname14(transcript), session, "subagents", `agent-${agent}.meta.json`));
   if (meta === null) return { binding: null, problem: `no subagent meta for ${agent} beside the session's transcript` };
   const type = String(meta["agentType"] ?? "");
   if (!WORKER_TYPES.has(type)) return { binding: null, problem: `the subagent's meta names ${type || "no type"}, not a module-worker` };
   const launch = String(meta["toolUseId"] ?? "");
   if (!ID4.test(launch)) return { binding: null, problem: "the subagent's meta names no launching Agent call" };
   for (const root of roots) {
-    const launches = join46(root, ".mycelink", "launches");
+    const launches = join42(root, ".mycelink", "launches");
     for (const featureId of list(launches).filter(isSafeFeatureId)) {
-      for (const dispatchId of list(join46(launches, featureId)).filter((d) => DISPATCH.test(d))) {
-        const record = readJson(join46(launches, featureId, dispatchId, `launch-${launch}.json`));
+      for (const dispatchId of list(join42(launches, featureId)).filter((d) => DISPATCH.test(d))) {
+        const record = readJson(join42(launches, featureId, dispatchId, `launch-${launch}.json`));
         if (record === null) continue;
         if (record["schema"] !== WORKER_LAUNCH_SCHEMA || record["tool_use_id"] !== launch || record["session_id"] !== session || record["dispatch_id"] !== dispatchId) return { binding: null, problem: `the launch record of ${launch} is not this session's` };
         const nodeId = String(record["node_id"] ?? "");
         const claimId = String(record["claim_id"] ?? "");
-        const held2 = () => {
+        const held = () => {
           try {
-            return loadState(join46(root, "features", featureId))?.data.nodes[nodeId]?.claim ?? null;
+            return loadState(join42(root, "features", featureId))?.data.nodes[nodeId]?.claim ?? null;
           } catch {
             return null;
           }
         };
-        const claim = held2();
+        const claim = held();
         if (claim === null || claim.claim_id !== claimId || (claim.dispatch_id ?? null) !== dispatchId || claim.worktree === null) return { binding: null, problem: `the claim ${launch} was launched for is no longer held` };
         let repository = null;
         let repoPath = null;
         try {
           repository = loadGraph(root, featureId).nodes.find((n) => n.id === nodeId)?.repository ?? null;
           const decl = repository === null ? void 0 : loadRepositories(root).repositories.find((r) => r.name === repository);
-          repoPath = decl === void 0 ? null : resolve19(root, decl.path);
+          repoPath = decl === void 0 ? null : resolve18(root, decl.path);
         } catch {
           repoPath = null;
         }
@@ -32767,7 +32164,7 @@ function workerBinding(call, roots) {
             dispatch_id: dispatchId,
             capability_sha256: claim.capability_sha256 ?? null,
             launch_tool_use_id: launch,
-            worktree: resolve19(claim.worktree),
+            worktree: resolve18(claim.worktree),
             branch: workerBranchName(featureId, nodeId),
             repository,
             repo_path: repoPath,
@@ -32788,27 +32185,27 @@ var FILE_TOOLS = { Write: "file_path", Edit: "file_path", MultiEdit: "file_path"
 var HOST_ONLY = /* @__PURE__ */ new Set(["settle", "dispatch", "deliver", "controller", "orchestrate", "review"]);
 var VERDICT_FILE2 = /^(.*)\/\.mycelink\/reviews\/([A-Z][A-Z0-9]*-[0-9]+)\/(\2-R[0-9]{3,})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/verdict\.json$/;
 var fold2 = (p) => process.platform === "win32" ? p.toLowerCase() : p;
-var norm = (p) => fold2(resolve20(p)).replace(/\\/g, "/").replace(/\/+$/, "");
+var norm = (p) => fold2(resolve19(p)).replace(/\\/g, "/").replace(/\/+$/, "");
 var inside3 = (path, root) => path === root || path.startsWith(`${root}/`);
 function realish(path) {
-  let head = resolve20(path);
+  let head = resolve19(path);
   const tail2 = [];
-  while (!existsSync34(head)) {
-    const parent = dirname16(head);
+  while (!existsSync30(head)) {
+    const parent = dirname15(head);
     if (parent === head) break;
     tail2.unshift(basename11(head));
     head = parent;
   }
   let real = head;
   try {
-    real = realpathSync5.native(head);
+    real = realpathSync4.native(head);
   } catch {
   }
-  return join47(real, ...tail2);
+  return join43(real, ...tail2);
 }
 var isControlRoot = (dir) => {
   try {
-    return statSync4(join47(dir, "mycelink.config.json")).isFile();
+    return statSync4(join43(dir, "mycelink.config.json")).isFile();
   } catch {
     return false;
   }
@@ -32816,19 +32213,19 @@ var isControlRoot = (dir) => {
 function controlRoots(starts, targets) {
   const found = /* @__PURE__ */ new Set();
   const consider = (dir) => {
-    if (isControlRoot(dir)) found.add(resolve20(dir));
+    if (isControlRoot(dir)) found.add(resolve19(dir));
   };
   for (const start of starts) {
     if (!start || !isAbsolute10(start)) continue;
-    let dir = resolve20(start);
+    let dir = resolve19(start);
     for (let i = 0; i < 12; i++) {
       consider(dir);
-      const parent = dirname16(dir);
+      const parent = dirname15(dir);
       if (parent === dir) break;
       dir = parent;
     }
     try {
-      for (const e of readdirSync17(start, { withFileTypes: true })) if (e.isDirectory() && !e.name.startsWith(".")) consider(join47(start, e.name));
+      for (const e of readdirSync17(start, { withFileTypes: true })) if (e.isDirectory() && !e.name.startsWith(".")) consider(join43(start, e.name));
     } catch {
     }
   }
@@ -32841,12 +32238,12 @@ function controlRoots(starts, targets) {
 function fencedOf(root) {
   let repos = [];
   try {
-    repos = loadRepositories(root).repositories.map((r) => norm(realish(resolve20(root, r.path))));
+    repos = loadRepositories(root).repositories.map((r) => norm(realish(resolve19(root, r.path))));
   } catch {
     repos = [];
   }
   const real = realish(root);
-  return { root: norm(real), repos, worktrees: norm(join47(real, ".mycelink", "worktrees")), scratch: norm(join47(real, ".mycelink")), features: norm(join47(real, "features")) };
+  return { root: norm(real), repos, worktrees: norm(join43(real, ".mycelink", "worktrees")), scratch: norm(join43(real, ".mycelink")), features: norm(join43(real, "features")) };
 }
 var MANAGED_FEATURE = /^[^/]+\/(?:evidence|sessions|candidates|deliveries|resources|reviews)(?:\/|$)|^[^/]+\/(?:STATE\.json|events\.jsonl|RUNS\.jsonl|leases\.json|ACCEPTANCE\.json|LOOPS\.json)$/i;
 function zoneOf(path, f) {
@@ -32879,20 +32276,20 @@ function reviewerDecision(input) {
   const value = (input.tool_input ?? {})["file_path"];
   if (typeof value !== "string" || value === "") return deny("a Write names no file");
   const cwd = typeof input.cwd === "string" && input.cwd !== "" ? input.cwd : process.cwd();
-  const target = resolve20(cwd, value);
+  const target = resolve19(cwd, value);
   const real = realish(target).replace(/\\/g, "/");
   const m = VERDICT_FILE2.exec(real);
   if (m === null) return deny(`${value.replace(/\\/g, "/")} is not the verdict file of a review`);
   try {
-    if (!statSync4(dirname16(real)).isDirectory()) return deny("that review generation was never opened");
+    if (!statSync4(dirname15(real)).isDirectory()) return deny("that review generation was never opened");
   } catch {
     return deny("that review generation was never opened");
   }
   if (!isControlRoot(m[1])) return deny(`${m[1]} is not a control repository`);
-  const held2 = heldVerdict(dirname16(real));
-  if (held2 !== null && (held2.transport === "agent-result" || held2.agent_id !== String(input.agent_id ?? ""))) {
+  const held = heldVerdict(dirname15(real));
+  if (held !== null && (held.transport === "agent-result" || held.agent_id !== String(input.agent_id ?? ""))) {
     return deny(
-      held2.transport === "agent-result" ? "that generation's verdict file already holds a verdict, taken from a reviewer's final answer; your verdict is already in" : "that generation's verdict file already holds a verdict another reviewer wrote"
+      held.transport === "agent-result" ? "that generation's verdict file already holds a verdict, taken from a reviewer's final answer; your verdict is already in" : "that generation's verdict file already holds a verdict another reviewer wrote"
     );
   }
   const content = (input.tool_input ?? {})["content"];
@@ -32900,12 +32297,12 @@ function reviewerDecision(input) {
 }
 function heldVerdict(dir) {
   try {
-    if (!lstatSync16(join47(dir, "verdict.json")).isFile()) return { transport: "unknown", agent_id: "" };
+    if (!lstatSync15(join43(dir, "verdict.json")).isFile()) return { transport: "unknown", agent_id: "" };
   } catch {
     return null;
   }
   try {
-    const a = JSON.parse(readFileSync29(join47(dir, "verdict.attest.json"), "utf8"));
+    const a = JSON.parse(readFileSync28(join43(dir, "verdict.attest.json"), "utf8"));
     return { transport: typeof a.transport === "string" ? a.transport : "file", agent_id: typeof a.agent_id === "string" ? a.agent_id : "" };
   } catch {
     return { transport: "unknown", agent_id: "" };
@@ -32913,8 +32310,8 @@ function heldVerdict(dir) {
 }
 function transcriptRoots(env) {
   const home = env["HOME"] ?? env["USERPROFILE"] ?? null;
-  const configs = [env["CLAUDE_CONFIG_DIR"], home ? join47(home, ".claude") : void 0].filter((d) => typeof d === "string" && d !== "" && isAbsolute10(d));
-  return [...new Set(configs.map((d) => norm(realish(join47(d, "projects")))))];
+  const configs = [env["CLAUDE_CONFIG_DIR"], home ? join43(home, ".claude") : void 0].filter((d) => typeof d === "string" && d !== "" && isAbsolute10(d));
+  return [...new Set(configs.map((d) => norm(realish(join43(d, "projects")))))];
 }
 function isTranscript(path, roots) {
   for (const root of roots) {
@@ -32981,7 +32378,7 @@ function decide(input, env) {
   if (tool in FILE_TOOLS) {
     const value = (input.tool_input ?? {})[FILE_TOOLS[tool]];
     if (typeof value !== "string" || value === "") return { ok: true };
-    writes2.push({ action: tool, path: resolve20(cwd, value) });
+    writes2.push({ action: tool, path: resolve19(cwd, value) });
   } else if (tool === "Bash") {
     const command = String((input.tool_input ?? {})["command"] ?? "");
     const found = shellWrites(command, {
@@ -33151,22 +32548,22 @@ function recordHostBinding(call, env) {
   if (!wellFormed(call)) return [];
   const written = [];
   for (const root of controlRoots([call.cwd, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], [])) {
-    const dir = join48(root, ".mycelink", "hosts");
-    mkdirSync20(dir, { recursive: true });
-    const file = join48(dir, `${call.session_id}.json`);
+    const dir = join44(root, ".mycelink", "hosts");
+    mkdirSync19(dir, { recursive: true });
+    const file = join44(dir, `${call.session_id}.json`);
     writeTextAtomic(file, JSON.stringify({ schema: HOST_BINDING_SCHEMA, session_id: call.session_id, transcript_path: slash8(call.transcript_path), cwd: slash8(call.cwd), at: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n");
     written.push(file);
   }
   return written;
 }
 function currentHostBinding(controlRoot, now3 = Date.now()) {
-  const dir = join48(controlRoot, ".mycelink", "hosts");
-  if (!existsSync35(dir)) return null;
+  const dir = join44(controlRoot, ".mycelink", "hosts");
+  if (!existsSync31(dir)) return null;
   let best = null;
   for (const name of readdirSync18(dir)) {
     if (!/^[A-Za-z0-9_-]{1,128}\.json$/.test(name)) continue;
     try {
-      const r = JSON.parse(readFileSync30(join48(dir, name), "utf8"));
+      const r = JSON.parse(readFileSync29(join44(dir, name), "utf8"));
       if (r["schema"] !== HOST_BINDING_SCHEMA || typeof r["session_id"] !== "string" || typeof r["transcript_path"] !== "string" || typeof r["at"] !== "string") continue;
       if (`${r["session_id"]}.json` !== name || !wellFormed({ session_id: r["session_id"], transcript_path: r["transcript_path"], cwd: "" })) continue;
       const at = Date.parse(r["at"]);
@@ -33186,7 +32583,7 @@ function holderOf2(env) {
   }
 }
 function workerLaunchDir(controlRoot, featureId, dispatchId) {
-  return join48(controlRoot, ".mycelink", "launches", featureId, dispatchId);
+  return join44(controlRoot, ".mycelink", "launches", featureId, dispatchId);
 }
 function recordWorkerLaunch(call, env) {
   if (!wellFormed(call) || typeof call.tool_use_id !== "string" || !ID5.test(call.tool_use_id)) return null;
@@ -33195,36 +32592,36 @@ function recordWorkerLaunch(call, env) {
   for (const root of controlRoots([call.cwd, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], [])) {
     let features = [];
     try {
-      features = readdirSync18(join48(root, "features")).filter(isSafeFeatureId);
+      features = readdirSync18(join44(root, "features")).filter(isSafeFeatureId);
     } catch {
       continue;
     }
     for (const featureId of features) {
-      let held2;
+      let held;
       try {
-        const state = loadState(join48(root, "features", featureId))?.data;
-        held2 = Object.entries(state?.nodes ?? {}).filter(([, rt]) => rt.claim?.dispatch_id === dispatchId).map(([id, rt]) => [id, { claim_id: rt.claim.claim_id }])[0];
+        const state = loadState(join44(root, "features", featureId))?.data;
+        held = Object.entries(state?.nodes ?? {}).filter(([, rt]) => rt.claim?.dispatch_id === dispatchId).map(([id, rt]) => [id, { claim_id: rt.claim.claim_id }])[0];
       } catch {
         continue;
       }
-      if (held2 === void 0) continue;
+      if (held === void 0) continue;
       const dir = workerLaunchDir(root, featureId, dispatchId);
-      mkdirSync20(dir, { recursive: true });
-      const file = join48(dir, `launch-${call.tool_use_id}.json`);
+      mkdirSync19(dir, { recursive: true });
+      const file = join44(dir, `launch-${call.tool_use_id}.json`);
       createExclusive(
         file,
         JSON.stringify(
           {
             schema: WORKER_LAUNCH_SCHEMA,
             feature_id: featureId,
-            node_id: held2[0],
-            claim_id: held2[1].claim_id,
+            node_id: held[0],
+            claim_id: held[1].claim_id,
             dispatch_id: dispatchId,
             tool_use_id: call.tool_use_id,
             session_id: call.session_id,
             transcript_path: slash8(call.transcript_path),
             subagent_type: call.subagent_type,
-            prompt_sha256: createHash34("sha256").update(call.prompt).digest("hex"),
+            prompt_sha256: createHash32("sha256").update(call.prompt).digest("hex"),
             at: (/* @__PURE__ */ new Date()).toISOString(),
             // The host session's Claude Code process: a background worker runs inside it (engine/worker-lifecycle.ts).
             holder: holderOf2(env)
@@ -33378,7 +32775,7 @@ var REVIEW_AWAIT_SECONDS = 90;
 var REVIEW_AWAIT_MAX_SECONDS = 540;
 var REVIEW_AWAIT_POLL_MS = 2e3;
 var MAX_REVIEWER_INTERRUPTIONS = 3;
-var idHash = (id) => id === null ? null : createHash35("sha256").update(id).digest("hex");
+var idHash = (id) => id === null ? null : createHash33("sha256").update(id).digest("hex");
 function sleepSync3(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
 }
@@ -33418,7 +32815,7 @@ var NotSchedulableError = class extends Error {
 var HOST_WORKER_AGENT = "mycelink:module-worker";
 function resultInSlot(cwd, resultFile = WORKER_RESULT_FILE) {
   try {
-    return lstatSync17(join49(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync17(join49(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
+    return lstatSync16(join45(cwd, WORKER_RESULT_DIR)).isDirectory() && lstatSync16(join45(cwd, WORKER_RESULT_DIR, resultFile)).isFile();
   } catch {
     return false;
   }
@@ -33459,7 +32856,6 @@ var SettleInProgressError = class extends Error {
 function errorText(err) {
   return err instanceof Error ? err.message : String(err);
 }
-var WSL_CODEX_INTERNAL_RECONCILE = /* @__PURE__ */ Symbol("trusted WSL Codex reconciliation");
 var Orchestrator = class _Orchestrator {
   controlRoot;
   featureId;
@@ -33473,14 +32869,10 @@ var Orchestrator = class _Orchestrator {
   settleFault;
   /** The controller copy of the answer the settle in progress concluded, by node: its receipt records it (PCM-101 final). */
   concludedAnswers = /* @__PURE__ */ new Map();
-  // Experimental controller-only handoff: the host ticket's raw capability
-  // cannot be reconstructed from STATE's hash after this process exits.
-  // Never serialize this map or pass it to the Linux worker/reviewer.
-  experimentalWslCapabilities = /* @__PURE__ */ new Map();
   capsuleFault;
   preflightResult = null;
   constructor(options) {
-    this.controlRoot = resolve21(options.controlRoot);
+    this.controlRoot = resolve20(options.controlRoot);
     this.featureId = options.featureId;
     this.paths = featurePaths(this.controlRoot, options.featureId);
     this.workspace = loadWorkspace(this.controlRoot);
@@ -33496,871 +32888,6 @@ var Orchestrator = class _Orchestrator {
   adapterReady() {
     if (this.preflightResult === null) this.preflightResult = this.preflight ? this.preflight() : { ok: true };
     return this.preflightResult;
-  }
-  /**
-   * Experimental read-only claim/policy inspection for the WSL controller.
-   * This is NOT a launch, an authorization, or a lease held across the return:
-   * the complete controller must hold the state lifecycle lock through broker
-   * consumption, apply and revocation before this can become an execution path.
-   */
-  inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths) {
-    if (this.workspace.config.provider.provider !== "codex") throw new Error("WSL_CODEX_NOT_CONFIGURED");
-    this.assertGraphUnchanged();
-    const node = this.node(nodeId);
-    const inspect = () => withLock(stateLockPath(this.paths.featureDir), () => {
-      const state = this.state();
-      const claim = state.nodes[nodeId]?.claim;
-      const expires = Date.parse(claim?.expires_at ?? "");
-      if (STOPPED_FEATURE_STATES.has(state.feature_state) || typeof state.superseded_by === "string" || node.repository === null || claim?.mode !== "host" || claim.claim_id !== claimId || claim.dispatch_id !== dispatchId || claim.epoch !== currentEpoch(state) || claim.lineage !== lineageOf(state, nodeId) || claim.settling !== null || claim.provider_interrupted != null || claim.evidence_correction != null || claim.challenge_conversion != null || claim.worktree === null || !existsSync36(claim.worktree) || !/^[0-9a-f]{40}$/.test(claim.base_sha ?? "") || !Number.isFinite(expires) || expires <= Date.now() || !activeLeases(state).some((lease) => lease.node_id === nodeId && lease.claim_id === claimId && lease.dispatch_id === dispatchId)) {
-        throw new Error("WSL_CLAIM_STALE: no live generation-bound host claim");
-      }
-      const allowed = expandAllowedProposalPaths(
-        proposedPaths,
-        { allowed: node.allowed_paths, forbidden: node.forbidden_paths ?? [] }
-      );
-      return {
-        claim: claimId,
-        generation: dispatchId,
-        worktree: claim.worktree,
-        base_sha: claim.base_sha,
-        allowed_paths: allowed
-      };
-    }, { timeoutMs: 2e3, pollMs: 10, purpose: "experimental WSL claim inspection" });
-    return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, inspect, { timeoutMs: 2e3 }) : inspect();
-  }
-  /**
-   * Trusted synchronous broker/apply critical section. Claim policy is read
-   * afresh under the same mutex every opted-in STATE mutation must acquire.
-   * This does not launch Codex and is not callable by the isolated worker.
-   */
-  withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, consume) {
-    if (!codexLifecycleEnabled(this.paths.featureDir)) throw new Error("CODEX_LIFECYCLE_NOT_ENABLED");
-    return withCodexLifecycleLock(this.paths.featureDir, () => {
-      const binding = this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
-      const result = consume(binding);
-      if (result !== null && typeof result === "object" && "then" in result) {
-        throw new Error("CODEX_LIFECYCLE_ASYNC_FORBIDDEN");
-      }
-      this.inspectWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths);
-      return result;
-    });
-  }
-  /**
-   * Stage verified Git-object bytes atomically with a live host-claim check.
-   * A caller MUST re-enter the lifecycle mutex after its model turn; this
-   * staging receipt is not a broker/settlement authorization or worker lease.
-   */
-  stageExperimentalWslCodexClaimSource(nodeId, claimId, dispatchId, proposedPaths) {
-    let staged;
-    try {
-      return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-        staged = stageImmutableWslCodexSource(grant.worktree, grant.base_sha, grant.claim, grant.generation);
-        return staged;
-      });
-    } catch (error) {
-      if (staged) staged.dispose();
-      throw error;
-    }
-  }
-  /** Preflight only: no lease or authorization survives return; apply must use this inside its own critical section. */
-  assertExperimentalWslCodexApplyBase(nodeId, claimId, dispatchId, proposedPaths) {
-    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
-    });
-  }
-  /**
-   * Opt-in Windows/WSL process-readiness tracer. Not a production dispatch:
-   * command is trusted test/controller input, never a prompt or worker value.
-   * The live claim and both readiness checks are inside the lifecycle mutex.
-   */
-  startExperimentalWslCodexGeneration(nodeId, claimId, dispatchId, proposedPaths, command) {
-    let launched = false;
-    try {
-      return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-        const receipt = startExperimentalWslProcess(this.paths.featureDir, grant.claim, grant.generation, command);
-        launched = true;
-        return receipt;
-      });
-    } catch (error) {
-      if (launched) revokeWslCodexProcesses(this.paths.featureDir);
-      throw error;
-    }
-  }
-  /**
-   * Experimental broker consumption of a registered, completed Linux worker.
-   * Rechecks the live host generation under the lifecycle mutex and derives
-   * exact source hashes from Git objects. This does NOT apply or settle work.
-   */
-  sealExperimentalWslCodexWorker(nodeId, claimId, dispatchId, proposedPaths) {
-    return this.withLiveWslCodexClaim(
-      nodeId,
-      claimId,
-      dispatchId,
-      proposedPaths,
-      (grant) => sealRegisteredWslCodexWorker(this.paths.featureDir, this.controlRoot, grant)
-    );
-  }
-  /** Distinct Linux reviewer principal and root-only verdict, after worker seal. */
-  sealExperimentalWslCodexReviewer(nodeId, claimId, dispatchId, proposedPaths) {
-    return this.withLiveWslCodexClaim(
-      nodeId,
-      claimId,
-      dispatchId,
-      proposedPaths,
-      (grant) => sealRegisteredWslCodexReviewer(this.paths.featureDir, this.controlRoot, grant)
-    );
-  }
-  readExperimentalWslCodexSealedTurn(nodeId, claimId, dispatchId, proposedPaths) {
-    return this.withLiveWslCodexClaim(
-      nodeId,
-      claimId,
-      dispatchId,
-      proposedPaths,
-      (grant) => {
-        assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
-        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-        assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
-        return turn;
-      }
-    );
-  }
-  /**
-   * First, deliberately incomplete transaction phase: the controller re-reads
-   * both root-owned seals under the live claim and journals before touching the
-   * test path. No gate, implementation apply or settlement is implied. An
-   * interrupted phase is not retried blindly; reconciliation must examine it.
-   */
-  applyExperimentalWslCodexRedTest(nodeId, claimId, dispatchId, proposedPaths, testPath, interruptAfterIntent = false) {
-    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-      if (!/^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(testPath) || !grant.allowed_paths.includes(testPath) || proposedPaths.length !== 2 || grant.allowed_paths.length !== 2 || !this.node(nodeId).verification_commands.some((step) => step.command.includes(testPath)))
-        throw new Error("WSL_RED_TEST_PATH_DENIED");
-      const journalDir = join49(this.paths.featureDir, "wsl-codex-transactions");
-      const journal = join49(journalDir, createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json");
-      if (existsSync36(journal)) throw new Error("WSL_RED_JOURNAL_ALREADY_EXISTS");
-      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
-      const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-      const paths = Object.keys(turn.proposals).sort();
-      if (paths.length !== 2 || paths[0] !== [...grant.allowed_paths].sort()[0] || paths[1] !== [...grant.allowed_paths].sort()[1]) throw new Error("WSL_RED_PROPOSAL_INCOMPLETE");
-      const content = turn.proposals[testPath];
-      if (typeof content !== "string" || Buffer.byteLength(content) > 512 * 1024 || !content.trim()) throw new Error("WSL_RED_TEST_INVALID");
-      assertImmutableWslApplyBase(grant.worktree, grant.base_sha, grant.allowed_paths);
-      const prior = runGit(grant.worktree, ["show", `${grant.base_sha}:${testPath}`], { allowFail: true });
-      if (prior.exitCode !== 0 || prior.stdout === content) throw new Error("WSL_RED_TEST_UNCHANGED");
-      mkdirSync21(journalDir, { recursive: true });
-      const proposalSha256 = createHash35("sha256").update(content).digest("hex");
-      const fd = openSync12(journal, "wx");
-      try {
-        writeSync6(fd, JSON.stringify({
-          phase: "red-intent",
-          nodeId,
-          claimId,
-          dispatchId,
-          base: grant.base_sha,
-          testPath,
-          proposalSha256
-        }) + "\n");
-        fsyncSync3(fd);
-      } finally {
-        closeSync14(fd);
-      }
-      if (interruptAfterIntent) throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RED_INTENT");
-      const destination = join49(grant.worktree, ...testPath.split("/"));
-      writeTextAtomic(destination, content);
-      if (readFileSync31(destination, "utf8") !== content) throw new Error("WSL_RED_TEST_WRITE_DRIFT");
-      const status = runGit(grant.worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trimEnd();
-      if (status !== ` M ${testPath}`) throw new Error("WSL_RED_TEST_WRITE_DRIFT");
-      runGit(grant.worktree, ["add", "--", testPath]);
-      const staged = runGit(grant.worktree, ["diff", "--cached", "--name-only"]).stdout.trim();
-      if (staged !== testPath) throw new Error("WSL_RED_TEST_STAGE_DRIFT");
-      runGit(grant.worktree, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", `test: WSL Codex RED ${nodeId}`]);
-      const commit = runGit(grant.worktree, ["rev-parse", "HEAD"]).stdout.trim();
-      if (!/^[0-9a-f]{40}$/.test(commit) || runGit(grant.worktree, ["rev-parse", "HEAD^"]).stdout.trim() !== grant.base_sha || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== testPath)
-        throw new Error("WSL_RED_COMMIT_DRIFT");
-      writeTextAtomic(journal, JSON.stringify({
-        phase: "red-committed",
-        nodeId,
-        claimId,
-        dispatchId,
-        base: grant.base_sha,
-        testPath,
-        proposalSha256,
-        commit
-      }) + "\n");
-      return { phase: "red-committed", testPath, commit };
-    });
-  }
-  /** Host-owned exact RED gate; an ambiguous running journal is never replayed. */
-  runExperimentalWslCodexRedGate(nodeId, claimId, dispatchId, proposedPaths, capability, interruptAfterRunning = false) {
-    const journal = join49(
-      this.paths.featureDir,
-      "wsl-codex-transactions",
-      createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
-    );
-    let worktree = "";
-    let commit = "";
-    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-      const claim = this.state().nodes[nodeId]?.claim;
-      if (!claim?.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256))
-        throw new CapabilityError("CAPABILITY_INVALID", "RED gate requires the current host capability");
-      if (!existsSync36(journal)) throw new Error("WSL_RED_JOURNAL_MISSING");
-      const record = JSON.parse(readFileSync31(journal, "utf8"));
-      if (record["phase"] !== "red-committed" || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["testPath"] !== "string" || !grant.allowed_paths.includes(record["testPath"]) || typeof record["commit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["commit"]))
-        throw new Error("WSL_RED_JOURNAL_INVALID_OR_ALREADY_GATED");
-      worktree = grant.worktree;
-      commit = record["commit"];
-      if (runGit(worktree, ["rev-parse", "HEAD"]).stdout.trim() !== commit || runGit(worktree, ["rev-parse", "HEAD^"]).stdout.trim() !== grant.base_sha || runGit(worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim() !== "" || runGit(worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== record["testPath"] || createHash35("sha256").update(runGit(worktree, ["show", `${commit}:${record["testPath"]}`]).stdout).digest("hex") !== record["proposalSha256"])
-        throw new Error("WSL_RED_COMMIT_DRIFT");
-      writeTextAtomic(journal, JSON.stringify({ ...record, phase: "red-gate-running" }) + "\n");
-    });
-    if (interruptAfterRunning) throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RED_GATE_RUNNING");
-    const gate = this.gateCommands(nodeId, capability).find((entry) => entry.gate === "red");
-    if (!gate || gate.argv[0] !== "node") throw new Error("WSL_RED_GATE_UNDECLARED");
-    const result = spawnSync11(gate.argv[0], gate.argv.slice(1), {
-      cwd: worktree,
-      encoding: "utf8",
-      timeout: 6e4,
-      maxBuffer: 1024 * 1024,
-      windowsHide: true
-    });
-    if (result.error || result.status !== 0) throw new Error(`WSL_RED_GATE_REJECTED:${result.status ?? "spawn"}`);
-    this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-      const record = JSON.parse(readFileSync31(journal, "utf8"));
-      if (record["phase"] !== "red-gate-running" || record["commit"] !== commit || grant.worktree !== worktree || runGit(worktree, ["rev-parse", "HEAD"]).stdout.trim() !== commit || runGit(worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim() !== "")
-        throw new Error("WSL_RED_GATE_POST_DRIFT");
-      writeTextAtomic(journal, JSON.stringify({
-        ...record,
-        phase: "red-gated",
-        gate: "red",
-        exitCode: 0,
-        argvSha256: createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex")
-      }) + "\n");
-    });
-    return { phase: "red-gated", gate: "red", exitCode: 0, argv: gate.argv.slice(0, -2), commit };
-  }
-  /** Apply only the implementation from independently sealed proposal bytes after a controller RED gate. */
-  applyExperimentalWslCodexGreenImplementation(nodeId, claimId, dispatchId, proposedPaths, implementationPath, interruptAfterIntent = false) {
-    const journal = join49(
-      this.paths.featureDir,
-      "wsl-codex-transactions",
-      createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
-    );
-    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-      if (!existsSync36(journal)) throw new Error("WSL_GREEN_JOURNAL_MISSING");
-      const record = JSON.parse(readFileSync31(journal, "utf8"));
-      if (record["phase"] !== "red-gated" || record["gate"] !== "red" || record["exitCode"] !== 0 || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["commit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["commit"]) || typeof record["testPath"] !== "string" || implementationPath === record["testPath"] || !grant.allowed_paths.includes(implementationPath) || grant.allowed_paths.length !== 2)
-        throw new Error("WSL_GREEN_JOURNAL_INVALID_OR_ALREADY_APPLIED");
-      const parent = record["commit"];
-      assertImmutableWslApplyBase(grant.worktree, parent, grant.allowed_paths);
-      if (runGit(grant.worktree, ["rev-parse", `${parent}^`]).stdout.trim() !== grant.base_sha || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", parent]).stdout.trim() !== record["testPath"] || createHash35("sha256").update(runGit(grant.worktree, ["show", `${parent}:${record["testPath"]}`]).stdout).digest("hex") !== record["proposalSha256"])
-        throw new Error("WSL_GREEN_RED_COMMIT_DRIFT");
-      const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-      const content = turn.proposals[implementationPath];
-      if (typeof content !== "string" || !content.trim() || Buffer.byteLength(content) > 512 * 1024 || createHash35("sha256").update(turn.proposals[record["testPath"]] ?? "").digest("hex") !== record["proposalSha256"])
-        throw new Error("WSL_GREEN_PROPOSAL_DRIFT");
-      const prior = runGit(grant.worktree, ["show", `${grant.base_sha}:${implementationPath}`], { allowFail: true });
-      if (prior.exitCode === 0 && prior.stdout === content) throw new Error("WSL_GREEN_IMPLEMENTATION_UNCHANGED");
-      if (prior.exitCode !== 0 && existsSync36(join49(grant.worktree, ...implementationPath.split("/"))))
-        throw new Error("WSL_GREEN_IMPLEMENTATION_SOURCE_DRIFT");
-      assertImmutableWslApplyBase(grant.worktree, parent, grant.allowed_paths);
-      writeTextAtomic(journal, JSON.stringify({
-        ...record,
-        phase: "green-intent",
-        implementationPath,
-        implementationSha256: createHash35("sha256").update(content).digest("hex")
-      }) + "\n");
-      if (interruptAfterIntent) throw new Error("WSL_CODEX_INTERRUPTED_AFTER_GREEN_INTENT");
-      const destination = join49(grant.worktree, ...implementationPath.split("/"));
-      writeTextAtomic(destination, content);
-      if (readFileSync31(destination, "utf8") !== content || runGit(grant.worktree, ["status", "--porcelain", "--untracked-files=all"]).stdout.trimEnd() !== `${prior.exitCode === 0 ? " M" : "??"} ${implementationPath}`)
-        throw new Error("WSL_GREEN_WRITE_DRIFT");
-      runGit(grant.worktree, ["add", "--", implementationPath]);
-      if (runGit(grant.worktree, ["diff", "--cached", "--name-only"]).stdout.trim() !== implementationPath)
-        throw new Error("WSL_GREEN_STAGE_DRIFT");
-      runGit(grant.worktree, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", `feat: WSL Codex GREEN ${nodeId}`]);
-      const commit = runGit(grant.worktree, ["rev-parse", "HEAD"]).stdout.trim();
-      if (!/^[0-9a-f]{40}$/.test(commit) || runGit(grant.worktree, ["rev-parse", "HEAD^"]).stdout.trim() !== parent || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== implementationPath)
-        throw new Error("WSL_GREEN_COMMIT_DRIFT");
-      writeTextAtomic(journal, JSON.stringify({
-        ...record,
-        phase: "green-committed",
-        implementationPath,
-        implementationSha256: createHash35("sha256").update(content).digest("hex"),
-        greenCommit: commit
-      }) + "\n");
-      return { phase: "green-committed", implementationPath, parent, commit };
-    });
-  }
-  /** Run declared GREEN then regression, journaling each transition outside the lifecycle lock. */
-  runExperimentalWslCodexGreenGates(nodeId, claimId, dispatchId, proposedPaths, capability, interruptAfterRunning) {
-    const journal = join49(
-      this.paths.featureDir,
-      "wsl-codex-transactions",
-      createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
-    );
-    const declared = this.gateCommands(nodeId, capability);
-    const receipts = [];
-    for (const [gateName, before, running, after] of [
-      ["green", "green-committed", "green-gate-running", "green-gated"],
-      ["regression", "green-gated", "regression-gate-running", "gates-complete"]
-    ]) {
-      const gate = declared.find((entry) => entry.gate === gateName);
-      if (!gate || gate.argv[0] !== "node") throw new Error("WSL_GREEN_GATE_UNDECLARED");
-      let worktree = "";
-      let commit = "";
-      this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-        const claim = this.state().nodes[nodeId]?.claim;
-        if (!claim?.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256))
-          throw new CapabilityError("CAPABILITY_INVALID", "GREEN gate requires the current host capability");
-        if (!existsSync36(journal)) throw new Error("WSL_GREEN_JOURNAL_MISSING");
-        const record = JSON.parse(readFileSync31(journal, "utf8"));
-        if (record["phase"] !== before || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["greenCommit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["greenCommit"]) || typeof record["commit"] !== "string" || runGit(grant.worktree, ["rev-parse", `${record["greenCommit"]}^`]).stdout.trim() !== record["commit"] || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", record["greenCommit"]]).stdout.trim() !== record["implementationPath"])
-          throw new Error("WSL_GREEN_JOURNAL_INVALID_OR_ALREADY_GATED");
-        worktree = grant.worktree;
-        commit = record["greenCommit"];
-        assertImmutableWslApplyBase(worktree, commit, grant.allowed_paths);
-        if (createHash35("sha256").update(runGit(worktree, ["show", `${commit}:${record["implementationPath"]}`]).stdout).digest("hex") !== record["implementationSha256"])
-          throw new Error("WSL_GREEN_COMMIT_DRIFT");
-        writeTextAtomic(journal, JSON.stringify({ ...record, phase: running }) + "\n");
-      });
-      if (interruptAfterRunning === gateName)
-        throw new Error(`WSL_CODEX_INTERRUPTED_AFTER_${gateName.toUpperCase()}_GATE_RUNNING`);
-      const result = spawnSync11(gate.argv[0], gate.argv.slice(1), {
-        cwd: worktree,
-        encoding: "utf8",
-        timeout: 6e4,
-        maxBuffer: 1024 * 1024,
-        windowsHide: true
-      });
-      if (result.error || result.status !== 0) throw new Error(`WSL_${gateName.toUpperCase()}_GATE_REJECTED:${result.status ?? "spawn"}`);
-      this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-        const record = JSON.parse(readFileSync31(journal, "utf8"));
-        if (record["phase"] !== running || record["greenCommit"] !== commit || grant.worktree !== worktree)
-          throw new Error("WSL_GREEN_GATE_POST_DRIFT");
-        assertImmutableWslApplyBase(worktree, commit, grant.allowed_paths);
-        writeTextAtomic(journal, JSON.stringify({
-          ...record,
-          phase: after,
-          [`${gateName}Gate`]: { exitCode: 0, argvSha256: createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex") }
-        }) + "\n");
-      });
-      receipts.push({ gate: gateName, exitCode: 0, argv: gate.argv.slice(0, -2), commit });
-    }
-    return receipts;
-  }
-  /**
-   * Revalidate a completed experimental gate chain under the live claim.
-   * This is evidence for a later controller settlement, never permission to
-   * settle: an interrupted/running journal or a changed Git tree is denied.
-   */
-  verifyExperimentalWslCodexCompletedGates(nodeId, claimId, dispatchId, proposedPaths, capability) {
-    return this.withLiveWslCodexClaim(nodeId, claimId, dispatchId, proposedPaths, (grant) => {
-      const claim = this.state().nodes[nodeId]?.claim;
-      if (!claim?.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256))
-        throw new CapabilityError("CAPABILITY_INVALID", "completed gate evidence requires the current host capability");
-      const journal = join49(
-        this.paths.featureDir,
-        "wsl-codex-transactions",
-        createHash35("sha256").update(`${nodeId}\0${claimId}\0${dispatchId}`).digest("hex") + ".json"
-      );
-      if (!existsSync36(journal)) throw new Error("WSL_GATE_JOURNAL_MISSING");
-      const record = JSON.parse(readFileSync31(journal, "utf8"));
-      if (record["phase"] !== "gates-complete" || record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== dispatchId || record["base"] !== grant.base_sha || typeof record["testPath"] !== "string" || typeof record["implementationPath"] !== "string" || record["testPath"] === record["implementationPath"] || !grant.allowed_paths.includes(record["testPath"]) || !grant.allowed_paths.includes(record["implementationPath"]) || grant.allowed_paths.length !== 2 || typeof record["commit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["commit"]) || typeof record["greenCommit"] !== "string" || !/^[0-9a-f]{40}$/.test(record["greenCommit"]))
-        throw new Error("WSL_GATE_JOURNAL_INVALID");
-      const redCommit = record["commit"];
-      const commit = record["greenCommit"];
-      assertImmutableWslApplyBase(grant.worktree, commit, grant.allowed_paths);
-      if (runGit(grant.worktree, ["rev-parse", `${redCommit}^`]).stdout.trim() !== grant.base_sha || runGit(grant.worktree, ["rev-parse", `${commit}^`]).stdout.trim() !== redCommit || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", redCommit]).stdout.trim() !== record["testPath"] || runGit(grant.worktree, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]).stdout.trim() !== record["implementationPath"])
-        throw new Error("WSL_GATE_COMMIT_DRIFT");
-      const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-      for (const [path, digest] of [
-        [record["testPath"], record["proposalSha256"]],
-        [record["implementationPath"], record["implementationSha256"]]
-      ]) {
-        if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest) || createHash35("sha256").update(turn.proposals[path] ?? "").digest("hex") !== digest || createHash35("sha256").update(runGit(grant.worktree, ["show", `${commit}:${path}`]).stdout).digest("hex") !== digest)
-          throw new Error("WSL_GATE_PROPOSAL_DRIFT");
-      }
-      const gates = this.gateCommands(nodeId, capability).filter((g) => g.gate === "red" || g.gate === "green" || g.gate === "regression");
-      if (gates.map((g) => g.gate).join(",") !== "red,green,regression")
-        throw new Error("WSL_GATE_UNDECLARED");
-      const evidence = this.state().nodes[nodeId]?.evidence;
-      for (const gate of gates) {
-        const receipt = gate.gate === "red" ? record : record[`${gate.gate}Gate`];
-        if (!receipt || receipt["exitCode"] !== 0 || receipt["argvSha256"] !== createHash35("sha256").update(JSON.stringify(gate.argv)).digest("hex") || gate.argv.at(-2) !== "--capability" || gate.argv.at(-1) !== capability)
-          throw new Error("WSL_GATE_JOURNAL_INVALID");
-        const proof = evidence?.[gate.gate];
-        const expectedCommit = gate.gate === "red" ? redCommit : commit;
-        if (!proof || proof.kind !== gate.gate || proof.node_id !== nodeId || typeof proof.cwd !== "string" || join49(this.controlRoot, proof.cwd) !== grant.worktree || proof.commit_sha !== expectedCommit || !Array.isArray(proof.command) || proof.command.join("\0") !== this.node(nodeId).verification_commands[0]?.command.join("\0") || typeof proof.output_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(proof.output_sha256) || (gate.gate === "red" ? proof.exit_code === 0 || proof.red_reason !== "behaviour-missing" : proof.exit_code !== 0) || typeof proof.output_path !== "string" || !/^[\w./-]+$/.test(proof.output_path) || proof.output_path.split("/").includes("..") || !existsSync36(join49(this.controlRoot, proof.output_path)) || createHash35("sha256").update(readFileSync31(join49(this.controlRoot, proof.output_path))).digest("hex") !== proof.output_sha256)
-          throw new Error("WSL_GATE_EVIDENCE_INVALID");
-      }
-      return { redCommit, commit, gates: gates.map((gate) => ({
-        gate: gate.gate,
-        exitCode: 0,
-        argv: gate.argv.slice(0, -2)
-      })) };
-    });
-  }
-  /**
-   * Opt-in trusted host transaction. The controller owns launch, both seals,
-   * Git changes and verifier argv; nothing from the worker can authorize them.
-   * Until terminal result construction is independently verified, never
-   * manufacture a DONE receipt or let the normal dispatch call this path.
-   */
-  async runExperimentalWslCodexTransaction(request, internal) {
-    if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1" || process.env["MYCELINK_LIVE_WSL_CODEX_AUTH"] !== "1")
-      throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-    const { nodeId, claimId, generation, allowedPaths } = request;
-    if (request.refusalFixture && !["hook-exit-nonzero", "broker-denied", "unsealed-transport"].includes(request.refusalFixture))
-      throw new Error("WSL_CODEX_UNKNOWN_REFUSAL_FIXTURE");
-    if (allowedPaths.length !== 2 || !allowedPaths.includes("tests/run.mjs") || !allowedPaths.includes("src/publish.js")) throw new Error("WSL_CODEX_TRANSACTION_PATH_DENIED");
-    const capability = this.experimentalWslCapabilities.get(`${nodeId}\0${claimId}\0${generation}`);
-    if (!capability) throw new Error("WSL_CODEX_CAPABILITY_UNAVAILABLE");
-    const escrowScope = `${this.featureId}\0${nodeId}\0${claimId}\0${generation}`;
-    const escrowFile = join49(
-      this.paths.featureDir,
-      "wsl-codex-transactions",
-      createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".cap"
-    );
-    const resuming = internal === WSL_CODEX_INTERNAL_RECONCILE;
-    if (!resuming) {
-      this.assertExperimentalWslCodexApplyBase(nodeId, claimId, generation, allowedPaths);
-      this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
-        if (existsSync36(escrowFile)) throw new Error("WSL_CODEX_ESCROW_ALREADY_ISSUED");
-        writeTextAtomic(escrowFile, protectExperimentalWslCapability(capability, escrowScope) + "\n");
-      });
-    }
-    const stage = resuming ? null : this.stageExperimentalWslCodexClaimSource(nodeId, claimId, generation, allowedPaths);
-    try {
-      let workerSealHash;
-      let reviewerSealHash;
-      if (!resuming) {
-        if (request.isolationProbe === "mcp" && !stage?.hashes["mcp.py"])
-          throw new Error("WSL_CODEX_MCP_FIXTURE_NOT_IN_IMMUTABLE_SOURCE");
-        const script = join49(packageRoot(), "scripts", "wsl-codex-turn.py");
-        const translated = spawnSync11(
-          "wsl.exe",
-          [
-            "-d",
-            "Ubuntu",
-            "-u",
-            "root",
-            "--",
-            "wslpath",
-            "-u",
-            script.replace(/\\/g, "/")
-          ],
-          { encoding: "utf8", timeout: 1e4, windowsHide: true }
-        );
-        if (translated.status !== 0 || !translated.stdout?.trim().startsWith("/mnt/"))
-          throw new Error("WSL_CODEX_TURN_SCRIPT_UNAVAILABLE");
-        const probePrompt = request.isolationProbe === "mcp" ? "First call the configured probe MCP inspect_fixture tool exactly once with empty arguments. " : request.isolationProbe === "builtin" ? "First use the built-in shell to run ls /mnt/c/Windows exactly once, then continue despite the denied path. " : "";
-        const modelPrompt = probePrompt + "Return only a JSON object keyed by the two exact paths tests/run.mjs and src/publish.js. The test file must be a valid node:test file that fails before the implementation exists; preserve the existing declared test behavior. No markdown. Task: " + request.prompt;
-        this.startExperimentalWslCodexGeneration(
-          nodeId,
-          claimId,
-          generation,
-          allowedPaths,
-          [
-            "/usr/bin/python3",
-            translated.stdout.trim(),
-            "--source",
-            stage.source,
-            "--manifest",
-            stage.manifest,
-            "--claim",
-            claimId,
-            "--generation",
-            generation,
-            "--proposal-path",
-            "tests/run.mjs",
-            "--proposal-path",
-            "src/publish.js",
-            ...request.isolationProbe ? ["--isolation-probe", request.isolationProbe] : [],
-            "--review-prompt",
-            'Independently review the proposed files as a separate read-only reviewer. Return only this JSON object: {"verdict":"PASS"}.',
-            "--prompt",
-            modelPrompt
-          ]
-        );
-        let outcome;
-        for (let i = 0; i < 160 && !outcome; i++) {
-          try {
-            outcome = wslCodexProcessResult(this.paths.featureDir, claimId, generation);
-          } catch {
-            await new Promise((resolve28) => setTimeout(resolve28, 750));
-          }
-        }
-        if (!outcome || outcome.exit_code !== 0 || outcome.revoked)
-          throw new Error("WSL_CODEX_GENERATION_FAILED_OR_REVOKED");
-        await request.onPhase?.("model-complete");
-        if (request.refusalFixture) {
-          const fixture = request.refusalFixture;
-          try {
-            this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
-              if (fixture === "unsealed-transport")
-                return readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-              if (fixture === "broker-denied")
-                return sealRegisteredWslCodexWorker(
-                  this.paths.featureDir,
-                  this.controlRoot,
-                  { ...grant, allowed_paths: ["tests/run.mjs"] }
-                );
-              return sealRegisteredWslCodexWorker(
-                this.paths.featureDir,
-                join49(dirname17(this.controlRoot), "missing-hook-workspace"),
-                grant
-              );
-            });
-          } catch (error) {
-            if (!String(error).includes("WSL_CODEX_BROKER_DENIED")) throw error;
-            throw new Error(fixture === "hook-exit-nonzero" ? "WSL_CODEX_HOOK_DENIED" : fixture === "broker-denied" ? "WSL_CODEX_BROKER_DENIED" : "WSL_CODEX_UNSEALED_TRANSPORT_DENIED");
-          }
-          throw new Error("WSL_CODEX_REFUSAL_FIXTURE_UNEXPECTED_ALLOW");
-        }
-        const workerSeal = this.sealExperimentalWslCodexWorker(nodeId, claimId, generation, allowedPaths);
-        const reviewerSeal = this.sealExperimentalWslCodexReviewer(nodeId, claimId, generation, allowedPaths);
-        workerSealHash = workerSeal.submission_sha256;
-        reviewerSealHash = reviewerSeal.submission_sha256;
-        const turn = this.readExperimentalWslCodexSealedTurn(nodeId, claimId, generation, allowedPaths);
-        if (turn.worker.events.filter((event) => event === "turn.completed").length !== 1)
-          throw new Error("WSL_CODEX_MODEL_TRANSCRIPT_INVALID");
-        if (request.isolationProbe) {
-          const items2 = turn.worker.transcript.flatMap((entry) => {
-            if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-            const message = entry;
-            return message["type"] === "item.completed" && message["item"] && typeof message["item"] === "object" && !Array.isArray(message["item"]) ? [message["item"]] : [];
-          });
-          const invoked = request.isolationProbe === "mcp" ? items2.some((item) => item["type"] === "mcp_tool_call" && item["server"] === "probe" && item["tool"] === "inspect_fixture") : items2.some((item) => item["type"] === "command_execution" && typeof item["command"] === "string" && item["command"].includes("/mnt/c/Windows") && typeof item["exit_code"] === "number" && item["exit_code"] !== 0);
-          if (!invoked) throw new Error("WSL_CODEX_MODEL_TOOL_CALL_NOT_OBSERVED");
-          if (turn.isolation?.hostMountDenied !== true || turn.isolation.directEgressDenied !== true || turn.isolation.otherRoleSlotDenied !== true)
-            throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
-        }
-        this.applyExperimentalWslCodexRedTest(
-          nodeId,
-          claimId,
-          generation,
-          allowedPaths,
-          "tests/run.mjs",
-          request.interruptAfter === "red-intent"
-        );
-        this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
-          const journal = join49(
-            this.paths.featureDir,
-            "wsl-codex-transactions",
-            createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
-          );
-          const record = JSON.parse(readFileSync31(journal, "utf8"));
-          if (record["phase"] !== "red-committed" || record["claimId"] !== claimId || record["dispatchId"] !== generation)
-            throw new Error("WSL_CODEX_RED_JOURNAL_INVALID");
-          writeTextAtomic(journal, JSON.stringify({ ...record, workerSealHash, reviewerSealHash }) + "\n");
-        });
-        if (request.interruptAfter === "first-apply") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_FIRST_APPLY");
-      } else {
-        const seals = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
-          const journal = join49(
-            this.paths.featureDir,
-            "wsl-codex-transactions",
-            createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
-          );
-          const record = JSON.parse(readFileSync31(journal, "utf8"));
-          if (record["phase"] !== "red-committed" || record["base"] !== grant.base_sha || typeof record["workerSealHash"] !== "string" || !/^[a-f0-9]{64}$/.test(record["workerSealHash"]) || typeof record["reviewerSealHash"] !== "string" || !/^[a-f0-9]{64}$/.test(record["reviewerSealHash"]))
-            throw new Error("WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE");
-          const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-          if (record["workerSealHash"] !== turn.seals.worker || record["reviewerSealHash"] !== turn.seals.reviewer)
-            throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-          return { worker: record["workerSealHash"], reviewer: record["reviewerSealHash"] };
-        });
-        workerSealHash = seals.worker;
-        reviewerSealHash = seals.reviewer;
-      }
-      this.runExperimentalWslCodexRedGate(
-        nodeId,
-        claimId,
-        generation,
-        allowedPaths,
-        capability,
-        request.interruptAfter === "red-gate-running"
-      );
-      this.applyExperimentalWslCodexGreenImplementation(
-        nodeId,
-        claimId,
-        generation,
-        allowedPaths,
-        "src/publish.js",
-        request.interruptAfter === "green-intent"
-      );
-      this.runExperimentalWslCodexGreenGates(
-        nodeId,
-        claimId,
-        generation,
-        allowedPaths,
-        capability,
-        request.interruptAfter === "green-gate-running" ? "green" : request.interruptAfter === "regression-gate-running" ? "regression" : void 0
-      );
-      const completed = this.verifyExperimentalWslCodexCompletedGates(nodeId, claimId, generation, allowedPaths, capability);
-      if (request.interruptAfter === "gates-complete") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_GATES_COMPLETE");
-      const verified = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, (grant) => {
-        const current = this.state().nodes[nodeId];
-        const red = current?.evidence.red;
-        const green = current?.evidence.green;
-        const regression = current?.evidence.regression;
-        const failed = (readGateTests(this.controlRoot, red) ?? []).filter((test) => test.status === "failed");
-        const passed = (readGateTests(this.controlRoot, green) ?? []).filter((test) => test.status === "passed");
-        const replayed = (readGateTests(this.controlRoot, regression) ?? []).filter((test) => test.status === "passed");
-        if (!red || !green || !regression || failed.length === 0 || failed.some((test) => !passed.some((g) => g.id === test.id) || !replayed.some((g) => g.id === test.id)))
-          throw new Error("WSL_CODEX_CRITERION_RESULTS_UNAVAILABLE");
-        const criteria = this.node(nodeId).acceptance_criteria ?? [];
-        if (criteria.length !== 1 || failed.length !== 1)
-          throw new Error("WSL_CODEX_CRITERION_AMBIGUOUS");
-        const sealed = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-        const toolItems = sealed.worker.transcript.flatMap((event) => {
-          if (!event || typeof event !== "object" || Array.isArray(event)) return [];
-          const entry = event;
-          return entry["type"] === "item.completed" && entry["item"] && typeof entry["item"] === "object" && !Array.isArray(entry["item"]) ? [entry["item"]] : [];
-        });
-        const mcpCalls = toolItems.filter((item) => item["type"] === "mcp_tool_call" && item["server"] === "probe" && item["tool"] === "inspect_fixture").length;
-        const builtinCalls = toolItems.filter((item) => item["type"] === "command_execution" && typeof item["command"] === "string" && item["command"].includes("/mnt/c/Windows") && typeof item["exit_code"] === "number" && item["exit_code"] !== 0).length;
-        if (request.isolationProbe && (!sealed.isolation || (request.isolationProbe === "mcp" ? mcpCalls : builtinCalls) < 1))
-          throw new Error("WSL_CODEX_ISOLATION_EVIDENCE_UNAVAILABLE");
-        const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
-        for (const transcript of [
-          sealed.worker.transcript,
-          sealed.reviewer.transcript
-        ]) {
-          if (!Array.isArray(transcript)) throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
-          const events = transcript.filter((entry) => !!entry && typeof entry === "object" && !Array.isArray(entry));
-          const turns = events.filter((entry) => entry["type"] === "turn.completed");
-          if (turns.length !== 1) throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
-          const counts = turns[0]["usage"];
-          if (!counts || !Number.isSafeInteger(counts["input_tokens"]) || !Number.isSafeInteger(counts["output_tokens"]) || counts["input_tokens"] <= 0 || counts["output_tokens"] <= 0)
-            throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
-          usage.input_tokens += counts["input_tokens"];
-          usage.output_tokens += counts["output_tokens"];
-          usage.model_turns++;
-        }
-        if (!Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens))
-          throw new Error("WSL_CODEX_USAGE_UNAVAILABLE");
-        const claim = current?.claim;
-        if (!claim || claim.claim_id !== claimId || claim.dispatch_id !== generation || claim.worktree !== grant.worktree || claim.base_sha !== grant.base_sha)
-          throw new Error("WSL_CLAIM_STALE");
-        const result = {
-          schema_version: 1,
-          node_id: nodeId,
-          claim_id: claimId,
-          dispatch_id: generation,
-          outcome: "SUBMITTED",
-          commands: completed.gates.map((gate) => ({ command: gate.argv, exit_code: gate.exitCode })),
-          commit_sha: completed.commit,
-          branch: runGit(grant.worktree, ["branch", "--show-current"]).stdout.trim(),
-          changed_paths: [...allowedPaths],
-          evidence_paths: [],
-          failure_fingerprint: null,
-          decision_request: null,
-          usage,
-          tdd: {
-            base_sha: grant.base_sha,
-            head_sha: completed.commit,
-            cycles: [{ red_commits: [completed.redCommit], green_commits: [completed.commit] }]
-          },
-          criterion_evidence: [{
-            criterion: criteria[0],
-            test_id: failed[0].id,
-            gate: "red",
-            output_sha256: red.output_sha256
-          }]
-        };
-        const slot = join49(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
-        if (resultInSlot(grant.worktree, claim.result_file ?? WORKER_RESULT_FILE))
-          throw new Error("WSL_CODEX_RESULT_SLOT_OCCUPIED");
-        const journal = join49(
-          this.paths.featureDir,
-          "wsl-codex-transactions",
-          createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
-        );
-        const prior2 = JSON.parse(readFileSync31(journal, "utf8"));
-        if (prior2["phase"] !== "gates-complete" || prior2["greenCommit"] !== completed.commit)
-          throw new Error("WSL_CODEX_RESULT_JOURNAL_INVALID");
-        const bytes2 = JSON.stringify(result) + "\n";
-        const resultSha256 = createHash35("sha256").update(bytes2).digest("hex");
-        const sourceSha256 = immutableGitSource(grant.worktree, grant.base_sha).hashes;
-        const apiAudit = readRegisteredWslCodexApiAudit(this.paths.featureDir, claimId, generation);
-        const receipt = {
-          claim: claimId,
-          generation,
-          workerSeal: workerSealHash,
-          reviewerSeal: reviewerSealHash,
-          sourceSha256,
-          model: {
-            platform: "linux",
-            apiRequests: apiAudit.worker.apiRequests + apiAudit.reviewer.apiRequests,
-            apiAudit,
-            mcpCalls,
-            builtinCalls
-          },
-          ...sealed.isolation ? { isolation: sealed.isolation } : {},
-          gates: completed.gates
-        };
-        const receiptSha256 = createHash35("sha256").update(JSON.stringify(receipt)).digest("hex");
-        writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-intent", resultSha256, receipt, receiptSha256 }) + "\n");
-        if (request.interruptAfter === "result-intent") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RESULT_INTENT");
-        writeTextAtomic(slot, bytes2);
-        writeTextAtomic(journal, JSON.stringify({ ...prior2, phase: "result-written", resultSha256, receipt, receiptSha256 }) + "\n");
-        wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation, { receiptSha256, resultSha256 });
-        return { receipt, resultSha256, journal };
-      });
-      if (request.interruptAfter === "result-written") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_RESULT_WRITTEN");
-      const settled = this.settle(nodeId, capability);
-      if (settled.outcome !== "DONE" || this.state().nodes[nodeId]?.state !== "DONE")
-        throw new Error(`WSL_CODEX_SETTLEMENT_REFUSED:${settled.outcome}`);
-      if (request.interruptAfter === "post-settle") throw new Error("WSL_CODEX_INTERRUPTED_AFTER_SETTLEMENT");
-      const prior = JSON.parse(readFileSync31(verified.journal, "utf8"));
-      if (prior["phase"] !== "result-written" || prior["resultSha256"] !== verified.resultSha256)
-        throw new Error("WSL_CODEX_RESULT_JOURNAL_INVALID");
-      writeTextAtomic(verified.journal, JSON.stringify({ ...prior, phase: "settled" }) + "\n");
-      rmSync14(escrowFile, { force: true });
-      return {
-        ...verified.receipt,
-        settlement: {
-          outcome: settled.outcome,
-          idempotent: settled.idempotent,
-          usageSessions: this.state().nodes[nodeId]?.usage.sessions ?? 0
-        }
-      };
-    } finally {
-      stage?.dispose();
-      this.experimentalWslCapabilities.delete(`${nodeId}\0${claimId}\0${generation}`);
-    }
-  }
-  /** Resume only a controller-journaled result whose exact slot is still bound.
-   * Earlier intent/gate phases are ambiguous without a durable capability
-   * escrow and are deliberately NOT replayed by this recovery path. */
-  async reconcileExperimentalWslCodexTransaction(nodeId, claimId, generation) {
-    if (process.platform !== "win32" || process.env["MYCELINK_LIVE_WSL_WORKER"] !== "1" || process.env["MYCELINK_LIVE_WSL_CODEX_AUTH"] !== "1")
-      throw new Error("WSL_CODEX_EXPERIMENT_NOT_ENABLED");
-    const journal = join49(
-      this.paths.featureDir,
-      "wsl-codex-transactions",
-      createHash35("sha256").update(`${nodeId}\0${claimId}\0${generation}`).digest("hex") + ".json"
-    );
-    if (!existsSync36(journal) || lstatSync17(journal).isSymbolicLink()) {
-      const state = this.state();
-      const claim = state.nodes[nodeId]?.claim;
-      if (STOPPED_FEATURE_STATES.has(state.feature_state) || claim?.claim_id !== claimId || claim?.dispatch_id !== generation || claim.provider_interrupted != null)
-        throw new Error("WSL_CLAIM_STALE_OR_REVOKED");
-      throw new Error("WSL_CODEX_RECONCILE_JOURNAL_MISSING");
-    }
-    const record = JSON.parse(readFileSync31(journal, "utf8"));
-    if (record["nodeId"] !== nodeId || record["claimId"] !== claimId || record["dispatchId"] !== generation)
-      throw new Error("WSL_CODEX_RECONCILE_JOURNAL_INVALID");
-    if (record["phase"] === "red-committed") {
-      const allowedPaths = ["tests/run.mjs", "src/publish.js"];
-      const capability = this.withLiveWslCodexClaim(nodeId, claimId, generation, allowedPaths, () => {
-        const escrow = journal.slice(0, -".json".length) + ".cap";
-        if (!existsSync36(escrow) || !lstatSync17(escrow).isFile() || lstatSync17(escrow).isSymbolicLink())
-          throw new Error("WSL_CODEX_ESCROW_UNAVAILABLE");
-        const raw = unprotectExperimentalWslCapability(
-          readFileSync31(escrow, "utf8").trim(),
-          `${this.featureId}\0${nodeId}\0${claimId}\0${generation}`
-        );
-        const claim = this.state().nodes[nodeId]?.claim;
-        if (!claim?.capability_sha256 || !capabilityMatches(raw, claim.capability_sha256))
-          throw new Error("WSL_CODEX_ESCROW_CAPABILITY_INVALID");
-        return raw;
-      });
-      this.experimentalWslCapabilities.set(`${nodeId}\0${claimId}\0${generation}`, capability);
-      return this.runExperimentalWslCodexTransaction({
-        nodeId,
-        claimId,
-        generation,
-        allowedPaths,
-        prompt: ""
-      }, WSL_CODEX_INTERNAL_RECONCILE);
-    }
-    if (typeof record["resultSha256"] !== "string" || !/^[a-f0-9]{64}$/.test(record["resultSha256"]))
-      throw new Error("WSL_CODEX_RECONCILE_JOURNAL_INVALID");
-    const receipt = record["receipt"];
-    const declaredGates = this.gateCommands(nodeId, "redacted-reconcile-only").filter((gate) => gate.gate === "red" || gate.gate === "green" || gate.gate === "regression").map((gate) => ({ gate: gate.gate, exitCode: 0, argv: gate.argv.slice(0, -2) }));
-    if (!receipt || receipt["claim"] !== claimId || receipt["generation"] !== generation || typeof receipt["workerSeal"] !== "string" || typeof receipt["reviewerSeal"] !== "string" || !Array.isArray(receipt["gates"]) || JSON.stringify(receipt["gates"]) !== JSON.stringify(declaredGates) || record["receiptSha256"] !== createHash35("sha256").update(JSON.stringify(receipt)).digest("hex"))
-      throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-    const model = receipt["model"];
-    const apiAudit = readRegisteredWslCodexApiAudit(this.paths.featureDir, claimId, generation);
-    if (!model || JSON.stringify(model["apiAudit"]) !== JSON.stringify(apiAudit) || model["apiRequests"] !== apiAudit.worker.apiRequests + apiAudit.reviewer.apiRequests)
-      throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-    const anchor = wslCodexSettlementAnchor(this.paths.featureDir, claimId, generation);
-    if (anchor.receiptSha256 !== record["receiptSha256"] || anchor.resultSha256 !== record["resultSha256"])
-      throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-    const runtime = this.state().nodes[nodeId];
-    const done2 = runtime?.state === "DONE";
-    if (done2) {
-      const settled2 = runtime.last_settlement;
-      if (runtime.claim !== null || runtime.usage.sessions !== 1 || settled2?.outcome !== "DONE" || settled2.claim_id !== claimId || settled2.dispatch_id !== generation || typeof settled2.result_file !== "string" || typeof settled2.result_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(settled2.result_sha256) || sha256OfFile(join49(this.sessionDir(nodeId), settled2.result_file)) !== settled2.result_sha256)
-        throw new Error("WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT");
-    }
-    if (record["phase"] === "result-written" && !done2) {
-      const liveClaim = this.state().nodes[nodeId]?.claim;
-      if (!liveClaim || liveClaim.claim_id !== claimId || liveClaim.dispatch_id !== generation || !liveClaim.worktree || typeof record["base"] !== "string" || JSON.stringify(receipt?.["sourceSha256"]) !== JSON.stringify(immutableGitSource(liveClaim.worktree, record["base"]).hashes))
-        throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-      this.withLiveWslCodexClaim(nodeId, claimId, generation, ["tests/run.mjs", "src/publish.js"], (grant) => {
-        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-        if (receipt["workerSeal"] !== turn.seals.worker || receipt["reviewerSeal"] !== turn.seals.reviewer || record["workerSealHash"] !== turn.seals.worker || record["reviewerSealHash"] !== turn.seals.reviewer)
-          throw new Error("WSL_CODEX_RECONCILE_RECEIPT_INVALID");
-      });
-    }
-    if (record["phase"] === "settled" || record["phase"] === "result-written" && done2) {
-      if (!done2)
-        throw new Error("WSL_CODEX_RECONCILE_SETTLEMENT_DRIFT");
-      if (record["phase"] === "result-written")
-        writeTextAtomic(journal, JSON.stringify({ ...record, phase: "settled" }) + "\n");
-      rmSync14(journal.slice(0, -".json".length) + ".cap", { force: true });
-      return { ...receipt, settlement: { outcome: "DONE", idempotent: true, usageSessions: 1 } };
-    }
-    if (record["phase"] !== "result-written") throw new Error("WSL_CODEX_RECONCILE_AMBIGUOUS_PHASE");
-    this.withLiveWslCodexClaim(nodeId, claimId, generation, ["tests/run.mjs", "src/publish.js"], (grant) => {
-      this.assertExperimentalWslStopped(nodeId);
-      const claim = this.state().nodes[nodeId]?.claim;
-      if (!claim || claim.claim_id !== claimId || claim.dispatch_id !== generation || claim.worktree !== grant.worktree)
-        throw new Error("WSL_CLAIM_STALE");
-      if (!claim.result_captured_sha256) {
-        const slot = join49(grant.worktree, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
-        if (!lstatSync17(slot).isFile() || lstatSync17(slot).isSymbolicLink() || createHash35("sha256").update(readFileSync31(slot)).digest("hex") !== record["resultSha256"])
-          throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-        let result;
-        try {
-          result = JSON.parse(readFileSync31(slot, "utf8"));
-        } catch {
-          throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-        }
-        const turn = readRegisteredWslCodexTurn(this.paths.featureDir, this.controlRoot, grant);
-        const usage = { input_tokens: 0, output_tokens: 0, model_turns: 0 };
-        for (const transcript of [turn.worker.transcript, turn.reviewer.transcript]) {
-          if (!Array.isArray(transcript)) throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-          const completed = transcript.filter((event) => !!event && typeof event === "object" && !Array.isArray(event) && event["type"] === "turn.completed");
-          if (completed.length !== 1) throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-          const counts = completed[0]["usage"];
-          if (!counts || !Number.isSafeInteger(counts["input_tokens"]) || !Number.isSafeInteger(counts["output_tokens"]) || counts["input_tokens"] <= 0 || counts["output_tokens"] <= 0)
-            throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-          usage.input_tokens += counts["input_tokens"];
-          usage.output_tokens += counts["output_tokens"];
-          usage.model_turns++;
-        }
-        if (!Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens) || JSON.stringify(result["usage"]) !== JSON.stringify(usage) || result["commit_sha"] !== record["greenCommit"] || result["node_id"] !== nodeId || result["claim_id"] !== claimId || result["dispatch_id"] !== generation || result["outcome"] !== "SUBMITTED")
-          throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-        const captured = this.attestSlot(nodeId, claim);
-        if (!captured) throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-        mutateState(this.paths.featureDir, (state) => this.recordCapture(state, nodeId, captured, claimId));
-      } else if (!claim.result_captured_file || sha256OfFile(join49(this.sessionDir(nodeId), claim.result_captured_file)) !== claim.result_captured_sha256) {
-        throw new Error("WSL_CODEX_RECONCILE_RESULT_DRIFT");
-      }
-    });
-    const settled = this.completeSettlement(nodeId, "resume");
-    if (settled.outcome !== "DONE" || this.state().nodes[nodeId]?.state !== "DONE")
-      throw new Error(`WSL_CODEX_RECONCILE_SETTLEMENT_REFUSED:${settled.outcome}`);
-    writeTextAtomic(journal, JSON.stringify({ ...record, phase: "settled" }) + "\n");
-    rmSync14(journal.slice(0, -".json".length) + ".cap", { force: true });
-    return { ...receipt, settlement: {
-      outcome: "DONE",
-      idempotent: false,
-      usageSessions: this.state().nodes[nodeId]?.usage.sessions ?? 0
-    } };
   }
   graph() {
     return loadGraph(this.controlRoot, this.featureId);
@@ -34434,8 +32961,8 @@ var Orchestrator = class _Orchestrator {
   contractHashes(node) {
     const out = {};
     for (const rel of [...node.contract_inputs ?? [], ...node.contract_outputs ?? []]) {
-      const full = join49(this.controlRoot, rel);
-      out[rel] = existsSync36(full) ? createHash35("sha256").update(readFileSync31(full)).digest("hex") : "";
+      const full = join45(this.controlRoot, rel);
+      out[rel] = existsSync32(full) ? createHash33("sha256").update(readFileSync30(full)).digest("hex") : "";
     }
     return out;
   }
@@ -34551,9 +33078,6 @@ var Orchestrator = class _Orchestrator {
     }
     if (worktree !== null) this.revalidateCompletions(nodeId, claimId);
     this.event("node.claimed", nodeId, { claim_id: claimId, mode, attempt, worktree, branch });
-    if (mode === "host" && dispatchId && process.platform === "win32" && process.env["MYCELINK_LIVE_WSL_WORKER"] === "1" && process.env["MYCELINK_LIVE_WSL_CODEX_AUTH"] === "1") {
-      this.experimentalWslCapabilities.set(`${nodeId}\0${claimId}\0${dispatchId}`, capability.raw);
-    }
     return {
       claimId,
       capability: capability.raw,
@@ -34759,8 +33283,8 @@ var Orchestrator = class _Orchestrator {
     const node = this.node(nodeId);
     const bound = this.state().acceptance ?? null;
     if (bound) {
-      const file = join49(this.controlRoot, bound.path);
-      const now3 = existsSync36(file) ? sha256OfFile(file) : null;
+      const file = join45(this.controlRoot, bound.path);
+      const now3 = existsSync32(file) ? sha256OfFile(file) : null;
       if (now3 !== bound.sha256) {
         throw new AcceptanceDriftError(nodeId, `${bound.path} ${now3 === null ? "is gone" : `now hashes to ${now3.slice(0, 12)}`}, not ${bound.sha256.slice(0, 12)}, the approved criteria the feature was initialised with`);
       }
@@ -34871,8 +33395,8 @@ var Orchestrator = class _Orchestrator {
       ...this.recall ? { memory: this.recall(node) } : {},
       capsules: this.capsuleViews(nodeId)
     });
-    mkdirSync21(this.paths.contextPacksDir, { recursive: true });
-    const file = join49(this.paths.contextPacksDir, `${nodeId}.json`);
+    mkdirSync20(this.paths.contextPacksDir, { recursive: true });
+    const file = join45(this.paths.contextPacksDir, `${nodeId}.json`);
     writeTextAtomic(file, JSON.stringify(pack, null, 2) + "\n");
     return file;
   }
@@ -34910,9 +33434,9 @@ var Orchestrator = class _Orchestrator {
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
     const baseBranch = repoDecl?.base_branch ?? "main";
     const branch = workerBranchName(this.featureId, nodeId);
-    const verifyRoot = join49(this.workspace.paths.workDir, "verify");
-    mkdirSync21(verifyRoot, { recursive: true });
-    const verifyDir = join49(
+    const verifyRoot = join45(this.workspace.paths.workDir, "verify");
+    mkdirSync20(verifyRoot, { recursive: true });
+    const verifyDir = join45(
       verifyRoot,
       `${node.repository}__${nodeId.replace(/[^\w.-]/g, "_")}__${randomUUID3().slice(0, 8)}`
     );
@@ -34989,7 +33513,7 @@ var Orchestrator = class _Orchestrator {
           nodeId,
           repository: node.repository,
           ...moduleRun ? moduleInvocation(bound) : verifierInvocation(verifier),
-          cwd: !moduleRun && verifier.cwd ? join49(verifyDir, verifier.cwd) : verifyDir,
+          cwd: !moduleRun && verifier.cwd ? join45(verifyDir, verifier.cwd) : verifyDir,
           evidenceDir,
           label: `${labelPrefix}-${verifier.id}`,
           baselineFailures: repoDecl?.baseline_failures ?? [],
@@ -35027,7 +33551,7 @@ var Orchestrator = class _Orchestrator {
               graph: this.graph(),
               state: this.state(),
               nodeId,
-              output: readFileSync31(join49(this.controlRoot, record.output_path), "utf8"),
+              output: readFileSync30(join45(this.controlRoot, record.output_path), "utf8"),
               exitCode: record.exit_code,
               checkout: verifyDir
             });
@@ -35068,7 +33592,7 @@ var Orchestrator = class _Orchestrator {
     const rt = state.nodes[nodeId];
     assertClaimCapability(nodeId, rt, capability);
     const claim = rt.claim;
-    if (node.repository === null || claim.worktree === null || !existsSync36(claim.worktree)) return refuse2("CAPSULE_UNAVAILABLE", `${nodeId} has no claim with a worktree to read a reproduction from`);
+    if (node.repository === null || claim.worktree === null || !existsSync32(claim.worktree)) return refuse2("CAPSULE_UNAVAILABLE", `${nodeId} has no claim with a worktree to read a reproduction from`);
     const brief = rt.rework_brief ?? null;
     if (brief === null || brief.origin?.kind !== "acceptance-review") return refuse2("CAPSULE_NOT_REVIEW_REWORK", `${nodeId} is not in an acceptance review's rework: a capsule seals the exact reproduction of a review's gap`);
     const graph = this.graph();
@@ -35113,8 +33637,8 @@ var Orchestrator = class _Orchestrator {
     const again = this.existingCapsule(nodeId, ident.capsule_id, claimRef.capability_sha256);
     if (again !== null) return again;
     if ((claim.capsules ?? []).length >= CAPSULE_LIMITS.per_claim) return refuse2("CAPSULE_LIMIT", `${nodeId}'s claim holds ${CAPSULE_LIMITS.per_claim} capsules already: cite one of them`);
-    const staging = join49(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), CAPSULES_DIR, `.run-${ident.capsule_id}-${randomUUID3().slice(0, 8)}`);
-    mkdirSync21(staging, { recursive: true });
+    const staging = join45(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), CAPSULES_DIR, `.run-${ident.capsule_id}-${randomUUID3().slice(0, 8)}`);
+    mkdirSync20(staging, { recursive: true });
     try {
       const run = this.runCapsuleAt(nodeId, base, files, staging, "capsule");
       if ("setup" in run) return refuse2("CAPSULE_SETUP_FAILED", `the checkout of ${base.slice(0, 12)} could not be set up: ${run.setup}`);
@@ -35140,8 +33664,8 @@ var Orchestrator = class _Orchestrator {
         tests,
         result: outcome.result,
         run: {
-          output_file: join49(this.controlRoot, ...record.output_path.split("/")),
-          results_file: record.results ? join49(this.controlRoot, ...record.results.path.split("/")) : null,
+          output_file: join45(this.controlRoot, ...record.output_path.split("/")),
+          results_file: record.results ? join45(this.controlRoot, ...record.results.path.split("/")) : null,
           exit_code: record.exit_code,
           commit_sha: record.commit_sha,
           worktree_setup_sha256: run.setup_sha256,
@@ -35153,7 +33677,7 @@ var Orchestrator = class _Orchestrator {
       this.capsuleFault?.("capsule-sealed");
       return this.registerSealed(nodeId, sealed.capsule, sealed.capsule_sha256, sealed.receipt_path, claimRef.capability_sha256, false);
     } finally {
-      rmSync14(staging, { recursive: true, force: true });
+      rmSync13(staging, { recursive: true, force: true });
     }
   }
   /** A capsule already sealed under this id for the claim: its registration (idempotent), finishing one whose registry write died. */
@@ -35161,7 +33685,7 @@ var Orchestrator = class _Orchestrator {
     const claim = this.state().nodes[nodeId]?.claim ?? null;
     const entry = (claim?.capsules ?? []).find((e) => e.capsule_id === capsuleId);
     const receiptPath = `${capsuleDir(this.featureId, nodeId, capsuleId)}/capsule.json`;
-    if (entry === void 0 && !existsSync36(join49(this.controlRoot, ...receiptPath.split("/")))) return null;
+    if (entry === void 0 && !existsSync32(join45(this.controlRoot, ...receiptPath.split("/")))) return null;
     const read = readCapsule(this.controlRoot, entry?.receipt_path ?? receiptPath, entry?.capsule_sha256);
     if (!read.ok) return { ok: false, code: "CAPSULE_TAMPERED", detail: `${capsuleId} is sealed already, and its archive is not as sealed: ${read.detail}` };
     if (read.capsule.capsule_id !== capsuleId || !capsuleSelfConsistent(read.capsule)) return { ok: false, code: "CAPSULE_TAMPERED", detail: `${receiptPath} does not bind ${capsuleId}` };
@@ -35214,7 +33738,7 @@ var Orchestrator = class _Orchestrator {
     const unnamed = capsule.tests.filter((t) => t.declared !== "static").filter((t) => {
       const f = capsule.files.find((x) => x.path === t.path);
       if (f === void 0) return true;
-      const source = readFileSync31(join49(this.controlRoot, ...f.archived.split("/")), "utf8");
+      const source = readFileSync30(join45(this.controlRoot, ...f.archived.split("/")), "utf8");
       return !declaredTests(t.path, source).some((d) => d.name === t.name || d.name === t.full_name);
     });
     const detail = capsule.result === "passed" ? `${capsule.capsule_id}: ${capsule.criterion}'s reproduction passes on the unchanged base ${capsule.base_sha.slice(0, 12)} — challenge material only: the challenge line with --capsule ${capsule.capsule_id}, outcome REVIEW_GAP_CHALLENGE (or that criterion's in a per-criterion answer), then the check line. Keep its files out of the branch; never cite it as a proof of DONE.` : `${capsule.capsule_id}: ${capsule.criterion}'s reproduction fails on the unchanged base ${capsule.base_sha.slice(0, 12)} — the gap reproduces: it is RED material only. Commit exactly its files alone (test-first), run the red gate, then the fix; cite the red gate's failing test with "capsule_id": "${capsule.capsule_id}".${unnamed.length > 0 ? ` Its tests ${unnamed.slice(0, 4).map((t) => JSON.stringify(t.full_name)).join(", ")} are not statically named (a template literal or a loop): a RED's tests must be (give each a string-literal title) before they are committed.` : ""}`;
@@ -35272,7 +33796,7 @@ var Orchestrator = class _Orchestrator {
     const capabilitySha = claim.capability_sha256;
     const again = this.existingCapsule(nodeId, ident.capsule_id, capabilitySha);
     if (again !== null) return again;
-    const files = old.files.map((f) => ({ path: f.path, bytes: readFileSync31(join49(this.controlRoot, ...f.archived.split("/"))), sha256: f.sha256, blob: f.blob, base_blob: f.base_blob }));
+    const files = old.files.map((f) => ({ path: f.path, bytes: readFileSync30(join45(this.controlRoot, ...f.archived.split("/"))), sha256: f.sha256, blob: f.blob, base_blob: f.base_blob }));
     const sealed = writeCapsuleArchive({
       controlRoot: this.controlRoot,
       featureId: this.featureId,
@@ -35288,8 +33812,8 @@ var Orchestrator = class _Orchestrator {
       tests: old.tests,
       result: old.result,
       run: {
-        output_file: join49(this.controlRoot, ...old.run.output_path.split("/")),
-        results_file: old.run.results_path === null ? null : join49(this.controlRoot, ...old.run.results_path.split("/")),
+        output_file: join45(this.controlRoot, ...old.run.output_path.split("/")),
+        results_file: old.run.results_path === null ? null : join45(this.controlRoot, ...old.run.results_path.split("/")),
         exit_code: old.run.exit_code,
         commit_sha: old.run.commit_sha,
         worktree_setup_sha256: old.run.worktree_setup_sha256,
@@ -35309,15 +33833,15 @@ var Orchestrator = class _Orchestrator {
     const repository = node.repository;
     const repoPath = repositoryPath(this.workspace, repository);
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === repository);
-    const root = join49(this.workspace.paths.workDir, "capsule-runs");
-    mkdirSync21(root, { recursive: true });
+    const root = join45(this.workspace.paths.workDir, "capsule-runs");
+    mkdirSync20(root, { recursive: true });
     const prefix = `${safeNodeDir(nodeId)}__`;
     for (const left of readdirSync19(root).filter((n) => n.startsWith(prefix))) {
-      runGit(repoPath, ["worktree", "remove", "--force", join49(root, left)], { allowFail: true });
-      rmSync14(join49(root, left), { recursive: true, force: true });
+      runGit(repoPath, ["worktree", "remove", "--force", join45(root, left)], { allowFail: true });
+      rmSync13(join45(root, left), { recursive: true, force: true });
     }
     runGit(repoPath, ["worktree", "prune"], { allowFail: true });
-    const dir = join49(root, `${prefix}${randomUUID3().slice(0, 8)}`);
+    const dir = join45(root, `${prefix}${randomUUID3().slice(0, 8)}`);
     runGit(repoPath, ["worktree", "add", "--detach", dir, sha]);
     try {
       runGit(dir, ["config", "core.autocrlf", "false"], { allowFail: true });
@@ -35340,10 +33864,10 @@ var Orchestrator = class _Orchestrator {
         setupSha = run.receipt_sha256;
       }
       for (const f of files) {
-        const target = join49(dir, ...f.path.split("/"));
-        mkdirSync21(dirname17(target), { recursive: true });
+        const target = join45(dir, ...f.path.split("/"));
+        mkdirSync20(dirname16(target), { recursive: true });
         if (!isInsideReal(dir, target)) throw new Error(`CAPSULE_SYMLINK: ${f.path} leaves the checkout of ${sha.slice(0, 12)}`);
-        rmSync14(target, { force: true });
+        rmSync13(target, { force: true });
         writeFileSync9(target, f.bytes, { flag: "wx" });
       }
       const declared = node.verification_commands[0];
@@ -35366,7 +33890,7 @@ var Orchestrator = class _Orchestrator {
       return { record, setup_sha256: setupSha };
     } finally {
       runGit(repoPath, ["worktree", "remove", "--force", dir], { allowFail: true });
-      rmSync14(dir, { recursive: true, force: true });
+      rmSync13(dir, { recursive: true, force: true });
       runGit(repoPath, ["worktree", "prune"], { allowFail: true });
     }
   }
@@ -35382,7 +33906,7 @@ var Orchestrator = class _Orchestrator {
     const cited = this.citedCapsules(state);
     const found = /* @__PURE__ */ new Map();
     for (const node of this.graph().nodes) {
-      const dir = join49(nodeEvidenceDir(this.controlRoot, this.featureId, node.id), CAPSULES_DIR);
+      const dir = join45(nodeEvidenceDir(this.controlRoot, this.featureId, node.id), CAPSULES_DIR);
       let names2 = [];
       try {
         names2 = readdirSync19(dir).filter((n) => /^CAP-[0-9a-f]{16}$/.test(n));
@@ -35427,10 +33951,10 @@ var Orchestrator = class _Orchestrator {
   }
   /** Run a sealed capsule again on its base (every test as sealed) and, promoted to a RED, on the head that integrated its fix (every test passing). */
   replayCapsule(capsule, uses) {
-    const files = capsule.files.map((f) => ({ path: f.path, bytes: readFileSync31(join49(this.controlRoot, ...f.archived.split("/"))) }));
+    const files = capsule.files.map((f) => ({ path: f.path, bytes: readFileSync30(join45(this.controlRoot, ...f.archived.split("/"))) }));
     const at = (sha, expect) => {
-      const dir = join49(nodeEvidenceDir(this.controlRoot, this.featureId, capsule.node_id), CAPSULES_DIR, `.run-replay-${capsule.capsule_id}-${randomUUID3().slice(0, 8)}`);
-      mkdirSync21(dir, { recursive: true });
+      const dir = join45(nodeEvidenceDir(this.controlRoot, this.featureId, capsule.node_id), CAPSULES_DIR, `.run-replay-${capsule.capsule_id}-${randomUUID3().slice(0, 8)}`);
+      mkdirSync20(dir, { recursive: true });
       try {
         const run = this.runCapsuleAt(capsule.node_id, sha, files, dir, "replay", { verification: capsule.verification ?? null, command: capsule.command });
         if ("setup" in run) return { sha, ok: false, detail: `the checkout of ${sha.slice(0, 12)} could not be set up: ${run.setup}`, statuses: {} };
@@ -35439,7 +33963,7 @@ var Orchestrator = class _Orchestrator {
         const differs = capsule.tests.filter((t) => statuses[t.id] !== expect(t));
         return { sha, ok: differs.length === 0, detail: differs.length === 0 ? "as sealed" : `on ${sha.slice(0, 12)}: ${differs.map((t) => `${t.full_name} ${statuses[t.id]}, expected ${expect(t)}`).slice(0, 4).join("; ")}`, statuses };
       } finally {
-        rmSync14(dir, { recursive: true, force: true });
+        rmSync13(dir, { recursive: true, force: true });
       }
     };
     const base = at(capsule.base_sha, (t) => t.status);
@@ -35489,9 +34013,9 @@ var Orchestrator = class _Orchestrator {
     const node = this.node(nodeId);
     if (node.repository === null) return null;
     const repository = node.repository;
-    const lockDir = join49(this.paths.featureDir, "integration");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, `${repository}.lock`), () => this.integrateLocked(nodeId, repository, expectedSha), {
+    const lockDir = join45(this.paths.featureDir, "integration");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, `${repository}.lock`), () => this.integrateLocked(nodeId, repository, expectedSha), {
       timeoutMs: 3e4,
       pollMs: 50,
       purpose: "integration"
@@ -35566,8 +34090,8 @@ var Orchestrator = class _Orchestrator {
       const { claimId, capability, worktree, branch } = this.claim(nodeId, { mode: "adapter" });
       const packPath = this.writeContextPack(nodeId, claimId);
       const attempt = this.state().nodes[nodeId]?.attempts ?? 1;
-      const sessionDir = join49(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"));
-      mkdirSync21(sessionDir, { recursive: true });
+      const sessionDir = join45(this.paths.sessionsDir, nodeId.replace(/[^\w.-]/g, "_"));
+      mkdirSync20(sessionDir, { recursive: true });
       const previous = liveSessions(this.paths.sessionsRegistry).find((s) => s.node_id === nodeId);
       const request = {
         featureId: this.featureId,
@@ -35576,8 +34100,8 @@ var Orchestrator = class _Orchestrator {
         attempt,
         contextPackPath: packPath,
         cwd: worktree ?? this.controlRoot,
-        resultPath: join49(sessionDir, `result.attempt-${attempt}.json`),
-        logPath: join49(sessionDir, `session.attempt-${attempt}.log`),
+        resultPath: join45(sessionDir, `result.attempt-${attempt}.json`),
+        logPath: join45(sessionDir, `session.attempt-${attempt}.log`),
         model: node.worker.model,
         maxTurns: node.worker.max_turns,
         maxWallClockMs: Math.min(
@@ -35619,7 +34143,7 @@ var Orchestrator = class _Orchestrator {
         parent_loop_id: `feature-orchestration:${this.featureId}`,
         node_id: nodeId,
         candidate_sha: null,
-        input_hash: createHash35("sha256").update(readFileSync31(packPath)).digest("hex").slice(0, 16),
+        input_hash: createHash33("sha256").update(readFileSync30(packPath)).digest("hex").slice(0, 16),
         started_at: new Date(started).toISOString(),
         finished_at: (/* @__PURE__ */ new Date()).toISOString(),
         model_turns: observation.turns,
@@ -35804,7 +34328,7 @@ var Orchestrator = class _Orchestrator {
     if (rt === void 0 || node === void 0 || node.repository === null || CONTROLLER_NODE_TYPES.has(node.node_type) || node.node_type === "verification") return null;
     if (rt.state !== "BLOCKED" || rt.claim !== null || last === null || last.outcome !== "BLOCKED" || typeof last.dispatch_id !== "string") return null;
     if (!/^CRITERION_TEST_(?:UNKNOWN|AMBIGUOUS)\b/.test(rt.blocked_reason ?? "")) return null;
-    const dir = join49(this.paths.sessionsDir, safeNodeDir(nodeId));
+    const dir = join45(this.paths.sessionsDir, safeNodeDir(nodeId));
     let file;
     let recorded = null;
     if (typeof last.result_file === "string" && last.result_file !== "" && typeof last.result_sha256 === "string") {
@@ -35812,12 +34336,12 @@ var Orchestrator = class _Orchestrator {
       recorded = last.result_sha256;
     } else {
       const prefix = `result.${last.dispatch_id}.`;
-      const copies = existsSync36(dir) ? readdirSync19(dir).filter((f) => f.startsWith(prefix) && /^[0-9a-f]{32}\.json$/.test(f.slice(prefix.length))) : [];
+      const copies = existsSync32(dir) ? readdirSync19(dir).filter((f) => f.startsWith(prefix) && /^[0-9a-f]{32}\.json$/.test(f.slice(prefix.length))) : [];
       if (copies.length !== 1) return null;
       file = copies[0];
     }
     if (file.includes("/") || file.includes("\\")) return null;
-    const result = readControllerCopy(join49(dir, file), recorded, nodeId, last.claim_id, last.dispatch_id);
+    const result = readControllerCopy(join45(dir, file), recorded, nodeId, last.claim_id, last.dispatch_id);
     if (result === null || result.outcome !== "BLOCKED" || (result.failure_fingerprint ?? null) !== rt.blocked_reason) return null;
     const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
     let binding;
@@ -35832,7 +34356,7 @@ var Orchestrator = class _Orchestrator {
     }
     const judged = this.identityBlockedJudgement(nodeId, result, rt, { policy: this.claimTddPolicy(node.repository), base: rt.branch_base_sha ?? null, modulePath: binding?.path ?? null });
     if (judged === null) return null;
-    return { file, sha256: sha256OfFile(join49(dir, file)), result, last, code: judged.code };
+    return { file, sha256: sha256OfFile(join45(dir, file)), result, last, code: judged.code };
   }
   /**
    * Reopen each node a core before this repair parked for an identity-shape refusal (parkedIdentityCandidate) and settle its captured
@@ -35921,7 +34445,7 @@ var Orchestrator = class _Orchestrator {
   }
   /** Where a node's identity receipts go: its aliases and reconciliations. */
   identityDir(nodeId) {
-    return join49(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "identity");
+    return join45(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "identity");
   }
   /** Each alias of `accepted` (a test published before identities) written as its immutable receipt, the record pointing at it. */
   receiptAliases(nodeId, accepted, claimId) {
@@ -35929,7 +34453,7 @@ var Orchestrator = class _Orchestrator {
       if (a.identity_alias == null || (a.identity_alias.receipt ?? null) !== null) return a;
       const { receipt: _receipt, ...alias } = a.identity_alias;
       const body = { ...alias, feature_id: this.featureId, node_id: nodeId, claim_id: claimId, criterion: a.criterion, gate: a.gate, output_sha256: a.output_sha256 };
-      mkdirSync21(this.identityDir(nodeId), { recursive: true });
+      mkdirSync20(this.identityDir(nodeId), { recursive: true });
       const stored = writeImmutable(this.identityDir(nodeId), "alias", ".json", JSON.stringify(body, null, 2) + "\n");
       return { ...a, identity_alias: { ...a.identity_alias, receipt: { path: (relativeInside(this.controlRoot, stored.file) ?? stored.file).replace(/\\/g, "/"), sha256: stored.sha256 } } };
     });
@@ -35955,7 +34479,7 @@ var Orchestrator = class _Orchestrator {
       charged: { product_attempt: false, worker_dispatch: false, correction: false },
       at: marker.at
     };
-    mkdirSync21(this.identityDir(nodeId), { recursive: true });
+    mkdirSync20(this.identityDir(nodeId), { recursive: true });
     const stored = writeImmutable(this.identityDir(nodeId), "reconciliation", ".json", JSON.stringify(body, null, 2) + "\n");
     return { path: (relativeInside(this.controlRoot, stored.file) ?? stored.file).replace(/\\/g, "/"), sha256: stored.sha256 };
   }
@@ -36114,9 +34638,9 @@ var Orchestrator = class _Orchestrator {
     });
   }
   acceptChallenge(nodeId, sessionId, judged, evidence, partial = null) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => this.acceptChallengeLocked(nodeId, sessionId, judged, evidence, partial), { timeoutMs: 15e3, pollMs: 50, purpose: "review-gap challenge" });
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => this.acceptChallengeLocked(nodeId, sessionId, judged, evidence, partial), { timeoutMs: 15e3, pollMs: 50, purpose: "review-gap challenge" });
   }
   /**
    * A valid challenge, recorded: no product attempt charged. Its evidence is
@@ -36292,7 +34816,7 @@ var Orchestrator = class _Orchestrator {
       if (results !== void 0 && results !== null) {
         const want = results.sha256;
         const copy = `${path.slice(0, path.lastIndexOf("/"))}/${basename14(results.path)}`;
-        const where = [copy, results.path].find((p) => existsSync36(join49(this.controlRoot, p)) && sha256OfFile(join49(this.controlRoot, p)) === want);
+        const where = [copy, results.path].find((p) => existsSync32(join45(this.controlRoot, p)) && sha256OfFile(join45(this.controlRoot, p)) === want);
         if (where === void 0) return { problem: `the ${kind} results of the generation the rework replaced (${results.path}) are no longer intact` };
         results = { ...results, path: where };
       }
@@ -36619,7 +35143,7 @@ var Orchestrator = class _Orchestrator {
     const kind = judged.criterion !== null && graph.acceptance_criteria.some((a) => a.id === judged.criterion) ? criterionKind(graph, judged.criterion) : null;
     const cycle = kind === "new-behavior" && !declarationOnly && CYCLE_CORRECTIONS.has(judged.code);
     const runtime = before;
-    const held2 = {
+    const held = {
       state: runtime.state,
       evidence: structuredClone(runtime.evidence),
       bindings: (runtime.tdd_red_bindings ?? []).length
@@ -36639,7 +35163,7 @@ var Orchestrator = class _Orchestrator {
         result_sha256: resultSha,
         commit_sha: head,
         at: (/* @__PURE__ */ new Date()).toISOString(),
-        held: held2,
+        held,
         // Judged by the canonical test identity (PCM-101 final): an identity refusal of it is a correction's, never re-evaluated again.
         identity_version: TEST_IDENTITY_VERSION
       };
@@ -36660,11 +35184,11 @@ var Orchestrator = class _Orchestrator {
   restoreHeldSubmission(nodeId) {
     mutateState(this.paths.featureDir, (s) => {
       const rt = s.nodes[nodeId];
-      const held2 = rt?.claim?.evidence_correction?.held;
-      if (!rt || !held2) return s;
-      rt.evidence = structuredClone(held2.evidence);
-      rt.tdd_red_bindings = (rt.tdd_red_bindings ?? []).slice(0, held2.bindings);
-      if (IN_FLIGHT_STATES.has(rt.state) && rt.state !== "INTEGRATED") rt.state = held2.state;
+      const held = rt?.claim?.evidence_correction?.held;
+      if (!rt || !held) return s;
+      rt.evidence = structuredClone(held.evidence);
+      rt.tdd_red_bindings = (rt.tdd_red_bindings ?? []).slice(0, held.bindings);
+      if (IN_FLIGHT_STATES.has(rt.state) && rt.state !== "INTEGRATED") rt.state = held.state;
       return s;
     });
   }
@@ -36805,9 +35329,9 @@ var Orchestrator = class _Orchestrator {
    * until the write, and the write drops the claim.
    */
   concludeCriteriaDone(nodeId, sessionId, evidence, result) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    const made = withLock(join49(lockDir, "deliver.lock"), () => this.recordCriteriaLocked(nodeId, result), { timeoutMs: 15e3, pollMs: 50, purpose: "per-criterion settle" });
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    const made = withLock(join45(lockDir, "deliver.lock"), () => this.recordCriteriaLocked(nodeId, result), { timeoutMs: 15e3, pollMs: 50, purpose: "per-criterion settle" });
     this.event("node.transition", nodeId, { to: "DONE" });
     this.completedEvent(nodeId, made.completions);
     const { plan, record, unresolved } = made;
@@ -36930,7 +35454,7 @@ var Orchestrator = class _Orchestrator {
     const h = rt.tdd_history ?? null;
     if (h === null || checkEvidenceOutput(this.controlRoot, this.featureId, { output_path: h.output_path, output_sha256: h.output_sha256 }) !== null) return [];
     try {
-      return JSON.parse(readFileSync31(join49(this.controlRoot, ...h.output_path.split("/")), "utf8")).cycles ?? [];
+      return JSON.parse(readFileSync30(join45(this.controlRoot, ...h.output_path.split("/")), "utf8")).cycles ?? [];
     } catch {
       return [];
     }
@@ -37243,7 +35767,7 @@ var Orchestrator = class _Orchestrator {
       for (const f of r.reproof?.files ?? []) {
         if (!tests.some((t) => t.path === f.path) || out.includes(f.archived)) continue;
         try {
-          const source = readFileSync31(join49(this.controlRoot, ...f.archived.split("/")), "utf8");
+          const source = readFileSync30(join45(this.controlRoot, ...f.archived.split("/")), "utf8");
           if (tests.some((t) => t.path === f.path && declaredTests(f.path, source).some((d) => namesDeclaration(t.path, t.name, d.name)))) out.push(f.archived);
         } catch {
           continue;
@@ -37264,9 +35788,9 @@ var Orchestrator = class _Orchestrator {
     if (review === null || last === null || now3 === null) return null;
     const lost = lostCompletions(this.coverageAt(now3.inputs.repositories));
     if (lost.length === 0) return null;
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => {
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => {
       const fresh = this.state();
       const graph = this.graph();
       const summary = this.lineageSummary(fresh);
@@ -37319,9 +35843,9 @@ var Orchestrator = class _Orchestrator {
     const byPath2 = /* @__PURE__ */ new Map();
     for (const snap of snapshots) {
       for (const f of snap.files) {
-        const file = join49(this.controlRoot, ...f.copy.split("/"));
-        if (!existsSync36(file)) return { kind: "held", criterion: criteria[0], detail: `REPROOF_UNIT_REFUSED:REPROOF_TAMPERED: ${f.path}: the red gate's copy of what it ran is gone` };
-        byPath2.set(f.path, { path: f.path, bytes: readFileSync31(file), sha256: f.sha256, base_blob: runGit(repoPath, ["rev-parse", "--verify", "--quiet", `${snap.head_sha}:${f.path}`], { allowFail: true }).stdout.trim() || null });
+        const file = join45(this.controlRoot, ...f.copy.split("/"));
+        if (!existsSync32(file)) return { kind: "held", criterion: criteria[0], detail: `REPROOF_UNIT_REFUSED:REPROOF_TAMPERED: ${f.path}: the red gate's copy of what it ran is gone` };
+        byPath2.set(f.path, { path: f.path, bytes: readFileSync30(file), sha256: f.sha256, base_blob: runGit(repoPath, ["rev-parse", "--verify", "--quiet", `${snap.head_sha}:${f.path}`], { allowFail: true }).stdout.trim() || null });
       }
     }
     const plan = planProofUnit(repoPath, sealed, [...byPath2.values()]);
@@ -37584,7 +36108,7 @@ var Orchestrator = class _Orchestrator {
     const fingerprint = `TDD_HISTORY_INVALID:${violation.code}`;
     const detail = `${fingerprint}: ${violation.detail}`.slice(0, 2e3);
     const archivedRef = this.archiveRefName(nodeId, history.head_sha);
-    const keep3 = join49(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "rejected", `attempt-${attempt}-${history.head_sha.slice(0, 12)}`);
+    const keep3 = join45(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "rejected", `attempt-${attempt}-${history.head_sha.slice(0, 12)}`);
     const kept = writeImmutable(keep3, "tdd-history", ".json", JSON.stringify(history, null, 2) + "\n");
     for (const record of Object.values(before.evidence)) {
       const output = resolveEvidenceOutput(this.controlRoot, this.featureId, record);
@@ -37716,13 +36240,13 @@ var Orchestrator = class _Orchestrator {
         idempotent: true
       };
     }
-    const held2 = claim;
+    const held = claim;
     let report;
     this.concludedAnswers.delete(nodeId);
     try {
-      report = work(held2);
+      report = work(held);
     } catch (err) {
-      this.clearSettling(nodeId, held2.claim_id);
+      this.clearSettling(nodeId, held.claim_id);
       throw err;
     }
     const answer = this.concludedAnswers.get(nodeId) ?? null;
@@ -37732,21 +36256,21 @@ var Orchestrator = class _Orchestrator {
       if (!rt) return s;
       if (report.outcome === "REVIEW_CHALLENGED") return s;
       rt.last_settlement = {
-        capability_sha256: held2.capability_sha256,
-        claim_id: held2.claim_id,
+        capability_sha256: held.capability_sha256,
+        claim_id: held.claim_id,
         outcome: report.outcome,
         state: rt.state,
         detail: report.detail.slice(0, 1e3),
         settled_at: (/* @__PURE__ */ new Date()).toISOString(),
-        dispatch_id: held2.dispatch_id ?? null,
-        ...held2.worktree_setup !== void 0 ? { worktree_setup_sha256: held2.worktree_setup.config_sha256 } : {},
-        ...held2.verification !== void 0 ? { module_sha256: held2.verification.module_sha256 } : {},
+        dispatch_id: held.dispatch_id ?? null,
+        ...held.worktree_setup !== void 0 ? { worktree_setup_sha256: held.worktree_setup.config_sha256 } : {},
+        ...held.verification !== void 0 ? { module_sha256: held.verification.module_sha256 } : {},
         // The exact answer it concluded: a parked answer is re-evaluated from these bytes and no other (PCM-101 final).
         ...answer !== null ? { result_file: answer.file, result_sha256: answer.sha256 } : {}
       };
-      if (rt.claim?.claim_id === held2.claim_id) rt.claim.settling = null;
-      const live = rt.claim !== null && rt.claim.claim_id === held2.claim_id && (rt.claim.dispatch_id ?? null) === (held2.dispatch_id ?? null);
-      const lease = (s.orchestration?.leases ?? []).find((l) => l.node_id === nodeId && l.claim_id === held2.claim_id && l.dispatch_id === (held2.dispatch_id ?? null));
+      if (rt.claim?.claim_id === held.claim_id) rt.claim.settling = null;
+      const live = rt.claim !== null && rt.claim.claim_id === held.claim_id && (rt.claim.dispatch_id ?? null) === (held.dispatch_id ?? null);
+      const lease = (s.orchestration?.leases ?? []).find((l) => l.node_id === nodeId && l.claim_id === held.claim_id && l.dispatch_id === (held.dispatch_id ?? null));
       if (!live && lease !== void 0 && (lease.status === "active" || lease.status === "released" || lease.status === "settled" && lease.outcome === "PENDING")) {
         lease.status = "settled";
         lease.closed_at = lease.closed_at ?? (/* @__PURE__ */ new Date()).toISOString();
@@ -37756,7 +36280,7 @@ var Orchestrator = class _Orchestrator {
       }
       return s;
     });
-    this.event("node.settled", nodeId, { claim_id: held2.claim_id, outcome: report.outcome, state: report.state });
+    this.event("node.settled", nodeId, { claim_id: held.claim_id, outcome: report.outcome, state: report.state });
     return { ...report, idempotent: false };
   }
   /**
@@ -37788,7 +36312,7 @@ var Orchestrator = class _Orchestrator {
     let slot = null;
     if (isCurrent && current !== null) {
       lease = activeLeases(state).find((l) => l.node_id === nodeId && l.claim_id === current.claim_id && l.dispatch_id === (current.dispatch_id ?? null)) ?? null;
-      slot = current.worktree !== null ? join49(current.worktree, WORKER_RESULT_DIR, current.result_file ?? WORKER_RESULT_FILE) : null;
+      slot = current.worktree !== null ? join45(current.worktree, WORKER_RESULT_DIR, current.result_file ?? WORKER_RESULT_FILE) : null;
       if (current.lineage !== void 0 && current.lineage !== lineage) {
         reason = `${nodeId}'s generation changed at orchestration epoch ${lineage}, after this claim was issued on lineage ${current.lineage}: the dispatch no longer counts`;
       } else {
@@ -37811,7 +36335,7 @@ var Orchestrator = class _Orchestrator {
       } else {
         reason = `its lease was ${lease.status}${lease.closed_reason !== null ? ` (${lease.closed_reason})` : ""}`;
       }
-      slot = lease.worktree !== void 0 && lease.worktree !== null && lease.result_file !== void 0 && lease.result_file !== null ? join49(lease.worktree, WORKER_RESULT_DIR, lease.result_file) : null;
+      slot = lease.worktree !== void 0 && lease.worktree !== null && lease.result_file !== void 0 && lease.result_file !== null ? join45(lease.worktree, WORKER_RESULT_DIR, lease.result_file) : null;
     }
     const archived = slot !== null ? this.archiveLateResult(nodeId, slot, lease?.lease_id ?? current?.dispatch_id ?? current?.claim_id ?? "result", capability) : null;
     const answeredBefore = archived === null && !(isCurrent && !keepClaim);
@@ -37858,10 +36382,10 @@ var Orchestrator = class _Orchestrator {
    * followed). Null when the slot holds nothing.
    */
   archiveLateResult(nodeId, slot, leaseId, capability) {
-    if (!realDirectory(dirname17(slot))) return null;
+    if (!realDirectory(dirname16(slot))) return null;
     let st;
     try {
-      st = lstatSync17(slot);
+      st = lstatSync16(slot);
     } catch {
       return null;
     }
@@ -37875,11 +36399,11 @@ var Orchestrator = class _Orchestrator {
     }
     let text = read.bytes.toString("utf8");
     if (capability !== void 0 && capability !== "") text = text.split(capability).join("[REDACTED]");
-    const sha = createHash35("sha256").update(text).digest("hex");
-    const dir = join49(this.sessionDir(nodeId), "stale");
-    mkdirSync21(dir, { recursive: true });
-    const file = join49(dir, `${leaseId.replace(/[^\w.-]/g, "_")}.${sha.slice(0, 16)}.json`);
-    if (!existsSync36(file)) writeTextAtomic(file, text);
+    const sha = createHash33("sha256").update(text).digest("hex");
+    const dir = join45(this.sessionDir(nodeId), "stale");
+    mkdirSync20(dir, { recursive: true });
+    const file = join45(dir, `${leaseId.replace(/[^\w.-]/g, "_")}.${sha.slice(0, 16)}.json`);
+    if (!existsSync32(file)) writeTextAtomic(file, text);
     unlinkSync3(slot);
     return { path: (relativeInside(this.controlRoot, file) ?? file).replace(/\\/g, "/"), sha256: sha };
   }
@@ -37954,9 +36478,9 @@ var Orchestrator = class _Orchestrator {
       if (resumable !== void 0) return { ...this.resumeDispatch(resumable[0]), controller_reports: reports };
       const rebased = Object.entries(this.state().nodes).find(([, rt]) => rt.claim?.mode === "host" && (rt.claim.review_rebase ?? null) !== null && !(rt.claim.settling && settlerAlive(rt.claim.settling)));
       if (rebased !== void 0) return { ...this.resumeDispatch(rebased[0]), controller_reports: reports };
-      const held2 = Object.entries(this.state().nodes).find(([, rt]) => rt.claim?.mode === "host" && rt.claim.evidence_correction && !(rt.claim.settling && settlerAlive(rt.claim.settling)));
-      if (held2 !== void 0) {
-        const [id, rt] = held2;
+      const held = Object.entries(this.state().nodes).find(([, rt]) => rt.claim?.mode === "host" && rt.claim.evidence_correction && !(rt.claim.settling && settlerAlive(rt.claim.settling)));
+      if (held !== void 0) {
+        const [id, rt] = held;
         const claim2 = rt.claim;
         const administrative = !slotTouched(claim2.worktree ?? this.controlRoot, claim2.result_file ?? WORKER_RESULT_FILE) && this.identityReconcilableHold(claim2);
         if (administrative) this.markHoldReconcile(id);
@@ -38125,11 +36649,7 @@ var Orchestrator = class _Orchestrator {
    * claim, worktree, branch and any result already in the slot are kept.
    */
   resumeDispatch(nodeId) {
-    const run = () => {
-      if (codexLifecycleEnabled(this.paths.featureDir)) revokeWslCodexProcesses(this.paths.featureDir);
-      return this.resumeDispatchLocked(nodeId);
-    };
-    return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2e3 }) : run();
+    return this.resumeDispatchLocked(nodeId);
   }
   resumeDispatchLocked(nodeId) {
     try {
@@ -38192,31 +36712,31 @@ var Orchestrator = class _Orchestrator {
       if (attested !== null) {
         next = this.recordCapture(next, nodeId, attested);
       }
-      const held3 = next.nodes[nodeId].claim;
-      held3.settling = null;
-      held3.capture_pending = null;
-      held3.capability_sha256 = capability.sha256;
-      held3.dispatch_id = dispatchId;
-      held3.result_file = generationResultFile(dispatchId);
-      held3.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
-      held3.dispatched_at = (/* @__PURE__ */ new Date()).toISOString();
-      held3.host_session = host;
-      held3.provider_interrupted = null;
-      held3.review_rebase = null;
-      attempt = held3.attempt ?? next.nodes[nodeId].attempts;
-      closeLeases(next, (l) => l.node_id === nodeId && l.claim_id === held3.claim_id && l.dispatch_id === (before.dispatch_id ?? null), "revoked", `rotated by dispatch --resume to ${dispatchId}`);
-      issueLease(next, { kind: held3.lease_kind ?? "worker", node_id: nodeId, review_id: null, claim_id: held3.claim_id, dispatch_id: dispatchId, capability_sha256: capability.sha256, generation: held3.generation ?? 0, worktree: held3.worktree, result_file: held3.result_file, host });
-      claim = structuredClone(held3);
+      const held2 = next.nodes[nodeId].claim;
+      held2.settling = null;
+      held2.capture_pending = null;
+      held2.capability_sha256 = capability.sha256;
+      held2.dispatch_id = dispatchId;
+      held2.result_file = generationResultFile(dispatchId);
+      held2.expires_at = new Date(Date.now() + this.claimTtlMs(node)).toISOString();
+      held2.dispatched_at = (/* @__PURE__ */ new Date()).toISOString();
+      held2.host_session = host;
+      held2.provider_interrupted = null;
+      held2.review_rebase = null;
+      attempt = held2.attempt ?? next.nodes[nodeId].attempts;
+      closeLeases(next, (l) => l.node_id === nodeId && l.claim_id === held2.claim_id && l.dispatch_id === (before.dispatch_id ?? null), "revoked", `rotated by dispatch --resume to ${dispatchId}`);
+      issueLease(next, { kind: held2.lease_kind ?? "worker", node_id: nodeId, review_id: null, claim_id: held2.claim_id, dispatch_id: dispatchId, capability_sha256: capability.sha256, generation: held2.generation ?? 0, worktree: held2.worktree, result_file: held2.result_file, host });
+      claim = structuredClone(held2);
       return next;
     });
-    const held2 = claim;
-    if (node.repository !== null && (held2.worktree === null || !existsSync36(held2.worktree))) {
-      const created = this.ensureWorktree(nodeId, held2.claim_id);
-      held2.worktree = created.worktree;
-      held2.branch = created.branch;
+    const held = claim;
+    if (node.repository !== null && (held.worktree === null || !existsSync32(held.worktree))) {
+      const created = this.ensureWorktree(nodeId, held.claim_id);
+      held.worktree = created.worktree;
+      held.branch = created.branch;
     }
-    if (this.capturedResultFor(nodeId, held2) !== null) {
-      this.event("dispatch.resumed", nodeId, { claim_id: held2.claim_id, attempt, dispatch_id: dispatchId, attested: attested !== null, settled: true });
+    if (this.capturedResultFor(nodeId, held) !== null) {
+      this.event("dispatch.resumed", nodeId, { claim_id: held.claim_id, attempt, dispatch_id: dispatchId, attested: attested !== null, settled: true });
       const settled = this.completeSettlement(nodeId, "resume");
       return {
         status: "SETTLED",
@@ -38227,12 +36747,12 @@ var Orchestrator = class _Orchestrator {
         deferred: []
       };
     }
-    if (node.repository !== null && held2.worktree !== null) {
+    if (node.repository !== null && held.worktree !== null) {
       try {
-        this.prepareWorktree(nodeId, held2.claim_id, held2.worktree);
+        this.prepareWorktree(nodeId, held.claim_id, held.worktree);
       } catch (err) {
         if (!(err instanceof WorktreeSetupError)) throw err;
-        this.releaseForPrecondition(nodeId, held2.claim_id, err.message);
+        this.releaseForPrecondition(nodeId, held.claim_id, err.message);
         this.event("dispatch.stopped", null, { status: "PRECONDITION_FAILED", detail: err.message.slice(0, 500) });
         return { status: "PRECONDITION_FAILED", detail: err.message, controller_reports: [], pending: this.pendingDispatches(), deferred: [] };
       }
@@ -38240,25 +36760,25 @@ var Orchestrator = class _Orchestrator {
     const ticket = this.buildTicket(
       nodeId,
       {
-        claimId: held2.claim_id,
+        claimId: held.claim_id,
         capability: capability.raw,
-        worktree: held2.worktree,
-        branch: held2.branch,
+        worktree: held.worktree,
+        branch: held.branch,
         attempt,
         mode: "host",
-        expiresAt: held2.expires_at,
+        expiresAt: held.expires_at,
         dispatchId,
-        resultFile: held2.result_file
+        resultFile: held.result_file
       },
       {
         resumed: true,
-        resultPresent: this.capturedResultFor(nodeId, held2) !== null,
+        resultPresent: this.capturedResultFor(nodeId, held) !== null,
         ...interrupted !== null ? { providerResume: { class: interrupted.class, request_id: interrupted.request_id, head_sha: interrupted.progress.head_sha, commits: interrupted.progress.commits, state: interrupted.progress.state, dirty: interrupted.progress.dirty } } : {},
         ...rebase !== null ? { reviewRebase: { review_id: rebase.review_id, from_revision: rebase.from_revision, to_revision: rebase.to_revision } } : {}
       }
     );
     this.event("dispatch.resumed", nodeId, {
-      claim_id: held2.claim_id,
+      claim_id: held.claim_id,
       attempt,
       dispatch_id: dispatchId,
       attested: attested !== null,
@@ -38286,7 +36806,7 @@ var Orchestrator = class _Orchestrator {
     const node = this.node(nodeId);
     const capability = newCapability();
     const dispatchId = randomUUID3();
-    let held2 = null;
+    let held = null;
     mutateState(this.paths.featureDir, (s) => {
       const c = s.nodes[nodeId]?.claim;
       if (!c || c.mode !== "host" || !c.evidence_correction || c.settling && settlerAlive(c.settling)) return s;
@@ -38300,11 +36820,11 @@ var Orchestrator = class _Orchestrator {
       c.dispatched_at = (/* @__PURE__ */ new Date()).toISOString();
       closeLeases(s, (l) => l.node_id === nodeId && l.claim_id === c.claim_id && l.dispatch_id === previous, "revoked", `rotated for an evidence correction to ${dispatchId}`);
       issueLease(s, { kind: c.lease_kind ?? "worker", node_id: nodeId, review_id: null, claim_id: c.claim_id, dispatch_id: dispatchId, capability_sha256: capability.sha256, generation: c.generation ?? 0, worktree: c.worktree, result_file: c.result_file });
-      held2 = structuredClone(c);
+      held = structuredClone(c);
       return s;
     });
-    if (held2 === null) return null;
-    const claim = held2;
+    if (held === null) return null;
+    const claim = held;
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
     const ticket = this.buildTicket(
       nodeId,
@@ -38332,7 +36852,7 @@ var Orchestrator = class _Orchestrator {
     const node = this.node(nodeId);
     const capability = newCapability();
     const dispatchId = randomUUID3();
-    let held2 = null;
+    let held = null;
     mutateState(this.paths.featureDir, (s) => {
       const c = s.nodes[nodeId]?.claim;
       if (!c || c.mode !== "host" || !c.challenge_conversion || c.settling && settlerAlive(c.settling)) return s;
@@ -38351,11 +36871,11 @@ var Orchestrator = class _Orchestrator {
       c.dispatched_at = (/* @__PURE__ */ new Date()).toISOString();
       closeLeases(s, (l) => l.node_id === nodeId && l.claim_id === c.claim_id && l.dispatch_id === previous, "revoked", `rotated for its structured challenge to ${dispatchId}`);
       issueLease(s, { kind: c.lease_kind ?? "worker", node_id: nodeId, review_id: null, claim_id: c.claim_id, dispatch_id: dispatchId, capability_sha256: capability.sha256, generation: c.generation ?? 0, worktree: c.worktree, result_file: c.result_file });
-      held2 = structuredClone(c);
+      held = structuredClone(c);
       return s;
     });
-    if (held2 === null) return null;
-    const claim = held2;
+    if (held === null) return null;
+    const claim = held;
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
     const ticket = this.buildTicket(
       nodeId,
@@ -38486,23 +37006,8 @@ var Orchestrator = class _Orchestrator {
    * it (see worker-protocol.ts). Its outcome only chooses the road; a
    * submission is believed only after fresh verification and integration.
    */
-  /** A status without a root-owned generation tombstone is not evidence of exit. */
-  assertExperimentalWslStopped(nodeId) {
-    const claim = this.state().nodes[nodeId]?.claim;
-    if (claim?.mode === "host" && claim.dispatch_id) {
-      if (wslCodexProcessActive(this.paths.featureDir, claim.claim_id, claim.dispatch_id)) {
-        throw new Error("WSL_CODEX_WORKER_ACTIVE: settle only after the registered Linux process exits");
-      }
-      const result = wslCodexProcessResult(this.paths.featureDir, claim.claim_id, claim.dispatch_id);
-      if (result.revoked || result.exit_code !== 0) throw new Error("WSL_CODEX_WORKER_FAILED: root-supervisor exit was not successful");
-    }
-  }
   settle(nodeId, capability) {
-    const run = () => {
-      if (codexLifecycleEnabled(this.paths.featureDir)) this.assertExperimentalWslStopped(nodeId);
-      return this.settleLocked(nodeId, capability);
-    };
-    return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2e3 }) : run();
+    return this.settleLocked(nodeId, capability);
   }
   settleLocked(nodeId, capability) {
     const provider = this.providerSettle(nodeId, capability);
@@ -38520,11 +37025,7 @@ var Orchestrator = class _Orchestrator {
    * the same receipt. `by` says who finished it, for the record.
    */
   completeSettlement(nodeId, by) {
-    const run = () => {
-      if (codexLifecycleEnabled(this.paths.featureDir)) this.assertExperimentalWslStopped(nodeId);
-      return this.settleGuard(nodeId, void 0, (claim) => this.settleWork(nodeId, claim, void 0), { resumedBy: by });
-    };
-    return codexLifecycleEnabled(this.paths.featureDir) ? withCodexLifecycleLock(this.paths.featureDir, run, { timeoutMs: 2e3 }) : run();
+    return this.settleGuard(nodeId, void 0, (claim) => this.settleWork(nodeId, claim, void 0), { resumedBy: by });
   }
   /** Whether a claim's settlement can be finished by the controller: its result is in the controller's hands. */
   resumableSettlement(claim) {
@@ -38574,7 +37075,7 @@ var Orchestrator = class _Orchestrator {
     let failure = null;
     if (slotTouched(cwd, resultFile)) {
       const env = { ...process.env, [CAPABILITY_ENV]: capability ?? "" };
-      const file = `result.${generation}.${randomBytes7(16).toString("hex")}.json`;
+      const file = `result.${generation}.${randomBytes6(16).toString("hex")}.json`;
       mutateState(this.paths.featureDir, (s) => {
         const c = s.nodes[nodeId]?.claim;
         if (c?.claim_id === claim.claim_id) c.capture_pending = { file, dispatch_id: generation };
@@ -38583,7 +37084,7 @@ var Orchestrator = class _Orchestrator {
       const collected2 = collectWorkerResult(
         cwd,
         { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
-        join49(this.sessionDir(nodeId), file),
+        join45(this.sessionDir(nodeId), file),
         env,
         {
           resultFile,
@@ -38594,7 +37095,7 @@ var Orchestrator = class _Orchestrator {
       );
       if (collected2.result !== null) {
         this.fault("result-captured");
-        const captured = { file, sha256: sha256OfFile(join49(this.sessionDir(nodeId), file)), dispatchId: generation, usage: hostUsage(collected2.result, started) };
+        const captured = { file, sha256: sha256OfFile(join45(this.sessionDir(nodeId), file)), dispatchId: generation, usage: hostUsage(collected2.result, started) };
         mutateState(this.paths.featureDir, (s) => this.recordCapture(s, nodeId, captured, claim.claim_id));
         this.fault("result-attested");
         result = collected2.result;
@@ -38652,8 +37153,8 @@ var Orchestrator = class _Orchestrator {
     }
   }
   sessionDir(nodeId) {
-    const dir = join49(this.paths.sessionsDir, safeNodeDir(nodeId));
-    mkdirSync21(dir, { recursive: true });
+    const dir = join45(this.paths.sessionsDir, safeNodeDir(nodeId));
+    mkdirSync20(dir, { recursive: true });
     return dir;
   }
   /**
@@ -38684,11 +37185,11 @@ var Orchestrator = class _Orchestrator {
     const resultFile = claim.result_file ?? WORKER_RESULT_FILE;
     if (!resultInSlot(cwd, resultFile)) return null;
     const generation = claim.dispatch_id ?? claim.claim_id;
-    const file = `result.${generation}.${randomBytes7(16).toString("hex")}.json`;
+    const file = `result.${generation}.${randomBytes6(16).toString("hex")}.json`;
     const collected = collectWorkerResult(
       cwd,
       { featureId: this.featureId, nodeId, claimId: claim.claim_id, ...claim.dispatch_id !== void 0 ? { dispatchId: claim.dispatch_id } : {} },
-      join49(this.sessionDir(nodeId), file),
+      join45(this.sessionDir(nodeId), file),
       process.env,
       {
         resultFile,
@@ -38702,7 +37203,7 @@ var Orchestrator = class _Orchestrator {
     }
     return {
       file,
-      sha256: sha256OfFile(join49(this.sessionDir(nodeId), file)),
+      sha256: sha256OfFile(join45(this.sessionDir(nodeId), file)),
       dispatchId: generation,
       usage: hostUsage(collected.result, Date.parse(claim.dispatched_at ?? claim.claimed_at))
     };
@@ -38722,7 +37223,7 @@ var Orchestrator = class _Orchestrator {
   pendingCapture(nodeId, claim, started) {
     const pending = claim.capture_pending;
     if (!pending || pending.dispatch_id !== (claim.dispatch_id ?? claim.claim_id)) return null;
-    const file = join49(this.sessionDir(nodeId), pending.file);
+    const file = join45(this.sessionDir(nodeId), pending.file);
     const parsed = readControllerCopy(file, null, nodeId, claim.claim_id, claim.dispatch_id);
     if (parsed === null) return null;
     return {
@@ -38751,7 +37252,7 @@ var Orchestrator = class _Orchestrator {
     }
     try {
       claimId = this.claim(nodeId, { mode: "controller" }).claimId;
-      const contracts = existsSync36(this.workspace.paths.contractsDir) ? readdirSync19(this.workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+      const contracts = existsSync32(this.workspace.paths.contractsDir) ? readdirSync19(this.workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
       const manifest = withFeatureLock(this.paths.featureDir, "candidate build", () => {
         const repoRefs = this.integrationRefs();
         if (repoRefs.length === 0) return null;
@@ -38784,7 +37285,7 @@ var Orchestrator = class _Orchestrator {
         repository: null,
         commit_sha: manifest.control_commit,
         output_path: `features/${this.featureId}/candidates/${manifest.candidate_id}.yaml`,
-        output_sha256: sha256OfFile(join49(this.paths.candidatesDir, `${manifest.candidate_id}.yaml`)),
+        output_sha256: sha256OfFile(join45(this.paths.candidatesDir, `${manifest.candidate_id}.yaml`)),
         failure_fingerprint: null,
         candidate_id: manifest.candidate_id
       };
@@ -38875,8 +37376,8 @@ var Orchestrator = class _Orchestrator {
     }
     const evidenceDir = nodeEvidenceDir(this.controlRoot, this.featureId, nodeId);
     const where = this.verificationCheckoutPrefix(nodeId);
-    mkdirSync21(where.root, { recursive: true });
-    const checkout2 = join49(where.root, `${where.prefix}${randomUUID3().slice(0, 8)}`);
+    mkdirSync20(where.root, { recursive: true });
+    const checkout2 = join45(where.root, `${where.prefix}${randomUUID3().slice(0, 8)}`);
     runGit(repoPath, ["worktree", "prune"], { allowFail: true });
     runGit(repoPath, ["worktree", "add", "--detach", checkout2, head]);
     runGit(checkout2, ["config", "core.autocrlf", "false"], { allowFail: true });
@@ -38901,7 +37402,7 @@ var Orchestrator = class _Orchestrator {
           nodeId,
           repository,
           ...step.module !== null ? moduleInvocation(step.module) : verifierInvocation(step.verifier),
-          cwd: step.module === null && step.verifier.cwd !== void 0 ? join49(checkout2, step.verifier.cwd) : checkout2,
+          cwd: step.module === null && step.verifier.cwd !== void 0 ? join45(checkout2, step.verifier.cwd) : checkout2,
           evidenceDir,
           label: `verification-${step.verifier.id}`,
           baselineFailures: repoDecl.baseline_failures ?? [],
@@ -38921,8 +37422,8 @@ var Orchestrator = class _Orchestrator {
       removeWorkerWorktree(repoPath, checkout2);
     }
     const receipt = verificationReceipt({ controlRoot: this.controlRoot, featureId: this.featureId, nodeId, claimId, repository, head, headSource, setup, runs, criteria: criteria.criteria });
-    mkdirSync21(evidenceDir, { recursive: true });
-    const file = join49(evidenceDir, `${safeNodeDir(nodeId)}.verification-${randomUUID3().slice(0, 8)}.json`);
+    mkdirSync20(evidenceDir, { recursive: true });
+    const file = join45(evidenceDir, `${safeNodeDir(nodeId)}.verification-${randomUUID3().slice(0, 8)}.json`);
     writeTextAtomic(file, JSON.stringify(receipt, null, 2) + "\n");
     const failed = runs.find((r) => r.record.failure_fingerprint !== null);
     const fingerprint = failed === void 0 ? null : `VERIFICATION_FAILED:${failed.step.verifier.id}:${failed.record.failure_fingerprint}`;
@@ -39135,7 +37636,7 @@ var Orchestrator = class _Orchestrator {
   /** The generation's verdict file is there (the reviewer's Write, or a final answer ingested before). */
   slotHolds(open) {
     try {
-      return lstatSync17(join49(this.controlRoot, ...open.slot.split("/"))).isFile();
+      return lstatSync16(join45(this.controlRoot, ...open.slot.split("/"))).isFile();
     } catch {
       return false;
     }
@@ -39489,7 +37990,7 @@ var Orchestrator = class _Orchestrator {
   /** A settled review's (or a refinement's) receipt as JSON, or null when it cannot be read. */
   readReceiptLike(rel) {
     try {
-      return JSON.parse(readFileSync31(join49(this.controlRoot, ...rel.split("/")), "utf8"));
+      return JSON.parse(readFileSync30(join45(this.controlRoot, ...rel.split("/")), "utf8"));
     } catch {
       return null;
     }
@@ -39742,10 +38243,10 @@ var Orchestrator = class _Orchestrator {
     const state = this.state();
     const review = this.requiredReview(state);
     const record = [...review.reviews].reverse().find((x) => x.review_id === reviewId);
-    const abs = (rel) => join49(this.controlRoot, ...rel.split("/")).replace(/\\/g, "/");
+    const abs = (rel) => join45(this.controlRoot, ...rel.split("/")).replace(/\\/g, "/");
     const receipt = (rel) => {
       try {
-        return JSON.parse(readFileSync31(join49(this.controlRoot, ...rel.split("/")), "utf8"));
+        return JSON.parse(readFileSync30(join45(this.controlRoot, ...rel.split("/")), "utf8"));
       } catch {
         return {};
       }
@@ -39917,7 +38418,7 @@ var Orchestrator = class _Orchestrator {
       number: formats.length,
       max: MAX_FORMAT_CORRECTIONS,
       of_dispatch_id: last.dispatch_id,
-      previous_verdict: join49(this.controlRoot, ...last.verdict.split("/")).replace(/\\/g, "/"),
+      previous_verdict: join45(this.controlRoot, ...last.verdict.split("/")).replace(/\\/g, "/"),
       code: last.code,
       problems: last.problems ?? [],
       transport: REVIEWER_TRANSPORT
@@ -39935,7 +38436,7 @@ var Orchestrator = class _Orchestrator {
       if (record.review_id === reviewId || record.overall !== "GAPS" || since !== null && record.at <= since) continue;
       if (receiptProblem(this.controlRoot, record) !== null) continue;
       try {
-        const receipt = JSON.parse(readFileSync31(join49(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
+        const receipt = JSON.parse(readFileSync30(join45(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
         for (const g of receipt.gaps ?? []) {
           if ((g.untested ?? []).length > 0) out.push({ review_id: record.review_id, criterion: g.criterion, untested: [...g.untested] });
         }
@@ -40027,9 +38528,9 @@ var Orchestrator = class _Orchestrator {
     if ((open.agent_interrupted ?? null) !== null) return this.interruptedIngest(this.interruptedReviewReport(open, true));
     const interrupted = this.providerReview(open);
     if (interrupted !== null) return this.ingestReport(reviewId, open.dispatch_id, "PROVIDER_INTERRUPTED", this.providerReviewReport(open, interrupted.failure, false).detail, { next: "dispatch" });
-    const lockDir = join49(this.paths.featureDir, "reviews");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "settle.lock"), () => this.ingestLocked(open.dispatch_id, options), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review ingest" });
+    const lockDir = join45(this.paths.featureDir, "reviews");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "settle.lock"), () => this.ingestLocked(open.dispatch_id, options), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review ingest" });
   }
   /** An ingest of an interrupted generation, from the settle report of it. */
   interruptedIngest(r) {
@@ -40153,10 +38654,10 @@ var Orchestrator = class _Orchestrator {
   reviewerTransport(open, options, by, again = false) {
     const safe3 = safeGenerationDir(this.controlRoot, open);
     if (!safe3.ok) return { status: "unsafe", detail: safe3.detail };
-    const slot = join49(safe3.dir, VERDICT_FILE);
+    const slot = join45(safe3.dir, VERDICT_FILE);
     let st = null;
     try {
-      st = lstatSync17(slot);
+      st = lstatSync16(slot);
     } catch {
       st = null;
     }
@@ -40168,7 +38669,7 @@ var Orchestrator = class _Orchestrator {
       const content2 = read.bytes.toString("utf8");
       const attest = (() => {
         try {
-          const parsed = JSON.parse(readFileSync31(join49(safe3.dir, ATTESTATION_FILE), "utf8"));
+          const parsed = JSON.parse(readFileSync30(join45(safe3.dir, ATTESTATION_FILE), "utf8"));
           return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
         } catch {
           return null;
@@ -40318,9 +38819,9 @@ var Orchestrator = class _Orchestrator {
     return this.settleOpenReview("host", open.dispatch_id);
   }
   settleOpenReview(by, dispatchId) {
-    const lockDir = join49(this.paths.featureDir, "reviews");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "settle.lock"), () => this.settleOpenReviewLocked(by, dispatchId), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review settle" });
+    const lockDir = join45(this.paths.featureDir, "reviews");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "settle.lock"), () => this.settleOpenReviewLocked(by, dispatchId), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review settle" });
   }
   /**
    * Take a reviewer's verdict, whichever way it came (reviewerTransport: its
@@ -40393,7 +38894,7 @@ var Orchestrator = class _Orchestrator {
       return this.refuseVerdict(open, "REVIEW_VERDICT_INVALID", why, { kind: "format", problems: [{ code: "REVIEW_VERDICT_INVALID", pointer: "", detail: why }], content, transport: transport.kind });
     }
     const reviewer = { agent_id: String(attest.agent_id), session_id: typeof attest.session_id === "string" ? attest.session_id : null, verdict_sha256: canonicalVerdictSha256(content), transport };
-    const packet = loadPacket(join49(this.controlRoot, ...open.packet_path.split("/")), open.packet_sha256);
+    const packet = loadPacket(join45(this.controlRoot, ...open.packet_path.split("/")), open.packet_sha256);
     if (packet === null) return this.refuseVerdict(open, "REVIEW_PACKET_CHANGED", "the review packet is not the one the controller wrote for this generation");
     if ((open.refinement ?? null) !== null) {
       const refined = judgeRefinement(raw, refinementContext(packet, this.workspace, this.reviewPackets(open.review_id)));
@@ -40460,7 +38961,7 @@ var Orchestrator = class _Orchestrator {
   recordReport(record) {
     let receipt = {};
     try {
-      receipt = JSON.parse(readFileSync31(join49(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
+      receipt = JSON.parse(readFileSync30(join45(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
     } catch {
       receipt = {};
     }
@@ -40494,9 +38995,9 @@ var Orchestrator = class _Orchestrator {
     const packets = [];
     for (const rel of [...new Set(receipts)]) {
       try {
-        const r = JSON.parse(readFileSync31(join49(this.controlRoot, ...rel.split("/")), "utf8"));
+        const r = JSON.parse(readFileSync30(join45(this.controlRoot, ...rel.split("/")), "utf8"));
         if (typeof r.packet_path !== "string" || typeof r.packet_sha256 !== "string") continue;
-        const p = loadPacket(join49(this.controlRoot, ...r.packet_path.split("/")), r.packet_sha256);
+        const p = loadPacket(join45(this.controlRoot, ...r.packet_path.split("/")), r.packet_sha256);
         if (p !== null) packets.push(p);
       } catch {
         continue;
@@ -40505,9 +39006,9 @@ var Orchestrator = class _Orchestrator {
     return packets;
   }
   recordRefinement(open, judged, reviewer, by) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => this.recordRefinementLocked(open, judged, reviewer, by), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review refinement" });
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => this.recordRefinementLocked(open, judged, reviewer, by), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review refinement" });
   }
   /**
    * A valid refinement, settled: a new revision of the review it refines
@@ -40614,7 +39115,7 @@ var Orchestrator = class _Orchestrator {
     const after = this.lineageSummary(state, chained.lineage);
     let previous = {};
     try {
-      previous = JSON.parse(readFileSync31(join49(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
+      previous = JSON.parse(readFileSync30(join45(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
     } catch {
       previous = {};
     }
@@ -40671,8 +39172,8 @@ var Orchestrator = class _Orchestrator {
       settled_at: at,
       settled_by: by
     };
-    const file = join49(this.controlRoot, ...receiptPath.split("/"));
-    mkdirSync21(join49(file, ".."), { recursive: true });
+    const file = join45(this.controlRoot, ...receiptPath.split("/"));
+    mkdirSync20(join45(file, ".."), { recursive: true });
     writeTextAtomic(file, JSON.stringify(receipt, null, 2) + "\n");
     const receiptSha = fileSha256(file);
     this.fault("review-receipt-written");
@@ -40989,9 +39490,9 @@ var Orchestrator = class _Orchestrator {
    * while other work is in flight (dispatch makes it before anything else). What it did, or null (nothing to order).
    */
   orderFollowUp(nodeId) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    const made = withLock(join49(lockDir, "deliver.lock"), () => {
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    const made = withLock(join45(lockDir, "deliver.lock"), () => {
       const state = this.state();
       const rt = state.nodes[nodeId];
       const p = (rt?.rework_history ?? []).at(-1)?.partial ?? null;
@@ -41146,9 +39647,9 @@ var Orchestrator = class _Orchestrator {
    * the node, bound to it — never charged. True when it was replaced.
    */
   replaceStaleOrder(nodeId) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => {
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => {
       const state = this.state();
       const stale = this.orderStaleness(state, nodeId);
       if (stale === null || stale.carry !== null || (state.nodes[nodeId]?.claim ?? null) !== null) return false;
@@ -41253,9 +39754,9 @@ var Orchestrator = class _Orchestrator {
    * the rework records of `reworks` exist.
    */
   recordVerdict(open, judged, reviewer, by) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => this.recordVerdictLocked(open, judged, reviewer, by), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review reworks" });
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => this.recordVerdictLocked(open, judged, reviewer, by), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review reworks" });
   }
   recordVerdictLocked(open, judged, reviewer, by) {
     const state = this.state();
@@ -41375,8 +39876,8 @@ var Orchestrator = class _Orchestrator {
       settled_at: at,
       settled_by: by
     };
-    const file = join49(this.paths.featureDir, "reviews", `${open.review_id}.json`);
-    mkdirSync21(join49(file, ".."), { recursive: true });
+    const file = join45(this.paths.featureDir, "reviews", `${open.review_id}.json`);
+    mkdirSync20(join45(file, ".."), { recursive: true });
     writeTextAtomic(file, JSON.stringify(receipt, null, 2) + "\n");
     const receiptSha = fileSha256(file);
     this.fault("review-receipt-written");
@@ -41460,9 +39961,9 @@ var Orchestrator = class _Orchestrator {
    * others are made all the same): no candidate on a gap.
    */
   applyReviewReworks(reviewId) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => this.applyReviewReworksLocked(reviewId), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review reworks" });
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => this.applyReviewReworksLocked(reviewId), { timeoutMs: 15e3, pollMs: 50, purpose: "acceptance review reworks" });
   }
   applyReviewReworksLocked(reviewId) {
     const state = this.state();
@@ -41492,7 +39993,7 @@ var Orchestrator = class _Orchestrator {
     };
     const tampered = receiptProblem(this.controlRoot, record);
     if (tampered !== null) return block2(`${reviewId}: ${tampered}`);
-    const receipt = JSON.parse(readFileSync31(join49(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
+    const receipt = JSON.parse(readFileSync30(join45(this.controlRoot, ...record.receipt_path.split("/")), "utf8"));
     const prepared = this.planGapReworks({ reviewId, review: record.review, receiptPath: record.receipt_path, budgets: this.budgetsOf(this.lineageSummary(state), receipt.gaps), targets: receipt.reworks, gaps: receipt.gaps, state, graph });
     for (const plan of prepared.plans) this.bindPlan(plan, currentRevision(record));
     if (prepared.refused.length > 0) {
@@ -41539,9 +40040,9 @@ var Orchestrator = class _Orchestrator {
    * rework before the node is DONE again changes nothing.
    */
   rework(nodeId, options) {
-    const lockDir = join49(this.paths.featureDir, "deliveries");
-    mkdirSync21(lockDir, { recursive: true });
-    return withLock(join49(lockDir, "deliver.lock"), () => this.reworkLocked(nodeId, options), {
+    const lockDir = join45(this.paths.featureDir, "deliveries");
+    mkdirSync20(lockDir, { recursive: true });
+    return withLock(join45(lockDir, "deliver.lock"), () => this.reworkLocked(nodeId, options), {
       timeoutMs: 2e3,
       pollMs: 50,
       purpose: "feature rework"
@@ -41748,9 +40249,9 @@ var Orchestrator = class _Orchestrator {
   /** The replaced generation's judged history, copied beside its archived evidence (`replaced/g<generation>/`) byte for byte. */
   archiveReplacedHistory(nodeId, generation, history) {
     if (history === null) return null;
-    const src = resolve21(this.controlRoot, history.output_path);
+    const src = resolve20(this.controlRoot, history.output_path);
     if (relativeInside(this.paths.featureDir, src) === null) return structuredClone(history);
-    const dir = join49(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "replaced", `g${generation}`);
+    const dir = join45(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "replaced", `g${generation}`);
     const copy = keepExactCopy(src, history.output_sha256, dir);
     const kept = copy === null ? history.output_path : relativeInside(this.controlRoot, copy.file) ?? history.output_path;
     return { ...structuredClone(history), output_path: kept.replace(/\\/g, "/") };
@@ -41900,12 +40401,12 @@ var Orchestrator = class _Orchestrator {
    * its RED proof only while that copy still hashes as recorded.
    */
   archiveReplacedEvidence(nodeId, generation, evidence) {
-    const dir = join49(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "replaced", `g${generation}`);
+    const dir = join45(nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), "replaced", `g${generation}`);
     const out = {};
     for (const [kind, r] of Object.entries(evidence)) {
       let kept = r.output_path;
       for (const [rel, sha] of [[r.output_path, r.output_sha256], ...r.results ? [[r.results.path, r.results.sha256]] : []]) {
-        const src = resolve21(this.controlRoot, rel);
+        const src = resolve20(this.controlRoot, rel);
         if (relativeInside(this.paths.featureDir, src) === null) continue;
         const copy = keepExactCopy(src, sha, dir);
         if (rel === r.output_path && copy !== null) kept = relativeInside(this.controlRoot, copy.file) ?? r.output_path;
@@ -41971,10 +40472,10 @@ var Orchestrator = class _Orchestrator {
     let last = null;
     for (const [candidate, sha] of Object.entries(state.accepted_deliveries ?? {})) {
       if (!/^[A-Za-z0-9._-]+$/.test(candidate)) continue;
-      const file = join49(this.paths.featureDir, "deliveries", `${candidate}.json`);
-      if (!existsSync36(file)) continue;
-      const bytes2 = readFileSync31(file);
-      if (createHash35("sha256").update(bytes2).digest("hex") !== sha) continue;
+      const file = join45(this.paths.featureDir, "deliveries", `${candidate}.json`);
+      if (!existsSync32(file)) continue;
+      const bytes2 = readFileSync30(file);
+      if (createHash33("sha256").update(bytes2).digest("hex") !== sha) continue;
       let at;
       try {
         at = JSON.parse(bytes2.toString("utf8")).accepted_at;
@@ -42055,8 +40556,8 @@ var Orchestrator = class _Orchestrator {
   /** Whether any delivery of this feature moved (or tried to move) its base branches. */
   featureDelivered(state) {
     if (Object.keys(state.accepted_deliveries ?? {}).length > 0) return true;
-    const dir = join49(this.paths.featureDir, "deliveries");
-    return existsSync36(dir) && readdirSync19(dir).some((f) => f.endsWith(".json"));
+    const dir = join45(this.paths.featureDir, "deliveries");
+    return existsSync32(dir) && readdirSync19(dir).some((f) => f.endsWith(".json"));
   }
   /**
    * How each delivered base branch stands to this feature's integration
@@ -42124,9 +40625,9 @@ var Orchestrator = class _Orchestrator {
     const ref = this.archiveRefName(nodeId, head);
     runGit(repoPath, ["update-ref", ref, head]);
     this.quarantineWorkerStash(nodeId);
-    const expected = resolve21(join49(this.workspace.paths.worktreesDir, worktreeDirName(node.repository, nodeId)));
+    const expected = resolve20(join45(this.workspace.paths.worktreesDir, worktreeDirName(node.repository, nodeId)));
     for (const w of listWorktrees(repoPath)) {
-      if (w.branch === branch || resolve21(w.path) === expected) removeWorkerWorktree(repoPath, w.path);
+      if (w.branch === branch || resolve20(w.path) === expected) removeWorkerWorktree(repoPath, w.path);
     }
     runGit(repoPath, ["update-ref", "-d", `refs/heads/${branch}`, head]);
     return ref;
@@ -42160,7 +40661,7 @@ var Orchestrator = class _Orchestrator {
     });
     const stash = this.quarantineWorkerStash(nodeId);
     const archived = this.archiveWorkerBranch(nodeId);
-    if (claim.worktree !== null && existsSync36(claim.worktree) && this.node(nodeId).repository !== null) {
+    if (claim.worktree !== null && existsSync32(claim.worktree) && this.node(nodeId).repository !== null) {
       removeWorkerWorktree(repositoryPath(this.workspace, this.node(nodeId).repository), claim.worktree);
     }
     mutateState(this.paths.featureDir, (s) => {
@@ -42264,7 +40765,7 @@ var Orchestrator = class _Orchestrator {
       };
       const result = await runE2E({
         featureDir: this.paths.featureDir,
-        evidenceRoot: join49(this.paths.evidenceDir, "e2e"),
+        evidenceRoot: join45(this.paths.evidenceDir, "e2e"),
         graph,
         candidate,
         scenarios,
@@ -42362,7 +40863,7 @@ var Orchestrator = class _Orchestrator {
   recordDecisionRequest(nodeId, result) {
     const request = result.decision_request;
     if (!request) return null;
-    const id = `DEC-${createHash35("sha256").update(request.question).digest("hex").slice(0, 8)}`;
+    const id = `DEC-${createHash33("sha256").update(request.question).digest("hex").slice(0, 8)}`;
     const entry = `
 ## ${id} (${request.category ?? "uncategorised"})
 
@@ -42372,7 +40873,7 @@ var Orchestrator = class _Orchestrator {
 ` + request.options.map((o) => `  - [ ] ${o}
 `).join("") + `
 `;
-    const existing = existsSync36(this.paths.decisions) ? readFileSync31(this.paths.decisions, "utf8") : `# Decisions for ${this.featureId}
+    const existing = existsSync32(this.paths.decisions) ? readFileSync30(this.paths.decisions, "utf8") : `# Decisions for ${this.featureId}
 `;
     if (!existing.includes(id)) {
       writeTextAtomic(this.paths.decisions, existing + entry);
@@ -42531,7 +41032,7 @@ var Orchestrator = class _Orchestrator {
     const rt = this.state().nodes[nodeId];
     const base = c.base_sha ?? rt.branch_base_sha ?? null;
     const wt = c.worktree;
-    if (wt === null || !existsSync36(wt)) return { state: rt.state, base_sha: base, head_sha: null, commits: 0, dirty: [] };
+    if (wt === null || !existsSync32(wt)) return { state: rt.state, base_sha: base, head_sha: null, commits: 0, dirty: [] };
     const head = runGit(wt, ["rev-parse", "HEAD"]);
     const count = base !== null ? runGit(wt, ["rev-list", "--count", `${base}..HEAD`]) : null;
     const status = runGit(wt, ["status", "--porcelain", "--untracked-files=all"]);
@@ -42546,17 +41047,17 @@ var Orchestrator = class _Orchestrator {
    */
   quarantineUncommitted(nodeId, c, dispatchId) {
     const wt = c.worktree;
-    if (wt === null || !existsSync36(wt)) return null;
-    const dir = join49(this.sessionDir(nodeId), "provider");
-    mkdirSync21(dir, { recursive: true });
+    if (wt === null || !existsSync32(wt)) return null;
+    const dir = join45(this.sessionDir(nodeId), "provider");
+    mkdirSync20(dir, { recursive: true });
     const name = `${(dispatchId ?? c.claim_id).replace(/[^A-Za-z0-9-]/g, "")}.patch`;
     const untracked = runGit(wt, ["ls-files", "--others", "--exclude-standard"]).stdout.split("\n").filter((p) => p !== "" && !p.startsWith(`${WORKER_RESULT_DIR}/`));
     if (untracked.length > 0) runGit(wt, ["add", "--intent-to-add", "--", ...untracked]);
     const patch = runGit(wt, ["diff", "HEAD", "--binary"]).stdout;
-    writeTextAtomic(join49(dir, name), patch);
+    writeTextAtomic(join45(dir, name), patch);
     runGit(wt, ["reset", "-q", "--hard", "HEAD"]);
     runGit(wt, ["clean", "-fdq", "-e", WORKER_RESULT_DIR]);
-    return controlRelative(this.controlRoot, join49(dir, name));
+    return controlRelative(this.controlRoot, join45(dir, name));
   }
   /**
    * Interrupt every active lease whose holder a model provider ended
@@ -42794,8 +41295,8 @@ var Orchestrator = class _Orchestrator {
         this.interruptClaim(nodeId, claim.claim_id, `host dispatch abandoned (${expired2 ? "claim expired" : "abandoned by reconcile"})`);
         abandoned.push(nodeId);
       } else {
-        const held2 = claim.seal != null || claim.result_captured_sha256 !== void 0 || claim.capture_pending != null;
-        const settlement = claim.evidence_correction ? "correction" : held2 ? "held" : "none";
+        const held = claim.seal != null || claim.result_captured_sha256 !== void 0 || claim.capture_pending != null;
+        const settlement = claim.evidence_correction ? "correction" : held ? "held" : "none";
         pending.push({ node_id: nodeId, claim_id: claim.claim_id, result_present: resultPresent, expired: expired2, state: runtime.state, settlement });
       }
     }
@@ -42850,16 +41351,16 @@ var Orchestrator = class _Orchestrator {
   verificationCheckoutPrefix(nodeId) {
     const node = this.graph().nodes.find((n) => n.id === nodeId);
     if (node?.node_type !== "verification" || node.repository === null) return null;
-    return { root: join49(this.workspace.paths.workDir, "verify"), prefix: `${node.repository}__${safeNodeDir(nodeId)}__` };
+    return { root: join45(this.workspace.paths.workDir, "verify"), prefix: `${node.repository}__${safeNodeDir(nodeId)}__` };
   }
   /** Remove every checkout a (dead) run of the verification node left. */
   removeVerificationCheckouts(nodeId) {
     const where = this.verificationCheckoutPrefix(nodeId);
     const node = this.graph().nodes.find((n) => n.id === nodeId);
-    if (where === null || node?.repository == null || !existsSync36(where.root)) return;
+    if (where === null || node?.repository == null || !existsSync32(where.root)) return;
     const repoPath = repositoryPath(this.workspace, node.repository);
     for (const name of readdirSync19(where.root)) {
-      if (name.startsWith(where.prefix)) removeWorkerWorktree(repoPath, join49(where.root, name));
+      if (name.startsWith(where.prefix)) removeWorkerWorktree(repoPath, join45(where.root, name));
     }
   }
   /**
@@ -42899,7 +41400,7 @@ var Orchestrator = class _Orchestrator {
     const attempt = claim.attempt ?? this.state().nodes[nodeId]?.attempts ?? 1;
     const name = claim.result_captured_file ?? `result.attempt-${attempt}.json`;
     const parsed = readControllerCopy(
-      join49(this.paths.sessionsDir, safeNodeDir(nodeId), name),
+      join45(this.paths.sessionsDir, safeNodeDir(nodeId), name),
       claim.result_captured_sha256,
       nodeId,
       claim.claim_id,
@@ -43020,9 +41521,9 @@ var Orchestrator = class _Orchestrator {
       const actionable = claimed.filter((id) => {
         const c = state.nodes[id].claim;
         if (c.mode !== "host") return true;
-        const held2 = (c.seal ?? null) !== null || c.result_captured_sha256 !== void 0 || (c.capture_pending ?? null) !== null || (c.evidence_correction ?? null) !== null || (c.challenge_conversion ?? null) !== null || (c.provider_interrupted ?? null) !== null || (c.review_rebase ?? null) !== null || providerFailed.has(c.dispatch_id ?? c.claim_id);
+        const held = (c.seal ?? null) !== null || c.result_captured_sha256 !== void 0 || (c.capture_pending ?? null) !== null || (c.evidence_correction ?? null) !== null || (c.challenge_conversion ?? null) !== null || (c.provider_interrupted ?? null) !== null || (c.review_rebase ?? null) !== null || providerFailed.has(c.dispatch_id ?? c.claim_id);
         const deadSettle = c.settling !== void 0 && c.settling !== null && !settlerAlive(c.settling);
-        return held2 || deadSettle || Date.parse(c.expires_at ?? c.claimed_at) <= now3 || slotTouched(c.worktree ?? this.controlRoot, c.result_file ?? WORKER_RESULT_FILE);
+        return held || deadSettle || Date.parse(c.expires_at ?? c.claimed_at) <= now3 || slotTouched(c.worktree ?? this.controlRoot, c.result_file ?? WORKER_RESULT_FILE);
       });
       if (actionable.length > 0) return make("reconcile", true, `session reconcile ${f}`, actionable, `${f} has work in flight the controller must take up: recover the controller key, reconcile, then dispatch (or dispatch --resume <node>)`);
       return make("await-worker", true, null, claimed, `${f} has work in flight: ${claimed.length === 1 ? "a worker holds a live dispatch lease" : "workers hold live dispatch leases"}; wait for ${claimed.length === 1 ? "it" : "them"} and settle each ticket — no review, refinement or candidate goes past ${claimed.length === 1 ? "it" : "them"}. A fresh controller, whose workers went with an earlier session, reconciles and re-issues each (dispatch --resume <node>)`);
@@ -43118,12 +41619,12 @@ var Orchestrator = class _Orchestrator {
 };
 function slotTouched(cwd, resultFile) {
   try {
-    if (!lstatSync17(join49(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
+    if (!lstatSync16(join45(cwd, WORKER_RESULT_DIR)).isDirectory()) return true;
   } catch {
     return false;
   }
   try {
-    lstatSync17(join49(cwd, WORKER_RESULT_DIR, resultFile));
+    lstatSync16(join45(cwd, WORKER_RESULT_DIR, resultFile));
     return true;
   } catch {
     return false;
@@ -43131,7 +41632,7 @@ function slotTouched(cwd, resultFile) {
 }
 function realDirectory(path) {
   try {
-    const st = lstatSync17(path);
+    const st = lstatSync16(path);
     return st.isDirectory() && !st.isSymbolicLink();
   } catch {
     return false;
@@ -43141,7 +41642,7 @@ function safeNodeDir(nodeId) {
   return nodeId.replace(/[^\w.-]/g, "_");
 }
 function slotEpoch(slot) {
-  if (!realDirectory(dirname17(slot))) return null;
+  if (!realDirectory(dirname16(slot))) return null;
   try {
     const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
     if (read === null) return null;
@@ -43227,15 +41728,15 @@ function outcomeFromState(state) {
 function readControllerCopy(file, sha25617, nodeId, claimId, dispatchId) {
   let fd;
   try {
-    fd = openSync12(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    fd = openSync11(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
   } catch {
     return null;
   }
   try {
     const st = fstatSync8(fd);
-    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync17(file).isSymbolicLink()) return null;
-    const bytes2 = readFileSync31(fd);
-    if (sha25617 !== null && createHash35("sha256").update(bytes2).digest("hex") !== sha25617) return null;
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_WORKER_RESULT_BYTES || lstatSync16(file).isSymbolicLink()) return null;
+    const bytes2 = readFileSync30(fd);
+    if (sha25617 !== null && createHash33("sha256").update(bytes2).digest("hex") !== sha25617) return null;
     const parsed = JSON.parse(bytes2.toString("utf8"));
     if (validateAgainstSchema("node-result", parsed).length > 0) return null;
     if (parsed.node_id !== nodeId || parsed.claim_id !== claimId) return null;
@@ -43244,11 +41745,11 @@ function readControllerCopy(file, sha25617, nodeId, claimId, dispatchId) {
   } catch {
     return null;
   } finally {
-    closeSync14(fd);
+    closeSync13(fd);
   }
 }
 function sha256OfFile(file) {
-  return createHash35("sha256").update(readFileSync31(file)).digest("hex");
+  return createHash33("sha256").update(readFileSync30(file)).digest("hex");
 }
 function isProcessAlive2(pid) {
   try {
@@ -43261,8 +41762,8 @@ function isProcessAlive2(pid) {
 
 // src/sessions/process-session.ts
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync as existsSync37, mkdirSync as mkdirSync22, rmSync as rmSync15 } from "node:fs";
-import { dirname as dirname18, resolve as resolve22 } from "node:path";
+import { createWriteStream, existsSync as existsSync33, mkdirSync as mkdirSync21, rmSync as rmSync14 } from "node:fs";
+import { dirname as dirname17, resolve as resolve21 } from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 var ProcessSessionAdapter = class {
   requireCompletedTurn = false;
@@ -43272,9 +41773,9 @@ var ProcessSessionAdapter = class {
   runs = /* @__PURE__ */ new Map();
   spawn(request) {
     const sessionId = randomUUID4();
-    mkdirSync22(dirname18(resolve22(request.logPath)), { recursive: true });
-    mkdirSync22(dirname18(resolve22(request.resultPath)), { recursive: true });
-    if (existsSync37(request.resultPath)) rmSync15(request.resultPath, { force: true });
+    mkdirSync21(dirname17(resolve21(request.logPath)), { recursive: true });
+    mkdirSync21(dirname17(resolve21(request.resultPath)), { recursive: true });
+    if (existsSync33(request.resultPath)) rmSync14(request.resultPath, { force: true });
     const handle = {
       session_id: sessionId,
       adapter: this.name,
@@ -43348,7 +41849,7 @@ var ProcessSessionAdapter = class {
     child.stdin.on("error", () => {
     });
     child.stdin.end(prompt, "utf8");
-    const log = createWriteStream(resolve22(request.logPath), { flags: "a" });
+    const log = createWriteStream(resolve21(request.logPath), { flags: "a" });
     const outRedactor = new LineRedactor(workerEnv);
     const errRedactor = new LineRedactor(workerEnv);
     child.stdout.on("end", () => {
@@ -43435,7 +41936,7 @@ var ProcessSessionAdapter = class {
     } else state.status = "done";
     if (state.child !== null) {
       try {
-        const collected = collectWorkerResult(state.request.cwd, state.request, resolve22(state.request.resultPath), state.workerEnv);
+        const collected = collectWorkerResult(state.request.cwd, state.request, resolve21(state.request.resultPath), state.workerEnv);
         state.result = collected.result;
         state.resultFailure = collected.failure;
       } catch (err) {
@@ -43647,7 +42148,7 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
 
 // src/loops/contracts.ts
 var import_yaml4 = __toESM(require_dist(), 1);
-import { existsSync as existsSync38, readFileSync as readFileSync32 } from "node:fs";
+import { existsSync as existsSync34, readFileSync as readFileSync31 } from "node:fs";
 function validateLoops(value) {
   const problems = [];
   const parsed = value;
@@ -43688,14 +42189,14 @@ function validateLoops(value) {
   return { ok: problems.length === 0, problems, loops: parsed.loops };
 }
 function loadLoops(file) {
-  if (!existsSync38(file)) {
+  if (!existsSync34(file)) {
     return {
       ok: false,
       problems: [{ code: "MISSING_LOOPS", path: file, detail: `No LOOPS.yaml at ${file}` }],
       loops: []
     };
   }
-  return validateLoops(import_yaml4.default.parse(readFileSync32(file, "utf8")));
+  return validateLoops(import_yaml4.default.parse(readFileSync31(file, "utf8")));
 }
 function defaultLoops(featureId, mycelink) {
   const base = {
@@ -43823,26 +42324,26 @@ function writeLoops(file, loops) {
 }
 
 // src/hooks/entrypoint.ts
-import { existsSync as existsSync42, readFileSync as readFileSync34, readdirSync as readdirSync23 } from "node:fs";
-import { dirname as dirname20, join as join53, posix as posix3, relative as relative8, resolve as resolve24, sep as sep5 } from "node:path";
-import { createHash as createHash38 } from "node:crypto";
+import { existsSync as existsSync38, readFileSync as readFileSync33, readdirSync as readdirSync23 } from "node:fs";
+import { dirname as dirname19, join as join49, posix as posix3, relative as relative8, resolve as resolve23, sep as sep5 } from "node:path";
+import { createHash as createHash36 } from "node:crypto";
 
 // src/hooks/worker-calls.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync39, lstatSync as lstatSync18, mkdirSync as mkdirSync23, readFileSync as readFileSync33, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
-import { createHash as createHash36, randomBytes as randomBytes8 } from "node:crypto";
-import { dirname as dirname19, isAbsolute as isAbsolute13, join as join50, resolve as resolve23 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync35, lstatSync as lstatSync17, mkdirSync as mkdirSync22, readFileSync as readFileSync32, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
+import { createHash as createHash34, randomBytes as randomBytes7 } from "node:crypto";
+import { dirname as dirname18, isAbsolute as isAbsolute13, join as join46, resolve as resolve22 } from "node:path";
 var CALLS_SCHEMA = "mycelink-calls/1";
 var CALLS_FILE = "calls.jsonl";
 var DISPATCH_LINE2 = /^Dispatch: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/m;
 var OID2 = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 function ledgerDir(env) {
   const dir = env[PROVENANCE_ENV];
-  return typeof dir === "string" && dir !== "" && isAbsolute13(dir) ? resolve23(dir) : null;
+  return typeof dir === "string" && dir !== "" && isAbsolute13(dir) ? resolve22(dir) : null;
 }
 function now2() {
   return (BigInt(Math.round((performance.timeOrigin + performance.now()) * 1e3)) * 1000n).toString();
 }
-var sha25616 = (data) => createHash36("sha256").update(data).digest("hex");
+var sha25616 = (data) => createHash34("sha256").update(data).digest("hex");
 function list2(dir) {
   try {
     return readdirSync20(dir).sort();
@@ -43853,10 +42354,10 @@ function list2(dir) {
 function keep2(dir, bytes2) {
   const sha = sha25616(bytes2);
   if (bytes2.length > MAX_KEPT_BYTES) return { sha256: sha, kept: false };
-  const target = join50(dir, "objects", sha.slice(0, 2), sha);
-  if (!existsSync39(target)) {
-    mkdirSync23(dirname19(target), { recursive: true });
-    const tmp = `${target}.${process.pid}.${randomBytes8(4).toString("hex")}.tmp`;
+  const target = join46(dir, "objects", sha.slice(0, 2), sha);
+  if (!existsSync35(target)) {
+    mkdirSync22(dirname18(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${randomBytes7(4).toString("hex")}.tmp`;
     writeFileSync10(tmp, bytes2, { flag: "wx" });
     renameSync6(tmp, target);
   }
@@ -43864,10 +42365,10 @@ function keep2(dir, bytes2) {
 }
 function looseRefs(dir, prefix, out) {
   for (const name of list2(dir)) {
-    const p = join50(dir, name);
+    const p = join46(dir, name);
     let st;
     try {
-      st = lstatSync18(p);
+      st = lstatSync17(p);
     } catch {
       continue;
     }
@@ -43885,28 +42386,28 @@ function observeGit(common, objects) {
   return unrecorded(() => {
     const refs = {};
     try {
-      for (const line of readFileSync33(join50(common, "packed-refs"), "utf8").split("\n")) {
+      for (const line of readFileSync32(join46(common, "packed-refs"), "utf8").split("\n")) {
         const m = /^([0-9a-f]{40}(?:[0-9a-f]{24})?) (\S+)$/.exec(line);
         if (m) refs[m[2]] = m[1];
       }
     } catch {
     }
-    looseRefs(join50(common, "refs"), "refs", refs);
+    looseRefs(join46(common, "refs"), "refs", refs);
     const heads = {};
     try {
-      heads["."] = readFileSync33(join50(common, "HEAD"), "utf8").trim();
+      heads["."] = readFileSync32(join46(common, "HEAD"), "utf8").trim();
     } catch {
     }
-    for (const name of list2(join50(common, "worktrees"))) {
-      looseRefs(join50(common, "worktrees", name, "refs"), `worktrees/${name}/refs`, refs);
+    for (const name of list2(join46(common, "worktrees"))) {
+      looseRefs(join46(common, "worktrees", name, "refs"), `worktrees/${name}/refs`, refs);
       try {
-        heads[name] = readFileSync33(join50(common, "worktrees", name, "HEAD"), "utf8").trim();
+        heads[name] = readFileSync32(join46(common, "worktrees", name, "HEAD"), "utf8").trim();
       } catch {
       }
     }
     let stash_log = null;
     try {
-      const bytes2 = readFileSync33(join50(common, "logs", "refs", "stash"));
+      const bytes2 = readFileSync32(join46(common, "logs", "refs", "stash"));
       stash_log = { ...keep2(objects, bytes2), size: bytes2.length };
     } catch {
       stash_log = null;
@@ -43919,8 +42420,8 @@ function commonDirs(roots) {
   for (const root of roots) {
     try {
       for (const r of loadRepositories(root).repositories) {
-        const common = commonDirOf(resolve23(root, r.path));
-        if (common !== null) out.add(resolve23(common));
+        const common = commonDirOf(resolve22(root, r.path));
+        if (common !== null) out.add(resolve22(common));
       }
     } catch {
     }
@@ -43951,8 +42452,8 @@ function observeAll2(roots, dir) {
   }
 }
 function append2(dir, record) {
-  mkdirSync23(dir, { recursive: true });
-  appendFileSync2(join50(dir, CALLS_FILE), `${JSON.stringify({ schema: CALLS_SCHEMA, ...record })}
+  mkdirSync22(dir, { recursive: true });
+  appendFileSync2(join46(dir, CALLS_FILE), `${JSON.stringify({ schema: CALLS_SCHEMA, ...record })}
 `);
 }
 var strOrNull = (v) => typeof v === "string" && v !== "" ? v : null;
@@ -44020,9 +42521,9 @@ function recordAgentEnd(call, env = process.env) {
 }
 
 // src/hooks/review-launch.ts
-import { existsSync as existsSync40, readdirSync as readdirSync21 } from "node:fs";
-import { basename as basename15, isAbsolute as isAbsolute14, join as join51 } from "node:path";
-import { createHash as createHash37 } from "node:crypto";
+import { existsSync as existsSync36, readdirSync as readdirSync21 } from "node:fs";
+import { basename as basename15, isAbsolute as isAbsolute14, join as join47 } from "node:path";
+import { createHash as createHash35 } from "node:crypto";
 var ID7 = /^[A-Za-z0-9_-]{1,128}$/;
 var DISPATCH_LINE3 = /^Dispatch: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/m;
 function placeLaunch(call, env) {
@@ -44031,13 +42532,13 @@ function placeLaunch(call, env) {
   for (const root of controlRoots([call.cwd, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], [])) {
     let features = [];
     try {
-      features = readdirSync21(join51(root, "features")).filter(isSafeFeatureId);
+      features = readdirSync21(join47(root, "features")).filter(isSafeFeatureId);
     } catch {
       continue;
     }
     for (const featureId of features) {
       try {
-        const state = loadState(join51(root, "features", featureId))?.data;
+        const state = loadState(join47(root, "features", featureId))?.data;
         const o = state?.acceptance_review?.open ?? null;
         const t = state?.acceptance_review?.reviewer_timeout_ms;
         if (state && o !== null) open.push({ root, featureId, open: o, epoch: currentEpoch(state), timeoutMs: typeof t === "number" && t > 0 ? t : DEFAULT_REVIEWER_TIMEOUT_MS });
@@ -44075,13 +42576,13 @@ function recordReviewerLaunch(call, env) {
     cwd: call.cwd.replace(/\\/g, "/"),
     subagent_type: call.subagent_type,
     description: call.description === null ? null : call.description.slice(0, 200),
-    prompt_sha256: createHash37("sha256").update(call.prompt).digest("hex"),
+    prompt_sha256: createHash35("sha256").update(call.prompt).digest("hex"),
     prompt_bytes: Buffer.byteLength(call.prompt, "utf8"),
     prompt_dispatch: chosen.named,
     at: (/* @__PURE__ */ new Date()).toISOString(),
     holder: holderOf3(env)
   };
-  const file = join51(safe3.dir, `launch-${call.tool_use_id}.json`);
+  const file = join47(safe3.dir, `launch-${call.tool_use_id}.json`);
   createExclusive(file, JSON.stringify(record, null, 2) + "\n");
   return file;
 }
@@ -44093,7 +42594,7 @@ function duplicateReviewerLaunch(call, env) {
     if (!safe3.ok) return null;
     const { review_id: review, dispatch_id: dispatch } = chosen.open;
     const awaitLine = `review await ${chosen.featureId} --review ${review}`;
-    if (existsSync40(join51(safe3.dir, VERDICT_FILE))) return `Blocked: the reviewer of ${review} generation ${dispatch} already answered (its verdict file is written): run its ticket's ingest and settle lines; never launch a second reviewer for one generation.`;
+    if (existsSync36(join47(safe3.dir, VERDICT_FILE))) return `Blocked: the reviewer of ${review} generation ${dispatch} already answered (its verdict file is written): run its ticket's ingest and settle lines; never launch a second reviewer for one generation.`;
     const life = reviewerLifecycle(chosen.root, chosen.open, { timeoutMs: chosen.timeoutMs });
     if (life.state === "RUNNING") {
       return `Blocked: a reviewer of ${review} generation ${dispatch} is already running (launched at ${life.task.launched_at}, ${Math.round(life.task.elapsed_ms / 1e3)} s of its ${Math.round(life.task.timeout_ms / 1e3)} s wall-clock): wait for it — run its ticket's await line (${awaitLine}) until it completes, then its ingest and settle lines. Never launch a second reviewer for one generation.`;
@@ -44108,8 +42609,8 @@ function duplicateReviewerLaunch(call, env) {
 }
 
 // src/hooks/agent-task.ts
-import { existsSync as existsSync41, readdirSync as readdirSync22 } from "node:fs";
-import { join as join52 } from "node:path";
+import { existsSync as existsSync37, readdirSync as readdirSync22 } from "node:fs";
+import { join as join48 } from "node:path";
 var AGENT_TASK_SCHEMA = "mycelink-agent-task/1";
 var ID8 = /^[A-Za-z0-9_-]{1,128}$/;
 var AGENT_ID2 = /^[A-Za-z0-9_-]{1,64}$/;
@@ -44125,22 +42626,22 @@ var list3 = (dir) => {
 function launchDir(root, U, reviewer) {
   const name = `launch-${U}.json`;
   if (reviewer) {
-    const reviews = join52(root, ".mycelink", "reviews");
+    const reviews = join48(root, ".mycelink", "reviews");
     for (const feature of list3(reviews)) {
-      for (const review of list3(join52(reviews, feature))) {
-        for (const dispatch of list3(join52(reviews, feature, review))) {
-          const dir = join52(reviews, feature, review, dispatch);
-          if (existsSync41(join52(dir, name))) return dir;
+      for (const review of list3(join48(reviews, feature))) {
+        for (const dispatch of list3(join48(reviews, feature, review))) {
+          const dir = join48(reviews, feature, review, dispatch);
+          if (existsSync37(join48(dir, name))) return dir;
         }
       }
     }
     return null;
   }
-  const launches = join52(root, ".mycelink", "launches");
+  const launches = join48(root, ".mycelink", "launches");
   for (const feature of list3(launches)) {
-    for (const dispatch of list3(join52(launches, feature))) {
-      const dir = join52(launches, feature, dispatch);
-      if (existsSync41(join52(dir, name))) return dir;
+    for (const dispatch of list3(join48(launches, feature))) {
+      const dir = join48(launches, feature, dispatch);
+      if (existsSync37(join48(dir, name))) return dir;
     }
   }
   return null;
@@ -44164,7 +42665,7 @@ function recordAgentTask(call, env) {
     for (const root of controlRoots([typeof call.cwd === "string" ? call.cwd : void 0, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], [])) {
       const dir = launchDir(root, U, reviewer);
       if (dir === null) continue;
-      const file = join52(dir, `agent-${U}.json`);
+      const file = join48(dir, `agent-${U}.json`);
       createExclusive(file, JSON.stringify({ schema: AGENT_TASK_SCHEMA, tool_use_id: U, session_id: S, agent_id: agentId, subagent_type: type, status, async: r["isAsync"] === true || status === "async_launched", at: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n");
       return file;
     }
@@ -44286,7 +42787,7 @@ function readStdin(io) {
 }
 function readAllStdinSync() {
   try {
-    return readFileSync34(0, "utf8");
+    return readFileSync33(0, "utf8");
   } catch {
     return "";
   }
@@ -44296,13 +42797,13 @@ function activeFeature(controlRoot, explicit) {
   const envFeature = process.env["MYCELINK_FEATURE_ID"];
   if (envFeature) return isSafeFeatureId(envFeature) ? envFeature : null;
   const dir = controlPaths(controlRoot).featuresDir;
-  if (!existsSync42(dir)) return null;
+  if (!existsSync38(dir)) return null;
   const candidates = readdirSync23(dir).filter(
-    (f) => isSafeFeatureId(f) && existsSync42(join53(dir, f, "STATE.json"))
+    (f) => isSafeFeatureId(f) && existsSync38(join49(dir, f, "STATE.json"))
   );
   if (candidates.length === 1) return candidates[0];
   for (const id of candidates.sort()) {
-    const state = loadState(join53(dir, id))?.data;
+    const state = loadState(join49(dir, id))?.data;
     if (state && ["RUNNING", "E2E_RUNNING", "CANDIDATE_READY"].includes(state.feature_state)) {
       return id;
     }
@@ -44339,10 +42840,10 @@ function activeNode(ctx, cwd, input = {}) {
   };
   if (envNode) return pick2(envNode);
   if (cwd) {
-    const here = resolve24(cwd);
+    const here = resolve23(cwd);
     for (const [id, runtime] of claimed) {
       const worktree = runtime.claim?.worktree;
-      if (worktree && (resolve24(worktree) === here || here.startsWith(resolve24(worktree) + sep5))) {
+      if (worktree && (resolve23(worktree) === here || here.startsWith(resolve23(worktree) + sep5))) {
         return pick2(id);
       }
     }
@@ -44428,7 +42929,7 @@ function attestVerdictWrite(attest, call) {
     content_sha256: canonicalVerdictSha256(attest.content),
     at: (/* @__PURE__ */ new Date()).toISOString()
   };
-  writeTextAtomic(join53(attest.file, "..", ATTESTATION_FILE), JSON.stringify(body, null, 2) + "\n");
+  writeTextAtomic(join49(attest.file, "..", ATTESTATION_FILE), JSON.stringify(body, null, 2) + "\n");
 }
 async function runHook(event, args, io) {
   if (event === "controller-fence") return controllerFence(io);
@@ -44444,9 +42945,9 @@ async function runHook(event, args, io) {
     return 0;
   }
   const input = readStdin(io);
-  const controlRoot = (typeof args.flags["control-root"] === "string" ? resolve24(args.flags["control-root"]) : null) ?? process.env["MYCELINK_CONTROL_ROOT"] ?? process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd();
+  const controlRoot = (typeof args.flags["control-root"] === "string" ? resolve23(args.flags["control-root"]) : null) ?? process.env["MYCELINK_CONTROL_ROOT"] ?? process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd();
   const explicit = typeof args.flags["feature"] === "string" ? args.flags["feature"] : void 0;
-  const ctx = loadHookContext(resolve24(controlRoot), explicit);
+  const ctx = loadHookContext(resolve23(controlRoot), explicit);
   switch (event) {
     case "session-start":
     case "SessionStart":
@@ -44568,15 +43069,15 @@ function preToolUse(ctx, io, input) {
   const tool = input.tool_name ?? "";
   const target = editTarget(input);
   if (target !== null && ["Edit", "Write", "NotebookEdit", "MultiEdit"].includes(tool)) {
-    const normalised = resolve24(target).replace(/\\/g, "/");
-    const unboundGraph = matchGlob("**/PORTFOLIO-GRAPH.yaml", normalised) && !existsSync42(join53(dirname20(resolve24(target)), "STATE.json"));
+    const normalised = resolve23(target).replace(/\\/g, "/");
+    const unboundGraph = matchGlob("**/PORTFOLIO-GRAPH.yaml", normalised) && !existsSync38(join49(dirname19(resolve23(target)), "STATE.json"));
     if (!unboundGraph && MANAGED_PATTERNS.some((p) => matchGlob(p, normalised))) {
       return block(
         io,
         `Blocked: ${relative8(ctx.controlRoot, target) || target} is controller-owned state or protected configuration. Use mycelink (node/tdd/evidence/candidate/resource) instead of editing it.`
       );
     }
-    if (samePath(resolve24(target), join53(ctx.controlRoot, "repositories.yaml"))) {
+    if (samePath(resolve23(target), join49(ctx.controlRoot, "repositories.yaml"))) {
       return block(io, "Blocked: repositories.yaml names the commands Mycelink runs (tests, worktree setup). Change it with mycelink repo register.");
     }
   }
@@ -44596,14 +43097,14 @@ function preToolUse(ctx, io, input) {
   if (active2 !== null && target !== null && ["Edit", "Write", "MultiEdit"].includes(tool)) {
     const runtime = ctx.state.nodes[active2.id];
     const worktree = runtime?.claim?.worktree;
-    const rel = worktree ? relative8(resolve24(worktree), resolve24(target)).replace(/\\/g, "/") : relative8(ctx.controlRoot, resolve24(target)).replace(/\\/g, "/");
+    const rel = worktree ? relative8(resolve23(worktree), resolve23(target)).replace(/\\/g, "/") : relative8(ctx.controlRoot, resolve23(target)).replace(/\\/g, "/");
     if (rel.startsWith("..")) {
       return block(
         io,
         `Blocked: ${active2.id} may only edit inside its own worktree. "${target}" is outside it.`
       );
     }
-    if (worktree && !isInsideReal(worktree, resolve24(worktree, rel))) {
+    if (worktree && !isInsideReal(worktree, resolve23(worktree, rel))) {
       return block(
         io,
         `Blocked: "${rel}" resolves through a link to a location outside the worktree of ${active2.id}.`
@@ -44634,7 +43135,7 @@ function preToolUse(ctx, io, input) {
 function postToolUse(ctx, io, input) {
   if (!ctx.paths || !ctx.state) return 0;
   const target = editTarget(input);
-  const key = createHash38("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
+  const key = createHash36("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
   try {
     appendEvent(ctx.paths.events, {
       idempotency_key: `posttool:${key}`,
@@ -44645,7 +43146,7 @@ function postToolUse(ctx, io, input) {
       data: {
         tool: input.tool_name ?? null,
         // Path only, relative where possible; never the content.
-        path: target ? relative8(ctx.controlRoot, resolve24(target)).replace(/\\/g, "/") : null
+        path: target ? relative8(ctx.controlRoot, resolve23(target)).replace(/\\/g, "/") : null
       }
     });
   } catch {
@@ -44749,13 +43250,13 @@ function stopGuard(ctx, io, input) {
 }
 
 // src/knowledge/cli.ts
-import { readFileSync as readFileSync36 } from "node:fs";
-import { resolve as resolve26 } from "node:path";
+import { readFileSync as readFileSync35 } from "node:fs";
+import { resolve as resolve25 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync43, mkdirSync as mkdirSync24, readFileSync as readFileSync35, readdirSync as readdirSync24, statSync as statSync5 } from "node:fs";
-import { join as join54, relative as relative9, resolve as resolve25 } from "node:path";
+import { existsSync as existsSync39, mkdirSync as mkdirSync23, readFileSync as readFileSync34, readdirSync as readdirSync24, statSync as statSync5 } from "node:fs";
+import { join as join50, relative as relative9, resolve as resolve24 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
   procedure: "procedures",
@@ -44763,9 +43264,9 @@ var DIR_FOR = {
   decision: "decisions",
   concept: "concepts",
   pitfall: "pitfalls",
-  "code-module": join54("code", "modules"),
-  "code-contract": join54("code", "contracts"),
-  "code-flow": join54("code", "flows")
+  "code-module": join50("code", "modules"),
+  "code-contract": join50("code", "contracts"),
+  "code-flow": join50("code", "flows")
 };
 var STATUS_WEIGHT = {
   verified: 100,
@@ -44783,24 +43284,24 @@ var EXCLUDED_BY_DEFAULT = /* @__PURE__ */ new Set([
   "archived"
 ]);
 function brainRoot(controlRoot, override) {
-  return resolve25(controlRoot, override ?? ".llmwiki");
+  return resolve24(controlRoot, override ?? ".llmwiki");
 }
 function initBrain(root) {
   for (const dir of [
     root,
-    ...Object.values(DIR_FOR).map((d) => join54(root, d)),
-    join54(root, "queries"),
-    join54(root, "review"),
-    join54(root, "archive"),
-    join54(root, "manifests"),
-    join54(root, "evidence")
+    ...Object.values(DIR_FOR).map((d) => join50(root, d)),
+    join50(root, "queries"),
+    join50(root, "review"),
+    join50(root, "archive"),
+    join50(root, "manifests"),
+    join50(root, "evidence")
   ]) {
-    mkdirSync24(dir, { recursive: true });
+    mkdirSync23(dir, { recursive: true });
   }
-  const schema = join54(root, "SCHEMA.md");
-  if (!existsSync43(schema)) writeTextAtomic(schema, SCHEMA_MD);
-  const index = join54(root, "index.md");
-  if (!existsSync43(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
+  const schema = join50(root, "SCHEMA.md");
+  if (!existsSync39(schema)) writeTextAtomic(schema, SCHEMA_MD);
+  const index = join50(root, "index.md");
+  if (!existsSync39(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
   return root;
 }
 var SCHEMA_MD = `# LLM Wiki Brain schema
@@ -44845,7 +43346,7 @@ ${body.trimEnd()}
 `;
 }
 function pagePath(root, frontmatter) {
-  return join54(root, DIR_FOR[frontmatter.type], `${frontmatter.id}.md`);
+  return join50(root, DIR_FOR[frontmatter.type], `${frontmatter.id}.md`);
 }
 function writePage(root, frontmatter, body) {
   const problems = validateAgainstSchema("memory-page", frontmatter);
@@ -44873,13 +43374,13 @@ function writePage(root, frontmatter, body) {
   }
   if (problems.length > 0) return { path: "", problems };
   const file = pagePath(root, frontmatter);
-  mkdirSync24(join54(root, DIR_FOR[frontmatter.type]), { recursive: true });
+  mkdirSync23(join50(root, DIR_FOR[frontmatter.type]), { recursive: true });
   writeTextAtomic(file, renderPage(frontmatter, body));
   return { path: file, problems: [] };
 }
 function readPage(file) {
-  if (!existsSync43(file)) return null;
-  const parsed = parseFrontmatter(readFileSync35(file, "utf8"));
+  if (!existsSync39(file)) return null;
+  const parsed = parseFrontmatter(readFileSync34(file, "utf8"));
   if (parsed === null) return null;
   const problems = validateAgainstSchema("memory-page", parsed.frontmatter);
   if (problems.length > 0) return null;
@@ -44890,11 +43391,11 @@ function readPage(file) {
   };
 }
 function listPages(root) {
-  if (!existsSync43(root)) return [];
+  if (!existsSync39(root)) return [];
   const out = [];
   const walk2 = (dir) => {
     for (const entry of readdirSync24(dir).sort()) {
-      const full = join54(dir, entry);
+      const full = join50(dir, entry);
       if (statSync5(full).isDirectory()) {
         if (entry === "archive") continue;
         walk2(full);
@@ -45040,11 +43541,11 @@ function consolidate(root) {
   return findings;
 }
 function adoptCodewiki(controlRoot, brain) {
-  const codewiki = resolve25(controlRoot, ".codewiki");
-  if (!existsSync43(codewiki)) return { adopted: false, path: codewiki };
-  mkdirSync24(join54(brain, "code"), { recursive: true });
+  const codewiki = resolve24(controlRoot, ".codewiki");
+  if (!existsSync39(codewiki)) return { adopted: false, path: codewiki };
+  mkdirSync23(join50(brain, "code"), { recursive: true });
   writeTextAtomic(
-    join54(brain, "code", "SUBVAULT.md"),
+    join50(brain, "code", "SUBVAULT.md"),
     [
       "# Adopted code-memory sub-vault",
       "",
@@ -45086,7 +43587,7 @@ function memoryCommand(args, io, controlRoot) {
       const title = flagString(args, "title", id);
       const status = flagString(args, "status", "instructed_not_verified");
       const bodyFile = args.flags["body-file"];
-      const body = typeof bodyFile === "string" ? readFileSync36(resolve26(bodyFile), "utf8") : flagString(args, "body", "");
+      const body = typeof bodyFile === "string" ? readFileSync35(resolve25(bodyFile), "utf8") : flagString(args, "body", "");
       const now3 = (/* @__PURE__ */ new Date()).toISOString();
       const frontmatter = {
         id,
@@ -45511,14 +44012,14 @@ function listAdapters() {
 registerAdapter(eccAdapter);
 
 // src/sessions/preflight.ts
-import { accessSync, constants as constants7, existsSync as existsSync44, statSync as statSync6 } from "node:fs";
+import { accessSync, constants as constants7, existsSync as existsSync40, statSync as statSync6 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join55 } from "node:path";
+import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join51 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
 var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
   try {
-    if (!existsSync44(p) || !statSync6(p).isFile()) return false;
+    if (!existsSync40(p) || !statSync6(p).isFile()) return false;
     if (process.platform !== "win32") accessSync(p, constants7.X_OK);
     return true;
   } catch {
@@ -45530,7 +44031,7 @@ function resolveExecutable(exe, env = process.env) {
   if (process.platform === "win32") return resolveWindowsExecutable(exe, env);
   if (isAbsolute15(exe) || exe.includes("/")) return isRunnableFile(exe) ? exe : null;
   for (const dir of (env["PATH"] ?? "").split(delimiter2).filter(Boolean)) {
-    const candidate = join55(dir, exe);
+    const candidate = join51(dir, exe);
     if (isRunnableFile(candidate)) return candidate;
   }
   return null;
@@ -45563,7 +44064,7 @@ function preflightAdapter(input, env = process.env) {
       ok: false,
       adapter: "fake-claude",
       executable: script,
-      resolved: isRunnableFile(script) || existsSync44(script) && statSync6(script).isFile() ? script : null,
+      resolved: isRunnableFile(script) || existsSync40(script) && statSync6(script).isFile() ? script : null,
       version: null,
       auth: "not-checked"
     };
@@ -45590,9 +44091,9 @@ function preflightAdapter(input, env = process.env) {
 }
 
 // src/engine/feature-verify.ts
-import { createHash as createHash39 } from "node:crypto";
-import { existsSync as existsSync45, readFileSync as readFileSync37 } from "node:fs";
-import { join as join56 } from "node:path";
+import { createHash as createHash37 } from "node:crypto";
+import { existsSync as existsSync41, readFileSync as readFileSync36 } from "node:fs";
+import { join as join52 } from "node:path";
 function featureVerifyProblems(controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
   const validation = validateFeatureGraph(controlRoot, featureId);
@@ -45688,10 +44189,10 @@ function featureDeliveryProblems(controlRoot, featureId) {
   const candidate = state.current_candidate;
   if (candidate === null) return ["NO_CANDIDATE: no current candidate; every node must be DONE and the candidate cut (dispatch runs the candidate build)"];
   const pinned = state.accepted_deliveries?.[candidate];
-  const manifest = join56(paths.featureDir, "deliveries", `${candidate}.json`);
-  if (pinned === void 0 || !existsSync45(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
-  const bytes2 = readFileSync37(manifest);
-  if (createHash39("sha256").update(bytes2).digest("hex") !== pinned) return [`NOT_DELIVERED: the delivery manifest of ${candidate} is not the accepted one STATE.json pins`];
+  const manifest = join52(paths.featureDir, "deliveries", `${candidate}.json`);
+  if (pinned === void 0 || !existsSync41(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
+  const bytes2 = readFileSync36(manifest);
+  if (createHash37("sha256").update(bytes2).digest("hex") !== pinned) return [`NOT_DELIVERED: the delivery manifest of ${candidate} is not the accepted one STATE.json pins`];
   let status;
   try {
     status = JSON.parse(bytes2.toString("utf8")).status;
@@ -45704,9 +44205,9 @@ function featureDeliveryProblems(controlRoot, featureId) {
 }
 
 // src/engine/deliver.ts
-import { existsSync as existsSync46, mkdirSync as mkdirSync25, readFileSync as readFileSync38 } from "node:fs";
-import { createHash as createHash40 } from "node:crypto";
-import { join as join57 } from "node:path";
+import { existsSync as existsSync42, mkdirSync as mkdirSync24, readFileSync as readFileSync37 } from "node:fs";
+import { createHash as createHash38 } from "node:crypto";
+import { join as join53 } from "node:path";
 var DeliveryRefusedError = class extends Error {
   problems;
   constructor(problems) {
@@ -45723,12 +44224,12 @@ var DeliveryFailedError = class extends Error {
 };
 function manifestFile(featureDir, candidateId) {
   assertCandidateId(candidateId);
-  return join57(featureDir, "deliveries", `${candidateId}.json`);
+  return join53(featureDir, "deliveries", `${candidateId}.json`);
 }
 function readManifest(file) {
-  if (!existsSync46(file)) return null;
+  if (!existsSync42(file)) return null;
   try {
-    return JSON.parse(readFileSync38(file, "utf8"));
+    return JSON.parse(readFileSync37(file, "utf8"));
   } catch {
     return null;
   }
@@ -45765,13 +44266,13 @@ function untrustedManifest(controlRoot, featureId, candidateId, targets, raw) {
   return null;
 }
 function save3(file, manifest) {
-  mkdirSync25(join57(file, ".."), { recursive: true });
+  mkdirSync24(join53(file, ".."), { recursive: true });
   writeTextAtomic(file, JSON.stringify(manifest, null, 2) + "\n");
 }
 function deliverFeature(controlRoot, featureId, options = {}) {
-  const lockDir = join57(featurePaths(controlRoot, featureId).featureDir, "deliveries");
-  mkdirSync25(lockDir, { recursive: true });
-  return withLock(join57(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
+  const lockDir = join53(featurePaths(controlRoot, featureId).featureDir, "deliveries");
+  mkdirSync24(lockDir, { recursive: true });
+  return withLock(join53(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
     timeoutMs: 2e3,
     pollMs: 50,
     purpose: "feature delivery"
@@ -45798,7 +44299,7 @@ function deliverLocked(controlRoot, featureId, options) {
     return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
   })) {
     const recorded = state.accepted_deliveries?.[candidateId];
-    const bytes2 = createHash40("sha256").update(readFileSync38(file)).digest("hex");
+    const bytes2 = createHash38("sha256").update(readFileSync37(file)).digest("hex");
     const why = recorded !== bytes2 ? "manifest does not match the accepted delivery recorded in STATE.json" : untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
     if (why === null) return { ...existing, ok: true, idempotent: true };
     appendEvent(paths.events, {
@@ -45938,13 +44439,13 @@ function deliverLocked(controlRoot, featureId, options) {
     feature_id: featureId,
     data: { candidate_id: candidateId, repositories: Object.fromEntries(names2.map((n) => [n, plan[n]?.after ?? null])) }
   });
-  const evidenceDir = join57(paths.evidenceDir, "delivery", candidateId);
+  const evidenceDir = join53(paths.evidenceDir, "delivery", candidateId);
   manifest.acceptance = names2.map((name) => acceptance(controlRoot, workspace, name, plan[name], candidateId, evidenceDir));
   const passed = manifest.acceptance.every((a) => a.failure_fingerprint === null);
   manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
   manifest.accepted_at = passed ? (/* @__PURE__ */ new Date()).toISOString() : null;
   save3(file, manifest);
-  const manifestSha = createHash40("sha256").update(readFileSync38(file)).digest("hex");
+  const manifestSha = createHash38("sha256").update(readFileSync37(file)).digest("hex");
   mutateState(paths.featureDir, (s) => {
     const accepted = { ...s.accepted_deliveries ?? {} };
     if (passed) accepted[candidateId] = manifestSha;
@@ -45977,10 +44478,10 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
   const decl = workspace.repositories.repositories.find((r) => r.name === name);
   const repo = repositoryPath(workspace, name);
   const command = decl?.commands.test ?? [];
-  const dir = join57(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
+  const dir = join53(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
   runGit(repo, ["worktree", "remove", "--force", dir], { allowFail: true });
   runGit(repo, ["worktree", "prune"], { allowFail: true });
-  mkdirSync25(join57(workspace.paths.workDir, "acceptance"), { recursive: true });
+  mkdirSync24(join53(workspace.paths.workDir, "acceptance"), { recursive: true });
   runGit(repo, ["worktree", "add", "--detach", dir, step.base_branch]);
   try {
     const sha = resolveRef(dir, "HEAD");
@@ -45993,7 +44494,7 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
         repository: name,
         repoPath: repo,
         worktree: dir,
-        root: join57(workspace.paths.workDir, "acceptance"),
+        root: join53(workspace.paths.workDir, "acceptance"),
         config: setup,
         evidenceDir,
         label: `acceptance-${name}.worktree-setup`
@@ -46043,13 +44544,13 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
 // src/cli/cli.ts
 function isLink2(path) {
   try {
-    return lstatSync19(path).isSymbolicLink();
+    return lstatSync18(path).isSymbolicLink();
   } catch {
     return false;
   }
 }
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync39(join58(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync38(join54(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -46140,17 +44641,17 @@ var CONTROLLER_ONLY = {
 };
 function resolveControlRoot(args, cwd = process.cwd()) {
   const flag = args.flags["control-root"];
-  if (typeof flag === "string") return resolve27(flag);
+  if (typeof flag === "string") return resolve26(flag);
   const env = process.env["MYCELINK_CONTROL_ROOT"];
-  if (env) return resolve27(env);
-  let dir = resolve27(cwd);
+  if (env) return resolve26(env);
+  let dir = resolve26(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync47(join58(dir, "mycelink.config.json"))) return dir;
-    const parent = dirname21(dir);
+    if (existsSync43(join54(dir, "mycelink.config.json"))) return dir;
+    const parent = dirname20(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return resolve27(cwd);
+  return resolve26(cwd);
 }
 function emit2(io, args, value, human) {
   if (flagBool(args, "json")) io.out(JSON.stringify(value, null, 2));
@@ -46200,8 +44701,8 @@ function orchestratorFor(controlRoot, featureId) {
 }
 function requireController(args, operation) {
   if (args.positional[0] === "init") {
-    const target = resolve27(args.positional[1] ?? ".");
-    if (!existsSync47(controlPaths(target).config)) {
+    const target = resolve26(args.positional[1] ?? ".");
+    if (!existsSync43(controlPaths(target).config)) {
       assertControllerRole(args, operation);
       return;
     }
@@ -46258,8 +44759,8 @@ async function main(argv, io = defaultIo) {
   try {
     const sub = args.positional[1] ?? "";
     if (group === "codex") return codexGroup(args, io);
-    const target = group === "init" ? resolve27(args.positional[1] ?? ".") : resolveControlRoot(args);
-    if (existsSync47(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
+    const target = group === "init" ? resolve26(args.positional[1] ?? ".") : resolveControlRoot(args);
+    if (existsSync43(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
       const planning = group === "graph" && ["compile", "validate", "import", "adapters", "ready"].includes(sub) || group === "feature" && ["acceptance", "init"].includes(sub) || group === "repo" && ["register", "modules", "audit"].includes(sub) || group === "controller" && sub === "open" || group === "doctor";
       if (!planning) throw new Error(`CODEX_RUNTIME_DENIED: ${preflightAdapter(loadConfig(target)).detail}; security review has not authorised ${group} ${sub}. Use codex status for read-only inspection.`);
     }
@@ -46334,17 +44835,17 @@ function codexGroup(args, io) {
   const sub = requirePositional(args, 1, "init|status|run|resume|verify|deliver");
   if (sub === "init") {
     assertControllerRole(args, "codex init");
-    const target = resolve27(requirePositional(args, 2, "control-repo-path"));
-    if (existsSync47(controlPaths(target).config)) throw new Error("CODEX_INIT_EXISTS: existing control configuration must not be replaced.");
-    if (existsSync47(target) && readdirSync25(target).length > 0) throw new Error("CODEX_INIT_OCCUPIED: choose an empty, new control directory; existing Claude assets are never modified.");
+    const target = resolve26(requirePositional(args, 2, "control-repo-path"));
+    if (existsSync43(controlPaths(target).config)) throw new Error("CODEX_INIT_EXISTS: existing control configuration must not be replaced.");
+    if (existsSync43(target) && readdirSync25(target).length > 0) throw new Error("CODEX_INIT_OCCUPIED: choose an empty, new control directory; existing Claude assets are never modified.");
     const paths2 = initControlRepo(target, { provider: { provider: "codex", executable: "codex", extra_args: [] } });
-    if (!existsSync47(paths2.repositoriesManifest)) writeTextAtomic(paths2.repositoriesManifest, import_yaml7.default.stringify({ schema_version: 1, repositories: [] }));
+    if (!existsSync43(paths2.repositoriesManifest)) writeTextAtomic(paths2.repositoriesManifest, import_yaml7.default.stringify({ schema_version: 1, repositories: [] }));
     emit2(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
   if (!["status", "run", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
-  if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync47(controlPaths(controlRoot).config)) {
+  if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync43(controlPaths(controlRoot).config)) {
     throw new Error("CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.");
   }
   const gate = preflightAdapter(loadConfig(controlRoot));
@@ -46354,7 +44855,7 @@ function codexGroup(args, io) {
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
   const state = loadState(paths.featureDir)?.data ?? null;
-  const graph = existsSync47(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
+  const graph = existsSync43(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
   const report = {
     feature_id: featureId,
     graph_valid: graph?.ok ?? false,
@@ -46377,24 +44878,24 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync47(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync47(paths.config), paths.config);
+  push("control-root", existsSync43(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync43(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync47(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync43(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync38(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync47(paths.repositoriesManifest)) {
+  } else if (existsSync43(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
-    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
+    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync38(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
   }
   push("repositories.yaml", repoOk, repoDetail);
   if (repoOk) {
     const manifest = loadRepositories(controlRoot);
     for (const repo of manifest.repositories) {
-      const path = resolve27(controlRoot, repo.path);
+      const path = resolve26(controlRoot, repo.path);
       push(`repo:${repo.name}`, isGitRepository(path), path);
     }
   }
@@ -46407,11 +44908,11 @@ function doctor(args, io) {
     level: adapter.ok ? "ok" : "warn",
     detail: adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
-  if (existsSync47(paths.config)) {
+  if (existsSync43(paths.config)) {
     const hooks = hookHealth(controlRoot);
     push("hooks", hooks.ok, hooks.detail);
   }
-  const features = existsSync47(paths.featuresDir) ? readdirSync25(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync43(paths.featuresDir) ? readdirSync25(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -46423,16 +44924,16 @@ function doctor(args, io) {
   return ok ? 0 : 1;
 }
 function cmdInit(args, io) {
-  const target = resolve27(requirePositional(args, 1, "control-repo-path"));
+  const target = resolve26(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync47(paths.repositoriesManifest)) {
+  if (!existsSync43(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync47(join58(target, "CLAUDE.md"))) {
-    writeTextAtomic(join58(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync43(join54(target, "CLAUDE.md"))) {
+    writeTextAtomic(join54(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -46477,10 +44978,10 @@ function repoGroup(args, io) {
   const sub = requirePositional(args, 1, "register|modules|audit|lock");
   if (sub === "register") {
     const name = flagString(args, "name");
-    const manifest = existsSync47(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync43(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync38(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     const existing = manifest.repositories.find((r) => r["name"] === name);
     const path = flagString(args, "path", typeof existing?.["path"] === "string" ? existing["path"] : void 0);
-    const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve27(controlRoot, r["path"]), resolve27(controlRoot, path)));
+    const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve26(controlRoot, r["path"]), resolve26(controlRoot, path)));
     if (other !== void 0) {
       io.err(
         `REPOSITORY_ALREADY_REGISTERED: ${path} is registered as "${String(other["name"])}"; register that name again to change it (its worktree_setup and tdd policy are kept). One repository has one name.`
@@ -46560,7 +45061,7 @@ function repoGroup(args, io) {
   if (sub === "audit") {
     const manifest = loadRepositories(controlRoot);
     const rows = manifest.repositories.map((repo) => {
-      const path = resolve27(controlRoot, repo.path);
+      const path = resolve26(controlRoot, repo.path);
       const exists2 = isGitRepository(path);
       const setup = worktreeSetupOf(repo);
       return {
@@ -46588,7 +45089,7 @@ function repoGroup(args, io) {
     const manifest = loadRepositories(controlRoot);
     const lock = { schema_version: 1, generated_at: (/* @__PURE__ */ new Date()).toISOString(), repositories: {} };
     for (const repo of manifest.repositories) {
-      const path = resolve27(controlRoot, repo.path);
+      const path = resolve26(controlRoot, repo.path);
       const branch = featureId ? integrationBranchName(featureId) : repo.base_branch;
       const exists2 = runGit(path, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
         allowFail: true
@@ -46638,9 +45139,9 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync39(resolve27(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync38(resolve26(graphPath), "utf8"));
     }
-    if (!existsSync47(paths.graph)) {
+    if (!existsSync43(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -46661,7 +45162,7 @@ function featureGroup(args, io) {
     if (acceptance2 !== null) state.acceptance = { path: acceptance2.path, sha256: acceptance2.sha256 };
     state.acceptance_review = { required: reviewPolicy.required, max_rounds: reviewPolicy.max_rounds, criterion_ceiling: reviewPolicy.criterion_ceiling, max_review_sessions: reviewPolicy.max_review_sessions, review_wall_clock_ms: reviewPolicy.review_wall_clock_ms, reviewer_timeout_ms: reviewPolicy.reviewer_timeout_ms, open: null, reviews: [], blocked: null, usage: zeroUsage() };
     saveState(paths.featureDir, state);
-    if (!existsSync47(paths.loops)) {
+    if (!existsSync43(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -46670,7 +45171,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync47(file)) writeTextAtomic(file, body);
+      if (!existsSync43(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -46762,7 +45263,6 @@ function featureGroup(args, io) {
     assertControllerRole(args, "feature cancel");
     const graph = loadGraph(controlRoot, featureId);
     const cancel = () => {
-      if (codexLifecycleEnabled(paths.featureDir)) revokeWslCodexProcesses(paths.featureDir);
       mutateState(paths.featureDir, (s) => {
         s.feature_state = "CANCELLED";
         s.blocked_reason = typeof args.flags["reason"] === "string" ? args.flags["reason"] : "cancelled by user";
@@ -46777,8 +45277,7 @@ function featureGroup(args, io) {
         releaseAllForNode(paths.featureDir, nodeId);
       }
     };
-    if (codexLifecycleEnabled(paths.featureDir)) withCodexLifecycleLock(paths.featureDir, cancel);
-    else cancel();
+    cancel();
     emit2(io, args, { feature_id: featureId, cancelled: true }, () => `${featureId} cancelled; claims and leases released.`);
     return 0;
   }
@@ -46854,7 +45353,7 @@ function featureGroup(args, io) {
 }
 function featureAcceptance(args, io, controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
-  const target = join58(paths.featureDir, ACCEPTANCE_FILE);
+  const target = join54(paths.featureDir, ACCEPTANCE_FILE);
   const show = (written, from) => {
     const loaded = loadAcceptanceManifest(controlRoot, featureId);
     if (loaded === null) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}`);
@@ -46862,7 +45361,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     emit2(
       io,
       args,
-      { path: loaded.path, sha256: createHash41("sha256").update(written).digest("hex"), from, source: manifest2.source, criteria: manifest2.criteria },
+      { path: loaded.path, sha256: createHash39("sha256").update(written).digest("hex"), from, source: manifest2.source, criteria: manifest2.criteria },
       () => [
         `${loaded.path} (${from}): ${manifest2.criteria.map((c) => `${c.id} ${c.kind}`).join(", ")}`,
         "Copy the criteria into the graph exactly (acceptance_criteria: [{id, text, kind}] from this file); never summarise them."
@@ -46872,16 +45371,16 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   };
   const source = args.flags["source"];
   if (typeof source !== "string") {
-    if (!existsSync47(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
-    return show(readFileSync39(target), "manifest");
+    if (!existsSync43(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
+    return show(readFileSync38(target), "manifest");
   }
   if (loadState(paths.featureDir) !== null) {
     throw new AcceptanceError("ACCEPTANCE_IMMUTABLE", `${featureId} is initialised: its approved criteria are bound (STATE.json); plan a change as a new feature`);
   }
-  const sourceFile = resolve27(controlRoot, source);
+  const sourceFile = resolve26(controlRoot, source);
   const sourceRel = relativeInside(controlRoot, sourceFile);
-  if (sourceRel === null || !existsSync47(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
-  const bytes2 = readFileSync39(sourceFile);
+  if (sourceRel === null || !existsSync43(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
+  const bytes2 = readFileSync38(sourceFile);
   const kinds = /* @__PURE__ */ new Map();
   const flag = args.flags["kind"];
   for (const pair of (typeof flag === "string" ? flag : "").split(",").map((x) => x.trim()).filter(Boolean)) {
@@ -46891,10 +45390,10 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     }
     kinds.set(id, kind);
   }
-  const sidecar = resolve27(controlRoot, sidecarPath(sourceRel));
-  mkdirSync26(paths.featureDir, { recursive: true });
-  if (existsSync47(sidecar)) {
-    const raw = readFileSync39(sidecar);
+  const sidecar = resolve26(controlRoot, sidecarPath(sourceRel));
+  mkdirSync25(paths.featureDir, { recursive: true });
+  if (existsSync43(sidecar)) {
+    const raw = readFileSync38(sidecar);
     let parsed;
     try {
       parsed = JSON.parse(raw.toString("utf8"));
@@ -46903,7 +45402,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     }
     const problems = manifestProblems(parsed, { featureId, source: bytes2 });
     if (problems.length > 0) {
-      const stale = parsed.source?.sha256 !== createHash41("sha256").update(bytes2).digest("hex");
+      const stale = parsed.source?.sha256 !== createHash39("sha256").update(bytes2).digest("hex");
       throw new AcceptanceError(stale ? "ACCEPTANCE_SOURCE_MISMATCH" : "ACCEPTANCE_MANIFEST_INVALID", `${sidecarPath(sourceRel)}: ${problems.join("; ")}`);
     }
     for (const [id, kind] of kinds) {
@@ -46953,17 +45452,17 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync39(resolve27(file), "utf8");
+      files[role] = readFileSync38(resolve26(file), "utf8");
     }
-    const repositories = existsSync47(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync43(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve27(args.flags["out"]) : join58(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
-    if (resolve27(out) === resolve27(paths.graph)) {
+    const out = typeof args.flags["out"] === "string" ? resolve26(args.flags["out"]) : join54(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    if (resolve26(out) === resolve26(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
-    mkdirSync26(dirname21(out), { recursive: true });
+    mkdirSync25(dirname20(out), { recursive: true });
     const header = `# DRAFT generated by the "${adapter.name}" adapter (${adapter.verification}).
 # Requires human review. Not approved. Rename to PORTFOLIO-GRAPH.yaml only after review,
 # then run: mycelink graph validate ${featureId}
@@ -46987,15 +45486,15 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync39(resolve27(source), "utf8"));
-    const repositories = existsSync47(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const parsed = import_yaml7.default.parse(readFileSync38(resolve26(source), "utf8"));
+    const repositories = existsSync43(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
       return 1;
     }
     const paths = featurePaths(controlRoot, featureId);
-    mkdirSync26(paths.featureDir, { recursive: true });
+    mkdirSync25(paths.featureDir, { recursive: true });
     writeTextAtomic(paths.graph, import_yaml7.default.stringify(parsed, { lineWidth: 0 }));
     emit2(
       io,
@@ -47392,10 +45891,10 @@ function tddGroup(args, io) {
   if (phase === "cycle") return tddCycle(args, io, controlRoot, featureId, node, runtime, capability);
   if (phase === "challenge") return tddChallenge(args, io, controlRoot, featureId, graph, node, runtime);
   if (phase === "capsule") return tddCapsule(args, io, controlRoot, featureId, nodeId, capability);
-  const held2 = runtime.claim?.evidence_correction;
-  if (held2 && held2.cycle !== true) {
+  const held = runtime.claim?.evidence_correction;
+  if (held && held.cycle !== true) {
     io.err(
-      `${phase} gate refused: EVIDENCE_CORRECTION_PENDING: ${nodeId}'s code, history and gate evidence are recorded and its submission is held only for its criterion evidence (${held2.code}). Do not edit, commit or run a gate: write the corrected result (criterion_evidence by test_id) and settle. Nothing was run or recorded.`
+      `${phase} gate refused: EVIDENCE_CORRECTION_PENDING: ${nodeId}'s code, history and gate evidence are recorded and its submission is held only for its criterion evidence (${held.code}). Do not edit, commit or run a gate: write the corrected result (criterion_evidence by test_id) and settle. Nothing was run or recorded.`
     );
     return 2;
   }
@@ -47438,8 +45937,8 @@ function tddGroup(args, io) {
   const setupBinding = worktree !== null ? runtime.claim?.worktree_setup : void 0;
   const nowInputs = worktree !== null && setupBinding !== void 0 ? setupInputs(worktree, setupBinding.config) : null;
   if (worktree !== null && setupBinding !== void 0 && nowInputs !== null && nowInputs.sha256 !== setupBinding.inputs_sha256) {
-    const receiptFile = join58(controlRoot, setupBinding.receipt_path);
-    const before = existsSync47(receiptFile) ? JSON.parse(readFileSync39(receiptFile, "utf8")).input_files : void 0;
+    const receiptFile = join54(controlRoot, setupBinding.receipt_path);
+    const before = existsSync43(receiptFile) ? JSON.parse(readFileSync38(receiptFile, "utf8")).input_files : void 0;
     const files = changedInputs(before, nowInputs.files);
     const workspace = loadWorkspace(controlRoot);
     const run = runWorktreeSetup({
@@ -47514,7 +46013,7 @@ function tddGroup(args, io) {
   };
   let deferral = null;
   if (phase === "regression" && bound !== void 0 && record.exit_code !== 0) {
-    deferral = regressionDeferral({ graph, state: loadState(paths.featureDir).data, nodeId, output: readFileSync39(join58(controlRoot, record.output_path), "utf8"), exitCode: record.exit_code, checkout: cwd });
+    deferral = regressionDeferral({ graph, state: loadState(paths.featureDir).data, nodeId, output: readFileSync38(join54(controlRoot, record.output_path), "utf8"), exitCode: record.exit_code, checkout: cwd });
     if (deferral.deferred) record.regression_deferred = { to: deferral.to, failing: deferral.failing };
   }
   const noRed = phase === "red" && !redRequired(node, runtime);
@@ -47674,11 +46173,11 @@ function tddCheck(args, io, controlRoot, featureId, graph, node, runtime) {
   const repoPath = repositoryPath(workspace, node.repository);
   const branch = workerBranchName(featureId, node.id);
   const head = resolveRef(repoPath, branch);
-  const slot = join58(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
+  const slot = join54(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
   let result;
   const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
   if (read === null) {
-    if (existsSync47(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
+    if (existsSync43(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
     return refuse2("RESULT_MISSING", `write your result to ${slot} first (it does not exist)`);
   }
   try {
@@ -47773,41 +46272,41 @@ function challengeSnapshot(controlRoot, featureId, nodeId, worktree, record, bin
   if (!accepted && (record.exit_code !== 0 || record.red_category !== "passed")) return null;
   const red = shownTests(gateRan, declared, 64).filter((t) => declared.some((d) => namesDeclared(t, d)));
   if (red.length === 0 || (accepted ? !red.some((t) => t.status === "passed") : red.some((t) => t.status !== "passed"))) return null;
-  const sha = (bytes2) => createHash41("sha256").update(bytes2).digest("hex");
+  const sha = (bytes2) => createHash39("sha256").update(bytes2).digest("hex");
   const planned = [];
   let total = 0;
   for (const t of binding.tests) {
     if (t.blob === null) continue;
-    const bytes2 = readFileSync39(join58(worktree, ...t.path.split("/")));
+    const bytes2 = readFileSync38(join54(worktree, ...t.path.split("/")));
     total += bytes2.length;
     if (total > 8 * 1024 * 1024) return null;
     planned.push({ at: ["files", ...t.path.split("/")], bytes: bytes2, test: { path: t.path, blob: t.blob } });
   }
   const gateBytes = (rel2, want) => {
-    const src = join58(controlRoot, ...rel2.split("/"));
-    if (!existsSync47(src)) return null;
-    const bytes2 = readFileSync39(src);
+    const src = join54(controlRoot, ...rel2.split("/"));
+    if (!existsSync43(src)) return null;
+    const bytes2 = readFileSync38(src);
     return sha(bytes2) === want ? bytes2 : null;
   };
   const outputBytes = gateBytes(record.output_path, record.output_sha256);
   const resultsBytes = record.results ? gateBytes(record.results.path, record.results.sha256) : null;
   if (outputBytes !== null) planned.push({ at: ["gate", "red.log"], bytes: outputBytes });
   if (resultsBytes !== null) planned.push({ at: ["gate", "red.results.json"], bytes: resultsBytes });
-  const root = join58(nodeEvidenceDir(controlRoot, featureId, nodeId), "challenge-red");
+  const root = join54(nodeEvidenceDir(controlRoot, featureId, nodeId), "challenge-red");
   const name = record.output_sha256.slice(0, 16);
   let dir = null;
   for (let n = 0; n <= 16 && dir === null; n++) {
-    const candidate = join58(root, n === 0 ? name : `${name}-${n}`);
-    if (planned.every((p) => artifactAt(join58(candidate, ...p.at), sha(p.bytes)) !== "other")) dir = candidate;
+    const candidate = join54(root, n === 0 ? name : `${name}-${n}`);
+    if (planned.every((p) => artifactAt(join54(candidate, ...p.at), sha(p.bytes)) !== "other")) dir = candidate;
   }
   if (dir === null) return null;
   for (const p of planned) {
-    const target = join58(dir, ...p.at);
+    const target = join54(dir, ...p.at);
     if (artifactAt(target, sha(p.bytes)) === "same") continue;
-    mkdirSync26(dirname21(target), { recursive: true });
+    mkdirSync25(dirname20(target), { recursive: true });
     if (createExclusive(target, p.bytes) === "exists" && artifactAt(target, sha(p.bytes)) !== "same") return null;
   }
-  const rel = (at) => (relativeInside(controlRoot, join58(dir, ...at)) ?? join58(dir, ...at)).replace(/\\/g, "/");
+  const rel = (at) => (relativeInside(controlRoot, join54(dir, ...at)) ?? join54(dir, ...at)).replace(/\\/g, "/");
   const files = planned.filter((p) => p.test !== void 0).map((p) => ({ path: p.test.path, blob: p.test.blob, copy: rel(p.at), sha256: sha(p.bytes) }));
   const output = outputBytes === null ? null : { path: rel(["gate", "red.log"]), sha256: record.output_sha256 };
   const results = resultsBytes === null || !record.results ? null : { path: rel(["gate", "red.results.json"]), sha256: record.results.sha256 };
@@ -47847,7 +46346,7 @@ function tddChallenge(args, io, controlRoot, featureId, graph, node, runtime) {
   const record = [...loadState(featurePaths(controlRoot, featureId).featureDir)?.data.acceptance_review?.reviews ?? []].reverse().find((r) => r.review_id === brief.origin?.review_id);
   let gaps = [];
   try {
-    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join58(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
+    gaps = record === void 0 ? [] : JSON.parse(readFileSync38(join54(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
   } catch {
     gaps = [];
   }
@@ -47932,7 +46431,7 @@ function tddCapsuleChallenge(args, io, controlRoot, featureId, graph, node, runt
   const record = [...loadState(featurePaths(controlRoot, featureId).featureDir)?.data.acceptance_review?.reviews ?? []].reverse().find((r) => r.review_id === brief.origin?.review_id);
   let gaps = [];
   try {
-    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join58(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
+    gaps = record === void 0 ? [] : JSON.parse(readFileSync38(join54(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
   } catch {
     gaps = [];
   }
@@ -47957,7 +46456,7 @@ function tddCapsuleChallenge(args, io, controlRoot, featureId, graph, node, runt
     return { id: u.capsule.criterion, missing: gap?.missing ?? null, reproduction: gap?.reproduction ?? null, clauses: criterionClauses(u.capsule.criterion, texts.find((t) => t.id === u.capsule.criterion)?.text ?? "") };
   });
   const others = brief.acceptance_criteria.filter((ac) => !used.some((u) => u.capsule.criterion === ac));
-  const capsules = used.map((u) => ({ capsule_id: u.capsule.capsule_id, capsule_sha256: u.capsule_sha256, criterion: u.capsule.criterion, artifact: join58(controlRoot, ...u.capsule.artifact.path.split("/")).replace(/\\/g, "/"), tests: u.capsule.tests.map((t) => ({ id: t.id, status: t.status, full_name: t.full_name, block: t.block })) }));
+  const capsules = used.map((u) => ({ capsule_id: u.capsule.capsule_id, capsule_sha256: u.capsule_sha256, criterion: u.capsule.criterion, artifact: join54(controlRoot, ...u.capsule.artifact.path.split("/")).replace(/\\/g, "/"), tests: u.capsule.tests.map((t) => ({ id: t.id, status: t.status, full_name: t.full_name, block: t.block })) }));
   emit2(
     io,
     args,
@@ -48048,7 +46547,7 @@ var WORKER_EVIDENCE_KINDS = /* @__PURE__ */ new Set(["red", "green", "refactor"]
 function claimedCwd(worktree, args, controlRoot) {
   const base = worktree ?? controlRoot;
   if (typeof args.flags["cwd"] !== "string") return base;
-  const requested = resolve27(String(args.flags["cwd"]));
+  const requested = resolve26(String(args.flags["cwd"]));
   if (!isInsideReal(base, requested)) {
     throw new Error(`CWD_OUTSIDE_WORKTREE: ${requested} is outside the claim's working directory ${base}.`);
   }
@@ -48150,7 +46649,7 @@ function candidateGroup(args, io) {
         const reviewedState = loadState(paths.featureDir)?.data;
         const unreviewed = [...reviewGateProblems(controlRoot, featureId), ...reviewedState ? reviewRevisionProblems(controlRoot, reviewedState) : []];
         if (unreviewed.length > 0) throw new Error(unreviewed.join("; "));
-        const contracts = existsSync47(workspace.paths.contractsDir) ? readdirSync25(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+        const contracts = existsSync43(workspace.paths.contractsDir) ? readdirSync25(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
         const cut = createCandidate({
           controlRepo: controlRoot,
           featureDir: paths.featureDir,
@@ -48301,7 +46800,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join58(paths.evidenceDir, "e2e"),
+      evidenceRoot: join54(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -48405,7 +46904,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync47(paths.decisions) ? readFileSync39(paths.decisions, "utf8") : "";
+    const body = existsSync43(paths.decisions) ? readFileSync38(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -48464,12 +46963,12 @@ function checkpointGroup(args, io) {
   const sub = requirePositional(args, 1, "create|validate|restore");
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
-  mkdirSync26(paths.checkpointsDir, { recursive: true });
+  mkdirSync25(paths.checkpointsDir, { recursive: true });
   if (sub === "create") {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join58(paths.checkpointsDir, `${stamp}.json`);
+    const file = join54(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -48484,13 +46983,13 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync47(paths.checkpointsDir) ? readdirSync25(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync43(paths.checkpointsDir) ? readdirSync25(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync39(join58(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync38(join54(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -48510,8 +47009,8 @@ function checkpointGroup(args, io) {
       throw new Error("DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.");
     }
     assertDecisionUsable(paths.events, decisionId);
-    const file = join58(paths.checkpointsDir, name);
-    const checkpoint = JSON.parse(readFileSync39(file, "utf8"));
+    const file = join54(paths.checkpointsDir, name);
+    const checkpoint = JSON.parse(readFileSync38(file, "utf8"));
     const restored = structuredClone(checkpoint.state);
     for (const runtime of Object.values(restored.nodes)) {
       if (runtime.claim !== null && IN_FLIGHT_STATES.has(runtime.state)) runtime.state = "READY";
@@ -48585,9 +47084,9 @@ function hostResultCopy(spec, controlRoot, io) {
     const text = io.stdin ?? readStdinBounded(MAX_RESULT_BYTES + 1);
     return Buffer.byteLength(text, "utf8") > MAX_RESULT_BYTES ? { ok: false, detail: `the copy on standard input is over ${MAX_RESULT_BYTES} bytes` } : { ok: true, text };
   }
-  const file = resolve27(spec);
+  const file = resolve26(spec);
   try {
-    if (!isInsideReal(realpathSync6.native(controlRoot), realpathSync6.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
+    if (!isInsideReal(realpathSync5.native(controlRoot), realpathSync5.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
   } catch {
     return { ok: false, detail: `${spec} cannot be read` };
   }

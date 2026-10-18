@@ -460,8 +460,8 @@ or approve a PRD for you. `mycelink-run`, `mycelink-resume`, `mycelink-verify`,
 and `mycelink-deliver` explain and exercise explicit `CODEX_RUNTIME_DENIED`
 checks. Generic CLI worker/reviewer/delivery paths are also denied for Codex
 controls. No Codex hooks or MCP server are shipped. **No worker, reviewer,
-implementation, fresh verification, or delivery is enabled**: Windows Session 0
-DPAPI and independent runtime security review remain open. A valid graph or
+implementation, fresh verification, or delivery is enabled**: the original
+Codex host-hook/worker security boundary remains unverified. A valid graph or
 doctor check is not an execution grant. Claude's plugin assets are unchanged.
 See `docs/CODEX_COMPATIBILITY.md` in the source repository and the
 [release procedure](docs/RELEASING.md). A local build is not a published listing.

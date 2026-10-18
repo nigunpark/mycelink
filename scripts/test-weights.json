@@ -11,6 +11,7 @@
  "tests/benchmark/cache.test.ts": 1,
  "tests/benchmark/cases.test.ts": 1,
  "tests/benchmark/causal-provenance.test.ts": 1,
+ "tests/benchmark/codex-pilot.test.ts": 1,
  "tests/benchmark/continuation.test.ts": 110,
  "tests/benchmark/controller-edits.test.ts": 1,
  "tests/benchmark/controller-observability.test.ts": 1,

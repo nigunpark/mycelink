@@ -118,6 +118,15 @@ describe('npm run package', () => {
     expect(names.filter((n) => forbidden.test(n))).toEqual([]);
   });
 
+  it('does not ship the experimental Windows-to-WSL bridge or DPAPI escrow in either launcher', () => {
+    const entries = readZip(first.zip);
+    expect(entries.map((entry) => entry.name).filter((name) => /wsl-codex|CODEX_WSL|WSL_CODEX|dpapi/i.test(name))).toEqual([]);
+    for (const name of ['dist/mycelink.mjs', 'codex-plugin/dist/mycelink.mjs']) {
+      const bundle = entries.find((entry) => entry.name === name)?.data.toString('utf8') ?? '';
+      expect(bundle, name).not.toMatch(/wsl-codex|WSL_CODEX_|MYCELINK_LIVE_WSL|DataProtectionScope|CODEX-LIFECYCLE/);
+    }
+  });
+
   it('ships the user documentation, and leaves eval reports and benchmark audits in the repository', () => {
     const docs = readZip(first.zip)
       .map((e) => e.name)

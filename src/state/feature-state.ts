@@ -12,7 +12,6 @@ import type {
 } from '../model/types.js';
 import { casUpdate, readDoc, writeDocAtomic, type AtomicDoc } from './atomic-json.js';
 import { withLock } from './process-lock.js';
-import { codexLifecycleEnabled, withCodexLifecycleLock } from './codex-lifecycle.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { emptyOrchestration, syncLeases } from './orchestration.js';
 
@@ -110,11 +109,7 @@ export function saveState(featureDir: string, state: FeatureState_): AtomicDoc<F
     if (problems.length > 0) throw new StateSchemaError(problems);
     return writeDocAtomic(stateFilePath(featureDir), state);
   };
-  // Checkpoint restore writes through saveState rather than mutateState. It
-  // must not bypass an opted-in Codex broker's cancellation/settle mutex.
-  return codexLifecycleEnabled(featureDir)
-    ? withCodexLifecycleLock(featureDir, () => withLock(stateLockPath(featureDir), write), { timeoutMs: 2_000 })
-    : write();
+  return write();
 }
 
 /**
@@ -146,9 +141,5 @@ export function mutateState(
     },
     { timeoutMs: options.lockTimeoutMs ?? 15_000, pollMs: 10, purpose: 'STATE.json mutation' },
   );
-  // No Claude feature takes the extra mutex. Once explicitly opted in, every
-  // claim/cancel/resume/settle state mutation takes it before STATE.json.
-  return codexLifecycleEnabled(featureDir)
-    ? withCodexLifecycleLock(featureDir, update, { timeoutMs: options.lockTimeoutMs })
-    : update();
+  return update();
 }

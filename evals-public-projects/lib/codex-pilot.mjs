@@ -40,7 +40,7 @@ export function pilotPlan({ suiteRoot, pluginRoot, runRoot, cacheRoot }) {
   // Deliberately not derived from a caller flag or presence of credentials. The
   // unconditional production preflight denial cannot be overridden here.
   blockers.push('production Codex dispatch remains fail-closed');
-  blockers.push('Windows Session 0 CurrentUser DPAPI and Windows-to-WSL transaction require independent gate approval');
+  blockers.push('Codex host-hook/worker command, path, role and result provenance require independent gate approval');
   const cases = IDS.map((id) => {
     const found = findPrd(suite, id);
     if (!found) throw new Error(`missing approved PRD ${id}`);
