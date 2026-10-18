@@ -14,6 +14,36 @@ LAUNCHER = pathlib.Path(__file__).resolve().parents[2] / 'scripts' / 'wsl-codex-
 
 @unittest.skipUnless(os.geteuid() == 0 and os.environ.get('MYCELINK_LIVE_WSL_WORKER') == '1', 'requires explicit WSL root opt-in')
 class WorkerIsolationTest(unittest.TestCase):
+    def test_proposal_reader_refuses_inode_modified_while_reading(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('wsl_worker_proposal_race', LAUNCHER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='mycelink-proposal-race-') as temp:
+            proposal = pathlib.Path(temp) / 'result.json'
+            proposal.write_text('{"status":"0"}')
+            original = os.fdopen
+
+            class MutatingReader:
+                def __init__(self, stream):
+                    self.stream = stream
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return self.stream.__exit__(*args)
+                def read(self, *args):
+                    contents = self.stream.read(*args)
+                    # Same inode, same byte count: a hostile descendant edits
+                    # the proposal between the read and root publication.
+                    proposal.write_text('{"status":"9"}')
+                    return contents
+
+            with patch.object(module.os, 'fdopen', side_effect=lambda *a, **kw: MutatingReader(original(*a, **kw))):
+                with self.assertRaisesRegex(ValueError, 'changed during read'):
+                    module.proposals_from(pathlib.Path(temp))
+
+
     def test_rejects_replaced_or_writable_sandbox_executable(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location('wsl_worker_runtime_check', LAUNCHER)
