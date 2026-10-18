@@ -33,12 +33,17 @@ describe('Codex CLI adapter contract', () => {
     if (!module) return;
     const parser = new module.CodexStreamParser();
     const progress = { turns: 0, usage: { model_turns: 0, wall_clock_ms: 0, input_tokens: 0, output_tokens: 0, sessions: 0 }, providerFailure: null as string | null };
+    parser.consume('{"type":"thread.started","thread_id":"11111111-1111-4111-8111-111111111111"}', progress);
     parser.consume('{"type":"turn.started"}', progress);
+    parser.consume('{"type":"item.completed","item":{"id":"one","type":"agent_message","text":"one"}}', progress);
     parser.consume('{"type":"turn.completed","usage":{"input_tokens":50,"output_tokens":10}}', progress);
+    parser.consume('{"type":"turn.started"}', progress);
+    parser.consume('{"type":"item.completed","item":{"id":"two","type":"agent_message","text":"two"}}', progress);
     parser.consume('{"type":"turn.completed","usage":{"input_tokens":90,"output_tokens":20}}', progress);
+    parser.consume('{"type":"turn.started"}', progress);
     expect(progress.turns).toBe(2);
     expect(progress.usage).toMatchObject({ input_tokens: 90, output_tokens: 20 });
     parser.consume('{"type":"turn.failed","error":{"message":"authentication failed"}}', progress);
-    expect(progress.providerFailure).toMatch(/authentication failed/);
+    expect(progress.providerFailure).toMatch(/turn.failed \(unclassified\)/);
   });
 });

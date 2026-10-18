@@ -9,8 +9,9 @@ writeFileSync(join(process.cwd(), 'prompt-captured.txt'), prompt);
 const scenario = JSON.parse(readFileSync(process.env.FAKE_CODEX_SCENARIO, 'utf8'));
 const pack = JSON.parse(/<mycelink-context-pack>\n([\s\S]*?)\n<\/mycelink-context-pack>/.exec(prompt)[1]);
 const emit = (event) => process.stdout.write(JSON.stringify(event) + '\n');
-emit({ type: 'thread.started', thread_id: 'fake' });
+emit({ type: 'thread.started', thread_id: '11111111-1111-4111-8111-111111111111' });
 emit({ type: 'turn.started' });
+if (scenario.extra_event) process.stdout.write(scenario.extra_event + '\n');
 if (scenario.stall_ms) await new Promise((done) => setTimeout(done, scenario.stall_ms));
 if (scenario.result && !scenario.omit_result) {
   const result = {
@@ -22,5 +23,8 @@ if (scenario.result && !scenario.omit_result) {
   writeFileSync(join(process.cwd(), '.mycelink-worker', 'result.json'), '{broken');
 }
 if (scenario.failure) emit({ type: 'turn.failed', error: { message: scenario.failure } });
-else if (!scenario.omit_completion) emit({ type: 'turn.completed', usage: scenario.usage ?? { input_tokens: 4, output_tokens: 2 } });
+else if (!scenario.omit_completion) {
+  emit({ type: 'item.completed', item: { id: 'final-1', type: 'agent_message', text: scenario.final_text ?? 'worker approved' } });
+  emit({ type: 'turn.completed', usage: scenario.usage ?? { input_tokens: 4, output_tokens: 2 } });
+}
 process.exit(scenario.exit_code ?? (scenario.failure ? 1 : 0));

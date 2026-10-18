@@ -4,6 +4,7 @@ import { ProcessSessionAdapter } from './process-session.js';
 import type { ProviderStreamParser, StreamProgress } from './provider-stream.js';
 import { buildWorkerPrompt, renderGateCommand, type WorkerGate } from './worker-protocol.js';
 import type { ContextPack } from './context-pack.js';
+import { CodexTranscriptReader } from './codex-transcript.js';
 
 export interface CodexCliAdapterOptions {
   executable: string;
@@ -15,7 +16,11 @@ export interface CodexCliAdapterOptions {
 
 /** Usage in Codex turn.completed is the thread total, not an incremental turn delta. */
 export class CodexStreamParser implements ProviderStreamParser {
+  private readonly reader = new CodexTranscriptReader();
+  evidence() { return this.reader.finish(); }
   consume(line: string, progress: StreamProgress): void {
+    this.reader.consume(line);
+    if (this.reader.finish().terminal === 'invalid') return;
     let event: unknown;
     try { event = JSON.parse(line); } catch { return; }
     if (event === null || typeof event !== 'object' || Array.isArray(event)) return;
@@ -29,9 +34,7 @@ export class CodexStreamParser implements ProviderStreamParser {
         if (typeof u['output_tokens'] === 'number' && Number.isFinite(u['output_tokens']) && u['output_tokens'] >= 0) progress.usage.output_tokens = u['output_tokens'];
       }
     } else if (e['type'] === 'turn.failed') {
-      const error = e['error'];
-      const message = error && typeof error === 'object' ? (error as Record<string, unknown>)['message'] : null;
-      progress.providerFailure = `PROVIDER_FAILED: ${typeof message === 'string' ? message.slice(0, 300) : 'turn.failed'}`;
+      progress.providerFailure = 'PROVIDER_FAILED: turn.failed (unclassified)';
     } else if (e['type'] === 'error') {
       // Retryable errors may precede a successful turn; terminal turn.failed is authoritative.
     }
@@ -42,6 +45,7 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
   readonly name = 'codex-cli' as const;
   protected readonly executable: string;
   protected readonly parser = new CodexStreamParser();
+  protected override newParser(): ProviderStreamParser { return new CodexStreamParser(); }
   protected override readonly requireCompletedTurn = true;
   private readonly options: CodexCliAdapterOptions;
   constructor(options: CodexCliAdapterOptions) {

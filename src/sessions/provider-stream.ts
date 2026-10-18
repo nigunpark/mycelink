@@ -1,4 +1,5 @@
 import type { UsageTotals } from '../model/types.js';
+import type { CodexTranscriptEvidence } from './codex-transcript.js';
 
 /** Provider-owned interpretation of JSONL; the process runtime owns framing. */
 export interface StreamProgress {
@@ -10,6 +11,7 @@ export interface StreamProgress {
 
 export interface ProviderStreamParser {
   consume(line: string, progress: StreamProgress): void;
+  evidence?(): CodexTranscriptEvidence;
 }
 
 export class ClaudeStreamParser implements ProviderStreamParser {

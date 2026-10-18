@@ -6,6 +6,7 @@
  * interface, which is what keeps the automated suite free of model usage.
  */
 import type { UsageTotals } from '../model/types.js';
+import type { CodexTranscriptEvidence } from './codex-transcript.js';
 
 export type ProviderId = 'claude' | 'codex' | 'fake';
 export type AdapterId = 'claude-cli' | 'codex-cli' | 'fake-provider';
@@ -181,6 +182,15 @@ export interface SessionHandle {
 }
 
 export interface SessionObservation {
+  /** Provider-process evidence only; not worker result ownership or reviewer verdict authority. */
+  codex_evidence?: CodexTranscriptEvidence & { process_session_id: string };
+  /** Separate untrusted worker slot; no Codex reviewer verdict is inferred from worker text. */
+  codex_provenance?: {
+    provider: 'codex';
+    process_session_id: string;
+    worker_result: { source: 'worktree-result-slot'; attested: false; node_id: string; claim_id: string; sha256: string } | null;
+    reviewer_verdict: null;
+  };
   status: SessionStatus;
   exit_code: number | null;
   turns: number;

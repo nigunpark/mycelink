@@ -33,6 +33,8 @@ export interface SessionRecord {
   exit_code: number | null;
   replaces_session_id: string | null;
   attempt: number;
+  codex_evidence?: SessionObservation['codex_evidence'];
+  codex_provenance?: SessionObservation['codex_provenance'];
 }
 
 export interface SessionRegistryFile {
@@ -124,6 +126,23 @@ export function recordObservation(
       const registry = loadRegistry(file);
       const record = registry.sessions[sessionId];
       if (!record) return null;
+      if (observation.codex_evidence !== undefined || observation.codex_provenance !== undefined) {
+        if (record.adapter !== 'codex-cli' || observation.codex_evidence?.provider !== 'codex' || observation.codex_provenance?.provider !== 'codex' ||
+            observation.codex_evidence.process_session_id !== sessionId || observation.codex_provenance.process_session_id !== sessionId ||
+            observation.codex_evidence.turns !== observation.turns ||
+            (observation.codex_provenance.worker_result !== null &&
+              (observation.codex_provenance.worker_result?.claim_id !== record.claim_id || observation.codex_provenance.worker_result.node_id !== record.node_id))) {
+          throw new Error('CODEX_PROVENANCE_MISMATCH: provider, process session, claim or node');
+        }
+      }
+      if (record.finished_at !== null && TERMINAL.has(record.status)) {
+        if (record.status !== observation.status || JSON.stringify(record.codex_evidence ?? null) !== JSON.stringify(observation.codex_evidence ?? null) ||
+            JSON.stringify(record.codex_provenance ?? null) !== JSON.stringify(observation.codex_provenance ?? null)) throw new Error('SESSION_RECONCILE_CONFLICT');
+        return record;
+      }
+      if (record.codex_evidence !== undefined && observation.codex_evidence !== undefined && record.codex_evidence.thread_id !== observation.codex_evidence.thread_id) throw new Error('CODEX_THREAD_CHANGED');
+      if (observation.codex_evidence !== undefined) record.codex_evidence = observation.codex_evidence;
+      if (observation.codex_provenance !== undefined) record.codex_provenance = observation.codex_provenance;
       record.status = observation.status;
       record.turns = observation.turns;
       record.usage = {

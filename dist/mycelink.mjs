@@ -15362,7 +15362,7 @@ var require_dist2 = __commonJS({
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
 import { existsSync as existsSync43, lstatSync as lstatSync18, mkdirSync as mkdirSync25, readFileSync as readFileSync38, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
-import { createHash as createHash39 } from "node:crypto";
+import { createHash as createHash41 } from "node:crypto";
 import { dirname as dirname20, join as join54, resolve as resolve26 } from "node:path";
 
 // src/cli/args.ts
@@ -22167,6 +22167,18 @@ function recordObservation(file, sessionId, observation) {
       const registry = loadRegistry(file);
       const record = registry.sessions[sessionId];
       if (!record) return null;
+      if (observation.codex_evidence !== void 0 || observation.codex_provenance !== void 0) {
+        if (record.adapter !== "codex-cli" || observation.codex_evidence?.provider !== "codex" || observation.codex_provenance?.provider !== "codex" || observation.codex_evidence.process_session_id !== sessionId || observation.codex_provenance.process_session_id !== sessionId || observation.codex_evidence.turns !== observation.turns || observation.codex_provenance.worker_result !== null && (observation.codex_provenance.worker_result?.claim_id !== record.claim_id || observation.codex_provenance.worker_result.node_id !== record.node_id)) {
+          throw new Error("CODEX_PROVENANCE_MISMATCH: provider, process session, claim or node");
+        }
+      }
+      if (record.finished_at !== null && TERMINAL.has(record.status)) {
+        if (record.status !== observation.status || JSON.stringify(record.codex_evidence ?? null) !== JSON.stringify(observation.codex_evidence ?? null) || JSON.stringify(record.codex_provenance ?? null) !== JSON.stringify(observation.codex_provenance ?? null)) throw new Error("SESSION_RECONCILE_CONFLICT");
+        return record;
+      }
+      if (record.codex_evidence !== void 0 && observation.codex_evidence !== void 0 && record.codex_evidence.thread_id !== observation.codex_evidence.thread_id) throw new Error("CODEX_THREAD_CHANGED");
+      if (observation.codex_evidence !== void 0) record.codex_evidence = observation.codex_evidence;
+      if (observation.codex_provenance !== void 0) record.codex_provenance = observation.codex_provenance;
       record.status = observation.status;
       record.turns = observation.turns;
       record.usage = {
@@ -24149,7 +24161,7 @@ function challengeForm(raw, options = {}) {
   const add = (code, pointer, detail) => {
     problems.push({ code, pointer, detail });
   };
-  const object = (value, at, keys, optional = []) => {
+  const object2 = (value, at, keys, optional = []) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       add("REVIEW_CHALLENGE_INVALID", at || "/", "is not an object");
       return null;
@@ -24193,7 +24205,7 @@ function challengeForm(raw, options = {}) {
     if (value.length < min || value.length > max) add("REVIEW_CHALLENGE_INVALID", at, `has ${value.length} entries; ${min} to ${max} are allowed`);
     return value.slice(0, max);
   };
-  const top = object(raw, "", ["review_id", "reason_sha256", "base_sha", "gate_output_sha256", "gaps"]);
+  const top = object2(raw, "", ["review_id", "reason_sha256", "base_sha", "gate_output_sha256", "gaps"]);
   if (top === null) return refusal(problems);
   const challenge = {
     review_id: id(top["review_id"], "/review_id", REVIEW_ID, "a review id"),
@@ -24207,11 +24219,11 @@ function challengeForm(raw, options = {}) {
   const capsules = /* @__PURE__ */ new Set();
   for (const [g, rawGap] of list4(top["gaps"], "/gaps", 1, 8).entries()) {
     const at = pointerOf2("gaps", g);
-    const gap = object(rawGap, at, ["criterion", "reproduction_sha256", "tests", "clauses", "explanation"], ["capsule"]);
+    const gap = object2(rawGap, at, ["criterion", "reproduction_sha256", "tests", "clauses", "explanation"], ["capsule"]);
     if (gap === null) continue;
     let capsule;
     if ("capsule" in gap) {
-      const k = object(gap["capsule"], `${at}/capsule`, ["capsule_id", "capsule_sha256"]);
+      const k = object2(gap["capsule"], `${at}/capsule`, ["capsule_id", "capsule_sha256"]);
       if (k !== null) {
         capsule = { capsule_id: id(k["capsule_id"], `${at}/capsule/capsule_id`, CAPSULE_ID, "a capsule id (CAP- and 16 hex digits)"), capsule_sha256: id(k["capsule_sha256"], `${at}/capsule/capsule_sha256`, SHA256, "a SHA-256") };
         if (capsule.capsule_id !== "" && capsules.has(capsule.capsule_id)) add("REVIEW_CHALLENGE_INVALID", `${at}/capsule/capsule_id`, `${capsule.capsule_id} is cited twice: a capsule reproduces one criterion's gap`);
@@ -24225,7 +24237,7 @@ function challengeForm(raw, options = {}) {
     if (new Set(tests).size !== tests.length) add("REVIEW_CHALLENGE_INVALID", `${at}/tests`, "names a test twice");
     const clauses = list4(gap["clauses"], `${at}/clauses`, 0, 16).map((rawClause, k) => {
       const where = `${at}/clauses/${k}`;
-      const cl = object(rawClause, where, ["clause", "test_id", "assertions", "trace"]);
+      const cl = object2(rawClause, where, ["clause", "test_id", "assertions", "trace"]);
       if (cl === null) return { clause: "", test_id: "", assertions: [], trace: "" };
       const assertions = list4(cl["assertions"], `${where}/assertions`, 1, 8).map((ref, n) => {
         const pointer = `${where}/assertions/${n}`;
@@ -41785,8 +41797,11 @@ function isProcessAlive2(pid) {
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync as existsSync33, mkdirSync as mkdirSync21, rmSync as rmSync14 } from "node:fs";
 import { dirname as dirname17, resolve as resolve21 } from "node:path";
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { createHash as createHash34, randomUUID as randomUUID4 } from "node:crypto";
 var ProcessSessionAdapter = class {
+  newParser() {
+    return this.parser;
+  }
   requireCompletedTurn = false;
   workerPrompt(pack, request) {
     return buildWorkerPrompt({ pack, gates: this.gateLines(request) });
@@ -41841,7 +41856,8 @@ var ProcessSessionAdapter = class {
       stopped: false,
       done: done2,
       finish: finish2,
-      timers: []
+      timers: [],
+      parser: this.newParser()
     };
     this.runs.set(sessionId, state);
     let prompt;
@@ -41882,16 +41898,25 @@ var ProcessSessionAdapter = class {
       if (tail2) log.write(tail2);
     });
     let buffer = "";
+    let discardingOversizedLine = false;
     child.stdout.on("data", (chunk) => {
       state.lastProgressMs = Date.now();
       const text = chunk.toString("utf8");
       log.write(outRedactor.push(text));
-      buffer += text;
-      let idx;
-      while ((idx = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (line !== "") this.parser.consume(line, state);
+      for (let offset = 0; offset < text.length; offset += 64 * 1024) {
+        buffer += text.slice(offset, offset + 64 * 1024);
+        let idx;
+        while ((idx = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!discardingOversizedLine && (line !== "" || state.parser.evidence)) state.parser.consume(line, state);
+          discardingOversizedLine = false;
+        }
+        if (state.parser.evidence && buffer.length > 64 * 1024 && !discardingOversizedLine) {
+          state.parser.consume(" ".repeat(64 * 1024 + 1), state);
+          discardingOversizedLine = true;
+        }
+        if (discardingOversizedLine) buffer = "";
       }
     });
     child.stderr.on("data", (chunk) => {
@@ -41919,7 +41944,8 @@ var ProcessSessionAdapter = class {
       state.failureReason = `SPAWN_FAILED: ${err.message}`;
     });
     child.on("close", (code) => {
-      if (buffer.trim()) this.parser.consume(buffer.trim(), state);
+      if (discardingOversizedLine && state.parser.evidence) state.parser.consume("", state);
+      else if (buffer.trim()) state.parser.consume(buffer.trim(), state);
       if (state.exitCode !== 127) state.exitCode = code;
       this.settle(state, null, log);
     });
@@ -41941,11 +41967,20 @@ var ProcessSessionAdapter = class {
     state.usage.wall_clock_ms = Date.now() - state.startedAtMs;
     state.usage.sessions = 1;
     state.usage.model_turns = state.turns;
+    if (state.parser.evidence) {
+      state.codexEvidence = { ...state.parser.evidence(), process_session_id: state.handle.session_id };
+      if (state.codexEvidence.terminal === "invalid") {
+        state.failureReason = "PROVIDER_STREAM_INVALID";
+      } else if (state.codexEvidence.terminal === "incomplete") {
+        state.failureReason = "PROVIDER_STREAM_INCOMPLETE";
+      }
+    }
     if (log && "end" in log) log.end();
     if (forced !== null) state.status = forced;
     else if (state.stopped) state.status = "stopped";
     else if (state.status === "stalled" || state.status === "budget-exhausted") {
-    } else if (state.providerFailure) {
+    } else if (state.codexEvidence?.terminal === "invalid" || state.codexEvidence?.terminal === "incomplete") state.status = "failed";
+    else if (state.providerFailure) {
       state.status = "failed";
       state.failureReason = redactValue(state.providerFailure, state.workerEnv);
     } else if (state.exitCode !== 0) {
@@ -41964,6 +41999,21 @@ var ProcessSessionAdapter = class {
         state.resultFailure = `RESULT_UNREADABLE: ${err.message}`;
       }
     }
+    if (state.parser.evidence) {
+      const result = state.result;
+      state.codexProvenance = {
+        provider: "codex",
+        process_session_id: state.handle.session_id,
+        worker_result: result === null ? null : {
+          source: "worktree-result-slot",
+          attested: false,
+          node_id: result.node_id,
+          claim_id: result.claim_id,
+          sha256: createHash34("sha256").update(JSON.stringify(result)).digest("hex")
+        },
+        reviewer_verdict: null
+      };
+    }
     state.finish();
   }
   observe(state) {
@@ -41980,6 +42030,8 @@ var ProcessSessionAdapter = class {
       }
     }
     return {
+      ...state.codexEvidence === void 0 ? {} : { codex_evidence: state.codexEvidence },
+      ...state.codexProvenance === void 0 ? {} : { codex_provenance: state.codexProvenance },
       status,
       exit_code: state.exitCode,
       turns: state.turns,
@@ -42101,9 +42153,101 @@ var ClaudeCliAdapter = class extends ProcessSessionAdapter {
   }
 };
 
+// src/sessions/codex-transcript.ts
+import { createHash as createHash35 } from "node:crypto";
+var MAX_LINE_BYTES = 64 * 1024;
+var MAX_STREAM_BYTES = 8 * 1024 * 1024;
+var MAX_EVENTS = 4096;
+var ID7 = /^[A-Za-z0-9_-]{1,128}$/;
+var THREAD = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+var CodexTranscriptReader = class {
+  thread = null;
+  active = false;
+  terminal = "incomplete";
+  turns = 0;
+  final = null;
+  bytes = 0;
+  events = 0;
+  consume(line) {
+    if (this.terminal === "invalid") return;
+    const bytes2 = Buffer.byteLength(line, "utf8");
+    this.bytes += bytes2;
+    this.events++;
+    if (bytes2 > MAX_LINE_BYTES || this.bytes > MAX_STREAM_BYTES || this.events > MAX_EVENTS || this.terminal === "failed") return this.invalidate();
+    const parsed = parseStrictJson(line, { maxBytes: MAX_LINE_BYTES, maxDepth: 24 });
+    if (!parsed.ok || !object(parsed.value)) return this.invalidate();
+    const event = parsed.value;
+    if ("agent_id" in event || "agent_type" in event || "role" in event) return this.invalidate();
+    switch (event["type"]) {
+      case "thread.started":
+        if (this.thread !== null || this.active || this.turns > 0 || !THREAD.test(String(event["thread_id"]))) return this.invalidate();
+        this.thread = event["thread_id"];
+        return;
+      case "turn.started":
+        if (this.thread === null || this.active) return this.invalidate();
+        this.active = true;
+        this.final = null;
+        return;
+      case "item.started":
+      case "item.updated":
+      case "item.completed": {
+        if (!this.active || !object(event["item"]) || !ID7.test(String(event["item"]["id"]))) return this.invalidate();
+        const item = event["item"];
+        if (event["type"] === "item.completed" && item["type"] === "agent_message") {
+          if (typeof item["text"] !== "string" || Buffer.byteLength(item["text"], "utf8") > MAX_LINE_BYTES) return this.invalidate();
+          this.final = { item_id: item["id"], sha256: createHash35("sha256").update(item["text"]).digest("hex"), bytes: Buffer.byteLength(item["text"], "utf8") };
+        }
+        return;
+      }
+      case "error":
+        if (!this.active) return this.invalidate();
+        return;
+      // An error may be followed by a successful turn; no prose classification.
+      case "turn.failed":
+        if (!this.active || !object(event["error"])) return this.invalidate();
+        this.active = false;
+        this.final = null;
+        this.terminal = "failed";
+        return;
+      case "turn.completed":
+        if (!this.active || this.final === null || !object(event["usage"])) return this.invalidate();
+        this.active = false;
+        this.turns++;
+        this.terminal = "completed";
+        return;
+      default:
+        return this.invalidate();
+    }
+  }
+  invalidate() {
+    this.terminal = "invalid";
+    this.final = null;
+  }
+  finish() {
+    const terminal = this.terminal === "invalid" || this.thread === null ? "invalid" : this.active ? "incomplete" : this.terminal;
+    return {
+      provider: "codex",
+      source: "exec-jsonl",
+      thread_id: this.thread,
+      terminal,
+      turns: this.turns,
+      final: terminal === "completed" ? this.final : null,
+      failure: terminal === "failed" ? { class: "unclassified", transient: false } : null,
+      role_attested: false
+    };
+  }
+};
+
 // src/sessions/codex-cli-adapter.ts
 var CodexStreamParser = class {
+  reader = new CodexTranscriptReader();
+  evidence() {
+    return this.reader.finish();
+  }
   consume(line, progress) {
+    this.reader.consume(line);
+    if (this.reader.finish().terminal === "invalid") return;
     let event;
     try {
       event = JSON.parse(line);
@@ -42121,9 +42265,7 @@ var CodexStreamParser = class {
         if (typeof u["output_tokens"] === "number" && Number.isFinite(u["output_tokens"]) && u["output_tokens"] >= 0) progress.usage.output_tokens = u["output_tokens"];
       }
     } else if (e["type"] === "turn.failed") {
-      const error = e["error"];
-      const message = error && typeof error === "object" ? error["message"] : null;
-      progress.providerFailure = `PROVIDER_FAILED: ${typeof message === "string" ? message.slice(0, 300) : "turn.failed"}`;
+      progress.providerFailure = "PROVIDER_FAILED: turn.failed (unclassified)";
     } else if (e["type"] === "error") {
     }
   }
@@ -42132,6 +42274,9 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
   name = "codex-cli";
   executable;
   parser = new CodexStreamParser();
+  newParser() {
+    return new CodexStreamParser();
+  }
   requireCompletedTurn = true;
   options;
   constructor(options) {
@@ -42347,11 +42492,11 @@ function writeLoops(file, loops) {
 // src/hooks/entrypoint.ts
 import { existsSync as existsSync38, readFileSync as readFileSync33, readdirSync as readdirSync23 } from "node:fs";
 import { dirname as dirname19, join as join49, posix as posix3, relative as relative8, resolve as resolve23, sep as sep5 } from "node:path";
-import { createHash as createHash36 } from "node:crypto";
+import { createHash as createHash38 } from "node:crypto";
 
 // src/hooks/worker-calls.ts
 import { appendFileSync as appendFileSync2, existsSync as existsSync35, lstatSync as lstatSync17, mkdirSync as mkdirSync22, readFileSync as readFileSync32, readdirSync as readdirSync20, renameSync as renameSync6, writeFileSync as writeFileSync10 } from "node:fs";
-import { createHash as createHash34, randomBytes as randomBytes7 } from "node:crypto";
+import { createHash as createHash36, randomBytes as randomBytes7 } from "node:crypto";
 import { dirname as dirname18, isAbsolute as isAbsolute13, join as join46, resolve as resolve22 } from "node:path";
 var CALLS_SCHEMA = "mycelink-calls/1";
 var CALLS_FILE = "calls.jsonl";
@@ -42364,7 +42509,7 @@ function ledgerDir(env) {
 function now2() {
   return (BigInt(Math.round((performance.timeOrigin + performance.now()) * 1e3)) * 1000n).toString();
 }
-var sha25616 = (data) => createHash34("sha256").update(data).digest("hex");
+var sha25616 = (data) => createHash36("sha256").update(data).digest("hex");
 function list2(dir) {
   try {
     return readdirSync20(dir).sort();
@@ -42544,11 +42689,11 @@ function recordAgentEnd(call, env = process.env) {
 // src/hooks/review-launch.ts
 import { existsSync as existsSync36, readdirSync as readdirSync21 } from "node:fs";
 import { basename as basename15, isAbsolute as isAbsolute14, join as join47 } from "node:path";
-import { createHash as createHash35 } from "node:crypto";
-var ID7 = /^[A-Za-z0-9_-]{1,128}$/;
+import { createHash as createHash37 } from "node:crypto";
+var ID8 = /^[A-Za-z0-9_-]{1,128}$/;
 var DISPATCH_LINE3 = /^Dispatch: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/m;
 function placeLaunch(call, env) {
-  if (!ID7.test(call.tool_use_id) || !ID7.test(call.session_id) || !isAbsolute14(call.transcript_path) || basename15(call.transcript_path) !== `${call.session_id}.jsonl`) return null;
+  if (!ID8.test(call.tool_use_id) || !ID8.test(call.session_id) || !isAbsolute14(call.transcript_path) || basename15(call.transcript_path) !== `${call.session_id}.jsonl`) return null;
   const open = [];
   for (const root of controlRoots([call.cwd, env["CLAUDE_PROJECT_DIR"], env["MYCELINK_CONTROL_ROOT"]], [])) {
     let features = [];
@@ -42597,7 +42742,7 @@ function recordReviewerLaunch(call, env) {
     cwd: call.cwd.replace(/\\/g, "/"),
     subagent_type: call.subagent_type,
     description: call.description === null ? null : call.description.slice(0, 200),
-    prompt_sha256: createHash35("sha256").update(call.prompt).digest("hex"),
+    prompt_sha256: createHash37("sha256").update(call.prompt).digest("hex"),
     prompt_bytes: Buffer.byteLength(call.prompt, "utf8"),
     prompt_dispatch: chosen.named,
     at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -42633,7 +42778,7 @@ function duplicateReviewerLaunch(call, env) {
 import { existsSync as existsSync37, readdirSync as readdirSync22 } from "node:fs";
 import { join as join48 } from "node:path";
 var AGENT_TASK_SCHEMA = "mycelink-agent-task/1";
-var ID8 = /^[A-Za-z0-9_-]{1,128}$/;
+var ID9 = /^[A-Za-z0-9_-]{1,128}$/;
 var AGENT_ID2 = /^[A-Za-z0-9_-]{1,64}$/;
 var STATUS = /^[a-z_-]{1,32}$/;
 var MAX_DIRS = 2048;
@@ -42673,7 +42818,7 @@ function recordAgentTask(call, env) {
     if (typeof call.agent_id === "string" && call.agent_id !== "") return null;
     const U = call.tool_use_id;
     const S = call.session_id;
-    if (typeof U !== "string" || !ID8.test(U) || typeof S !== "string" || !ID8.test(S)) return null;
+    if (typeof U !== "string" || !ID9.test(U) || typeof S !== "string" || !ID9.test(S)) return null;
     const type = String((call.tool_input ?? {})["subagent_type"] ?? "");
     const reviewer = type === ACCEPTANCE_REVIEWER || type === "acceptance-reviewer";
     if (!reviewer && type !== MODULE_WORKER && type !== "module-worker") return null;
@@ -43214,7 +43359,7 @@ function preToolUse(ctx, io, input) {
 function postToolUse(ctx, io, input) {
   if (!ctx.paths || !ctx.state) return 0;
   const target = editTarget(input);
-  const key = createHash36("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
+  const key = createHash38("sha256").update(`${input.session_id ?? ""}|${input.tool_name ?? ""}|${target ?? ""}|${Date.now()}`).digest("hex").slice(0, 24);
   try {
     appendEvent(ctx.paths.events, {
       idempotency_key: `posttool:${key}`,
@@ -44170,7 +44315,7 @@ function preflightAdapter(input, env = process.env) {
 }
 
 // src/engine/feature-verify.ts
-import { createHash as createHash37 } from "node:crypto";
+import { createHash as createHash39 } from "node:crypto";
 import { existsSync as existsSync41, readFileSync as readFileSync36 } from "node:fs";
 import { join as join52 } from "node:path";
 function featureVerifyProblems(controlRoot, featureId) {
@@ -44271,7 +44416,7 @@ function featureDeliveryProblems(controlRoot, featureId) {
   const manifest = join52(paths.featureDir, "deliveries", `${candidate}.json`);
   if (pinned === void 0 || !existsSync41(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
   const bytes2 = readFileSync36(manifest);
-  if (createHash37("sha256").update(bytes2).digest("hex") !== pinned) return [`NOT_DELIVERED: the delivery manifest of ${candidate} is not the accepted one STATE.json pins`];
+  if (createHash39("sha256").update(bytes2).digest("hex") !== pinned) return [`NOT_DELIVERED: the delivery manifest of ${candidate} is not the accepted one STATE.json pins`];
   let status;
   try {
     status = JSON.parse(bytes2.toString("utf8")).status;
@@ -44285,7 +44430,7 @@ function featureDeliveryProblems(controlRoot, featureId) {
 
 // src/engine/deliver.ts
 import { existsSync as existsSync42, mkdirSync as mkdirSync24, readFileSync as readFileSync37 } from "node:fs";
-import { createHash as createHash38 } from "node:crypto";
+import { createHash as createHash40 } from "node:crypto";
 import { join as join53 } from "node:path";
 var DeliveryRefusedError = class extends Error {
   problems;
@@ -44378,7 +44523,7 @@ function deliverLocked(controlRoot, featureId, options) {
     return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
   })) {
     const recorded = state.accepted_deliveries?.[candidateId];
-    const bytes2 = createHash38("sha256").update(readFileSync37(file)).digest("hex");
+    const bytes2 = createHash40("sha256").update(readFileSync37(file)).digest("hex");
     const why = recorded !== bytes2 ? "manifest does not match the accepted delivery recorded in STATE.json" : untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
     if (why === null) return { ...existing, ok: true, idempotent: true };
     appendEvent(paths.events, {
@@ -44524,7 +44669,7 @@ function deliverLocked(controlRoot, featureId, options) {
   manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
   manifest.accepted_at = passed ? (/* @__PURE__ */ new Date()).toISOString() : null;
   save3(file, manifest);
-  const manifestSha = createHash38("sha256").update(readFileSync37(file)).digest("hex");
+  const manifestSha = createHash40("sha256").update(readFileSync37(file)).digest("hex");
   mutateState(paths.featureDir, (s) => {
     const accepted = { ...s.accepted_deliveries ?? {} };
     if (passed) accepted[candidateId] = manifestSha;
@@ -45440,7 +45585,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     emit2(
       io,
       args,
-      { path: loaded.path, sha256: createHash39("sha256").update(written).digest("hex"), from, source: manifest2.source, criteria: manifest2.criteria },
+      { path: loaded.path, sha256: createHash41("sha256").update(written).digest("hex"), from, source: manifest2.source, criteria: manifest2.criteria },
       () => [
         `${loaded.path} (${from}): ${manifest2.criteria.map((c) => `${c.id} ${c.kind}`).join(", ")}`,
         "Copy the criteria into the graph exactly (acceptance_criteria: [{id, text, kind}] from this file); never summarise them."
@@ -45481,7 +45626,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     }
     const problems = manifestProblems(parsed, { featureId, source: bytes2 });
     if (problems.length > 0) {
-      const stale = parsed.source?.sha256 !== createHash39("sha256").update(bytes2).digest("hex");
+      const stale = parsed.source?.sha256 !== createHash41("sha256").update(bytes2).digest("hex");
       throw new AcceptanceError(stale ? "ACCEPTANCE_SOURCE_MISMATCH" : "ACCEPTANCE_MANIFEST_INVALID", `${sidecarPath(sourceRel)}: ${problems.join("; ")}`);
     }
     for (const [id, kind] of kinds) {
@@ -46351,7 +46496,7 @@ function challengeSnapshot(controlRoot, featureId, nodeId, worktree, record, bin
   if (!accepted && (record.exit_code !== 0 || record.red_category !== "passed")) return null;
   const red = shownTests(gateRan, declared, 64).filter((t) => declared.some((d) => namesDeclared(t, d)));
   if (red.length === 0 || (accepted ? !red.some((t) => t.status === "passed") : red.some((t) => t.status !== "passed"))) return null;
-  const sha = (bytes2) => createHash39("sha256").update(bytes2).digest("hex");
+  const sha = (bytes2) => createHash41("sha256").update(bytes2).digest("hex");
   const planned = [];
   let total = 0;
   for (const t of binding.tests) {
