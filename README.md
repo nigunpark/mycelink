@@ -436,6 +436,30 @@ claude plugin install mycelink@mycelink-marketplace
 
 Each release also carries an SPDX SBOM (`SBOM.spdx.json`).
 
+### Codex plugin (discovery only; local release ZIP)
+
+The Codex marketplace is separate from Claude's. On this branch, extract a
+locally built release ZIP and use an **isolated** profile when evaluating it:
+
+```bash
+# Build locally first: npm ci && npm run package
+unzip artifacts/mycelink-0.3.0-beta.1.zip -d mycelink
+# Set ISOLATED_CODEX_HOME to a new native absolute directory (create it first).
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin marketplace add ./mycelink
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list --available
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin add mycelink@mycelink-codex-marketplace
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list
+```
+
+The installed `mycelink-status` skill is **informational only**. Mycelink
+Codex worker/runtime execution is disabled pending security review. No Codex
+hooks, MCP server, commands or worker entry point are shipped in this plugin;
+installing it does not enable Codex dispatch or make the Claude workflow
+available in Codex. The ZIP's separate bundled CLI supports `doctor --json`
+for diagnostics, not a security approval. See `docs/CODEX_COMPATIBILITY.md` in
+the source repository and the [release procedure](docs/RELEASING.md). A
+local build does not imply a published Codex marketplace listing.
+
 ### Try without installing
 
 ```bash

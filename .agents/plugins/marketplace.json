@@ -1,0 +1,20 @@
+{
+  "name": "mycelink-codex-marketplace",
+  "interface": {
+    "displayName": "Mycelink (Codex discovery only)"
+  },
+  "plugins": [
+    {
+      "name": "mycelink",
+      "source": {
+        "source": "local",
+        "path": "./codex-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
+    }
+  ]
+}

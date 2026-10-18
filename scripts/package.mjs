@@ -38,8 +38,9 @@ const zipName = `mycelink-${version}.zip`;
  * Documentation is listed file by file: eval reports (docs/evals/) and the
  * benchmark's constraint audit stay in the repository, outside the plugin.
  */
-const INCLUDE_DIRS = ['agents', 'commands', 'skills', 'hooks', 'templates', 'schemas'];
+const INCLUDE_DIRS = ['agents', 'commands', 'skills', 'hooks', 'templates', 'schemas', 'codex-plugin'];
 const INCLUDE_FILES = [
+  '.agents/plugins/marketplace.json',
   '.claude-plugin/plugin.json',
   '.claude-plugin/marketplace.json',
   'bin/mycelink.mjs',

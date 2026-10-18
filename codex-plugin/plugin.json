@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mycelink",
+  "version": "0.3.0-beta.1",
+  "description": "Mycelink Codex discovery only; worker/runtime execution is disabled pending security review.",
+  "license": "Apache-2.0",
+  "extensions": {
+    "com.openai": {
+      "hooks": {},
+      "interface": {
+        "displayName": "Mycelink (Codex discovery only)",
+        "shortDescription": "Worker/runtime execution is disabled pending security review.",
+        "developerName": "Mycelink Contributors",
+        "category": "Development"
+      }
+    }
+  }
+}

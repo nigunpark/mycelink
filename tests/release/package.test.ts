@@ -92,6 +92,9 @@ describe('npm run package', () => {
     for (const required of [
       '.claude-plugin/plugin.json',
       '.claude-plugin/marketplace.json',
+      '.agents/plugins/marketplace.json',
+      'codex-plugin/plugin.json',
+      'codex-plugin/skills/mycelink-status/SKILL.md',
       'bin/mycelink.mjs',
       'dist/mycelink.mjs',
       'schemas/portfolio-graph.schema.json',
