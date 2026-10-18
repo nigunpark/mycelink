@@ -25769,6 +25769,17 @@ function requireNode(graph, nodeId) {
   if (!node) throw new TransitionError("UNKNOWN_NODE", nodeId, `Node "${nodeId}" is not in the graph.`);
   return node;
 }
+function assertTaskDependencies(graph, state, nodeId) {
+  const node = requireNode(graph, nodeId);
+  const pending = node.depends_on.filter((id) => !["DONE", "EXCLUDED"].includes(state.nodes[id]?.state ?? "PLANNED"));
+  if (pending.length > 0) {
+    throw new TransitionError(
+      "DEPENDENCIES_NOT_DONE",
+      nodeId,
+      `Graph prerequisites are no longer settled: ${pending.map((id) => `${id}=${state.nodes[id]?.state ?? "missing"}`).join(", ")}.`
+    );
+  }
+}
 function redRequired(node, runtime) {
   return node.required_evidence.includes("red") && runtime.rework_brief?.red_required !== false;
 }
@@ -25882,6 +25893,7 @@ function applyNodeTransition(graph, state, nodeId, to, options) {
       `${from} -> ${to} is not a declared edge.`
     );
   }
+  if (to === "DONE") assertTaskDependencies(graph, next, nodeId);
   if (JUSTIFIED_EXITS.has(from) && !JUSTIFIED_EXITS.has(to)) {
     if (!options.decisionId && options.inputChanged !== true) {
       throw new TransitionError(
@@ -36208,6 +36220,7 @@ var Orchestrator = class _Orchestrator {
         throw new CapabilityError("NOT_CLAIMED", `${nodeId} has no claim whose settlement could be finished.`);
       }
       const live = rt.claim;
+      if (live.mode === "host") assertTaskDependencies(this.graph(), s, nodeId);
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
       from = rt.state;
       live.settling = settlerMarker();
@@ -36672,6 +36685,7 @@ var Orchestrator = class _Orchestrator {
       throw new Error(`REVIEW_NOT_OPEN: ${nodeId} is not an acceptance review of ${this.featureId} handed to a reviewer; run dispatch.`);
     }
     const node = this.node(nodeId);
+    assertTaskDependencies(this.graph(), this.state(), nodeId);
     const before = this.state().nodes[nodeId]?.claim ?? null;
     if (before === null) throw new CapabilityError("NOT_CLAIMED", `${nodeId} has no claim to resume.`);
     if (before.mode !== "host") {

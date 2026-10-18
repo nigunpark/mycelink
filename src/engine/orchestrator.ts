@@ -74,6 +74,7 @@ import { BARRIER_KINDS, activeLeases, bumpEpoch, closeLeases, currentEpoch, issu
 import {
   accumulateUsage,
   applyNodeTransition,
+  assertTaskDependencies,
   recordFailure,
   redRequired,
   SETTLE_GATE_STATE,
@@ -5005,6 +5006,9 @@ export class Orchestrator {
         throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim whose settlement could be finished.`);
       }
       const live = (rt as NodeRuntime).claim as NodeClaim;
+      // A host completion claim does not replace the graph's current prerequisites.
+      // Do this under the state lock before recording a provisional settlement.
+      if (live.mode === 'host') assertTaskDependencies(this.graph(), s, nodeId);
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
       from = (rt as NodeRuntime).state;
       live.settling = settlerMarker();
@@ -5531,6 +5535,8 @@ export class Orchestrator {
       throw new Error(`REVIEW_NOT_OPEN: ${nodeId} is not an acceptance review of ${this.featureId} handed to a reviewer; run dispatch.`);
     }
     const node = this.node(nodeId);
+    // A resumed ticket cannot authorize work after an upstream invalidation.
+    assertTaskDependencies(this.graph(), this.state(), nodeId);
     const before = this.state().nodes[nodeId]?.claim ?? null;
     if (before === null) throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim to resume.`);
     if (before.mode !== 'host') {
