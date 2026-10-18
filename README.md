@@ -436,7 +436,7 @@ claude plugin install mycelink@mycelink-marketplace
 
 Each release also carries an SPDX SBOM (`SBOM.spdx.json`).
 
-### Codex plugin (discovery only; local release ZIP)
+### Codex plugin (planning only; local release ZIP)
 
 The Codex marketplace is separate from Claude's. On this branch, extract a
 locally built release ZIP and use an **isolated** profile when evaluating it:
@@ -451,14 +451,20 @@ CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin add mycelink@mycelink-codex-marke
 CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list
 ```
 
-The installed `mycelink-status` skill is **informational only**. Mycelink
-Codex worker/runtime execution is disabled pending security review. No Codex
-hooks, MCP server, commands or worker entry point are shipped in this plugin;
-installing it does not enable Codex dispatch or make the Claude workflow
-available in Codex. The ZIP's separate bundled CLI supports `doctor --json`
-for diagnostics, not a security approval. See `docs/CODEX_COMPATIBILITY.md` in
-the source repository and the [release procedure](docs/RELEASING.md). A
-local build does not imply a published Codex marketplace listing.
+The installed skills `mycelink-init`, `mycelink-prd`, `mycelink-plan`, and
+`mycelink-status` guide planning with the **installed plugin's own launcher**.
+`codex init <new-control-path>` creates a Codex-provider skeleton without
+Claude hooks or CLAUDE.md; write a PRD, approve its criteria, then compile
+and validate a reviewed graph with the existing CLI. The CLI does not generate
+or approve a PRD for you. `mycelink-run`, `mycelink-resume`, `mycelink-verify`,
+and `mycelink-deliver` explain and exercise explicit `CODEX_RUNTIME_DENIED`
+checks. Generic CLI worker/reviewer/delivery paths are also denied for Codex
+controls. No Codex hooks or MCP server are shipped. **No worker, reviewer,
+implementation, fresh verification, or delivery is enabled**: Windows Session 0
+DPAPI and independent runtime security review remain open. A valid graph or
+doctor check is not an execution grant. Claude's plugin assets are unchanged.
+See `docs/CODEX_COMPATIBILITY.md` in the source repository and the
+[release procedure](docs/RELEASING.md). A local build is not a published listing.
 
 ### Try without installing
 

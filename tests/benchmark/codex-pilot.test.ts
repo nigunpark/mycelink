@@ -28,11 +28,11 @@ describe('Codex public-project PRD pilot (model-free, fail-closed)', () => {
     expect(plan.cases[0].agent.codexHome).not.toBe(plan.cases[1].agent.codexHome);
   });
 
-  it('rejects discovery-only plugin as PRD-to-delivery acceptance, even if status is discoverable', () => {
+  it('rejects planning-only plugin as PRD-to-delivery acceptance, even when init/prd/plan/status are discoverable', () => {
     const plan = pilotPlan({ suiteRoot: suite, pluginRoot: plugin, runRoot: root });
     expect(plan.ready).toBe(false);
     expect(plan.cases.every((c: { ready: boolean }) => c.ready === false)).toBe(true);
-    expect(plan.blockers).toContain('codex-plugin: no approved PRD/dispatch/worker/settle/delivery runtime');
+    expect(plan.blockers).toContain('codex-plugin: planning skills are available but no approved dispatch/worker/settle/delivery runtime');
     expect(plan.blockers).toContain('production Codex dispatch remains fail-closed');
   });
 

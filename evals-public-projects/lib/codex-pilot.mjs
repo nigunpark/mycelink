@@ -1,13 +1,13 @@
 // Model-free Codex PRD pilot plan. This is a denial gate, NOT a model runner.
 // A safe host transaction and an independent verifier must precede activation.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { casePrompt } from './cases.mjs';
 import { findPrd, loadSuite, sourceIdentity } from './manifests.mjs';
 
 const IDS = ['CSET-202', 'PCM-101'];
-const REQUIRED = ['mycelink-prd', 'mycelink-dispatch', 'mycelink-worker', 'mycelink-settle', 'mycelink-deliver'];
+const PLANNING_SKILLS = ['mycelink-init', 'mycelink-prd', 'mycelink-plan', 'mycelink-status'];
 const inside = (path, root) => { const rel = relative(root, path); return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel)); };
 const q = (value) => JSON.stringify(value);
 
@@ -28,11 +28,15 @@ export function pilotPlan({ suiteRoot, pluginRoot, runRoot, cacheRoot }) {
   const commit = head.stdout.trim();
   const status = spawnSync('git', ['status', '--porcelain', '--', 'evals-public-projects'], { cwd: repo, encoding: 'utf8' });
   const skillsRoot = join(pluginPath, 'skills');
-  const skills = existsSync(skillsRoot) ? readdirSync(skillsRoot) : [];
+  const planningAvailable = PLANNING_SKILLS.every((name) => existsSync(join(skillsRoot, name, 'SKILL.md')));
   const blockers = [];
   if (status.status !== 0 || status.stdout.trim()) blockers.push('suite checkout is not clean; commit and re-pin before verification');
-  if (!existsSync(join(pluginPath, 'plugin.json')) || !skills.includes('mycelink-status')) blockers.push('isolated Codex plugin discovery is unavailable');
-  if (REQUIRED.some((name) => !skills.includes(name))) blockers.push('codex-plugin: no approved PRD/dispatch/worker/settle/delivery runtime');
+  if (!existsSync(join(pluginPath, 'plugin.json')) || !planningAvailable) blockers.push('isolated Codex planning skills are unavailable');
+  // Discovery, a PRD authoring guide, or a green graph validate cannot attest
+  // independently fenced worker/reviewer processes and delivery provenance.
+  blockers.push(planningAvailable
+    ? 'codex-plugin: planning skills are available but no approved dispatch/worker/settle/delivery runtime'
+    : 'codex-plugin: no approved PRD/dispatch/worker/settle/delivery runtime');
   // Deliberately not derived from a caller flag or presence of credentials. The
   // unconditional production preflight denial cannot be overridden here.
   blockers.push('production Codex dispatch remains fail-closed');

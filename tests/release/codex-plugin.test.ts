@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import YAML from 'yaml';
+import { VALID_GRAPH, VALID_REPOSITORIES } from '../helpers/graph-fixtures.js';
 import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
 import { extractZip, readZip } from '../helpers/zip.js';
 import { planCommand } from '../../src/security/exec.js';
@@ -74,24 +76,86 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     extractZip(zip, source);
   });
 
-  it('ships an informational-only plugin without Claude runtime hooks', () => {
+  it('ships the planning skills and a launcher inside the installed plugin without Claude runtime hooks', () => {
     const names = readZip(zip).map((entry) => entry.name);
     expect(names).toContain('.agents/plugins/marketplace.json');
     expect(names).toContain('codex-plugin/plugin.json');
     expect(names).toContain('codex-plugin/skills/mycelink-status/SKILL.md');
-    expect(names.filter((name) => name.startsWith('codex-plugin/'))).toEqual([
-      'codex-plugin/plugin.json', 'codex-plugin/skills/mycelink-status/SKILL.md',
-    ]);
+    for (const name of ['init', 'prd', 'plan', 'status', 'run', 'resume', 'verify', 'deliver']) {
+      expect(names).toContain(`codex-plugin/skills/mycelink-${name}/SKILL.md`);
+    }
+    expect(names).toContain('codex-plugin/bin/mycelink.mjs');
+    expect(names).toContain('codex-plugin/dist/mycelink.mjs');
 
     const manifest = JSON.parse(readFileSync(join(source, 'codex-plugin/plugin.json'), 'utf8')) as { name: string; version: string; description: string };
     expect(manifest).toMatchObject({ name: 'mycelink', version: VERSION });
-    expect(manifest.description).toMatch(/disabled.*security review/i);
+    expect(manifest.description).toMatch(/planning.*disabled.*security review/i);
     const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-status/SKILL.md'), 'utf8');
     expect(skill).toMatch(/worker\/runtime execution is disabled pending security review/i);
     expect(existsSync(join(source, 'codex-plugin/hooks/hooks.json'))).toBe(false);
   });
 
-  it.runIf(process.env['MYCELINK_LIVE_CODEX_PLUGIN'] === '1')('installs the ZIP via Codex CLI 0.163.0 in an isolated profile and exposes the status skill', async () => {
+  it('initialises a Codex-only control and binds PRD criteria to a validated graph, but refuses execution', () => {
+    const control = join(output, 'codex-control');
+    const launcher = join(source, 'codex-plugin/bin/mycelink.mjs');
+    const run = (args: string[]) => spawnSync(process.execPath, [launcher, ...args], { cwd: output, encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    const init = run(['codex', 'init', control, '--json']);
+    expect(init.status, init.stderr).toBe(0);
+    const reinit = run(['codex', 'init', control, '--json']);
+    expect(reinit.status).toBe(1);
+    expect(reinit.stderr).toContain('CODEX_INIT_EXISTS');
+    const occupied = join(output, 'existing-claude-assets');
+    mkdirSync(occupied);
+    writeFileSync(join(occupied, 'CLAUDE.md'), '# Existing Claude asset\n');
+    const occupiedInit = run(['codex', 'init', occupied, '--json']);
+    expect(occupiedInit.status).toBe(1);
+    expect(occupiedInit.stderr).toContain('CODEX_INIT_OCCUPIED');
+    expect(readFileSync(join(occupied, 'CLAUDE.md'), 'utf8')).toBe('# Existing Claude asset\n');
+    expect(existsSync(join(occupied, 'mycelink.config.json'))).toBe(false);
+    expect(existsSync(join(control, '.claude/settings.json'))).toBe(false);
+    expect(existsSync(join(control, 'CLAUDE.md'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(control, 'mycelink.config.json'), 'utf8')).provider.provider).toBe('codex');
+    const requirement = '# Pilot\n\nStatus: approved\n\n**AC-1 — behavior.** Produce a safe value.\n\n**AC-2 — API.** Expose the safe value.\n';
+    mkdirSync(join(control, 'features/FEAT-101'), { recursive: true });
+    writeFileSync(join(control, 'features/FEAT-101/PRD.md'), requirement, { flag: 'wx' });
+    const authority = JSON.parse(run(['controller', 'open', '--control-root', control, '--json']).stdout).authority as string;
+    const prd = run(['feature', 'acceptance', 'FEAT-101', '--source', 'features/FEAT-101/PRD.md', '--control-root', control, '--authority', authority, '--json']);
+    expect(prd.status, prd.stderr).toBe(0);
+    const manifest = JSON.parse(readFileSync(join(control, 'features/FEAT-101/ACCEPTANCE.json'), 'utf8')) as { criteria: { id: string; text: string; kind: string }[] };
+    expect(manifest.criteria).toEqual([
+      { id: 'AC-1', text: '**AC-1 — behavior.** Produce a safe value.', kind: 'new-behavior', sha256: expect.any(String) },
+      { id: 'AC-2', text: '**AC-2 — API.** Expose the safe value.', kind: 'new-behavior', sha256: expect.any(String) },
+    ]);
+    const repos = structuredClone(VALID_REPOSITORIES);
+    writeFileSync(join(control, 'repositories.yaml'), YAML.stringify(repos));
+    const graph = structuredClone(VALID_GRAPH);
+    graph.acceptance_criteria = manifest.criteria.map(({ id, text, kind }) => ({ id, text, kind }));
+    const graphFile = join(output, 'approved.yaml');
+    writeFileSync(graphFile, YAML.stringify(graph));
+    const compiled = run(['graph', 'compile', 'FEAT-101', '--from', graphFile, '--control-root', control, '--authority', authority, '--json']);
+    expect(compiled.status, compiled.stderr).toBe(0);
+    expect(run(['graph', 'validate', 'FEAT-101', '--control-root', control, '--json']).status).toBe(0);
+    const status = run(['codex', 'status', 'FEAT-101', '--control-root', control, '--json']);
+    expect(status.status, status.stderr).toBe(0);
+    expect(JSON.parse(status.stdout)).toMatchObject({ graph_valid: true, state_present: false, runtime_enabled: false, runtime_reason: expect.stringMatching(/security fence/) });
+    for (const action of ['run', 'resume', 'verify', 'deliver']) {
+      const denied = run(['codex', action, 'FEAT-101', '--control-root', control, '--json']);
+      expect(denied.status, `${action}: ${denied.stdout} ${denied.stderr}`).toBe(1);
+      expect(denied.stderr).toMatch(/CODEX_RUNTIME_DENIED.*security|CODEX_RUNTIME_DENIED.*unverified/i);
+    }
+    for (const command of [
+      ['init', control], ['dispatch', 'FEAT-101'], ['session', 'spawn', 'FEAT-101'],
+      ['review', 'settle', 'FEAT-101'], ['deliver', 'FEAT-101'], ['orchestrate', 'run', 'FEAT-101'],
+    ]) {
+      const denied = run([...command, '--control-root', control, '--authority', authority, '--json']);
+      expect(denied.status, `${command.join(' ')}: ${denied.stdout} ${denied.stderr}`).toBe(1);
+      expect(denied.stderr).toContain('CODEX_RUNTIME_DENIED');
+    }
+    expect(existsSync(join(control, '.claude/settings.json'))).toBe(false);
+    expect(existsSync(join(control, 'features/FEAT-101/STATE.json'))).toBe(false);
+  });
+
+  it.runIf(process.env['MYCELINK_LIVE_CODEX_PLUGIN'] === '1')('installs the ZIP via Codex CLI 0.163.0 in an isolated profile and exposes all workflow skills', async () => {
     const home = join(output, 'isolated-codex-home');
     mkdirSync(home, { recursive: true });
     const invoke = (args: string[]) => {
@@ -112,12 +176,20 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(installed.installed).toContainEqual(expect.objectContaining({
       pluginId: `mycelink@${MARKETPLACE}`, installed: true, enabled: true, version: VERSION,
     }));
-    const cachedSkill = join(home, 'plugins', 'cache', MARKETPLACE, 'mycelink', VERSION, 'skills/mycelink-status/SKILL.md');
-    expect(existsSync(cachedSkill), `missing installed skill: ${cachedSkill}`).toBe(true);
+    const cache = join(home, 'plugins', 'cache', MARKETPLACE, 'mycelink', VERSION);
+    const cachedSkill = join(cache, 'skills/mycelink-status/SKILL.md');
+    expect(existsSync(join(cache, 'bin/mycelink.mjs'))).toBe(true);
+    expect(existsSync(join(cache, 'dist/mycelink.mjs'))).toBe(true);
+    const cachedRun = spawnSync(process.execPath, [join(cache, 'bin/mycelink.mjs'), 'codex', 'init', join(output, 'installed-codex-control'), '--json'], {
+      cwd: output, env: { ...process.env, CODEX_HOME: home }, encoding: 'utf8', timeout: 30_000, windowsHide: true,
+    });
+    expect(cachedRun.status, cachedRun.stderr).toBe(0);
+    expect(JSON.parse(cachedRun.stdout)).toMatchObject({ planning_only: true, runtime_enabled: false });
+    expect(existsSync(join(output, 'installed-codex-control', '.claude', 'settings.json'))).toBe(false);
     expect(readFileSync(cachedSkill, 'utf8')).toContain('execution is disabled pending security review');
     const discovered = (await discoveredSkills(home, output)).filter((skill) => skill.pluginId === `mycelink@${MARKETPLACE}`);
-    expect(discovered).toHaveLength(1);
-    expect(discovered[0]).toMatchObject({ name: 'mycelink:mycelink-status', enabled: true, pluginId: `mycelink@${MARKETPLACE}`, path: cachedSkill });
+    expect(discovered.map((s) => s.name).sort()).toEqual(['init', 'prd', 'plan', 'status', 'run', 'resume', 'verify', 'deliver'].map((n) => `mycelink:mycelink-${n}`).sort());
+    for (const skill of discovered) expect(skill).toMatchObject({ enabled: true, pluginId: `mycelink@${MARKETPLACE}`, path: join(cache, 'skills', skill.name.split(':')[1]!, 'SKILL.md') });
     const diagnostics = runCodex(['doctor', '--json'], home, output);
     const diagnosticReport = JSON.parse(diagnostics.stdout) as { codexVersion: string; checks: Record<string, { status: string }> };
     expect(diagnosticReport.codexVersion).toBe('0.163.0');

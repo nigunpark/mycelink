@@ -160,7 +160,7 @@ describe('npm run package', () => {
         offenders.push(`${entry.name}: personal path`);
       }
       // Third-party license texts legitimately carry their authors' addresses.
-      if (!['THIRD_PARTY_NOTICES.md', 'dist/mycelink.mjs'].includes(entry.name)) {
+      if (!['THIRD_PARTY_NOTICES.md', 'dist/mycelink.mjs', 'codex-plugin/dist/mycelink.mjs'].includes(entry.name)) {
         const emails = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? [];
         const real = emails.filter((e) => !/@(example\.(com|org|invalid)|users\.noreply\.github\.com)$/i.test(e) && !e.startsWith('git@'));
         if (real.length > 0) offenders.push(`${entry.name}: ${real.join(', ')}`);

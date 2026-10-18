@@ -111,6 +111,9 @@ const USAGE = `mycelink <group> <command> [options]
   help | --help | -h                         print this usage
   version | --version                        print the installed version
   doctor                                     environment and workspace health
+  codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
+  codex status <feature>                     inspect local plan and runtime denial
+  codex run|resume|verify|deliver <feature>  refuse unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
   init <control-repo-path>                   create a control repository
   repo register|modules|audit|lock           repository manifest operations (register --worktree-setup <argv JSON>|none; modules: the verifier allowlist)
@@ -339,6 +342,17 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
   try {
     const sub = args.positional[1] ?? '';
+    if (group === 'codex') return codexGroup(args, io);
+    // A planning-only Codex control must not reach legacy Claude hooks or any
+    // mutable runtime path by spelling a generic command instead of a skill.
+    const target = group === 'init' ? resolve(args.positional[1] ?? '.') : resolveControlRoot(args);
+    if (existsSync(controlPaths(target).config) && loadConfig(target).provider.provider === 'codex') {
+      const planning = (group === 'graph' && ['compile', 'validate', 'import', 'adapters', 'ready'].includes(sub)) ||
+        (group === 'feature' && ['acceptance', 'init'].includes(sub)) ||
+        (group === 'repo' && ['register', 'modules', 'audit'].includes(sub)) ||
+        (group === 'controller' && sub === 'open') || group === 'doctor';
+      if (!planning) throw new Error(`CODEX_RUNTIME_DENIED: ${preflightAdapter(loadConfig(target)).detail}; security review has not authorised ${group} ${sub}. Use codex status for read-only inspection.`);
+    }
     const only = CONTROLLER_ONLY[group];
     if (only === '*' || only?.has(sub)) requireController(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
     switch (group) {
@@ -406,6 +420,47 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 }
 
 // ---- doctor / init --------------------------------------------------------
+
+/** Codex host workflow: planning is possible, dispatch and delivery are not. */
+function codexGroup(args: ParsedArgs, io: CliIo): number {
+  const sub = requirePositional(args, 1, 'init|status|run|resume|verify|deliver');
+  if (sub === 'init') {
+    assertControllerRole(args, 'codex init');
+    const target = resolve(requirePositional(args, 2, 'control-repo-path'));
+    // Never convert an existing Claude control or install hooks by accident.
+    if (existsSync(controlPaths(target).config)) throw new Error('CODEX_INIT_EXISTS: existing control configuration must not be replaced.');
+    if (existsSync(target) && readdirSync(target).length > 0) throw new Error('CODEX_INIT_OCCUPIED: choose an empty, new control directory; existing Claude assets are never modified.');
+    const paths = initControlRepo(target, { provider: { provider: 'codex', executable: 'codex', extra_args: [] } });
+    if (!existsSync(paths.repositoriesManifest)) writeTextAtomic(paths.repositoriesManifest, YAML.stringify({ schema_version: 1, repositories: [] }));
+    emit(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
+    return 0;
+  }
+  if (!['status', 'run', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  const controlRoot = resolveControlRoot(args);
+  if (loadConfig(controlRoot).provider.provider !== 'codex' || !existsSync(controlPaths(controlRoot).config)) {
+    throw new Error('CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.');
+  }
+  const gate = preflightAdapter(loadConfig(controlRoot));
+  if (sub !== 'status') {
+    // A preflight warning or a writable STATE is never an execution grant.
+    // Even a future adapter must be separately authorised for the complete
+    // worker/reviewer/settlement/delivery transaction before this changes.
+    throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; security review has not authorised ${sub}. No worker, reviewer, verifier or delivery was started.`);
+  }
+  const featureId = requirePositional(args, 2, 'feature-id');
+  const paths = featurePaths(controlRoot, featureId);
+  const state = loadState(paths.featureDir)?.data ?? null;
+  const graph = existsSync(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
+  const report = {
+    feature_id: featureId, graph_valid: graph?.ok ?? false,
+    graph_problems: graph?.problems ?? [], state_present: state !== null,
+    feature_state: state?.feature_state ?? null,
+    nodes: state ? Object.fromEntries(Object.entries(state.nodes).map(([id, runtime]) => [id, runtime.state])) : {},
+    runtime_enabled: false, runtime_reason: gate.detail,
+  };
+  emit(io, args, report, () => `${featureId}: graph ${report.graph_valid ? 'valid' : 'not valid'}, state ${report.feature_state ?? 'not initialised'}; Codex runtime denied: ${gate.detail}`);
+  return 0;
+}
 
 function doctor(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);

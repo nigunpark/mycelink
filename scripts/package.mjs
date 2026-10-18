@@ -93,6 +93,12 @@ const entries = [...files].sort().map((name) => {
   return { name, data, mode: EXECUTABLE.has(name) ? 0o755 : 0o644 };
 });
 
+// Codex caches only its plugin subtree. Ship a self-contained launcher there;
+// never resolve executables from cwd, PATH, or the adjacent Claude plugin.
+for (const name of ['bin/mycelink.mjs', 'dist/mycelink.mjs']) {
+  entries.push({ name: `codex-plugin/${name}`, data: readFileSync(join(root, name)), mode: 0o755 });
+}
+
 // The shipped package.json carries identity and the launcher only: no
 // scripts, no dependency lists (everything runtime is in the bundle).
 const runtimePkg = {
