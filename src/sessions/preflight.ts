@@ -72,7 +72,7 @@ function probe(argv: string[], base: PreflightResult): PreflightResult {
 export function preflightAdapter(input: MycelinkConfigInput, env: NodeJS.ProcessEnv = process.env): PreflightResult {
   const config = normalizeConfig(input);
   if (config.provider.provider === 'codex') {
-    return { ok: false, adapter: 'codex-cli', detail: 'Codex worker adapter is not supported: the per-command and allowed-path security fence is unverified.' };
+    return { ok: false, adapter: 'codex-cli', auth: 'not-checked', detail: 'Codex worker adapter is not supported for production dispatch: the per-command and allowed-path security fence is unverified (isolated CLI adapter tests only).' };
   }
   // Preserve the legacy direct-call overrides used by existing integrations.
   const legacyAdapter = input.session_adapter;

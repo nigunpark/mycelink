@@ -673,6 +673,7 @@ function resultHistoryLines(git: string): string[] {
 export interface WorkerPromptArgs {
   pack: ContextPack;
   gates: { gate: WorkerGate; line: string }[];
+  provider?: 'claude' | 'codex';
   /** The rendered `tdd tests` line: the bound tests and their ids, by words. */
   testsLine?: string;
   /** The rendered `tdd check` line: the result's criterion evidence judged as settle will. */
@@ -716,11 +717,12 @@ function challengeResultLines(pack: ContextPack): string[] {
 
 export function buildWorkerPrompt(args: WorkerPromptArgs): string {
   const { pack } = args;
+  const codex = args.provider === 'codex';
   const gateLines =
     args.gates.length > 0
       ? [
-          'Gate commands. Run them with the Bash tool exactly as written, from your working directory.',
-          'They are pre-approved only in this exact form, and the controller records their real exit codes as evidence:',
+          codex ? 'Gate commands. Run them exactly as written from your working directory.' : 'Gate commands. Run them with the Bash tool exactly as written, from your working directory.',
+          codex ? 'Codex may deny these commands; the controller verifies their real outputs independently:' : 'They are pre-approved only in this exact form, and the controller records their real exit codes as evidence:',
           ...args.gates.map((g) => `- ${g.gate}: ${g.line}`),
           ...testsLines(args.testsLine),
           ...checkLines(args.checkLine),
@@ -728,7 +730,7 @@ export function buildWorkerPrompt(args: WorkerPromptArgs): string {
       : ['No gate commands were offered for this node.'];
 
   return [
-    'You are a bounded Claude Code worker session driven by Mycelink. You implement exactly one orchestrator graph node.',
+    codex ? 'You are a bounded Codex worker session driven by Mycelink. You implement exactly one orchestrator graph node.' : 'You are a bounded Claude Code worker session driven by Mycelink. You implement exactly one orchestrator graph node.',
     '',
     'Everything you need is in this prompt. Do not look for your brief in environment variables or in files outside',
     'your working directory: there is nothing there for you, and those reads are not approved.',
@@ -758,7 +760,7 @@ export function buildWorkerPrompt(args: WorkerPromptArgs): string {
     '',
     `Result file: ${WORKER_RESULT_REL}`,
     'Before you stop, for any reason, write one JSON node result to that path (relative to your working directory)',
-    'with the Write tool; it is pre-approved. Fields: schema_version 1; node_id and claim_id exactly as above;',
+    codex ? 'with an available file-edit tool. This is not an authorization grant. Fields: schema_version 1; node_id and claim_id exactly as above;' : 'with the Write tool; it is pre-approved. Fields: schema_version 1; node_id and claim_id exactly as above;',
     'outcome SUBMITTED, RETRYABLE, BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED; commands as',
     '[{"command": [...], "exit_code": n}]; commit_sha; changed_paths; evidence_paths; failure_fingerprint;',
     'decision_request ({"question", "options": [...]} for NEEDS_DECISION, otherwise null).',

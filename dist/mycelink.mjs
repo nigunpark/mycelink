@@ -28625,15 +28625,16 @@ function challengeResultLines(pack) {
 }
 function buildWorkerPrompt(args) {
   const { pack } = args;
+  const codex = args.provider === "codex";
   const gateLines = args.gates.length > 0 ? [
-    "Gate commands. Run them with the Bash tool exactly as written, from your working directory.",
-    "They are pre-approved only in this exact form, and the controller records their real exit codes as evidence:",
+    codex ? "Gate commands. Run them exactly as written from your working directory." : "Gate commands. Run them with the Bash tool exactly as written, from your working directory.",
+    codex ? "Codex may deny these commands; the controller verifies their real outputs independently:" : "They are pre-approved only in this exact form, and the controller records their real exit codes as evidence:",
     ...args.gates.map((g) => `- ${g.gate}: ${g.line}`),
     ...testsLines(args.testsLine),
     ...checkLines(args.checkLine)
   ] : ["No gate commands were offered for this node."];
   return [
-    "You are a bounded Claude Code worker session driven by Mycelink. You implement exactly one orchestrator graph node.",
+    codex ? "You are a bounded Codex worker session driven by Mycelink. You implement exactly one orchestrator graph node." : "You are a bounded Claude Code worker session driven by Mycelink. You implement exactly one orchestrator graph node.",
     "",
     "Everything you need is in this prompt. Do not look for your brief in environment variables or in files outside",
     "your working directory: there is nothing there for you, and those reads are not approved.",
@@ -28663,7 +28664,7 @@ function buildWorkerPrompt(args) {
     "",
     `Result file: ${WORKER_RESULT_REL}`,
     "Before you stop, for any reason, write one JSON node result to that path (relative to your working directory)",
-    "with the Write tool; it is pre-approved. Fields: schema_version 1; node_id and claim_id exactly as above;",
+    codex ? "with an available file-edit tool. This is not an authorization grant. Fields: schema_version 1; node_id and claim_id exactly as above;" : "with the Write tool; it is pre-approved. Fields: schema_version 1; node_id and claim_id exactly as above;",
     "outcome SUBMITTED, RETRYABLE, BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED; commands as",
     '[{"command": [...], "exit_code": n}]; commit_sha; changed_paths; evidence_paths; failure_fingerprint;',
     'decision_request ({"question", "options": [...]} for NEEDS_DECISION, otherwise null).',
@@ -43264,6 +43265,10 @@ import { createWriteStream, existsSync as existsSync37, mkdirSync as mkdirSync22
 import { dirname as dirname18, resolve as resolve22 } from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 var ProcessSessionAdapter = class {
+  requireCompletedTurn = false;
+  workerPrompt(pack, request) {
+    return buildWorkerPrompt({ pack, gates: this.gateLines(request) });
+  }
   runs = /* @__PURE__ */ new Map();
   spawn(request) {
     const sessionId = randomUUID4();
@@ -43321,7 +43326,7 @@ var ProcessSessionAdapter = class {
     let args;
     try {
       const pack = loadPromptPack(request.contextPackPath, request, workerEnv);
-      prompt = buildWorkerPrompt({ pack, gates: this.gateLines(request) });
+      prompt = this.workerPrompt(pack, request);
       args = this.buildArgs(request, sessionId);
       prepareResultSlot(request.cwd);
     } catch (err) {
@@ -43418,9 +43423,15 @@ var ProcessSessionAdapter = class {
     if (forced !== null) state.status = forced;
     else if (state.stopped) state.status = "stopped";
     else if (state.status === "stalled" || state.status === "budget-exhausted") {
+    } else if (state.providerFailure) {
+      state.status = "failed";
+      state.failureReason = redactValue(state.providerFailure, state.workerEnv);
     } else if (state.exitCode !== 0) {
       state.status = "failed";
       state.failureReason ??= `EXIT_${state.exitCode}`;
+    } else if (this.requireCompletedTurn && state.turns === 0) {
+      state.status = "failed";
+      state.failureReason = "PROVIDER_STREAM_INCOMPLETE: no turn.completed event";
     } else state.status = "done";
     if (state.child !== null) {
       try {
@@ -43565,6 +43576,72 @@ var ClaudeCliAdapter = class extends ProcessSessionAdapter {
     }
     args.push(...this.options.extraArgs ?? []);
     return args;
+  }
+};
+
+// src/sessions/codex-cli-adapter.ts
+var CodexStreamParser = class {
+  consume(line, progress) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (event === null || typeof event !== "object" || Array.isArray(event)) return;
+    const e = event;
+    if (e["type"] === "turn.completed") {
+      progress.turns += 1;
+      const usage = e["usage"];
+      if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+        const u = usage;
+        if (typeof u["input_tokens"] === "number" && Number.isFinite(u["input_tokens"]) && u["input_tokens"] >= 0) progress.usage.input_tokens = u["input_tokens"];
+        if (typeof u["output_tokens"] === "number" && Number.isFinite(u["output_tokens"]) && u["output_tokens"] >= 0) progress.usage.output_tokens = u["output_tokens"];
+      }
+    } else if (e["type"] === "turn.failed") {
+      const error = e["error"];
+      const message = error && typeof error === "object" ? error["message"] : null;
+      progress.providerFailure = `PROVIDER_FAILED: ${typeof message === "string" ? message.slice(0, 300) : "turn.failed"}`;
+    } else if (e["type"] === "error") {
+    }
+  }
+};
+var CodexCliAdapter = class extends ProcessSessionAdapter {
+  name = "codex-cli";
+  executable;
+  parser = new CodexStreamParser();
+  requireCompletedTurn = true;
+  options;
+  constructor(options) {
+    super();
+    if (options.extraArgs?.length) throw new Error("CODEX_ARGS_DENIED: arbitrary Codex exec flags are not allowed");
+    this.options = options;
+    this.executable = options.executable;
+  }
+  gateLines(request) {
+    return (request.gateCommands ?? []).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
+  }
+  workerPrompt(pack, request) {
+    return buildWorkerPrompt({ pack, gates: this.gateLines(request), provider: "codex" });
+  }
+  buildArgs(request, _sessionId) {
+    if (request.addDirs?.length || request.allowedTools?.length || request.disallowedTools?.length) {
+      throw new Error("CODEX_ARGS_DENIED: Claude tool and extra writable-directory grants cannot be translated safely");
+    }
+    return [
+      ...this.options.prefixArgs ?? [],
+      "exec",
+      "--json",
+      "--cd",
+      request.cwd,
+      "--sandbox",
+      this.options.sandbox ?? "workspace-write",
+      "-c",
+      "approval_policy=never",
+      "--model",
+      request.model,
+      "-"
+    ];
   }
 };
 
@@ -45475,7 +45552,7 @@ function probe(argv, base) {
 function preflightAdapter(input, env = process.env) {
   const config = normalizeConfig(input);
   if (config.provider.provider === "codex") {
-    return { ok: false, adapter: "codex-cli", detail: "Codex worker adapter is not supported: the per-command and allowed-path security fence is unverified." };
+    return { ok: false, adapter: "codex-cli", auth: "not-checked", detail: "Codex worker adapter is not supported for production dispatch: the per-command and allowed-path security fence is unverified (isolated CLI adapter tests only)." };
   }
   const legacyAdapter = input.session_adapter;
   const legacyExecutable = input.claude_executable;
@@ -46082,7 +46159,11 @@ function emit2(io, args, value, human) {
 function adapterFor(controlRoot) {
   const config = loadConfig(controlRoot);
   if (config.provider.provider === "codex") {
-    throw new Error("Codex worker adapter is not supported: the per-command and allowed-path security fence is unverified.");
+    return new CodexCliAdapter({
+      executable: config.provider.executable ?? "codex",
+      extraArgs: config.provider.extra_args,
+      sandbox: config.provider.sandbox ?? "workspace-write"
+    });
   }
   const fakeExecutable = process.env["MYCELINK_FAKE_CLAUDE"];
   if (config.adapter === "fake-provider" || fakeExecutable) {

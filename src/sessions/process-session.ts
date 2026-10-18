@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { statusForOutcome, zeroObservationUsage, type NodeResult, type SessionAdapter, type SessionHandle, type SessionObservation, type SessionStatus, type SpawnRequest } from './adapter.js';
 import type { UsageTotals } from '../model/types.js';
-import { LineRedactor } from '../security/redact.js';
+import { LineRedactor, redactValue } from '../security/redact.js';
 import { planCommand } from '../security/exec.js';
 import { buildWorkerPrompt, collectWorkerResult, loadPromptPack, prepareResultSlot, type WorkerGate } from './worker-protocol.js';
 import type { ProviderStreamParser, StreamProgress } from './provider-stream.js';
@@ -36,8 +36,12 @@ export abstract class ProcessSessionAdapter implements SessionAdapter {
   abstract readonly name: SessionHandle['adapter'];
   protected abstract readonly executable: string;
   protected abstract readonly parser: ProviderStreamParser;
+  protected readonly requireCompletedTurn: boolean = false;
   protected abstract buildArgs(request: SpawnRequest, sessionId: string): string[];
   protected abstract gateLines(request: SpawnRequest): { gate: WorkerGate; line: string }[];
+  protected workerPrompt(pack: ReturnType<typeof loadPromptPack>, request: SpawnRequest): string {
+    return buildWorkerPrompt({ pack, gates: this.gateLines(request) });
+  }
   private readonly runs = new Map<string, RunState>();
 
   spawn(request: SpawnRequest): SessionHandle {
@@ -71,7 +75,7 @@ export abstract class ProcessSessionAdapter implements SessionAdapter {
     let args: string[];
     try {
       const pack = loadPromptPack(request.contextPackPath, request, workerEnv);
-      prompt = buildWorkerPrompt({ pack, gates: this.gateLines(request) });
+      prompt = this.workerPrompt(pack, request);
       args = this.buildArgs(request, sessionId);
       prepareResultSlot(request.cwd);
     } catch (err) {
@@ -159,9 +163,15 @@ export abstract class ProcessSessionAdapter implements SessionAdapter {
     if (forced !== null) state.status = forced;
     else if (state.stopped) state.status = 'stopped';
     else if (state.status === 'stalled' || state.status === 'budget-exhausted') { /* Watchdog decided. */ }
-    else if (state.exitCode !== 0) {
+    else if (state.providerFailure) {
+      state.status = 'failed';
+      state.failureReason = redactValue(state.providerFailure, state.workerEnv);
+    } else if (state.exitCode !== 0) {
       state.status = 'failed';
       state.failureReason ??= `EXIT_${state.exitCode}`;
+    } else if (this.requireCompletedTurn && state.turns === 0) {
+      state.status = 'failed';
+      state.failureReason = 'PROVIDER_STREAM_INCOMPLETE: no turn.completed event';
     } else state.status = 'done';
     if (state.child !== null) {
       try {

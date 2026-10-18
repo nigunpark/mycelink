@@ -4,6 +4,8 @@ import type { UsageTotals } from '../model/types.js';
 export interface StreamProgress {
   turns: number;
   usage: UsageTotals;
+  /** Fatal terminal provider event, independent of process exit or result slot. */
+  providerFailure?: string | null;
 }
 
 export interface ProviderStreamParser {

@@ -38,6 +38,7 @@ import { createWorkerWorktree, workerBranchName, integrationBranchName } from '.
 import { isGitRepository, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { Orchestrator, REVIEW_AWAIT_MAX_SECONDS, REVIEW_AWAIT_SECONDS } from '../engine/orchestrator.js';
 import { ClaudeCliAdapter } from '../sessions/claude-cli-adapter.js';
+import { CodexCliAdapter } from '../sessions/codex-cli-adapter.js';
 import { liveSessions, loadRegistry } from '../sessions/registry.js';
 import { defaultLoops, loadLoops, writeLoops } from '../loops/contracts.js';
 import { runSummary } from '../loops/runs.js';
@@ -226,10 +227,16 @@ function emit(io: CliIo, args: ParsedArgs, value: unknown, human: () => string):
   else io.out(human());
 }
 
-function adapterFor(controlRoot: string): ClaudeCliAdapter {
+function adapterFor(controlRoot: string): ClaudeCliAdapter | CodexCliAdapter {
   const config = loadConfig(controlRoot);
   if (config.provider.provider === 'codex') {
-    throw new Error('Codex worker adapter is not supported: the per-command and allowed-path security fence is unverified.');
+    // Constructible for the standalone adapter contract, never dispatched:
+    // preflightAdapter and the CLI runtime gate still deny every Codex run.
+    return new CodexCliAdapter({
+      executable: config.provider.executable ?? 'codex',
+      extraArgs: config.provider.extra_args,
+      sandbox: config.provider.sandbox ?? 'workspace-write',
+    });
   }
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];
   if (config.adapter === 'fake-provider' || fakeExecutable) {
