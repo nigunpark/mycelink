@@ -405,7 +405,7 @@ Short version — details in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md),
 | Node.js | 22.12+ and 24.x |
 | Git | 2.30+ recommended (worktrees) |
 | Claude Code | a version with plugin marketplaces and `plugin validate --strict` |
-| OS | Windows, Linux, macOS — each exercised by the CI matrix |
+| OS | Windows, Linux, macOS — configured in the CI matrix; this branch's actual cross-OS run remains unverified |
 
 No Docker, WSL or VM is required. You do **not** need to run `npm install` or
 build anything to use a release: the runtime ships prebuilt.
@@ -463,8 +463,10 @@ controls. No Codex hooks or MCP server are shipped. **No worker, reviewer,
 implementation, fresh verification, or delivery is enabled**: the original
 Codex host-hook/worker security boundary remains unverified. A valid graph or
 doctor check is not an execution grant. Claude's plugin assets are unchanged.
-See `docs/CODEX_COMPATIBILITY.md` in the source repository and the
-[release procedure](docs/RELEASING.md). A local build is not a published listing.
+See the [Codex planning and DENIED-runtime guide](docs/CODEX.md) for the
+isolated `CODEX_HOME`/doctor walkthrough, exact policy limitations, migration
+and cleanup; source-only `docs/CODEX_COMPATIBILITY.md` holds the probes.
+A local build is not a published listing.
 
 ### Try without installing
 
@@ -642,6 +644,10 @@ verification commands (argv) and a worker budget.
 ---
 
 ## Update and uninstall
+
+The commands below are **Claude-only**. For an isolated Codex planning
+evaluation, see [Codex removal and cleanup](docs/CODEX.md#migration-update-and-removal);
+do not apply Claude hooks or migrate Claude state into a Codex control.
 
 ```bash
 claude plugin marketplace update mycelink-marketplace

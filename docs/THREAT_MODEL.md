@@ -6,6 +6,15 @@ tests that prove it. The controller authority, claim capabilities and hook
 fences that several mitigations rely on are specified in
 [PERMISSION_MODEL.md](PERMISSION_MODEL.md).
 
+**Codex boundary is denied, not certified.** The separate [Codex guide](CODEX.md)
+records the negative Windows MXC hardlink-alias counterexample (an allowed
+alias changed a forbidden file), failed whole-Codex AppContainer launch,
+MCP side effects during a read-only turn, and unauthenticated worker/result/
+reviewer provenance. These are not mitigated by the Claude hook, a custom
+Codex role TOML or a successful model-free test. Production Codex dispatch
+remains `CODEX_RUNTIME_DENIED`; this threat table's Claude mitigations must
+not be read as Codex coverage.
+
 ## What Mycelink is
 
 A local developer tool. The `mycelink` controller runs on the developer's

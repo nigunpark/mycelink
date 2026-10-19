@@ -2,6 +2,14 @@
 
 Who may do what, and where the switch for it lives.
 
+This table describes the **Claude execution path**, not a Codex parity claim.
+The [Codex planning guide](CODEX.md) describes its empty hook map, read-only
+diagnostics and unconditional `CODEX_RUNTIME_DENIED`; no Codex worker,
+reviewer, gate or delivery permission can be granted through these settings.
+`codex init` never installs Claude hooks or changes `.codex/config.toml`.
+Custom Codex role TOML cannot override parent `sandbox_mode`, approvals or
+`mcp_servers`; a worktree is not an OS isolation boundary.
+
 ## Principles
 
 1. **Configuration is the operator's.** Anything that widens trust lives in

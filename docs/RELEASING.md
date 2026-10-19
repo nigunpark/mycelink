@@ -1,7 +1,8 @@
 # Releasing
 
-Releases are tag-driven and reproducible. The same commit always produces the
-same ZIP bytes, checksum and SBOM.
+Releases are tag-driven and designed to be reproducible. Same-host repeat
+packaging has matched bytes; this branch's actual cross-OS equivalence and CI
+are unverified. Do not infer a published release from a local ZIP.
 
 ## Versioning
 
@@ -64,7 +65,8 @@ same ZIP bytes, checksum and SBOM.
    ```
 
 Codex plugin planning does **not** enable Codex worker/runtime execution.
-That remains disabled pending independent security review. The Codex plugin
+That remains disabled pending independent security review; see the shipped
+[Codex planning guide](CODEX.md). The Codex plugin
 ships init/PRD/plan/status guidance and explicit run/resume/verify/deliver
 refusals, plus its own copy of the bundled CLI. It has empty hooks, no MCP,
 and no Claude worker assets inside the Codex plugin. CLI `codex init` refuses
@@ -95,7 +97,7 @@ marketplace manifests, the isolated planning-only Codex plugin and its
 packaged launcher/runtime copy, Claude
 commands, skills, agents and hooks, templates, schemas, user documentation
 (the threat model, permission model, data handling, adapters and this file),
-the launcher, runtime bundle, runtime-only `package.json`, and the license,
+the Codex guide, launcher, runtime bundle, runtime-only `package.json`, and the license,
 notice, changelog, security, support, contributing, conduct and governance
 files. Sources, tests, scripts, CI configuration, the benchmark suites
 (`evals-*/`), the eval reports under `docs/evals/` and the benchmark's

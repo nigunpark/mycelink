@@ -99,6 +99,15 @@ The automated suite drives `ClaudeCliAdapter` with
 `tests/fake-claude/claude.mjs`, so spawning, stream parsing, timeouts and
 result validation are exercised with zero model usage.
 
+`CodexCliAdapter` has bounded JSONL/final-message parsing and model-free
+fake-executable tests, but its preflight unconditionally fails. A Codex
+process/thread observation and a writable worker result slot do not prove
+worker identity or independent reviewer provenance. Codex host-native and
+standalone CLI dispatch/settle/delivery are **not supported**; see the
+[planning-only Codex guide](CODEX.md) for the precise `CODEX_RUNTIME_DENIED`
+gate. Never treat the adapter's test-only `workspace-write` invocation as an
+operator permission default or a secure all-tool boundary.
+
 ## 3. Memory adapter (optional)
 
 `src/knowledge/brain.ts` implements an LLM Wiki–style Brain: Markdown pages

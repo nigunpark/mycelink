@@ -131,7 +131,7 @@ describe('npm run package', () => {
     const docs = readZip(first.zip)
       .map((e) => e.name)
       .filter((n) => n.startsWith('docs/'));
-    expect(docs).toEqual(['docs/ADAPTERS.md', 'docs/DATA_HANDLING.md', 'docs/PERMISSION_MODEL.md', 'docs/PROVIDER_CONTRACT.md', 'docs/RELEASING.md', 'docs/THREAT_MODEL.md']);
+    expect(docs).toEqual(['docs/ADAPTERS.md', 'docs/CODEX.md', 'docs/DATA_HANDLING.md', 'docs/PERMISSION_MODEL.md', 'docs/PROVIDER_CONTRACT.md', 'docs/RELEASING.md', 'docs/THREAT_MODEL.md']);
   });
 
   it('resolves every relative link in a shipped Markdown file inside the archive', () => {
