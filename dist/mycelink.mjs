@@ -1509,7 +1509,7 @@ var require_stringify = __commonJS({
         props.push(doc.directives.tagString(tag));
       return props.join(" ");
     }
-    function stringify(item, ctx, onComment, onChompKeep) {
+    function stringify2(item, ctx, onComment, onChompKeep) {
       if (identity2.isPair(item))
         return item.toString(ctx, onComment, onChompKeep);
       if (identity2.isAlias(item)) {
@@ -1538,7 +1538,7 @@ var require_stringify = __commonJS({
 ${ctx.indent}${str2}`;
     }
     exports.createStringifyContext = createStringifyContext;
-    exports.stringify = stringify;
+    exports.stringify = stringify2;
   }
 });
 
@@ -1548,7 +1548,7 @@ var require_stringifyPair = __commonJS({
     "use strict";
     var identity2 = require_identity();
     var Scalar = require_Scalar();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
       const { allNullValues, doc, indent, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
@@ -1570,7 +1570,7 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str2 = stringify.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      let str2 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
       if (!explicitKey && !ctx.inFlow && str2.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
@@ -1622,7 +1622,7 @@ ${indent}:`;
         ctx.indent = ctx.indent.substring(2);
       }
       let valueCommentDone = false;
-      const valueStr = stringify.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
+      const valueStr = stringify2.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
       let ws = " ";
       if (keyComment || vsb || vcb) {
         ws = vsb ? "\n" : "";
@@ -1763,7 +1763,7 @@ var require_addPairToJSMap = __commonJS({
     "use strict";
     var log = require_log();
     var merge3 = require_merge();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var identity2 = require_identity();
     var toJS = require_toJS();
     function addPairToJSMap(ctx, map, { key, value }) {
@@ -1799,7 +1799,7 @@ var require_addPairToJSMap = __commonJS({
       if (typeof jsKey !== "object")
         return String(jsKey);
       if (identity2.isNode(key) && ctx?.doc) {
-        const strCtx = stringify.createStringifyContext(ctx.doc, {});
+        const strCtx = stringify2.createStringifyContext(ctx.doc, {});
         strCtx.anchors = /* @__PURE__ */ new Set();
         for (const node of ctx.anchors.keys())
           strCtx.anchors.add(node.anchor);
@@ -1866,12 +1866,12 @@ var require_stringifyCollection = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports) {
     "use strict";
     var identity2 = require_identity();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyCollection(collection, ctx, options) {
       const flow = ctx.inFlow ?? collection.flow;
-      const stringify2 = flow ? stringifyFlowCollection : stringifyBlockCollection;
-      return stringify2(collection, ctx, options);
+      const stringify3 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+      return stringify3(collection, ctx, options);
     }
     function stringifyBlockCollection({ comment, items: items2 }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
       const { indent, options: { commentString } } = ctx;
@@ -1896,7 +1896,7 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str3 = stringify.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        let str3 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
         if (comment2)
           str3 += stringifyComment.lineComment(str3, itemIndent, commentString(comment2));
         if (chompKeep && comment2)
@@ -1963,7 +1963,7 @@ ${indent}${line}` : "\n";
         }
         if (comment)
           reqNewline = true;
-        let str2 = stringify.stringify(item, itemCtx, () => comment = null);
+        let str2 = stringify2.stringify(item, itemCtx, () => comment = null);
         reqNewline || (reqNewline = lines.length > linesAtValue || str2.includes("\n"));
         if (i < items2.length - 1) {
           str2 += ",";
@@ -3324,7 +3324,7 @@ var require_stringifyDocument = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports) {
     "use strict";
     var identity2 = require_identity();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyDocument(doc, options) {
       const lines = [];
@@ -3339,7 +3339,7 @@ var require_stringifyDocument = __commonJS({
       }
       if (hasDirectives)
         lines.push("---");
-      const ctx = stringify.createStringifyContext(doc, options);
+      const ctx = stringify2.createStringifyContext(doc, options);
       const { commentString } = ctx.options;
       if (doc.commentBefore) {
         if (lines.length !== 1)
@@ -3361,7 +3361,7 @@ var require_stringifyDocument = __commonJS({
           contentComment = doc.contents.comment;
         }
         const onChompKeep = contentComment ? void 0 : () => chompKeep = true;
-        let body = stringify.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
+        let body = stringify2.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
         if (contentComment)
           body += stringifyComment.lineComment(body, "", commentString(contentComment));
         if ((body[0] === "|" || body[0] === ">") && lines[lines.length - 1] === "---") {
@@ -3369,7 +3369,7 @@ var require_stringifyDocument = __commonJS({
         } else
           lines.push(body);
       } else {
-        lines.push(stringify.stringify(doc.contents, ctx));
+        lines.push(stringify2.stringify(doc.contents, ctx));
       }
       if (doc.directives?.docEnd) {
         if (doc.comment) {
@@ -5505,7 +5505,7 @@ var require_cst_scalar = __commonJS({
 var require_cst_stringify = __commonJS({
   "node_modules/yaml/dist/parse/cst-stringify.js"(exports) {
     "use strict";
-    var stringify = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
+    var stringify2 = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
     function stringifyToken(token) {
       switch (token.type) {
         case "block-scalar": {
@@ -5558,7 +5558,7 @@ var require_cst_stringify = __commonJS({
         res += stringifyToken(value);
       return res;
     }
-    exports.stringify = stringify;
+    exports.stringify = stringify2;
   }
 });
 
@@ -7269,7 +7269,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse2(src, reviver, options) {
+    function parse3(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7288,7 +7288,7 @@ var require_public_api = __commonJS({
       }
       return doc.toJS(Object.assign({ reviver: _reviver }, options));
     }
-    function stringify(value, replacer, options) {
+    function stringify2(value, replacer, options) {
       let _replacer = null;
       if (typeof replacer === "function" || Array.isArray(replacer)) {
         _replacer = replacer;
@@ -7310,10 +7310,10 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse2;
+    exports.parse = parse3;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
-    exports.stringify = stringify;
+    exports.stringify = stringify2;
   }
 });
 
@@ -7497,10 +7497,10 @@ var require_code = __commonJS({
     function interpolate(x) {
       return typeof x == "number" || typeof x == "boolean" || x === null ? x : safeStringify(Array.isArray(x) ? x.join(",") : x);
     }
-    function stringify(x) {
+    function stringify2(x) {
       return new _Code(safeStringify(x));
     }
-    exports.stringify = stringify;
+    exports.stringify = stringify2;
     function safeStringify(x) {
       return JSON.stringify(x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     }
@@ -11173,7 +11173,7 @@ var require_fast_uri = __commonJS({
         normalizeString(uri, options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse2(serialize(uri, options), options);
+        parse3(serialize(uri, options), options);
       }
       return uri;
     }
@@ -11213,8 +11213,8 @@ var require_fast_uri = __commonJS({
     function resolveComponent(base, relative10, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse2(serialize(base, options), options);
-        relative10 = parse2(serialize(relative10, options), options);
+        base = parse3(serialize(base, options), options);
+        relative10 = parse3(serialize(relative10, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative10.scheme) {
@@ -11513,7 +11513,7 @@ var require_fast_uri = __commonJS({
       }
       return { parsed, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme };
     }
-    function parse2(uri, opts) {
+    function parse3(uri, opts) {
       return parseWithStatus(uri, opts).parsed;
     }
     function normalizeString(uri, opts) {
@@ -11550,7 +11550,7 @@ var require_fast_uri = __commonJS({
       resolveComponent,
       equal,
       serialize,
-      parse: parse2
+      parse: parse3
     };
     module.exports = fastUri;
     module.exports.default = fastUri;
@@ -15361,9 +15361,9 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync43, lstatSync as lstatSync18, mkdirSync as mkdirSync25, readFileSync as readFileSync38, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
+import { existsSync as existsSync44, lstatSync as lstatSync18, mkdirSync as mkdirSync25, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
 import { createHash as createHash41 } from "node:crypto";
-import { dirname as dirname20, join as join54, resolve as resolve26 } from "node:path";
+import { dirname as dirname21, join as join55, resolve as resolve26 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -43473,14 +43473,789 @@ function stopGuard(ctx, io, input) {
   );
 }
 
+// src/workspace/codex-settings.ts
+import { spawnSync as spawnSync7 } from "node:child_process";
+import { existsSync as existsSync39, readFileSync as readFileSync34 } from "node:fs";
+import { dirname as dirname20, join as join50 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+
+// node_modules/smol-toml/dist/error.js
+function getLineColFromPtr(string, ptr) {
+  let lines = string.slice(0, ptr).split(/\r\n|\n|\r/g);
+  return [lines.length, lines.pop().length + 1];
+}
+function makeCodeBlock(string, line, column) {
+  let lines = string.split(/\r\n|\n|\r/g);
+  let codeblock = "";
+  let numberLen = (Math.log10(line + 1) | 0) + 1;
+  for (let i = line - 1; i <= line + 1; i++) {
+    let l = lines[i - 1];
+    if (!l)
+      continue;
+    codeblock += i.toString().padEnd(numberLen, " ");
+    codeblock += ":  ";
+    codeblock += l;
+    codeblock += "\n";
+    if (i === line) {
+      codeblock += " ".repeat(numberLen + column + 2);
+      codeblock += "^\n";
+    }
+  }
+  return codeblock;
+}
+var TomlError = class extends Error {
+  line;
+  column;
+  codeblock;
+  constructor(message, options) {
+    const [line, column] = getLineColFromPtr(options.toml, options.ptr);
+    const codeblock = makeCodeBlock(options.toml, line, column);
+    super(`Invalid TOML document: ${message}
+
+${codeblock}`, options);
+    this.line = line;
+    this.column = column;
+    this.codeblock = codeblock;
+  }
+};
+
+// node_modules/smol-toml/dist/util.js
+function isEscaped(str2, ptr) {
+  let i = 0;
+  while (str2[ptr - ++i] === "\\")
+    ;
+  return --i && i % 2;
+}
+function indexOfNewline(str2, start = 0, end = str2.length) {
+  let idx = str2.indexOf("\n", start);
+  if (str2[idx - 1] === "\r")
+    idx--;
+  return idx <= end ? idx : -1;
+}
+function skipComment(str2, ptr) {
+  for (let i = ptr; i < str2.length; i++) {
+    let c = str2[i];
+    if (c === "\n")
+      return i;
+    if (c === "\r" && str2[i + 1] === "\n")
+      return i + 1;
+    if (c < " " && c !== "	" || c === "") {
+      throw new TomlError("control characters are not allowed in comments", {
+        toml: str2,
+        ptr
+      });
+    }
+  }
+  return str2.length;
+}
+function skipVoid(str2, ptr, banNewLines, banComments) {
+  let c;
+  while ((c = str2[ptr]) === " " || c === "	" || !banNewLines && (c === "\n" || c === "\r" && str2[ptr + 1] === "\n"))
+    ptr++;
+  return banComments || c !== "#" ? ptr : skipVoid(str2, skipComment(str2, ptr), banNewLines);
+}
+function skipUntil(str2, ptr, sep6, end, banNewLines = false) {
+  if (!end) {
+    ptr = indexOfNewline(str2, ptr);
+    return ptr < 0 ? str2.length : ptr;
+  }
+  for (let i = ptr; i < str2.length; i++) {
+    let c = str2[i];
+    if (c === "#") {
+      i = indexOfNewline(str2, i);
+    } else if (c === sep6) {
+      return i + 1;
+    } else if (c === end || banNewLines && (c === "\n" || c === "\r" && str2[i + 1] === "\n")) {
+      return i;
+    }
+  }
+  throw new TomlError("cannot find end of structure", {
+    toml: str2,
+    ptr
+  });
+}
+function getStringEnd(str2, seek) {
+  let first = str2[seek];
+  let target = first === str2[seek + 1] && str2[seek + 1] === str2[seek + 2] ? str2.slice(seek, seek + 3) : first;
+  seek += target.length - 1;
+  do
+    seek = str2.indexOf(target, ++seek);
+  while (seek > -1 && first !== "'" && isEscaped(str2, seek));
+  if (seek > -1) {
+    seek += target.length;
+    if (target.length > 1) {
+      if (str2[seek] === first)
+        seek++;
+      if (str2[seek] === first)
+        seek++;
+    }
+  }
+  return seek;
+}
+
+// node_modules/smol-toml/dist/date.js
+var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[T ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|[-+]\d{2}:\d{2})?$/i;
+var TomlDate = class _TomlDate extends Date {
+  #hasDate = false;
+  #hasTime = false;
+  #offset = null;
+  constructor(date) {
+    let hasDate = true;
+    let hasTime = true;
+    let offset = "Z";
+    if (typeof date === "string") {
+      let match = date.match(DATE_TIME_RE);
+      if (match) {
+        if (!match[1]) {
+          hasDate = false;
+          date = `0000-01-01T${date}`;
+        }
+        hasTime = !!match[2];
+        hasTime && date[10] === " " && (date = date.replace(" ", "T"));
+        if (match[2] && +match[2] > 23) {
+          date = "";
+        } else {
+          offset = match[3] || null;
+          date = date.toUpperCase();
+          if (!offset && hasTime)
+            date += "Z";
+        }
+      } else {
+        date = "";
+      }
+    }
+    super(date);
+    if (!isNaN(this.getTime())) {
+      this.#hasDate = hasDate;
+      this.#hasTime = hasTime;
+      this.#offset = offset;
+    }
+  }
+  isDateTime() {
+    return this.#hasDate && this.#hasTime;
+  }
+  isLocal() {
+    return !this.#hasDate || !this.#hasTime || !this.#offset;
+  }
+  isDate() {
+    return this.#hasDate && !this.#hasTime;
+  }
+  isTime() {
+    return this.#hasTime && !this.#hasDate;
+  }
+  isValid() {
+    return this.#hasDate || this.#hasTime;
+  }
+  toISOString() {
+    let iso = super.toISOString();
+    if (this.isDate())
+      return iso.slice(0, 10);
+    if (this.isTime())
+      return iso.slice(11, 23);
+    if (this.#offset === null)
+      return iso.slice(0, -1);
+    if (this.#offset === "Z")
+      return iso;
+    let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
+    offset = this.#offset[0] === "-" ? offset : -offset;
+    let offsetDate = new Date(this.getTime() - offset * 6e4);
+    return offsetDate.toISOString().slice(0, -1) + this.#offset;
+  }
+  static wrapAsOffsetDateTime(jsDate, offset = "Z") {
+    let date = new _TomlDate(jsDate);
+    date.#offset = offset;
+    return date;
+  }
+  static wrapAsLocalDateTime(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#offset = null;
+    return date;
+  }
+  static wrapAsLocalDate(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#hasTime = false;
+    date.#offset = null;
+    return date;
+  }
+  static wrapAsLocalTime(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#hasDate = false;
+    date.#offset = null;
+    return date;
+  }
+};
+
+// node_modules/smol-toml/dist/primitive.js
+var INT_REGEX = /^((0x[0-9a-fA-F](_?[0-9a-fA-F])*)|(([+-]|0[ob])?\d(_?\d)*))$/;
+var FLOAT_REGEX = /^[+-]?\d(_?\d)*(\.\d(_?\d)*)?([eE][+-]?\d(_?\d)*)?$/;
+var LEADING_ZERO = /^[+-]?0[0-9_]/;
+var ESCAPE_REGEX = /^[0-9a-f]{2,8}$/i;
+var ESC_MAP = {
+  b: "\b",
+  t: "	",
+  n: "\n",
+  f: "\f",
+  r: "\r",
+  e: "\x1B",
+  '"': '"',
+  "\\": "\\"
+};
+function parseString(str2, ptr = 0, endPtr = str2.length) {
+  let isLiteral2 = str2[ptr] === "'";
+  let isMultiline = str2[ptr++] === str2[ptr] && str2[ptr] === str2[ptr + 1];
+  if (isMultiline) {
+    endPtr -= 2;
+    if (str2[ptr += 2] === "\r")
+      ptr++;
+    if (str2[ptr] === "\n")
+      ptr++;
+  }
+  let tmp = 0;
+  let isEscape;
+  let parsed = "";
+  let sliceStart = ptr;
+  while (ptr < endPtr - 1) {
+    let c = str2[ptr++];
+    if (c === "\n" || c === "\r" && str2[ptr] === "\n") {
+      if (!isMultiline) {
+        throw new TomlError("newlines are not allowed in strings", {
+          toml: str2,
+          ptr: ptr - 1
+        });
+      }
+    } else if (c < " " && c !== "	" || c === "") {
+      throw new TomlError("control characters are not allowed in strings", {
+        toml: str2,
+        ptr: ptr - 1
+      });
+    }
+    if (isEscape) {
+      isEscape = false;
+      if (c === "x" || c === "u" || c === "U") {
+        let code = str2.slice(ptr, ptr += c === "x" ? 2 : c === "u" ? 4 : 8);
+        if (!ESCAPE_REGEX.test(code)) {
+          throw new TomlError("invalid unicode escape", {
+            toml: str2,
+            ptr: tmp
+          });
+        }
+        try {
+          parsed += String.fromCodePoint(parseInt(code, 16));
+        } catch {
+          throw new TomlError("invalid unicode escape", {
+            toml: str2,
+            ptr: tmp
+          });
+        }
+      } else if (isMultiline && (c === "\n" || c === " " || c === "	" || c === "\r")) {
+        ptr = skipVoid(str2, ptr - 1, true);
+        if (str2[ptr] !== "\n" && str2[ptr] !== "\r") {
+          throw new TomlError("invalid escape: only line-ending whitespace may be escaped", {
+            toml: str2,
+            ptr: tmp
+          });
+        }
+        ptr = skipVoid(str2, ptr);
+      } else if (c in ESC_MAP) {
+        parsed += ESC_MAP[c];
+      } else {
+        throw new TomlError("unrecognized escape sequence", {
+          toml: str2,
+          ptr: tmp
+        });
+      }
+      sliceStart = ptr;
+    } else if (!isLiteral2 && c === "\\") {
+      tmp = ptr - 1;
+      isEscape = true;
+      parsed += str2.slice(sliceStart, tmp);
+    }
+  }
+  return parsed + str2.slice(sliceStart, endPtr - 1);
+}
+function parseValue(value, toml, ptr, integersAsBigInt) {
+  if (value === "true")
+    return true;
+  if (value === "false")
+    return false;
+  if (value === "-inf")
+    return -Infinity;
+  if (value === "inf" || value === "+inf")
+    return Infinity;
+  if (value === "nan" || value === "+nan" || value === "-nan")
+    return NaN;
+  if (value === "-0")
+    return integersAsBigInt ? 0n : 0;
+  let isInt = INT_REGEX.test(value);
+  if (isInt || FLOAT_REGEX.test(value)) {
+    if (LEADING_ZERO.test(value)) {
+      throw new TomlError("leading zeroes are not allowed", {
+        toml,
+        ptr
+      });
+    }
+    value = value.replace(/_/g, "");
+    let numeric = +value;
+    if (isNaN(numeric)) {
+      throw new TomlError("invalid number", {
+        toml,
+        ptr
+      });
+    }
+    if (isInt) {
+      if ((isInt = !Number.isSafeInteger(numeric)) && !integersAsBigInt) {
+        throw new TomlError("integer value cannot be represented losslessly", {
+          toml,
+          ptr
+        });
+      }
+      if (isInt || integersAsBigInt === true)
+        numeric = BigInt(value);
+    }
+    return numeric;
+  }
+  const date = new TomlDate(value);
+  if (!date.isValid()) {
+    throw new TomlError("invalid value", {
+      toml,
+      ptr
+    });
+  }
+  return date;
+}
+
+// node_modules/smol-toml/dist/extract.js
+function sliceAndTrimEndOf(str2, startPtr, endPtr) {
+  let value = str2.slice(startPtr, endPtr);
+  let commentIdx = value.indexOf("#");
+  if (commentIdx > -1) {
+    skipComment(str2, commentIdx);
+    value = value.slice(0, commentIdx);
+  }
+  return [value.trimEnd(), commentIdx];
+}
+function extractValue(str2, ptr, end, depth2, integersAsBigInt) {
+  if (depth2 === 0) {
+    throw new TomlError("document contains excessively nested structures. aborting.", {
+      toml: str2,
+      ptr
+    });
+  }
+  let c = str2[ptr];
+  if (c === "[" || c === "{") {
+    let [value, endPtr2] = c === "[" ? parseArray(str2, ptr, depth2, integersAsBigInt) : parseInlineTable(str2, ptr, depth2, integersAsBigInt);
+    if (end) {
+      endPtr2 = skipVoid(str2, endPtr2);
+      if (str2[endPtr2] === ",")
+        endPtr2++;
+      else if (str2[endPtr2] !== end) {
+        throw new TomlError("expected comma or end of structure", {
+          toml: str2,
+          ptr: endPtr2
+        });
+      }
+    }
+    return [value, endPtr2];
+  }
+  let endPtr;
+  if (c === '"' || c === "'") {
+    endPtr = getStringEnd(str2, ptr);
+    let parsed = parseString(str2, ptr, endPtr);
+    if (end) {
+      endPtr = skipVoid(str2, endPtr);
+      if (str2[endPtr] && str2[endPtr] !== "," && str2[endPtr] !== end && str2[endPtr] !== "\n" && str2[endPtr] !== "\r") {
+        throw new TomlError("unexpected character encountered", {
+          toml: str2,
+          ptr: endPtr
+        });
+      }
+      endPtr += +(str2[endPtr] === ",");
+    }
+    return [parsed, endPtr];
+  }
+  endPtr = skipUntil(str2, ptr, ",", end);
+  let slice = sliceAndTrimEndOf(str2, ptr, endPtr - +(str2[endPtr - 1] === ","));
+  if (!slice[0]) {
+    throw new TomlError("incomplete key-value declaration: no value specified", {
+      toml: str2,
+      ptr
+    });
+  }
+  if (end && slice[1] > -1) {
+    endPtr = skipVoid(str2, ptr + slice[1]);
+    endPtr += +(str2[endPtr] === ",");
+  }
+  return [
+    parseValue(slice[0], str2, ptr, integersAsBigInt),
+    endPtr
+  ];
+}
+
+// node_modules/smol-toml/dist/struct.js
+var KEY_PART_RE = /^[a-zA-Z0-9-_]+[ \t]*$/;
+function parseKey(str2, ptr, end = "=") {
+  let dot = ptr - 1;
+  let parsed = [];
+  let endPtr = str2.indexOf(end, ptr);
+  if (endPtr < 0) {
+    throw new TomlError("incomplete key-value: cannot find end of key", {
+      toml: str2,
+      ptr
+    });
+  }
+  do {
+    let c = str2[ptr = ++dot];
+    if (c !== " " && c !== "	") {
+      if (c === '"' || c === "'") {
+        if (c === str2[ptr + 1] && c === str2[ptr + 2]) {
+          throw new TomlError("multiline strings are not allowed in keys", {
+            toml: str2,
+            ptr
+          });
+        }
+        let eos = getStringEnd(str2, ptr);
+        if (eos < 0) {
+          throw new TomlError("unfinished string encountered", {
+            toml: str2,
+            ptr
+          });
+        }
+        dot = str2.indexOf(".", eos);
+        let strEnd = str2.slice(eos, dot < 0 || dot > endPtr ? endPtr : dot);
+        let newLine = indexOfNewline(strEnd);
+        if (newLine > -1) {
+          throw new TomlError("newlines are not allowed in keys", {
+            toml: str2,
+            ptr: ptr + dot + newLine
+          });
+        }
+        if (strEnd.trimStart()) {
+          throw new TomlError("found extra tokens after the string part", {
+            toml: str2,
+            ptr: eos
+          });
+        }
+        if (endPtr < eos) {
+          endPtr = str2.indexOf(end, eos);
+          if (endPtr < 0) {
+            throw new TomlError("incomplete key-value: cannot find end of key", {
+              toml: str2,
+              ptr
+            });
+          }
+        }
+        parsed.push(parseString(str2, ptr, eos));
+      } else {
+        dot = str2.indexOf(".", ptr);
+        let part = str2.slice(ptr, dot < 0 || dot > endPtr ? endPtr : dot);
+        if (!KEY_PART_RE.test(part)) {
+          throw new TomlError("only letter, numbers, dashes and underscores are allowed in keys", {
+            toml: str2,
+            ptr
+          });
+        }
+        parsed.push(part.trimEnd());
+      }
+    }
+  } while (dot + 1 && dot < endPtr);
+  return [parsed, skipVoid(str2, endPtr + 1, true, true)];
+}
+function parseInlineTable(str2, ptr, depth2, integersAsBigInt) {
+  let res = {};
+  let seen = /* @__PURE__ */ new Set();
+  let c;
+  ptr++;
+  while ((c = str2[ptr++]) !== "}" && c) {
+    if (c === ",") {
+      throw new TomlError("expected value, found comma", {
+        toml: str2,
+        ptr: ptr - 1
+      });
+    } else if (c === "#")
+      ptr = skipComment(str2, ptr);
+    else if (c !== " " && c !== "	" && c !== "\n" && c !== "\r") {
+      let k;
+      let t = res;
+      let hasOwn = false;
+      let [key, keyEndPtr] = parseKey(str2, ptr - 1);
+      for (let i = 0; i < key.length; i++) {
+        if (i)
+          t = hasOwn ? t[k] : t[k] = {};
+        k = key[i];
+        if ((hasOwn = Object.hasOwn(t, k)) && (typeof t[k] !== "object" || seen.has(t[k]))) {
+          throw new TomlError("trying to redefine an already defined value", {
+            toml: str2,
+            ptr
+          });
+        }
+        if (!hasOwn && k === "__proto__") {
+          Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        }
+      }
+      if (hasOwn) {
+        throw new TomlError("trying to redefine an already defined value", {
+          toml: str2,
+          ptr
+        });
+      }
+      let [value, valueEndPtr] = extractValue(str2, keyEndPtr, "}", depth2 - 1, integersAsBigInt);
+      seen.add(value);
+      t[k] = value;
+      ptr = valueEndPtr;
+    }
+  }
+  if (!c) {
+    throw new TomlError("unfinished table encountered", {
+      toml: str2,
+      ptr
+    });
+  }
+  return [res, ptr];
+}
+function parseArray(str2, ptr, depth2, integersAsBigInt) {
+  let res = [];
+  let c;
+  ptr++;
+  while ((c = str2[ptr++]) !== "]" && c) {
+    if (c === ",") {
+      throw new TomlError("expected value, found comma", {
+        toml: str2,
+        ptr: ptr - 1
+      });
+    } else if (c === "#")
+      ptr = skipComment(str2, ptr);
+    else if (c !== " " && c !== "	" && c !== "\n" && c !== "\r") {
+      let e = extractValue(str2, ptr - 1, "]", depth2 - 1, integersAsBigInt);
+      res.push(e[0]);
+      ptr = e[1];
+    }
+  }
+  if (!c) {
+    throw new TomlError("unfinished array encountered", {
+      toml: str2,
+      ptr
+    });
+  }
+  return [res, ptr];
+}
+
+// node_modules/smol-toml/dist/parse.js
+function peekTable(key, table, meta, type) {
+  let t = table;
+  let m = meta;
+  let k;
+  let hasOwn = false;
+  let state;
+  for (let i = 0; i < key.length; i++) {
+    if (i) {
+      t = hasOwn ? t[k] : t[k] = {};
+      m = (state = m[k]).c;
+      if (type === 0 && (state.t === 1 || state.t === 2)) {
+        return null;
+      }
+      if (state.t === 2) {
+        let l = t.length - 1;
+        t = t[l];
+        m = m[l].c;
+      }
+    }
+    k = key[i];
+    if ((hasOwn = Object.hasOwn(t, k)) && m[k]?.t === 0 && m[k]?.d) {
+      return null;
+    }
+    if (!hasOwn) {
+      if (k === "__proto__") {
+        Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        Object.defineProperty(m, k, { enumerable: true, configurable: true, writable: true });
+      }
+      m[k] = {
+        t: i < key.length - 1 && type === 2 ? 3 : type,
+        d: false,
+        i: 0,
+        c: {}
+      };
+    }
+  }
+  state = m[k];
+  if (state.t !== type && !(type === 1 && state.t === 3)) {
+    return null;
+  }
+  if (type === 2) {
+    if (!state.d) {
+      state.d = true;
+      t[k] = [];
+    }
+    t[k].push(t = {});
+    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: {} };
+  }
+  if (state.d) {
+    return null;
+  }
+  state.d = true;
+  if (type === 1) {
+    t = hasOwn ? t[k] : t[k] = {};
+  } else if (type === 0 && hasOwn) {
+    return null;
+  }
+  return [k, t, state.c];
+}
+function parse2(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
+  let res = {};
+  let meta = {};
+  let tbl = res;
+  let m = meta;
+  for (let ptr = skipVoid(toml, 0); ptr < toml.length; ) {
+    if (toml[ptr] === "[") {
+      let isTableArray = toml[++ptr] === "[";
+      let k = parseKey(toml, ptr += +isTableArray, "]");
+      if (isTableArray) {
+        if (toml[k[1] - 1] !== "]") {
+          throw new TomlError("expected end of table declaration", {
+            toml,
+            ptr: k[1] - 1
+          });
+        }
+        k[1]++;
+      }
+      let p = peekTable(
+        k[0],
+        res,
+        meta,
+        isTableArray ? 2 : 1
+        /* Type.EXPLICIT */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr
+        });
+      }
+      m = p[2];
+      tbl = p[1];
+      ptr = k[1];
+    } else {
+      let k = parseKey(toml, ptr);
+      let p = peekTable(
+        k[0],
+        tbl,
+        m,
+        0
+        /* Type.DOTTED */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr
+        });
+      }
+      let v = extractValue(toml, k[1], void 0, maxDepth, integersAsBigInt);
+      p[1][p[0]] = v[0];
+      ptr = v[1];
+    }
+    ptr = skipVoid(toml, ptr, true);
+    if (toml[ptr] && toml[ptr] !== "\n" && toml[ptr] !== "\r") {
+      throw new TomlError("each key-value declaration must be followed by an end-of-line", {
+        toml,
+        ptr
+      });
+    }
+    ptr = skipVoid(toml, ptr);
+  }
+  return res;
+}
+
+// src/workspace/codex-settings.ts
+function pluginRoot() {
+  let dir = dirname20(fileURLToPath4(import.meta.url));
+  for (let i = 0; i < 9; i++) {
+    if (existsSync39(join50(dir, "codex-plugin", "plugin.json"))) return join50(dir, "codex-plugin");
+    if (existsSync39(join50(dir, "plugin.json")) && existsSync39(join50(dir, "skills", "mycelink-init", "SKILL.md"))) return dir;
+    const parent = dirname20(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+function codexHealth(controlRoot, executable = "codex") {
+  const checks = [];
+  const run = (args) => {
+    try {
+      const plan = planCommand([executable, ...args]);
+      return spawnSync7(plan.file, plan.args, {
+        encoding: "utf8",
+        timeout: 5e3,
+        windowsHide: true,
+        windowsVerbatimArguments: plan.windowsVerbatimArguments,
+        // Do not return stderr/stdout to doctor: an arbitrary executable could print credentials.
+        maxBuffer: 1024 * 32
+      });
+    } catch {
+      return { status: null, stdout: "" };
+    }
+  };
+  const version = run(["--version"]);
+  const installed = version.status === 0 && /^codex-cli \d+\.\d+\.\d+/.test(version.stdout.trim());
+  checks.push({ name: "codex executable", ok: installed, detail: installed ? version.stdout.trim() : `Codex CLI unavailable at ${executable}; install Codex and retry` });
+  const status = installed ? run(["login", "status"]) : null;
+  const loggedIn = status?.status === 0 && /^Logged in/.test(status.stdout.trim());
+  checks.push({ name: "codex login", ok: loggedIn, detail: loggedIn ? "logged in (credentials not displayed)" : "not logged in or login status unavailable; run codex login interactively" });
+  let pluginInstalled = false;
+  if (installed) {
+    const listed = run(["plugin", "list", "--json"]);
+    if (listed.status === 0) {
+      try {
+        const data = JSON.parse(listed.stdout);
+        pluginInstalled = data.installed?.some((item) => item.pluginId?.startsWith("mycelink@") && item.installed === true && item.enabled === true) ?? false;
+      } catch {
+      }
+    }
+  }
+  checks.push({ name: "codex plugin installation", ok: pluginInstalled, detail: pluginInstalled ? "Mycelink enabled in Codex plugin list" : "Mycelink not enabled in Codex plugin list for this CODEX_HOME; install using codex plugin add mycelink@<marketplace>" });
+  const root = pluginRoot();
+  const manifest = root && join50(root, "plugin.json");
+  let valid = false;
+  let hooksDisabled = false;
+  if (manifest) {
+    try {
+      const data = JSON.parse(readFileSync34(manifest, "utf8"));
+      valid = data.name === "mycelink" && data.extensions?.["com.openai"]?.hooks !== void 0;
+      const hooks = data.extensions?.["com.openai"]?.hooks;
+      hooksDisabled = !!hooks && typeof hooks === "object" && !Array.isArray(hooks) && Object.keys(hooks).length === 0;
+    } catch {
+    }
+  }
+  checks.push({ name: "codex plugin", ok: valid, detail: manifest ?? "Mycelink plugin.json missing" });
+  const skill = root && join50(root, "skills", "mycelink-init", "SKILL.md");
+  checks.push({ name: "codex skills", ok: !!skill && existsSync39(skill), detail: skill ?? "Codex planning SKILL.md missing" });
+  const launcher = root && join50(root, "bin", "mycelink.mjs");
+  const bundle = root && join50(root, "dist", "mycelink.mjs");
+  const launcherOk = !!launcher && existsSync39(launcher) && !!bundle && existsSync39(bundle);
+  checks.push({ name: "codex launcher", ok: launcherOk, detail: launcherOk ? launcher : `${launcher ?? "Codex launcher"} or bundled runtime missing; reinstall Mycelink plugin` });
+  checks.push({ name: "hooks", ok: valid && hooksDisabled, level: "warn", detail: hooksDisabled ? "Codex plugin-owned hook map is empty: runtime hooks intentionally disabled pending security review; no project hooks installed" : "Codex plugin hook map missing or unexpectedly enabled; inspect the plugin manifest before use" });
+  const projectConfig = join50(controlRoot, ".codex", "config.toml");
+  if (existsSync39(projectConfig)) {
+    try {
+      const config = parse2(readFileSync34(projectConfig, "utf8"));
+      const unsafe = config["sandbox_mode"] === "danger-full-access" || config["approval_policy"] === "never";
+      checks.push({ name: "codex policy", ok: true, level: "warn", detail: unsafe ? `${projectConfig}: danger-full-access sandbox or never approval configured; Mycelink runtime remains denied` : `${projectConfig}: existing project settings left untouched; verify effective sandbox/approval policies (user config and overrides may apply)` });
+    } catch {
+      checks.push({ name: "codex policy", ok: false, detail: `${projectConfig}: invalid TOML; fix manually (Mycelink never rewrites it)` });
+    }
+  } else {
+    checks.push({ name: "codex policy", ok: true, level: "warn", detail: "no project .codex/config.toml; effective sandbox/approval policies may come from user configuration or CLI overrides" });
+  }
+  checks.push({ name: "codex runtime", ok: false, level: "warn", detail: "CODEX_RUNTIME_DENIED: worker, reviewer, settlement and delivery disabled pending whole-process/effect/result boundary review" });
+  return checks;
+}
+
 // src/knowledge/cli.ts
-import { readFileSync as readFileSync35 } from "node:fs";
+import { readFileSync as readFileSync36 } from "node:fs";
 import { resolve as resolve25 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync39, mkdirSync as mkdirSync23, readFileSync as readFileSync34, readdirSync as readdirSync24, statSync as statSync5 } from "node:fs";
-import { join as join50, relative as relative9, resolve as resolve24 } from "node:path";
+import { existsSync as existsSync40, mkdirSync as mkdirSync23, readFileSync as readFileSync35, readdirSync as readdirSync24, statSync as statSync5 } from "node:fs";
+import { join as join51, relative as relative9, resolve as resolve24 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
   procedure: "procedures",
@@ -43488,9 +44263,9 @@ var DIR_FOR = {
   decision: "decisions",
   concept: "concepts",
   pitfall: "pitfalls",
-  "code-module": join50("code", "modules"),
-  "code-contract": join50("code", "contracts"),
-  "code-flow": join50("code", "flows")
+  "code-module": join51("code", "modules"),
+  "code-contract": join51("code", "contracts"),
+  "code-flow": join51("code", "flows")
 };
 var STATUS_WEIGHT = {
   verified: 100,
@@ -43513,19 +44288,19 @@ function brainRoot(controlRoot, override) {
 function initBrain(root) {
   for (const dir of [
     root,
-    ...Object.values(DIR_FOR).map((d) => join50(root, d)),
-    join50(root, "queries"),
-    join50(root, "review"),
-    join50(root, "archive"),
-    join50(root, "manifests"),
-    join50(root, "evidence")
+    ...Object.values(DIR_FOR).map((d) => join51(root, d)),
+    join51(root, "queries"),
+    join51(root, "review"),
+    join51(root, "archive"),
+    join51(root, "manifests"),
+    join51(root, "evidence")
   ]) {
     mkdirSync23(dir, { recursive: true });
   }
-  const schema = join50(root, "SCHEMA.md");
-  if (!existsSync39(schema)) writeTextAtomic(schema, SCHEMA_MD);
-  const index = join50(root, "index.md");
-  if (!existsSync39(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
+  const schema = join51(root, "SCHEMA.md");
+  if (!existsSync40(schema)) writeTextAtomic(schema, SCHEMA_MD);
+  const index = join51(root, "index.md");
+  if (!existsSync40(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
   return root;
 }
 var SCHEMA_MD = `# LLM Wiki Brain schema
@@ -43570,7 +44345,7 @@ ${body.trimEnd()}
 `;
 }
 function pagePath(root, frontmatter) {
-  return join50(root, DIR_FOR[frontmatter.type], `${frontmatter.id}.md`);
+  return join51(root, DIR_FOR[frontmatter.type], `${frontmatter.id}.md`);
 }
 function writePage(root, frontmatter, body) {
   const problems = validateAgainstSchema("memory-page", frontmatter);
@@ -43598,13 +44373,13 @@ function writePage(root, frontmatter, body) {
   }
   if (problems.length > 0) return { path: "", problems };
   const file = pagePath(root, frontmatter);
-  mkdirSync23(join50(root, DIR_FOR[frontmatter.type]), { recursive: true });
+  mkdirSync23(join51(root, DIR_FOR[frontmatter.type]), { recursive: true });
   writeTextAtomic(file, renderPage(frontmatter, body));
   return { path: file, problems: [] };
 }
 function readPage(file) {
-  if (!existsSync39(file)) return null;
-  const parsed = parseFrontmatter(readFileSync34(file, "utf8"));
+  if (!existsSync40(file)) return null;
+  const parsed = parseFrontmatter(readFileSync35(file, "utf8"));
   if (parsed === null) return null;
   const problems = validateAgainstSchema("memory-page", parsed.frontmatter);
   if (problems.length > 0) return null;
@@ -43615,11 +44390,11 @@ function readPage(file) {
   };
 }
 function listPages(root) {
-  if (!existsSync39(root)) return [];
+  if (!existsSync40(root)) return [];
   const out = [];
   const walk2 = (dir) => {
     for (const entry of readdirSync24(dir).sort()) {
-      const full = join50(dir, entry);
+      const full = join51(dir, entry);
       if (statSync5(full).isDirectory()) {
         if (entry === "archive") continue;
         walk2(full);
@@ -43766,10 +44541,10 @@ function consolidate(root) {
 }
 function adoptCodewiki(controlRoot, brain) {
   const codewiki = resolve24(controlRoot, ".codewiki");
-  if (!existsSync39(codewiki)) return { adopted: false, path: codewiki };
-  mkdirSync23(join50(brain, "code"), { recursive: true });
+  if (!existsSync40(codewiki)) return { adopted: false, path: codewiki };
+  mkdirSync23(join51(brain, "code"), { recursive: true });
   writeTextAtomic(
-    join50(brain, "code", "SUBVAULT.md"),
+    join51(brain, "code", "SUBVAULT.md"),
     [
       "# Adopted code-memory sub-vault",
       "",
@@ -43811,7 +44586,7 @@ function memoryCommand(args, io, controlRoot) {
       const title = flagString(args, "title", id);
       const status = flagString(args, "status", "instructed_not_verified");
       const bodyFile = args.flags["body-file"];
-      const body = typeof bodyFile === "string" ? readFileSync35(resolve25(bodyFile), "utf8") : flagString(args, "body", "");
+      const body = typeof bodyFile === "string" ? readFileSync36(resolve25(bodyFile), "utf8") : flagString(args, "body", "");
       const now3 = (/* @__PURE__ */ new Date()).toISOString();
       const frontmatter = {
         id,
@@ -44236,14 +45011,14 @@ function listAdapters() {
 registerAdapter(eccAdapter);
 
 // src/sessions/preflight.ts
-import { accessSync, constants as constants7, existsSync as existsSync40, statSync as statSync6 } from "node:fs";
+import { accessSync, constants as constants7, existsSync as existsSync41, statSync as statSync6 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join51 } from "node:path";
+import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join52 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
 var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
   try {
-    if (!existsSync40(p) || !statSync6(p).isFile()) return false;
+    if (!existsSync41(p) || !statSync6(p).isFile()) return false;
     if (process.platform !== "win32") accessSync(p, constants7.X_OK);
     return true;
   } catch {
@@ -44255,7 +45030,7 @@ function resolveExecutable(exe, env = process.env) {
   if (process.platform === "win32") return resolveWindowsExecutable(exe, env);
   if (isAbsolute15(exe) || exe.includes("/")) return isRunnableFile(exe) ? exe : null;
   for (const dir of (env["PATH"] ?? "").split(delimiter2).filter(Boolean)) {
-    const candidate = join51(dir, exe);
+    const candidate = join52(dir, exe);
     if (isRunnableFile(candidate)) return candidate;
   }
   return null;
@@ -44288,7 +45063,7 @@ function preflightAdapter(input, env = process.env) {
       ok: false,
       adapter: "fake-claude",
       executable: script,
-      resolved: isRunnableFile(script) || existsSync40(script) && statSync6(script).isFile() ? script : null,
+      resolved: isRunnableFile(script) || existsSync41(script) && statSync6(script).isFile() ? script : null,
       version: null,
       auth: "not-checked"
     };
@@ -44316,8 +45091,8 @@ function preflightAdapter(input, env = process.env) {
 
 // src/engine/feature-verify.ts
 import { createHash as createHash39 } from "node:crypto";
-import { existsSync as existsSync41, readFileSync as readFileSync36 } from "node:fs";
-import { join as join52 } from "node:path";
+import { existsSync as existsSync42, readFileSync as readFileSync37 } from "node:fs";
+import { join as join53 } from "node:path";
 function featureVerifyProblems(controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
   const validation = validateFeatureGraph(controlRoot, featureId);
@@ -44413,9 +45188,9 @@ function featureDeliveryProblems(controlRoot, featureId) {
   const candidate = state.current_candidate;
   if (candidate === null) return ["NO_CANDIDATE: no current candidate; every node must be DONE and the candidate cut (dispatch runs the candidate build)"];
   const pinned = state.accepted_deliveries?.[candidate];
-  const manifest = join52(paths.featureDir, "deliveries", `${candidate}.json`);
-  if (pinned === void 0 || !existsSync41(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
-  const bytes2 = readFileSync36(manifest);
+  const manifest = join53(paths.featureDir, "deliveries", `${candidate}.json`);
+  if (pinned === void 0 || !existsSync42(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
+  const bytes2 = readFileSync37(manifest);
   if (createHash39("sha256").update(bytes2).digest("hex") !== pinned) return [`NOT_DELIVERED: the delivery manifest of ${candidate} is not the accepted one STATE.json pins`];
   let status;
   try {
@@ -44429,9 +45204,9 @@ function featureDeliveryProblems(controlRoot, featureId) {
 }
 
 // src/engine/deliver.ts
-import { existsSync as existsSync42, mkdirSync as mkdirSync24, readFileSync as readFileSync37 } from "node:fs";
+import { existsSync as existsSync43, mkdirSync as mkdirSync24, readFileSync as readFileSync38 } from "node:fs";
 import { createHash as createHash40 } from "node:crypto";
-import { join as join53 } from "node:path";
+import { join as join54 } from "node:path";
 var DeliveryRefusedError = class extends Error {
   problems;
   constructor(problems) {
@@ -44448,12 +45223,12 @@ var DeliveryFailedError = class extends Error {
 };
 function manifestFile(featureDir, candidateId) {
   assertCandidateId(candidateId);
-  return join53(featureDir, "deliveries", `${candidateId}.json`);
+  return join54(featureDir, "deliveries", `${candidateId}.json`);
 }
 function readManifest(file) {
-  if (!existsSync42(file)) return null;
+  if (!existsSync43(file)) return null;
   try {
-    return JSON.parse(readFileSync37(file, "utf8"));
+    return JSON.parse(readFileSync38(file, "utf8"));
   } catch {
     return null;
   }
@@ -44490,13 +45265,13 @@ function untrustedManifest(controlRoot, featureId, candidateId, targets, raw) {
   return null;
 }
 function save3(file, manifest) {
-  mkdirSync24(join53(file, ".."), { recursive: true });
+  mkdirSync24(join54(file, ".."), { recursive: true });
   writeTextAtomic(file, JSON.stringify(manifest, null, 2) + "\n");
 }
 function deliverFeature(controlRoot, featureId, options = {}) {
-  const lockDir = join53(featurePaths(controlRoot, featureId).featureDir, "deliveries");
+  const lockDir = join54(featurePaths(controlRoot, featureId).featureDir, "deliveries");
   mkdirSync24(lockDir, { recursive: true });
-  return withLock(join53(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
+  return withLock(join54(lockDir, "deliver.lock"), () => deliverLocked(controlRoot, featureId, options), {
     timeoutMs: 2e3,
     pollMs: 50,
     purpose: "feature delivery"
@@ -44523,7 +45298,7 @@ function deliverLocked(controlRoot, featureId, options) {
     return decl !== void 0 && resolveRef(repositoryPath(workspace, n), decl.base_branch) === targets[n];
   })) {
     const recorded = state.accepted_deliveries?.[candidateId];
-    const bytes2 = createHash40("sha256").update(readFileSync37(file)).digest("hex");
+    const bytes2 = createHash40("sha256").update(readFileSync38(file)).digest("hex");
     const why = recorded !== bytes2 ? "manifest does not match the accepted delivery recorded in STATE.json" : untrustedManifest(controlRoot, featureId, candidateId, targets, existing);
     if (why === null) return { ...existing, ok: true, idempotent: true };
     appendEvent(paths.events, {
@@ -44663,13 +45438,13 @@ function deliverLocked(controlRoot, featureId, options) {
     feature_id: featureId,
     data: { candidate_id: candidateId, repositories: Object.fromEntries(names2.map((n) => [n, plan[n]?.after ?? null])) }
   });
-  const evidenceDir = join53(paths.evidenceDir, "delivery", candidateId);
+  const evidenceDir = join54(paths.evidenceDir, "delivery", candidateId);
   manifest.acceptance = names2.map((name) => acceptance(controlRoot, workspace, name, plan[name], candidateId, evidenceDir));
   const passed = manifest.acceptance.every((a) => a.failure_fingerprint === null);
   manifest.status = passed ? "ACCEPTED" : "ACCEPTANCE_FAILED";
   manifest.accepted_at = passed ? (/* @__PURE__ */ new Date()).toISOString() : null;
   save3(file, manifest);
-  const manifestSha = createHash40("sha256").update(readFileSync37(file)).digest("hex");
+  const manifestSha = createHash40("sha256").update(readFileSync38(file)).digest("hex");
   mutateState(paths.featureDir, (s) => {
     const accepted = { ...s.accepted_deliveries ?? {} };
     if (passed) accepted[candidateId] = manifestSha;
@@ -44702,10 +45477,10 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
   const decl = workspace.repositories.repositories.find((r) => r.name === name);
   const repo = repositoryPath(workspace, name);
   const command = decl?.commands.test ?? [];
-  const dir = join53(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
+  const dir = join54(workspace.paths.workDir, "acceptance", `${name}__${candidateId}`);
   runGit(repo, ["worktree", "remove", "--force", dir], { allowFail: true });
   runGit(repo, ["worktree", "prune"], { allowFail: true });
-  mkdirSync24(join53(workspace.paths.workDir, "acceptance"), { recursive: true });
+  mkdirSync24(join54(workspace.paths.workDir, "acceptance"), { recursive: true });
   runGit(repo, ["worktree", "add", "--detach", dir, step.base_branch]);
   try {
     const sha = resolveRef(dir, "HEAD");
@@ -44718,7 +45493,7 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
         repository: name,
         repoPath: repo,
         worktree: dir,
-        root: join53(workspace.paths.workDir, "acceptance"),
+        root: join54(workspace.paths.workDir, "acceptance"),
         config: setup,
         evidenceDir,
         label: `acceptance-${name}.worktree-setup`
@@ -44774,7 +45549,7 @@ function isLink2(path) {
   }
 }
 function packageVersion() {
-  const pkg = JSON.parse(readFileSync38(join54(packageRoot(), "package.json"), "utf8"));
+  const pkg = JSON.parse(readFileSync39(join55(packageRoot(), "package.json"), "utf8"));
   return pkg.version ?? "0.0.0";
 }
 var defaultIo = {
@@ -44870,8 +45645,8 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve26(env);
   let dir = resolve26(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync43(join54(dir, "mycelink.config.json"))) return dir;
-    const parent = dirname20(dir);
+    if (existsSync44(join55(dir, "mycelink.config.json"))) return dir;
+    const parent = dirname21(dir);
     if (parent === dir) break;
     dir = parent;
   }
@@ -44926,7 +45701,7 @@ function orchestratorFor(controlRoot, featureId) {
 function requireController(args, operation) {
   if (args.positional[0] === "init") {
     const target = resolve26(args.positional[1] ?? ".");
-    if (!existsSync43(controlPaths(target).config)) {
+    if (!existsSync44(controlPaths(target).config)) {
       assertControllerRole(args, operation);
       return;
     }
@@ -44984,7 +45759,7 @@ async function main(argv, io = defaultIo) {
     const sub = args.positional[1] ?? "";
     if (group === "codex") return codexGroup(args, io);
     const target = group === "init" ? resolve26(args.positional[1] ?? ".") : resolveControlRoot(args);
-    if (existsSync43(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
+    if (existsSync44(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
       const planning = group === "graph" && ["compile", "validate", "import", "adapters", "ready"].includes(sub) || group === "feature" && ["acceptance", "init"].includes(sub) || group === "repo" && ["register", "modules", "audit"].includes(sub) || group === "controller" && sub === "open" || group === "doctor";
       if (!planning) throw new Error(`CODEX_RUNTIME_DENIED: ${preflightAdapter(loadConfig(target)).detail}; security review has not authorised ${group} ${sub}. Use codex status for read-only inspection.`);
     }
@@ -45060,16 +45835,16 @@ function codexGroup(args, io) {
   if (sub === "init") {
     assertControllerRole(args, "codex init");
     const target = resolve26(requirePositional(args, 2, "control-repo-path"));
-    if (existsSync43(controlPaths(target).config)) throw new Error("CODEX_INIT_EXISTS: existing control configuration must not be replaced.");
-    if (existsSync43(target) && readdirSync25(target).length > 0) throw new Error("CODEX_INIT_OCCUPIED: choose an empty, new control directory; existing Claude assets are never modified.");
+    if (existsSync44(controlPaths(target).config) && loadConfig(target).provider.provider !== "codex") throw new Error("CODEX_INIT_EXISTS: existing Claude control configuration must not be replaced.");
+    if (existsSync44(join55(target, ".claude")) || existsSync44(join55(target, "CLAUDE.md"))) throw new Error("CODEX_INIT_OCCUPIED: Claude assets must not be modified.");
     const paths2 = initControlRepo(target, { provider: { provider: "codex", executable: "codex", extra_args: [] } });
-    if (!existsSync43(paths2.repositoriesManifest)) writeTextAtomic(paths2.repositoriesManifest, import_yaml7.default.stringify({ schema_version: 1, repositories: [] }));
+    if (!existsSync44(paths2.repositoriesManifest)) writeTextAtomic(paths2.repositoriesManifest, import_yaml7.default.stringify({ schema_version: 1, repositories: [] }));
     emit2(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
   if (!["status", "run", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
-  if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync43(controlPaths(controlRoot).config)) {
+  if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync44(controlPaths(controlRoot).config)) {
     throw new Error("CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.");
   }
   const gate = preflightAdapter(loadConfig(controlRoot));
@@ -45079,7 +45854,7 @@ function codexGroup(args, io) {
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
   const state = loadState(paths.featureDir)?.data ?? null;
-  const graph = existsSync43(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
+  const graph = existsSync44(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
   const report = {
     feature_id: featureId,
     graph_valid: graph?.ok ?? false,
@@ -45102,18 +45877,18 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync43(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync43(paths.config), paths.config);
+  push("control-root", existsSync44(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync44(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync43(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync38(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync44(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync43(paths.repositoriesManifest)) {
+  } else if (existsSync44(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
-    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync38(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
+    repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
   }
   push("repositories.yaml", repoOk, repoDetail);
   if (repoOk) {
@@ -45130,13 +45905,16 @@ function doctor(args, io) {
     name: "worker adapter (standalone)",
     ok: true,
     level: adapter.ok ? "ok" : "warn",
-    detail: adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
+    detail: config.provider.provider === "codex" ? `Codex worker preflight denied: ${adapter.detail}; host dispatch and delivery are also disabled.` : adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
-  if (existsSync43(paths.config)) {
-    const hooks = hookHealth(controlRoot);
-    push("hooks", hooks.ok, hooks.detail);
+  if (existsSync44(paths.config)) {
+    if (config.provider.provider === "codex") checks.push(...codexHealth(controlRoot, config.provider.executable ?? "codex"));
+    else {
+      const hooks = hookHealth(controlRoot);
+      push("hooks", hooks.ok, hooks.detail);
+    }
   }
-  const features = existsSync43(paths.featuresDir) ? readdirSync25(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync44(paths.featuresDir) ? readdirSync25(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -45150,14 +45928,14 @@ function doctor(args, io) {
 function cmdInit(args, io) {
   const target = resolve26(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync43(paths.repositoriesManifest)) {
+  if (!existsSync44(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync43(join54(target, "CLAUDE.md"))) {
-    writeTextAtomic(join54(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
+  if (!existsSync44(join55(target, "CLAUDE.md"))) {
+    writeTextAtomic(join55(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
   emit2(
@@ -45202,7 +45980,7 @@ function repoGroup(args, io) {
   const sub = requirePositional(args, 1, "register|modules|audit|lock");
   if (sub === "register") {
     const name = flagString(args, "name");
-    const manifest = existsSync43(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync38(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync44(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     const existing = manifest.repositories.find((r) => r["name"] === name);
     const path = flagString(args, "path", typeof existing?.["path"] === "string" ? existing["path"] : void 0);
     const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve26(controlRoot, r["path"]), resolve26(controlRoot, path)));
@@ -45363,9 +46141,9 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync38(resolve26(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync39(resolve26(graphPath), "utf8"));
     }
-    if (!existsSync43(paths.graph)) {
+    if (!existsSync44(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -45386,7 +46164,7 @@ function featureGroup(args, io) {
     if (acceptance2 !== null) state.acceptance = { path: acceptance2.path, sha256: acceptance2.sha256 };
     state.acceptance_review = { required: reviewPolicy.required, max_rounds: reviewPolicy.max_rounds, criterion_ceiling: reviewPolicy.criterion_ceiling, max_review_sessions: reviewPolicy.max_review_sessions, review_wall_clock_ms: reviewPolicy.review_wall_clock_ms, reviewer_timeout_ms: reviewPolicy.reviewer_timeout_ms, open: null, reviews: [], blocked: null, usage: zeroUsage() };
     saveState(paths.featureDir, state);
-    if (!existsSync43(paths.loops)) {
+    if (!existsSync44(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -45395,7 +46173,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync43(file)) writeTextAtomic(file, body);
+      if (!existsSync44(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -45577,7 +46355,7 @@ function featureGroup(args, io) {
 }
 function featureAcceptance(args, io, controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
-  const target = join54(paths.featureDir, ACCEPTANCE_FILE);
+  const target = join55(paths.featureDir, ACCEPTANCE_FILE);
   const show = (written, from) => {
     const loaded = loadAcceptanceManifest(controlRoot, featureId);
     if (loaded === null) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}`);
@@ -45595,16 +46373,16 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   };
   const source = args.flags["source"];
   if (typeof source !== "string") {
-    if (!existsSync43(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
-    return show(readFileSync38(target), "manifest");
+    if (!existsSync44(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
+    return show(readFileSync39(target), "manifest");
   }
   if (loadState(paths.featureDir) !== null) {
     throw new AcceptanceError("ACCEPTANCE_IMMUTABLE", `${featureId} is initialised: its approved criteria are bound (STATE.json); plan a change as a new feature`);
   }
   const sourceFile = resolve26(controlRoot, source);
   const sourceRel = relativeInside(controlRoot, sourceFile);
-  if (sourceRel === null || !existsSync43(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
-  const bytes2 = readFileSync38(sourceFile);
+  if (sourceRel === null || !existsSync44(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
+  const bytes2 = readFileSync39(sourceFile);
   const kinds = /* @__PURE__ */ new Map();
   const flag = args.flags["kind"];
   for (const pair of (typeof flag === "string" ? flag : "").split(",").map((x) => x.trim()).filter(Boolean)) {
@@ -45616,8 +46394,8 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   }
   const sidecar = resolve26(controlRoot, sidecarPath(sourceRel));
   mkdirSync25(paths.featureDir, { recursive: true });
-  if (existsSync43(sidecar)) {
-    const raw = readFileSync38(sidecar);
+  if (existsSync44(sidecar)) {
+    const raw = readFileSync39(sidecar);
     let parsed;
     try {
       parsed = JSON.parse(raw.toString("utf8"));
@@ -45676,17 +46454,17 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync38(resolve26(file), "utf8");
+      files[role] = readFileSync39(resolve26(file), "utf8");
     }
-    const repositories = existsSync43(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync44(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve26(args.flags["out"]) : join54(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    const out = typeof args.flags["out"] === "string" ? resolve26(args.flags["out"]) : join55(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
     if (resolve26(out) === resolve26(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
-    mkdirSync25(dirname20(out), { recursive: true });
+    mkdirSync25(dirname21(out), { recursive: true });
     const header = `# DRAFT generated by the "${adapter.name}" adapter (${adapter.verification}).
 # Requires human review. Not approved. Rename to PORTFOLIO-GRAPH.yaml only after review,
 # then run: mycelink graph validate ${featureId}
@@ -45710,8 +46488,8 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync38(resolve26(source), "utf8"));
-    const repositories = existsSync43(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const parsed = import_yaml7.default.parse(readFileSync39(resolve26(source), "utf8"));
+    const repositories = existsSync44(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
@@ -46161,8 +46939,8 @@ function tddGroup(args, io) {
   const setupBinding = worktree !== null ? runtime.claim?.worktree_setup : void 0;
   const nowInputs = worktree !== null && setupBinding !== void 0 ? setupInputs(worktree, setupBinding.config) : null;
   if (worktree !== null && setupBinding !== void 0 && nowInputs !== null && nowInputs.sha256 !== setupBinding.inputs_sha256) {
-    const receiptFile = join54(controlRoot, setupBinding.receipt_path);
-    const before = existsSync43(receiptFile) ? JSON.parse(readFileSync38(receiptFile, "utf8")).input_files : void 0;
+    const receiptFile = join55(controlRoot, setupBinding.receipt_path);
+    const before = existsSync44(receiptFile) ? JSON.parse(readFileSync39(receiptFile, "utf8")).input_files : void 0;
     const files = changedInputs(before, nowInputs.files);
     const workspace = loadWorkspace(controlRoot);
     const run = runWorktreeSetup({
@@ -46237,7 +47015,7 @@ function tddGroup(args, io) {
   };
   let deferral = null;
   if (phase === "regression" && bound !== void 0 && record.exit_code !== 0) {
-    deferral = regressionDeferral({ graph, state: loadState(paths.featureDir).data, nodeId, output: readFileSync38(join54(controlRoot, record.output_path), "utf8"), exitCode: record.exit_code, checkout: cwd });
+    deferral = regressionDeferral({ graph, state: loadState(paths.featureDir).data, nodeId, output: readFileSync39(join55(controlRoot, record.output_path), "utf8"), exitCode: record.exit_code, checkout: cwd });
     if (deferral.deferred) record.regression_deferred = { to: deferral.to, failing: deferral.failing };
   }
   const noRed = phase === "red" && !redRequired(node, runtime);
@@ -46397,11 +47175,11 @@ function tddCheck(args, io, controlRoot, featureId, graph, node, runtime) {
   const repoPath = repositoryPath(workspace, node.repository);
   const branch = workerBranchName(featureId, node.id);
   const head = resolveRef(repoPath, branch);
-  const slot = join54(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
+  const slot = join55(claim.worktree ?? controlRoot, WORKER_RESULT_DIR, claim.result_file ?? WORKER_RESULT_FILE);
   let result;
   const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
   if (read === null) {
-    if (existsSync43(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
+    if (existsSync44(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
     return refuse2("RESULT_MISSING", `write your result to ${slot} first (it does not exist)`);
   }
   try {
@@ -46501,36 +47279,36 @@ function challengeSnapshot(controlRoot, featureId, nodeId, worktree, record, bin
   let total = 0;
   for (const t of binding.tests) {
     if (t.blob === null) continue;
-    const bytes2 = readFileSync38(join54(worktree, ...t.path.split("/")));
+    const bytes2 = readFileSync39(join55(worktree, ...t.path.split("/")));
     total += bytes2.length;
     if (total > 8 * 1024 * 1024) return null;
     planned.push({ at: ["files", ...t.path.split("/")], bytes: bytes2, test: { path: t.path, blob: t.blob } });
   }
   const gateBytes = (rel2, want) => {
-    const src = join54(controlRoot, ...rel2.split("/"));
-    if (!existsSync43(src)) return null;
-    const bytes2 = readFileSync38(src);
+    const src = join55(controlRoot, ...rel2.split("/"));
+    if (!existsSync44(src)) return null;
+    const bytes2 = readFileSync39(src);
     return sha(bytes2) === want ? bytes2 : null;
   };
   const outputBytes = gateBytes(record.output_path, record.output_sha256);
   const resultsBytes = record.results ? gateBytes(record.results.path, record.results.sha256) : null;
   if (outputBytes !== null) planned.push({ at: ["gate", "red.log"], bytes: outputBytes });
   if (resultsBytes !== null) planned.push({ at: ["gate", "red.results.json"], bytes: resultsBytes });
-  const root = join54(nodeEvidenceDir(controlRoot, featureId, nodeId), "challenge-red");
+  const root = join55(nodeEvidenceDir(controlRoot, featureId, nodeId), "challenge-red");
   const name = record.output_sha256.slice(0, 16);
   let dir = null;
   for (let n = 0; n <= 16 && dir === null; n++) {
-    const candidate = join54(root, n === 0 ? name : `${name}-${n}`);
-    if (planned.every((p) => artifactAt(join54(candidate, ...p.at), sha(p.bytes)) !== "other")) dir = candidate;
+    const candidate = join55(root, n === 0 ? name : `${name}-${n}`);
+    if (planned.every((p) => artifactAt(join55(candidate, ...p.at), sha(p.bytes)) !== "other")) dir = candidate;
   }
   if (dir === null) return null;
   for (const p of planned) {
-    const target = join54(dir, ...p.at);
+    const target = join55(dir, ...p.at);
     if (artifactAt(target, sha(p.bytes)) === "same") continue;
-    mkdirSync25(dirname20(target), { recursive: true });
+    mkdirSync25(dirname21(target), { recursive: true });
     if (createExclusive(target, p.bytes) === "exists" && artifactAt(target, sha(p.bytes)) !== "same") return null;
   }
-  const rel = (at) => (relativeInside(controlRoot, join54(dir, ...at)) ?? join54(dir, ...at)).replace(/\\/g, "/");
+  const rel = (at) => (relativeInside(controlRoot, join55(dir, ...at)) ?? join55(dir, ...at)).replace(/\\/g, "/");
   const files = planned.filter((p) => p.test !== void 0).map((p) => ({ path: p.test.path, blob: p.test.blob, copy: rel(p.at), sha256: sha(p.bytes) }));
   const output = outputBytes === null ? null : { path: rel(["gate", "red.log"]), sha256: record.output_sha256 };
   const results = resultsBytes === null || !record.results ? null : { path: rel(["gate", "red.results.json"]), sha256: record.results.sha256 };
@@ -46570,7 +47348,7 @@ function tddChallenge(args, io, controlRoot, featureId, graph, node, runtime) {
   const record = [...loadState(featurePaths(controlRoot, featureId).featureDir)?.data.acceptance_review?.reviews ?? []].reverse().find((r) => r.review_id === brief.origin?.review_id);
   let gaps = [];
   try {
-    gaps = record === void 0 ? [] : JSON.parse(readFileSync38(join54(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
+    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join55(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
   } catch {
     gaps = [];
   }
@@ -46655,7 +47433,7 @@ function tddCapsuleChallenge(args, io, controlRoot, featureId, graph, node, runt
   const record = [...loadState(featurePaths(controlRoot, featureId).featureDir)?.data.acceptance_review?.reviews ?? []].reverse().find((r) => r.review_id === brief.origin?.review_id);
   let gaps = [];
   try {
-    gaps = record === void 0 ? [] : JSON.parse(readFileSync38(join54(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
+    gaps = record === void 0 ? [] : JSON.parse(readFileSync39(join55(controlRoot, ...record.receipt_path.split("/")), "utf8")).gaps ?? [];
   } catch {
     gaps = [];
   }
@@ -46680,7 +47458,7 @@ function tddCapsuleChallenge(args, io, controlRoot, featureId, graph, node, runt
     return { id: u.capsule.criterion, missing: gap?.missing ?? null, reproduction: gap?.reproduction ?? null, clauses: criterionClauses(u.capsule.criterion, texts.find((t) => t.id === u.capsule.criterion)?.text ?? "") };
   });
   const others = brief.acceptance_criteria.filter((ac) => !used.some((u) => u.capsule.criterion === ac));
-  const capsules = used.map((u) => ({ capsule_id: u.capsule.capsule_id, capsule_sha256: u.capsule_sha256, criterion: u.capsule.criterion, artifact: join54(controlRoot, ...u.capsule.artifact.path.split("/")).replace(/\\/g, "/"), tests: u.capsule.tests.map((t) => ({ id: t.id, status: t.status, full_name: t.full_name, block: t.block })) }));
+  const capsules = used.map((u) => ({ capsule_id: u.capsule.capsule_id, capsule_sha256: u.capsule_sha256, criterion: u.capsule.criterion, artifact: join55(controlRoot, ...u.capsule.artifact.path.split("/")).replace(/\\/g, "/"), tests: u.capsule.tests.map((t) => ({ id: t.id, status: t.status, full_name: t.full_name, block: t.block })) }));
   emit2(
     io,
     args,
@@ -46873,7 +47651,7 @@ function candidateGroup(args, io) {
         const reviewedState = loadState(paths.featureDir)?.data;
         const unreviewed = [...reviewGateProblems(controlRoot, featureId), ...reviewedState ? reviewRevisionProblems(controlRoot, reviewedState) : []];
         if (unreviewed.length > 0) throw new Error(unreviewed.join("; "));
-        const contracts = existsSync43(workspace.paths.contractsDir) ? readdirSync25(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+        const contracts = existsSync44(workspace.paths.contractsDir) ? readdirSync25(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
         const cut = createCandidate({
           controlRepo: controlRoot,
           featureDir: paths.featureDir,
@@ -47024,7 +47802,7 @@ async function e2eGroup(args, io) {
     const only = typeof args.flags["only"] === "string" ? String(args.flags["only"]).split(",") : void 0;
     const result = await runE2E({
       featureDir: paths.featureDir,
-      evidenceRoot: join54(paths.evidenceDir, "e2e"),
+      evidenceRoot: join55(paths.evidenceDir, "e2e"),
       graph,
       candidate,
       scenarios,
@@ -47128,7 +47906,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync43(paths.decisions) ? readFileSync38(paths.decisions, "utf8") : "";
+    const body = existsSync44(paths.decisions) ? readFileSync39(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -47192,7 +47970,7 @@ function checkpointGroup(args, io) {
     const doc = loadState(paths.featureDir);
     if (doc === null) throw new Error(`No STATE.json for ${featureId}`);
     const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const file = join54(paths.checkpointsDir, `${stamp}.json`);
+    const file = join55(paths.checkpointsDir, `${stamp}.json`);
     const checkpoint = {
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       feature_id: featureId,
@@ -47207,13 +47985,13 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync43(paths.checkpointsDir) ? readdirSync25(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync44(paths.checkpointsDir) ? readdirSync25(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
       return 1;
     }
-    const checkpoint = JSON.parse(readFileSync38(join54(paths.checkpointsDir, latest), "utf8"));
+    const checkpoint = JSON.parse(readFileSync39(join55(paths.checkpointsDir, latest), "utf8"));
     const current = validateFeatureGraph(controlRoot, featureId);
     const ok = checkpoint.graph_hash === current.graphHash;
     emit2(
@@ -47233,8 +48011,8 @@ function checkpointGroup(args, io) {
       throw new Error("DECISION_REQUIRED: checkpoint restore rewrites the feature state; pass --decision <recorded decision id>.");
     }
     assertDecisionUsable(paths.events, decisionId);
-    const file = join54(paths.checkpointsDir, name);
-    const checkpoint = JSON.parse(readFileSync38(file, "utf8"));
+    const file = join55(paths.checkpointsDir, name);
+    const checkpoint = JSON.parse(readFileSync39(file, "utf8"));
     const restored = structuredClone(checkpoint.state);
     for (const runtime of Object.values(restored.nodes)) {
       if (runtime.claim !== null && IN_FLIGHT_STATES.has(runtime.state)) runtime.state = "READY";

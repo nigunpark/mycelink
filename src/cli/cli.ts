@@ -48,6 +48,7 @@ import { createExclusive, writeTextAtomic } from '../state/atomic-json.js';
 import { appendEvent, readEvents } from '../state/event-log.js';
 import { runHook } from '../hooks/entrypoint.js';
 import { hookHealth, installHooks } from '../workspace/hook-settings.js';
+import { codexHealth } from '../workspace/codex-settings.js';
 import { memoryCommand } from '../knowledge/cli.js';
 import type { ChallengeRedSnapshot, EvidenceKind, EvidenceRecord, GraphNode, NodeRuntime, PortfolioGraph } from '../model/types.js';
 import type { NodeResult } from '../sessions/adapter.js';
@@ -432,9 +433,9 @@ function codexGroup(args: ParsedArgs, io: CliIo): number {
   if (sub === 'init') {
     assertControllerRole(args, 'codex init');
     const target = resolve(requirePositional(args, 2, 'control-repo-path'));
-    // Never convert an existing Claude control or install hooks by accident.
-    if (existsSync(controlPaths(target).config)) throw new Error('CODEX_INIT_EXISTS: existing control configuration must not be replaced.');
-    if (existsSync(target) && readdirSync(target).length > 0) throw new Error('CODEX_INIT_OCCUPIED: choose an empty, new control directory; existing Claude assets are never modified.');
+    // Idempotent for Codex; never convert Claude or edit a project config.
+    if (existsSync(controlPaths(target).config) && loadConfig(target).provider.provider !== 'codex') throw new Error('CODEX_INIT_EXISTS: existing Claude control configuration must not be replaced.');
+    if (existsSync(join(target, '.claude')) || existsSync(join(target, 'CLAUDE.md'))) throw new Error('CODEX_INIT_OCCUPIED: Claude assets must not be modified.');
     const paths = initControlRepo(target, { provider: { provider: 'codex', executable: 'codex', extra_args: [] } });
     if (!existsSync(paths.repositoriesManifest)) writeTextAtomic(paths.repositoriesManifest, YAML.stringify({ schema_version: 1, repositories: [] }));
     emit(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
@@ -515,14 +516,19 @@ function doctor(args: ParsedArgs, io: CliIo): number {
     name: 'worker adapter (standalone)',
     ok: true,
     level: adapter.ok ? 'ok' : 'warn',
-    detail: adapter.ok
-      ? `${adapter.detail}`
-      : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,
+    detail: config.provider.provider === 'codex'
+      ? `Codex worker preflight denied: ${adapter.detail}; host dispatch and delivery are also disabled.`
+      : adapter.ok
+        ? `${adapter.detail}`
+        : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,
   });
 
   if (existsSync(paths.config)) {
-    const hooks = hookHealth(controlRoot);
-    push('hooks', hooks.ok, hooks.detail);
+    if (config.provider.provider === 'codex') checks.push(...codexHealth(controlRoot, config.provider.executable ?? 'codex'));
+    else {
+      const hooks = hookHealth(controlRoot);
+      push('hooks', hooks.ok, hooks.detail);
+    }
   }
 
   const features = existsSync(paths.featuresDir)

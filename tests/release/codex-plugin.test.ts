@@ -102,8 +102,8 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     const init = run(['codex', 'init', control, '--json']);
     expect(init.status, init.stderr).toBe(0);
     const reinit = run(['codex', 'init', control, '--json']);
-    expect(reinit.status).toBe(1);
-    expect(reinit.stderr).toContain('CODEX_INIT_EXISTS');
+    expect(reinit.status, reinit.stderr).toBe(0);
+    expect(JSON.parse(reinit.stdout)).toMatchObject({ planning_only: true, runtime_enabled: false });
     const occupied = join(output, 'existing-claude-assets');
     mkdirSync(occupied);
     writeFileSync(join(occupied, 'CLAUDE.md'), '# Existing Claude asset\n');
@@ -185,6 +185,16 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     });
     expect(cachedRun.status, cachedRun.stderr).toBe(0);
     expect(JSON.parse(cachedRun.stdout)).toMatchObject({ planning_only: true, runtime_enabled: false });
+    const installedDoctor = spawnSync(process.execPath, [join(cache, 'bin/mycelink.mjs'), 'doctor', '--control-root', join(output, 'installed-codex-control'), '--json'], {
+      cwd: output, env: { ...process.env, CODEX_HOME: home }, encoding: 'utf8', timeout: 30_000, windowsHide: true,
+    });
+    expect(installedDoctor.status, installedDoctor.stderr).toBe(1); // no repositories or auth; runtime denied
+    const installedChecks = (JSON.parse(installedDoctor.stdout) as { checks: { name: string; ok: boolean; detail: string }[] }).checks;
+    for (const name of ['codex executable', 'codex plugin installation', 'codex plugin', 'codex skills', 'codex launcher']) {
+      expect(installedChecks.find((entry) => entry.name === name)?.ok, name).toBe(true);
+    }
+    expect(installedChecks.find((entry) => entry.name === 'codex login')?.ok).toBe(false);
+    expect(installedChecks.find((entry) => entry.name === 'codex runtime')?.ok).toBe(false);
     expect(existsSync(join(output, 'installed-codex-control', '.claude', 'settings.json'))).toBe(false);
     expect(readFileSync(cachedSkill, 'utf8')).toContain('execution is disabled pending security review');
     const discovered = (await discoveredSkills(home, output)).filter((skill) => skill.pluginId === `mycelink@${MARKETPLACE}`);
