@@ -40,6 +40,8 @@ jobs:
           - benchmark-4
           - benchmark-5
           - benchmark-6
+          - provider-claude
+          - provider-codex
     defaults:
       run:
         shell: bash
@@ -66,13 +68,20 @@ jobs:
         run: npm ci
 
       - name: Install Claude Code CLI (plugin-e2e only, no model usage)
-        if: matrix.group == 'core'
+        if: matrix.group == 'provider-claude'
         run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Require Claude Code CLI before plugin tests
+        if: matrix.group == 'provider-claude'
+        run: claude --version
 
       - name: Test ${{ matrix.group }}
         run: node scripts/test-suites.mjs ci ${{ matrix.group }}
         env:
           ANTHROPIC_API_KEY: ''
+          OPENAI_API_KEY: ''
+          CODEX_API_KEY: ''
+          MYCELINK_LIVE_CODEX_PLUGIN: '0'
 
   verify:
     name: verify and package

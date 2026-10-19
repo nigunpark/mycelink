@@ -30,7 +30,7 @@
     "test:security": "node scripts/test-suites.mjs run security",
     "test:fixture": "node scripts/test-suites.mjs run fixtures",
     "test:release": "node scripts/test-suites.mjs run release",
-    "test:plugin": "node scripts/test-suites.mjs run plugin-e2e",
+    "test:plugin": "node scripts/test-suites.mjs run provider-claude provider-codex",
     "test:pilot": "vitest run --config vitest.pilot.config.ts",
     "test:benchmark": "node scripts/test-suites.mjs run benchmark",
     "bench:cases:check": "node evals-public-projects/tools/generate-cases.mjs --check",
