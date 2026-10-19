@@ -41,6 +41,8 @@ export const SUITES = {
   security: { dir: 'tests/security', maxWorkers: 3, shards: 1 },
   fixtures: { dir: 'tests/fixtures', maxWorkers: 2, shards: 2, timeoutMs: 300_000 },
   release: { dir: 'tests/release', maxWorkers: 2, shards: 1 },
+  // Includes isolated Codex release/plugin-management discovery. Live Codex CLI metadata
+  // requires MYCELINK_LIVE_CODEX_PLUGIN=1; production Codex worker E2E remains skipped at CODEX_RUNTIME_DENIED.
   'plugin-e2e': { dir: 'tests/plugin-e2e', maxWorkers: 1, shards: 1 },
   // The model-free tests of the public-project benchmark (evals-public-projects); real pilots are opt-in elsewhere.
   // Three shards ran into the 60-minute job bound on the Windows legs of CI 38443874383: arms and controller-rollback,
