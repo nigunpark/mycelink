@@ -1,18 +1,18 @@
 /** Pinned completion preflight and locked, evidence-first import into a new control. */
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { FeatureState_, PortfolioGraph, Problem } from '../model/types.js';
 import { checkEvidenceOutput, observeEvidenceOutput } from '../evidence/paths.js';
 import { branchExists, isAncestor, resolveRef, runGit } from '../git/git.js';
 import { integrationBranchName } from '../git/worktree.js';
-import { hashGraph } from '../graph/validate.js';
+import { hashGraph, stableStringify } from '../graph/validate.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { createExclusive } from '../state/atomic-json.js';
 import { loadState, mutateState } from '../state/feature-state.js';
 import { isInsideReal, samePath } from '../security/paths.js';
 import { featurePaths } from '../workspace/paths.js';
-import { loadGraph, loadWorkspace, repositoryPath, validateFeatureGraph } from '../workspace/workspace.js';
+import { loadGraph, loadRepositories, loadWorkspace, repositoryPath, validateFeatureGraph } from '../workspace/workspace.js';
 import { graphAcceptanceProblems, loadAcceptanceManifest, manifestProblems } from './acceptance.js';
 import { completionStanding } from './criterion-coverage.js';
 import { ledgerProblems, latestCompletion } from './criterion-ledger.js';
@@ -21,6 +21,10 @@ import type { TddPolicy } from './tdd-history.js';
 
 export interface CompletionImportInput {
   sourceControlRoot: string;
+  /** Required for independently rebound control-owned command paths. */
+  targetControlRoot?: string;
+  /** Evidence-copy readback location; graph provenance stays on the source. */
+  evidenceControlRoot?: string;
   /** The exact independently pinned source STATE.json document bytes. */
   sourceStateBytes: Buffer;
   expectedSourceSha256: string;
@@ -32,6 +36,63 @@ export interface CompletionImportInput {
   head: string;
   policy: TddPolicy;
   completedNodes: readonly string[];
+}
+
+/** Relocation is explicit and narrow: graph shape, registered gate commands,
+ * and gate script bytes must agree after replacing only the control root. */
+function relocatedGraphMatches(input: CompletionImportInput): boolean {
+  if (!input.targetControlRoot) return false;
+  const rootOf = (control: string): string => resolve(basename(control) === 'control' ? dirname(control) : control).replaceAll('\\', '/');
+  const sourceRoot = rootOf(input.sourceControlRoot);
+  const targetRoot = rootOf(input.targetControlRoot);
+  if (sourceRoot === targetRoot) return false;
+  const wsl = (s: string): string => s.replace(/^([A-Za-z]):/, (_, drive: string) => `/mnt/${drive.toLowerCase()}`);
+  const relocate = (s: string): string => s.replaceAll(sourceRoot, targetRoot).replaceAll(wsl(sourceRoot), wsl(targetRoot));
+  const scripts = new Set<string>();
+  const relocateValue = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      if (value.startsWith(`${sourceRoot}/`) && /\.(?:mjs|js|cjs|sh)$/.test(value)) scripts.add(value);
+      return relocate(value);
+    }
+    if (Array.isArray(value)) return value.map(relocateValue);
+    if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, relocateValue(v)]));
+    return value;
+  };
+  if (stableStringify(relocateValue(loadRepositories(input.sourceControlRoot))) !==
+    stableStringify(loadRepositories(input.targetControlRoot))) return false;
+  const source = structuredClone(input.sourceGraph);
+  const target = input.targetGraph;
+  if (source.nodes.length !== target.nodes.length) return false;
+  for (let i = 0; i < source.nodes.length; i++) {
+    const node = source.nodes[i]!;
+    const other = target.nodes[i]!;
+    if (node.id !== other.id || node.verification_commands.length !== other.verification_commands.length) return false;
+    for (let j = 0; j < node.verification_commands.length; j++) {
+      const verifier = node.verification_commands[j]!;
+      const targetVerifier = other.verification_commands[j]!;
+      verifier.command = verifier.command.map((arg) => relocateValue(arg) as string);
+      // Both graph validators must independently check module hash against
+      // their own registered repository before this equivalence authorizes a write.
+      if (verifier.module !== undefined && verifier.module === targetVerifier.module) verifier.module_sha256 = targetVerifier.module_sha256;
+    }
+  }
+  if (stableStringify(source) !== stableStringify(target)) return false;
+  for (const path of scripts) {
+    const dest = relocate(path);
+    if (dest === path || !existsSync(path) || !existsSync(dest) || !lstatSync(path).isFile() || !lstatSync(dest).isFile()) return false;
+    const text = readFileSync(path, 'utf8');
+    if (relocate(text) !== readFileSync(dest, 'utf8')) return false;
+    // A gate may call a second absolute control-local script (native full).
+    for (const match of text.matchAll(/(?:[A-Za-z]:\/|\/mnt\/[a-z]\/)[^\s'"`]+\.(?:mjs|js|cjs|sh)/g)) {
+      const nested = match[0]!;
+      if (!nested.startsWith(`${sourceRoot}/`) && !nested.startsWith(`${wsl(sourceRoot)}/`)) continue;
+      const local = nested.startsWith(wsl(sourceRoot)) ? `${sourceRoot}${nested.slice(wsl(sourceRoot).length)}` : nested;
+      const translated = relocate(local);
+      if (!existsSync(local) || !existsSync(translated) || !lstatSync(local).isFile() || !lstatSync(translated).isFile() ||
+        relocate(readFileSync(local, 'utf8')) !== readFileSync(translated, 'utf8')) return false;
+    }
+  }
+  return true;
 }
 
 export function validateCompletionImport(input: CompletionImportInput): { ok: boolean; problems: Problem[] } {
@@ -54,9 +115,10 @@ export function validateCompletionImport(input: CompletionImportInput): { ok: bo
     return { ok: false, problems };
   }
   const { data } = doc;
+  const evidenceRoot = input.evidenceControlRoot ?? input.sourceControlRoot;
   const sourceHash = hashGraph(input.sourceGraph);
   const targetHash = hashGraph(input.targetGraph);
-  if (sourceHash !== targetHash || data.graph_hash !== sourceHash || input.targetState.graph_hash !== targetHash || data.feature_id !== input.sourceGraph.feature_id || input.targetState.feature_id !== input.targetGraph.feature_id || data.acceptance?.sha256 === undefined || data.acceptance.sha256 !== input.targetState.acceptance?.sha256) {
+  if ((sourceHash !== targetHash && !relocatedGraphMatches(input)) || data.graph_hash !== sourceHash || input.targetState.graph_hash !== targetHash || data.feature_id !== input.sourceGraph.feature_id || input.targetState.feature_id !== input.targetGraph.feature_id || data.acceptance?.sha256 === undefined || data.acceptance.sha256 !== input.targetState.acceptance?.sha256) {
     fail('IMPORT_GRAPH_MISMATCH', 'The source and new control must bind the exact same graph, feature and approved acceptance manifest.');
     return { ok: false, problems };
   }
@@ -94,15 +156,15 @@ export function validateCompletionImport(input: CompletionImportInput): { ok: bo
       fail('IMPORT_ANCESTRY', `${id}'s integrated work is not an ancestor of the new authoritative head.`);
       continue;
     }
-    if (rt.tdd_history?.ok !== true || rt.tdd_history.head_sha !== rt.integrated_sha || checkEvidenceOutput(input.sourceControlRoot, data.feature_id, rt.tdd_history) !== null) {
+    if (rt.tdd_history?.ok !== true || rt.tdd_history.head_sha !== rt.integrated_sha || checkEvidenceOutput(evidenceRoot, data.feature_id, rt.tdd_history) !== null) {
       fail('IMPORT_HISTORY_INVALID', `${id} has no intact test-first history at its integrated head.`);
     }
     for (const kind of node.required_evidence ?? []) {
       const evidence = rt.evidence[kind];
-      if (evidence === undefined || checkEvidenceOutput(input.sourceControlRoot, data.feature_id, evidence) !== null) fail('IMPORT_GATE_INVALID', `${id}'s ${kind} gate is missing or changed.`);
+      if (evidence === undefined || checkEvidenceOutput(evidenceRoot, data.feature_id, evidence) !== null) fail('IMPORT_GATE_INVALID', `${id}'s ${kind} gate is missing or changed.`);
     }
     const ledger = rt.criterion_ledger ?? [];
-    for (const detail of ledgerProblems(input.sourceControlRoot, data.feature_id, ledger)) fail('IMPORT_LEDGER_INVALID', `${id}: ${detail}`);
+    for (const detail of ledgerProblems(evidenceRoot, data.feature_id, ledger)) fail('IMPORT_LEDGER_INVALID', `${id}: ${detail}`);
     const assigned = node.acceptance_criteria ?? [];
     for (const ac of assigned) {
       const accepted = rt.criteria?.filter((c) => c.criterion === ac) ?? [];
@@ -111,7 +173,7 @@ export function validateCompletionImport(input: CompletionImportInput): { ok: bo
         fail('IMPORT_CRITERION_MISSING', `${id} does not have a matching settled ${ac} completion and accepted proof.`);
         continue;
       }
-      const standing = completionStanding({ controlRoot: input.sourceControlRoot, featureId: data.feature_id, record, ledger, repoPath: input.repositoryPath, head: input.head, policy: input.policy });
+      const standing = completionStanding({ controlRoot: evidenceRoot, featureId: data.feature_id, record, ledger, repoPath: input.repositoryPath, head: input.head, policy: input.policy });
       if (!standing.holds || standing.tests.some((t) => t.declared !== true)) fail('IMPORT_PROOF_INVALID', `${id} ${ac} does not stand at the new head: ${standing.detail ?? 'test declaration unknown'}.`);
     }
     for (const c of rt.criteria ?? []) if (!assigned.includes(c.criterion)) fail('IMPORT_CRITERION_MISMATCH', `${id} settled unassigned ${c.criterion}.`);
@@ -200,6 +262,8 @@ export function importCompletions(input: DurableCompletionImportInput): { ok: bo
         (targetDoc.data.pending_integrations && Object.keys(targetDoc.data.pending_integrations).length > 0)) return fail('IMPORT_TARGET_CHANGED', 'Target is not the pinned fresh feature state.');
       const sourceWs = loadWorkspace(input.sourceControlRoot);
       const targetWs = loadWorkspace(input.targetControlRoot);
+      const sourceValidation = validateFeatureGraph(input.sourceControlRoot, featureId);
+      if (!sourceValidation.ok) return { ok: false, problems: sourceValidation.problems };
       const graphValidation = validateFeatureGraph(input.targetControlRoot, featureId);
       if (!graphValidation.ok) return { ok: false, problems: graphValidation.problems };
       const sourceState = (JSON.parse(sourceBytes.toString('utf8')) as { data: FeatureState_ }).data;
@@ -259,7 +323,7 @@ export function importCompletions(input: DurableCompletionImportInput): { ok: bo
           created.push(dest);
           if (checkEvidenceOutput(input.targetControlRoot, featureId, { output_path: f.path, output_sha256: f.sha256 }, { overlay: false }) !== null) throw new Error(`IMPORT_COPY_INVALID: ${f.path}`);
         }
-        const copied = validateCompletionImport({ ...input, sourceControlRoot: input.targetControlRoot, sourceGraph, targetGraph, targetState: targetDoc.data });
+        const copied = validateCompletionImport({ ...input, evidenceControlRoot: input.targetControlRoot, sourceGraph, targetGraph, targetState: targetDoc.data });
         if (!copied.ok) throw new Error(`IMPORT_COPIED_PROOF_INVALID: ${copied.problems.map((p) => p.code).join(', ')}`);
         mutateState(targetDir, (state) => {
           if (JSON.stringify(state) !== JSON.stringify(targetDoc.data)) throw new Error('IMPORT_TARGET_CHANGED: state changed while copying');

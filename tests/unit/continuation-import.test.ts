@@ -153,6 +153,45 @@ function diskFixture() {
 }
 
 describe('durable continuation import', () => {
+  it('imports an equivalent graph with independently rebound command paths, never a changed command or script', () => {
+    const f = diskFixture();
+    const sourceGraph = structuredClone(f.args.sourceGraph);
+    const targetGraph = structuredClone(sourceGraph);
+    // Scripts live at the same relative location under separate control roots.
+    const sourceBound = join(f.args.sourceControlRoot, 'gate.mjs').replaceAll('\\', '/');
+    const targetBound = join(f.targetRoot, 'gate.mjs').replaceAll('\\', '/');
+    writeFileSync(sourceBound, `// ${f.args.sourceControlRoot.replaceAll('\\', '/')}\n`);
+    writeFileSync(targetBound, `// ${f.targetRoot.replaceAll('\\', '/')}\n`);
+    sourceGraph.nodes[0]!.verification_commands[0]!.command = ['node', sourceBound, '--test'];
+    targetGraph.nodes[0]!.verification_commands[0]!.command = ['node', targetBound, '--test'];
+    for (const [root, graph, script] of [[f.args.sourceControlRoot, sourceGraph, sourceBound], [f.targetRoot, targetGraph, targetBound]] as const) {
+      writeFileSync(join(root, 'features', feature, 'PORTFOLIO-GRAPH.yaml'), YAML.stringify(graph));
+      writeFileSync(join(root, 'repositories.yaml'), `schema_version: 1\nrepositories:\n  - name: app\n    path: ../app\n    base_branch: main\n    commands:\n      test: [node, '${script.replaceAll('\\', '/')}', --test]\n`);
+    }
+    const sourceDoc = loadState(f.sourceDir)!.data;
+    sourceDoc.graph_hash = hashGraph(sourceGraph);
+    saveState(f.sourceDir, sourceDoc);
+    const targetDoc = loadState(f.targetDir)!.data;
+    targetDoc.graph_hash = hashGraph(targetGraph);
+    saveState(f.targetDir, targetDoc);
+    const input = { ...f.args, sourceGraph, targetGraph, targetState: targetDoc, sourceStateBytes: readFileSync(join(f.sourceDir, 'STATE.json')) };
+    input.expectedSourceSha256 = sha(input.sourceStateBytes);
+    expect(validateFeatureGraph(f.targetRoot, feature).ok).toBe(true);
+    expect(hashGraph(sourceGraph)).not.toBe(hashGraph(targetGraph));
+    const changedCommand = structuredClone(targetGraph);
+    changedCommand.nodes[0]!.verification_commands[0]!.command.push('unapproved');
+    expect(validateCompletionImport({ ...input, targetControlRoot: f.targetRoot, targetGraph: changedCommand }).problems.map((p) => p.code)).toContain('IMPORT_GRAPH_MISMATCH');
+    writeFileSync(targetBound, '// changed script\n');
+    expect(validateCompletionImport({ ...input, targetControlRoot: f.targetRoot }).problems.map((p) => p.code)).toContain('IMPORT_GRAPH_MISMATCH');
+    writeFileSync(targetBound, `// ${f.targetRoot.replaceAll('\\', '/')}\n`);
+    expect(importCompletions({ ...input, targetControlRoot: f.targetRoot })).toEqual({ ok: true, problems: [] });
+    const imported = loadState(f.targetDir)!.data;
+    expect(imported.graph_hash).toBe(hashGraph(targetGraph));
+    expect(completionImportProblems(f.targetRoot, imported)).toEqual([]);
+    expect(completionStanding({ controlRoot: f.targetRoot, featureId: feature, record: imported.nodes[producer]!.criterion_ledger![0]!, ledger: imported.nodes[producer]!.criterion_ledger!, repoPath: f.repo, head: f.head, policy }).holds).toBe(true);
+    const changed = diskFixture();
+    expect(importCompletions({ ...changed.args, targetControlRoot: changed.targetRoot, targetGraph: { ...changed.args.targetGraph, acceptance_criteria: [{ ...changed.args.targetGraph.acceptance_criteria[0]!, text: 'changed' }, changed.args.targetGraph.acceptance_criteria[1]!] } }).ok).toBe(false);
+  });
   it('copies producer evidence with pinned provenance before committing DONE under the feature lock', () => {
     const f = diskFixture();
     const result = importCompletions({ ...f.args, targetControlRoot: f.targetRoot });
