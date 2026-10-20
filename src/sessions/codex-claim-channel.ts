@@ -17,7 +17,7 @@ export interface LiveClaim {
 }
 
 export type ChannelResponse =
-  | { ok: true; sequence: number; exitCode: number; output: string; commitSha?: never }
+  | { ok: true; sequence: number; exitCode: number; output: string; output_sha256?: string; test_ids?: string[]; commitSha?: never }
   | { ok: true; sequence: number; commitSha: string; exitCode?: never; output?: never }
   | { ok: false; sequence: number | null; code: string; exitCode?: number; output?: string };
 
@@ -46,7 +46,7 @@ export class ClaimChannel {
   private sequence = 0;
   constructor(
     private readonly liveClaim: () => LiveClaim | null,
-    private readonly runGate: (argv: readonly string[], cwd: string) => { exitCode: number; output: string },
+    private readonly runGate: (argv: readonly string[], cwd: string) => { exitCode: number; output: string; outputSha256?: string; testIds?: string[] },
   ) {}
 
   handle(input: unknown): ChannelResponse {
@@ -55,7 +55,8 @@ export class ClaimChannel {
     const sequence = request.sequence;
     const fail = (code: string): ChannelResponse => ({ ok: false, sequence, code });
     if (sequence !== this.sequence + 1) return fail('CHANNEL_SEQUENCE_INVALID');
-    const scope = this.liveClaim();
+    let scope: LiveClaim | null;
+    try { scope = this.liveClaim(); } catch { return fail('CHANNEL_CLAIM_STALE'); }
     if (!scope || scope.claimId !== request.claimId || scope.featureId !== request.featureId || scope.nodeId !== request.nodeId) return fail('CHANNEL_CLAIM_STALE');
     if (request.operation === 'gate' && (scope.nextGate !== request.gate || !scope.gateCommands.some((g) => g.gate === request.gate))) {
       return fail('CHANNEL_GATE_OUT_OF_ORDER');
@@ -71,7 +72,8 @@ export class ClaimChannel {
         if (!now || now.claimId !== scope.claimId || now.featureId !== scope.featureId || now.nodeId !== scope.nodeId || !samePath(now.worktree, scope.worktree)) return fail('CHANNEL_CLAIM_STALE');
         const output = result.output.slice(0, 64 * 1024);
         return result.exitCode === 0
-          ? { ok: true, sequence, exitCode: 0, output }
+          ? { ok: true, sequence, exitCode: 0, output,
+            ...(result.outputSha256 ? { output_sha256: result.outputSha256, test_ids: result.testIds ?? [] } : {}) }
           : { ok: false, sequence, code: 'CHANNEL_GATE_FAILED', exitCode: result.exitCode, output };
       } catch {
         return fail('CHANNEL_GATE_FAILED');

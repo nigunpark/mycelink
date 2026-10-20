@@ -11,6 +11,39 @@ const MAX_RESPONSE_OUTPUT = 32 * 1024;
 const MAX_REQUESTS = 64;
 const NAME = /^request-([1-9][0-9]{0,2})\.json$/;
 
+/** The worker gets no host path, capability or verifier argv: only this local request client. */
+function clientSource(identity: { claimId: string; featureId: string; nodeId: string }): string {
+  return `import { existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises';
+const dir = dirname(fileURLToPath(import.meta.url));
+const [operation, ...args] = process.argv.slice(2);
+const identity = ${JSON.stringify(identity)};
+let payload;
+if (operation === 'gate' && args.length === 1 && ['red', 'green', 'regression'].includes(args[0])) payload = { operation, gate: args[0] };
+else if (operation === 'commit' && args.length >= 2 && args.length <= 101) payload = { operation, message: args[0], paths: args.slice(1) };
+else throw new Error('CHANNEL_CLIENT_USAGE');
+const numbers = readdirSync(dir).map(x => /^request-([1-9][0-9]{0,2})\\.json$/.exec(x)).filter(Boolean).map(x => Number(x[1]));
+const sequence = Math.max(0, ...numbers) + 1;
+if (sequence > 64) throw new Error('CHANNEL_LIMIT');
+const request = JSON.stringify({ ...identity, sequence, ...payload });
+if (Buffer.byteLength(request) > 8192) throw new Error('CHANNEL_REQUEST_TOO_LARGE');
+writeFileSync(join(dir, 'request-' + sequence + '.json'), request, { flag: 'wx' });
+const response = join(dir, 'response-' + sequence + '.json');
+let answer;
+for (let i = 0; i < 12000; i++) {
+  try { answer = JSON.parse(readFileSync(response, 'utf8')); break; }
+  catch (err) { if (err.code !== 'ENOENT') throw err; }
+  if (!existsSync(dir)) throw new Error('CHANNEL_STOPPED');
+  await sleep(50);
+}
+if (!answer || answer.sequence !== sequence) throw new Error('CHANNEL_RESPONSE_TIMEOUT');
+console.log(JSON.stringify(answer));
+if (!answer.ok) process.exitCode = 1;
+`;
+}
+
 export class ClaimFileTransport {
   readonly dir: string;
   private timer: NodeJS.Timeout | null = null;
@@ -18,8 +51,11 @@ export class ClaimFileTransport {
   private expected = 1;
   private readonly responded = new Set<number>();
 
-  constructor(worktree: string, claimId: string, private readonly handle: (request: unknown) => ChannelResponse, private readonly env: Env = process.env) {
+  constructor(worktree: string, private readonly claimId: string, private readonly handle: (request: unknown) => ChannelResponse, private readonly env: Env = process.env,
+    private readonly identity: { featureId: string; nodeId: string } = { featureId: '', nodeId: '' }) {
     if (!/^[A-Za-z0-9_.-]{1,128}$/.test(claimId)) throw new Error('CHANNEL_CLAIM_INVALID');
+    if (identity.featureId && !/^[A-Za-z0-9_.-]{1,128}$/.test(identity.featureId)) throw new Error('CHANNEL_IDENTITY_INVALID');
+    if (identity.nodeId && !/^[A-Za-z0-9_.-]{1,128}$/.test(identity.nodeId)) throw new Error('CHANNEL_IDENTITY_INVALID');
     this.dir = join(worktree, '.mycelink-worker', `channel-${claimId}`);
   }
 
@@ -28,6 +64,8 @@ export class ClaimFileTransport {
     const parent = join(this.dir, '..');
     if (!lstatSync(parent).isDirectory() || !isInsideReal(join(parent, '..'), parent)) throw new Error('CHANNEL_PATH_INVALID');
     mkdirSync(this.dir);
+    try { writeFileSync(join(this.dir, 'client.mjs'), clientSource({ claimId: this.claimId, ...this.identity }), { flag: 'wx' }); }
+    catch (err) { rmSync(this.dir, { recursive: true, force: true }); throw err; }
     this.active = true;
     this.timer = setInterval(() => { try { this.tick(); } catch { this.stop(); } }, 50);
     this.timer.unref();

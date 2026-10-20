@@ -173,6 +173,8 @@ import { writeTextAtomic } from '../state/atomic-json.js';
 import { keepExactCopy, writeImmutable } from '../evidence/store.js';
 import { repairRequired, repairRequiredDetail } from './evidence-integrity.js';
 import type { NodeResult, SessionAdapter, SessionStatus, SpawnRequest } from '../sessions/adapter.js';
+import { ClaimChannel, type LiveClaim } from '../sessions/codex-claim-channel.js';
+import { executeHostClaimGate } from '../sessions/codex-host-gate.js';
 import {
   findOrphanedSessions,
   recordObservation,
@@ -1815,6 +1817,30 @@ export class Orchestrator {
       }));
   }
 
+  /** Reload graph and claim for each request, never from worker-supplied scope. */
+  codexClaimScope(nodeId: string, claimId: string, capability: string, worktree: string): LiveClaim | null {
+    const graph = this.graph();
+    const state = this.state();
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    const rt = state.nodes[nodeId];
+    const claim = rt?.claim;
+    if (state.graph_hash !== hashGraph(graph) || !node || node.repository === null || !claim ||
+        claim.mode !== 'adapter' || claim.claim_id !== claimId || !claim.worktree ||
+        resolve(claim.worktree) !== resolve(worktree) || !isInsideReal(worktree, claim.worktree) ||
+        !claim.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256)) return null;
+    const nextGate = rt.state === 'CLAIMED' || rt.state === 'RED_PENDING'
+      ? (redRequired(node, rt) ? 'red' : 'green')
+      : rt.state === 'RED_VERIFIED' || rt.state === 'GREEN_PENDING' ? 'green'
+        : rt.state === 'GREEN_VERIFIED' ? 'regression' : null;
+    return {
+      claimId, featureId: this.featureId, nodeId,
+      repoPath: repositoryPath(this.workspace, node.repository), worktree: claim.worktree,
+      expectedHead: resolveRef(claim.worktree, 'HEAD'),
+      allowedPaths: [...node.allowed_paths], forbiddenPaths: [...(node.forbidden_paths ?? [])],
+      nextGate, gateCommands: this.gateCommands(nodeId, capability),
+    };
+  }
+
   /** Write the node's context pack and return its path. */
   writeContextPack(nodeId: string, claimId: string): string {
     const graph = this.graph();
@@ -2637,14 +2663,26 @@ export class Orchestrator {
         ),
         stallMs: Math.max(30_000, Math.floor(node.worker.max_wall_clock_minutes * 60_000 * 0.4)),
         gateCommands: this.gateCommands(nodeId, capability),
-        env: {
-          MYCELINK_CONTROL_ROOT: this.controlRoot,
-          MYCELINK_BRANCH: branch ?? '',
-          [CAPABILITY_ENV]: capability,
-          ...this.workerEnv,
-        },
+        env: this.adapter.name === 'codex-cli'
+          ? { MYCELINK_BRANCH: branch ?? '', ...this.workerEnv }
+          : { MYCELINK_CONTROL_ROOT: this.controlRoot, MYCELINK_BRANCH: branch ?? '', [CAPABILITY_ENV]: capability, ...this.workerEnv },
         replacesSessionId: previous?.session_id ?? null,
       };
+
+      if (this.adapter.name === 'codex-cli' && worktree !== null) {
+        const scope = () => this.codexClaimScope(nodeId, claimId, capability, worktree);
+        const channel = new ClaimChannel(scope, (argv, cwd) => {
+          const gate = argv[3];
+          if (gate !== 'red' && gate !== 'green' && gate !== 'regression') throw new Error('CHANNEL_GATE_INVALID');
+          return executeHostClaimGate({
+            controlRoot: this.controlRoot, featureId: this.featureId, gate, cwd, argv,
+            deadlineMs: Math.min(600_000, request.maxWallClockMs),
+            requireTests: node.required_evidence.includes('red'),
+            readRecord: () => this.state().nodes[nodeId]?.evidence[gate],
+          });
+        });
+        request.claimChannel = { handle: (input) => channel.handle(input), redactEnv: { [CAPABILITY_ENV]: capability } };
+      }
 
       const handle = this.adapter.spawn(request);
       sessionId = handle.session_id;

@@ -7,6 +7,7 @@
  */
 import type { UsageTotals } from '../model/types.js';
 import type { CodexTranscriptEvidence } from './codex-transcript.js';
+import type { ChannelResponse } from './codex-claim-channel.js';
 
 export type ProviderId = 'claude' | 'codex' | 'fake';
 export type AdapterId = 'claude-cli' | 'codex-cli' | 'fake-provider';
@@ -165,6 +166,8 @@ export interface SpawnRequest {
    * the worker verbatim and pre-approved as that exact command line only.
    */
   gateCommands?: { gate: 'red' | 'green' | 'regression'; argv: string[] }[];
+  /** Controller-only, per-attempt handler; never serialized into the worker pack. */
+  claimChannel?: { handle: (request: unknown) => ChannelResponse; redactEnv?: Record<string, string> };
   env?: Record<string, string>;
   /** Links a replacement session to the one it took over from. */
   replacesSessionId?: string | null;

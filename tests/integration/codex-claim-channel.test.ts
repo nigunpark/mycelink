@@ -65,4 +65,10 @@ describe('claim-scoped controller channel core', () => {
     expect(f.channel.handle({ ...f.identity, sequence: 2, operation: 'commit', paths: ['../repo/src/a.js'], message: 'bad' })).toMatchObject({ ok: false, code: 'CHANNEL_COMMIT_FAILED' });
     expect(git(f.wt, ['status', '--porcelain'])).toContain('src/a.js');
   });
+
+  it('responds stale when the live state cannot be reloaded instead of silently stopping the mailbox', () => {
+    const f = fixture();
+    const channel = new ClaimChannel(() => { throw new Error('STATE_READ_FAILED'); }, () => { throw new Error('should not run'); });
+    expect(channel.handle({ ...f.identity, sequence: 1, operation: 'gate', gate: 'red' })).toMatchObject({ ok: false, code: 'CHANNEL_CLAIM_STALE' });
+  });
 });

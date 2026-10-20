@@ -164,4 +164,47 @@ describe('isolated Codex session using fake executable', () => {
     expect(observation.result).toBeNull();
     expect(existsSync(request.resultPath)).toBe(false);
   });
+
+  it('serves the claim mailbox during a real child lifetime and removes it on completion, stop and timeout', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const adapter = new CodexCliAdapter({ executable: process.execPath, prefixArgs: [fixture] });
+    const make = (overrides: Partial<SpawnRequest> = {}) => setup({ stall_ms: 30_000 }, overrides);
+    const request = make({ maxWallClockMs: 500, stallMs: 10_000 });
+    const handled: unknown[] = [];
+    request.claimChannel = { handle: (input) => { handled.push(input); return { ok: true, sequence: 1, exitCode: 0, output: 'host gate' }; } };
+    const handle = adapter.spawn(request);
+    const dir = join(request.cwd, '.mycelink-worker', `channel-${request.claimId}`);
+    expect(existsSync(dir)).toBe(true);
+    for (let i = 0; i < 30 && !existsSync(join(request.cwd, 'prompt-captured.txt')); i++) await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(readFileSync(join(request.cwd, 'prompt-captured.txt'), 'utf8')).toContain('channel-claim-1');
+    writeFileSync(join(dir, 'request-1.json'), JSON.stringify({ claimId: request.claimId, featureId: request.featureId, nodeId: request.nodeId, sequence: 1, operation: 'gate', gate: 'red' }));
+    await new Promise((resolve) => setTimeout(resolve, 130));
+    expect(JSON.parse(readFileSync(join(dir, 'response-1.json'), 'utf8'))).toMatchObject({ ok: true, output: 'host gate' });
+    expect(handled).toHaveLength(1);
+    adapter.stop(handle);
+    expect((await adapter.wait(handle)).status).toBe('stopped');
+    expect(existsSync(dir)).toBe(false);
+    const timed = make({ maxWallClockMs: 300, stallMs: 10_000, claimChannel: request.claimChannel });
+    expect((await adapter.wait(adapter.spawn(timed))).timed_out).toBe(true);
+    expect(existsSync(join(timed.cwd, '.mycelink-worker', `channel-${timed.claimId}`))).toBe(false);
+  });
+
+  it('runs the generated worker client through a child process and denies stale and out-of-order requests', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const adapter = new CodexCliAdapter({ executable: process.execPath, prefixArgs: [fixture] });
+    const request = setup({ channel_gate: 'red', omit_result: true });
+    let calls = 0;
+    request.claimChannel = { handle: (input) => {
+      calls++;
+      expect(input).toMatchObject({ claimId: request.claimId, featureId: request.featureId, nodeId: request.nodeId, gate: 'red', sequence: 1 });
+      return { ok: true, sequence: 1, exitCode: 0, output: 'host verifier' };
+    } };
+    const observation = await adapter.wait(adapter.spawn(request));
+    const reply = JSON.parse(readFileSync(join(request.cwd, 'channel-reply.json'), 'utf8')) as { status: number; stdout: string };
+    expect(reply.status).toBe(0);
+    expect(JSON.parse(reply.stdout)).toMatchObject({ ok: true, output: 'host verifier' });
+    expect(calls).toBe(1);
+    expect(observation.status).toBe('failed'); // turn.completed is not a result or accepted gate.
+    expect(existsSync(join(request.cwd, '.mycelink-worker', `channel-${request.claimId}`))).toBe(false);
+  });
 });

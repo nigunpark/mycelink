@@ -32,6 +32,7 @@ interface RunState extends StreamProgress {
   parser: ProviderStreamParser;
   codexEvidence?: SessionObservation['codex_evidence'];
   codexProvenance?: SessionObservation['codex_provenance'];
+  cleanup?: () => void;
 }
 
 /** Shared process lifecycle; provider-specific argv and JSONL interpretation are injected. */
@@ -46,6 +47,7 @@ export abstract class ProcessSessionAdapter implements SessionAdapter {
   protected workerPrompt(pack: ReturnType<typeof loadPromptPack>, request: SpawnRequest): string {
     return buildWorkerPrompt({ pack, gates: this.gateLines(request) });
   }
+  protected startWorkerServices(_request: SpawnRequest): (() => void) | undefined { return undefined; }
   private readonly runs = new Map<string, RunState>();
 
   spawn(request: SpawnRequest): SessionHandle {
@@ -82,6 +84,7 @@ export abstract class ProcessSessionAdapter implements SessionAdapter {
       prompt = this.workerPrompt(pack, request);
       args = this.buildArgs(request, sessionId);
       prepareResultSlot(request.cwd);
+      state.cleanup = this.startWorkerServices(request);
     } catch (err) {
       state.failureReason = (err as Error).message;
       this.settle(state, 'failed');
@@ -163,12 +166,16 @@ export abstract class ProcessSessionAdapter implements SessionAdapter {
   private kill(state: RunState, status: SessionStatus): void {
     if (state.settled || state.child === null) return;
     state.status = status;
+    try { state.cleanup?.(); } catch { /* Still terminate the child if cleanup failed. */ }
+    state.cleanup = undefined;
     try { state.child.kill('SIGKILL'); } catch { /* Already gone. */ }
   }
 
   private settle(state: RunState, forced: SessionStatus | null, log?: NodeJS.WritableStream): void {
     if (state.settled) return;
     state.settled = true;
+    try { state.cleanup?.(); } catch { /* Preserve the process outcome; mailbox is no longer served. */ }
+    state.cleanup = undefined;
     for (const t of state.timers) clearInterval(t);
     state.timers = [];
     state.usage.wall_clock_ms = Date.now() - state.startedAtMs;

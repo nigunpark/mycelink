@@ -674,6 +674,7 @@ export interface WorkerPromptArgs {
   pack: ContextPack;
   gates: { gate: WorkerGate; line: string }[];
   provider?: 'claude' | 'codex';
+  mediated?: boolean;
   /** The rendered `tdd tests` line: the bound tests and their ids, by words. */
   testsLine?: string;
   /** The rendered `tdd check` line: the result's criterion evidence judged as settle will. */
@@ -727,7 +728,7 @@ export function buildWorkerPrompt(args: WorkerPromptArgs): string {
           ...testsLines(args.testsLine),
           ...checkLines(args.checkLine),
         ]
-      : ['No gate commands were offered for this node.'];
+      : [args.mediated ? 'Use the controller-mediated gate commands above; do not run the verifier directly.' : 'No gate commands were offered for this node.'];
 
   return [
     codex ? 'You are a bounded Codex worker session driven by Mycelink. You implement exactly one orchestrator graph node.' : 'You are a bounded Claude Code worker session driven by Mycelink. You implement exactly one orchestrator graph node.',
@@ -744,7 +745,10 @@ export function buildWorkerPrompt(args: WorkerPromptArgs): string {
     '* Implement exactly this node, inside your working directory only, and only within the pack\'s allowed_paths.',
     '* Do not spawn subagents. Do not edit PRD, PLAN, PORTFOLIO-GRAPH, STATE or contracts.',
     ...redLines(),
-    ...historyLines('git'),
+    ...(args.mediated ? [
+      '* Run RED via the claim client after test-only edits, then commit exactly those tests through its commit command.',
+      '* Run GREEN via the claim client after production edits, then commit exactly that code through its commit command. Never use git add or git commit directly.',
+    ] : historyLines('git')),
     ...compatibilityLines(pack, 'git'),
     '* Everything you finish with is committed on the current branch: a fresh verifier checks out the branch, not your files.',
     '* If a tool you need is denied, do not work around it. Write the result with outcome BLOCKED and',

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--version')) { process.stdout.write('codex-cli 0.163.0\n'); process.exit(0); }
@@ -12,6 +13,12 @@ const emit = (event) => process.stdout.write(JSON.stringify(event) + '\n');
 emit({ type: 'thread.started', thread_id: '11111111-1111-4111-8111-111111111111' });
 emit({ type: 'turn.started' });
 if (scenario.extra_event) process.stdout.write(scenario.extra_event + '\n');
+if (scenario.channel_gate) {
+  const client = join(process.cwd(), '.mycelink-worker', `channel-${pack.claim_id}`, 'client.mjs');
+  const reply = spawnSync(process.execPath, [client, 'gate', scenario.channel_gate], { cwd: process.cwd(), encoding: 'utf8', timeout: 15_000,
+    env: { ...process.env, MYCELINK_FEATURE_ID: '', MYCELINK_NODE_ID: '' } });
+  writeFileSync(join(process.cwd(), 'channel-reply.json'), JSON.stringify({ status: reply.status, stdout: reply.stdout, stderr: reply.stderr }));
+}
 if (scenario.stall_ms) await new Promise((done) => setTimeout(done, scenario.stall_ms));
 if (scenario.result && !scenario.omit_result) {
   const result = {

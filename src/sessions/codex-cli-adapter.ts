@@ -5,6 +5,7 @@ import type { ProviderStreamParser, StreamProgress } from './provider-stream.js'
 import { buildWorkerPrompt, renderGateCommand, type WorkerGate } from './worker-protocol.js';
 import type { ContextPack } from './context-pack.js';
 import { CodexTranscriptReader } from './codex-transcript.js';
+import { ClaimFileTransport } from './codex-claim-files.js';
 
 export interface CodexCliAdapterOptions {
   executable: string;
@@ -92,7 +93,21 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     });
   }
   protected override workerPrompt(pack: ContextPack, request: SpawnRequest): string {
-    return buildWorkerPrompt({ pack, gates: this.gateLines(request), provider: 'codex' });
+    const prompt = buildWorkerPrompt({ pack, gates: request.claimChannel ? [] : this.gateLines(request), provider: 'codex', mediated: !!request.claimChannel });
+    if (!request.claimChannel) return prompt;
+    const path = `.mycelink-worker/channel-${request.claimId}/client.mjs`;
+    return `Controller-mediated gates and commits (only these commands, from this worktree):\n` +
+      `node ${path} gate red\nnode ${path} gate green\nnode ${path} gate regression\n` +
+      `node ${path} commit <message> <owned-path> [more-owned-paths]\n` +
+      `Use the returned output_sha256 and test_ids for criterion_evidence; a completed model turn alone proves nothing.\n` + prompt;
+  }
+  protected override startWorkerServices(request: SpawnRequest): (() => void) | undefined {
+    if (!request.claimChannel) return undefined;
+    const transport = new ClaimFileTransport(request.cwd, request.claimId, (input) => request.claimChannel!.handle(input),
+      { ...process.env, ...request.claimChannel.redactEnv },
+      { featureId: request.featureId, nodeId: request.nodeId });
+    transport.start();
+    return () => transport.stop();
   }
   buildArgs(request: SpawnRequest, _sessionId: string): string[] {
     if (request.addDirs?.length || request.allowedTools?.length || request.disallowedTools?.length) {

@@ -10,6 +10,17 @@ afterAll(() => cleanupTmpRoots());
 
 // There is deliberately no TaskCreated, TaskCompleted or PostCompact hook in any of these paths.
 describe('task lifecycle at controller-owned transitions, without host task hooks', () => {
+  it('derives channel scope from the current graph and claim and revokes it on rotation', async () => {
+    const p = await hostPortfolio();
+    const orchestrator = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID, adapter: {} as never });
+    const claim = orchestrator.claim(CORE, { mode: 'adapter' });
+    const scope = orchestrator.codexClaimScope(CORE, claim.claimId, claim.capability, claim.worktree!);
+    expect(scope).toMatchObject({ claimId: claim.claimId, nodeId: CORE, worktree: claim.worktree,
+      allowedPaths: orchestrator.node(CORE).allowed_paths, nextGate: 'red' });
+    expect(scope?.gateCommands.find((g) => g.gate === 'red')?.argv).toEqual(orchestrator.gateCommands(CORE, claim.capability).find((g) => g.gate === 'red')?.argv);
+    mutateState(p.featureDir, (s) => { s.nodes[CORE]!.claim!.claim_id = 'rotated'; return s; });
+    expect(orchestrator.codexClaimScope(CORE, claim.claimId, claim.capability, claim.worktree!)).toBeNull();
+  });
   it('refuses an out-of-graph claim even if the caller bypasses dispatch selection', async () => {
     const p = await hostPortfolio();
     const orchestrator = new Orchestrator({ controlRoot: p.control, featureId: FEATURE_ID, adapter: {} as never });
