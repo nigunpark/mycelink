@@ -42675,7 +42675,7 @@ var MAX_RESPONSE_OUTPUT = 32 * 1024;
 var MAX_REQUESTS = 64;
 var NAME2 = /^request-([1-9][0-9]{0,2})\.json$/;
 function clientSource(identity2) {
-  return `import { existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+  return `import { existsSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -42691,7 +42691,9 @@ const sequence = Math.max(0, ...numbers) + 1;
 if (sequence > 64) throw new Error('CHANNEL_LIMIT');
 const request = JSON.stringify({ ...identity, sequence, ...payload });
 if (Buffer.byteLength(request) > 8192) throw new Error('CHANNEL_REQUEST_TOO_LARGE');
-writeFileSync(join(dir, 'request-' + sequence + '.json'), request, { flag: 'wx' });
+const pending = join(dir, '.request-' + sequence + '-' + process.pid + '.tmp');
+writeFileSync(pending, request, { flag: 'wx' });
+renameSync(pending, join(dir, 'request-' + sequence + '.json'));
 const response = join(dir, 'response-' + sequence + '.json');
 let answer;
 for (let i = 0; i < 12000; i++) {
@@ -42725,6 +42727,7 @@ var ClaimFileTransport = class {
   active = false;
   expected = 1;
   responded = /* @__PURE__ */ new Set();
+  incompleteSince = /* @__PURE__ */ new Map();
   start() {
     if (this.active || existsSync35(this.dir)) throw new Error("CHANNEL_ALREADY_STARTED");
     const parent = join47(this.dir, "..");
@@ -42773,11 +42776,24 @@ var ClaimFileTransport = class {
           } finally {
             closeSync15(fd);
           }
-          const parsed = JSON.parse(bytes2.toString("utf8"));
+          let parsed;
+          try {
+            parsed = JSON.parse(bytes2.toString("utf8"));
+          } catch (err) {
+            const since = this.incompleteSince.get(n) ?? Date.now();
+            this.incompleteSince.set(n, since);
+            if (err instanceof SyntaxError && Date.now() - since < 1e3) continue;
+            throw err;
+          }
+          this.incompleteSince.delete(n);
           if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || parsed["sequence"] !== n) {
             throw new Error("filename and request sequence differ");
           }
-          response = this.handle(parsed);
+          try {
+            response = this.handle(parsed);
+          } catch {
+            response = { ok: false, sequence: n, code: "CHANNEL_HANDLER_FAILED" };
+          }
           if (response.sequence !== n) throw new Error("handler returned a response for another sequence");
         } catch {
           response = { ok: false, sequence: n, code: "CHANNEL_REQUEST_INVALID" };

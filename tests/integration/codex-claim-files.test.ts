@@ -99,6 +99,34 @@ describe('bounded claim file transport', () => {
     fresh.transport.stop();
   });
 
+  it('does not consume a request while its JSON write is incomplete', () => {
+    const seen: number[] = [];
+    const f = fixture((r) => {
+      const sequence = (r as { sequence: number }).sequence;
+      seen.push(sequence);
+      return { ok: true, sequence, exitCode: 0, output: 'ok' };
+    });
+    const request = { claimId: 'claim-1', featureId: 'F', nodeId: 'F.n', sequence: 1, operation: 'gate', gate: 'green' };
+    const path = join(f.dir, 'request-1.json');
+    writeFileSync(path, JSON.stringify(request).slice(0, 40));
+    f.transport.tick();
+    expect(existsSync(join(f.dir, 'response-1.json'))).toBe(false);
+    writeFileSync(path, JSON.stringify(request));
+    f.transport.tick();
+    expect(f.response(1)).toMatchObject({ ok: true, sequence: 1 });
+    expect(seen).toEqual([1]);
+    f.transport.stop();
+  });
+
+  it('distinguishes a handler exception from malformed request bytes', () => {
+    const f = fixture(() => { throw new Error('sensitive-value-123'); });
+    f.put(1, { claimId: 'claim-1', featureId: 'F', nodeId: 'F.n', sequence: 1, operation: 'gate', gate: 'green' });
+    f.transport.tick();
+    expect(f.response(1)).toMatchObject({ ok: false, code: 'CHANNEL_HANDLER_FAILED' });
+    expect(JSON.stringify(f.response(1))).not.toContain('sensitive-value-123');
+    f.transport.stop();
+  });
+
   it('refuses a pre-existing claim directory and a linked mailbox parent', () => {
     const root = makeTmpDir('claim-files-parent-');
     const worktree = join(root, 'tree');

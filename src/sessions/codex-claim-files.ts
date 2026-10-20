@@ -13,7 +13,7 @@ const NAME = /^request-([1-9][0-9]{0,2})\.json$/;
 
 /** The worker gets no host path, capability or verifier argv: only this local request client. */
 function clientSource(identity: { claimId: string; featureId: string; nodeId: string }): string {
-  return `import { existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+  return `import { existsSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -29,7 +29,9 @@ const sequence = Math.max(0, ...numbers) + 1;
 if (sequence > 64) throw new Error('CHANNEL_LIMIT');
 const request = JSON.stringify({ ...identity, sequence, ...payload });
 if (Buffer.byteLength(request) > 8192) throw new Error('CHANNEL_REQUEST_TOO_LARGE');
-writeFileSync(join(dir, 'request-' + sequence + '.json'), request, { flag: 'wx' });
+const pending = join(dir, '.request-' + sequence + '-' + process.pid + '.tmp');
+writeFileSync(pending, request, { flag: 'wx' });
+renameSync(pending, join(dir, 'request-' + sequence + '.json'));
 const response = join(dir, 'response-' + sequence + '.json');
 let answer;
 for (let i = 0; i < 12000; i++) {
@@ -50,6 +52,7 @@ export class ClaimFileTransport {
   private active = false;
   private expected = 1;
   private readonly responded = new Set<number>();
+  private readonly incompleteSince = new Map<number, number>();
 
   constructor(worktree: string, private readonly claimId: string, private readonly handle: (request: unknown) => ChannelResponse, private readonly env: Env = process.env,
     private readonly identity: { featureId: string; nodeId: string } = { featureId: '', nodeId: '' }) {
@@ -98,11 +101,22 @@ export class ClaimFileTransport {
             bytes = bytes.subarray(0, count);
             if (count > MAX_REQUEST) throw new Error('oversized request');
           } finally { closeSync(fd); }
-          const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+          let parsed: unknown;
+          try { parsed = JSON.parse(bytes.toString('utf8')); }
+          catch (err) {
+            // A legacy/in-flight writer may expose the filename before its
+            // write completes. Bound the grace period for malformed JSON.
+            const since = this.incompleteSince.get(n) ?? Date.now();
+            this.incompleteSince.set(n, since);
+            if (err instanceof SyntaxError && Date.now() - since < 1_000) continue;
+            throw err;
+          }
+          this.incompleteSince.delete(n);
           if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed) || (parsed as Record<string, unknown>)['sequence'] !== n) {
             throw new Error('filename and request sequence differ');
           }
-          response = this.handle(parsed);
+          try { response = this.handle(parsed); }
+          catch { response = { ok: false, sequence: n, code: 'CHANNEL_HANDLER_FAILED' }; }
           if (response.sequence !== n) throw new Error('handler returned a response for another sequence');
         } catch {
           response = { ok: false, sequence: n, code: 'CHANNEL_REQUEST_INVALID' };
