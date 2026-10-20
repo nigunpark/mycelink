@@ -224,6 +224,7 @@ import {
   type VerdictProblem,
 } from './acceptance-review.js';
 import { MAX_REVIEW_FINDINGS, buildReviewPacket, controlRelative, loadPacket, refinementContext, refinementPrompt, removeReviewCheckouts, reviewerPrompt, verdictContext, type PacketRefinement, type ReviewCorrection, type ReviewFinding, type ReviewMemory, type ReviewPacket } from './review-packet.js';
+import { codexReviewerPaths, runCodexReviewSession } from './codex-review-session.js';
 import { DEFAULT_REVIEWER_TIMEOUT_MS, MAX_RESULT_DEPTH, REVIEWER_TRANSPORT, reviewerLifecycle, reviewerOutput, safeGenerationDir, writeIngestAttestation, writeIngestedVerdict, type AgentEvidence, type AgentOutput, type ResultExtraction, type ReviewerLifecycle, type ReviewerLifecycleState, type TransportCode } from './review-transport.js';
 import { parseStrictJson } from '../security/strict-json.js';
 import { countInterruption, emptyProviderLedger, holderFailure, launchFiles, providerMark, recordInterruption, ticketOf, type HolderFailure } from './provider-interrupt.js';
@@ -7981,6 +7982,41 @@ export class Orchestrator {
     const interrupted = this.providerReview(open);
     if (interrupted !== null) return this.providerReviewReport(open, interrupted.failure, false);
     return this.settleOpenReview('host', open.dispatch_id);
+  }
+
+  /** Controller-owned Codex process; a role label or Claude Agent callback is not provenance. */
+  async settleCodexReview(ticket: ReviewTicket, processOptions: { executable: string; prefixArgs?: string[]; timeoutMs: number; wsl?: boolean }): Promise<ReviewSettleReport> {
+    const check = (): { open: OpenReview; packet: ReviewPacket } => {
+      const state = this.state();
+      const open = state.acceptance_review?.open;
+      if (!open || state.acceptance_review?.reviews.some((r) => r.review_id === ticket.review_id)) throw new Error('CODEX_REVIEW_ALREADY_SETTLED_OR_NOT_OPEN');
+      if (ticket.feature_id !== this.featureId || ticket.review_id !== open.review_id || ticket.dispatch_id !== open.dispatch_id || !capabilityMatches(ticket.capability, open.capability_sha256) || ticket.inputs_sha256 !== open.inputs_sha256 || ticket.packet_path !== join(this.controlRoot, ...open.packet_path.split('/')).replace(/\\/g, '/') || ticket.result_slot !== join(this.controlRoot, ...open.slot.split('/')).replace(/\\/g, '/')) throw new Error('CODEX_REVIEW_FOREIGN_TICKET');
+      const why = this.reviewStaleReason(open, state);
+      if (why !== null) throw new Error(`CODEX_REVIEW_STALE: ${why}`);
+      const inputs = currentReviewInputs(this.controlRoot, this.featureId, this.workspace, this.graph(), state);
+      if (reviewInputsSha256(inputs) !== open.inputs_sha256) throw new Error('CODEX_REVIEW_HEADS_CHANGED');
+      const packet = loadPacket(join(this.controlRoot, ...open.packet_path.split('/')), open.packet_sha256);
+      if (!packet || packet.feature_id !== this.featureId || packet.review_id !== open.review_id || packet.dispatch_id !== open.dispatch_id || packet.inputs_sha256 !== open.inputs_sha256 || packet.repositories.length !== inputs.repositories.length || packet.repositories.some((r) => !inputs.repositories.some((i) => i.name === r.name && i.head_sha === r.head_sha)) || new Set(packet.criteria.map((c) => c.id)).size !== packet.criteria.length || packet.criteria.map((c) => c.id).join('\0') !== ticket.criteria.join('\0')) throw new Error('CODEX_REVIEW_PACKET_CHANGED');
+      return { open, packet };
+    };
+    const { open, packet } = check();
+    if (open.refinement) throw new Error('CODEX_REVIEW_REFINEMENT_UNSUPPORTED');
+    const checkout = packet.repositories[0]?.checkout;
+    if (!checkout) throw new Error('CODEX_REVIEW_CHECKOUT_MISSING');
+    const evidenceDir = join(this.controlRoot, ...open.slot.split('/').slice(0, -1), 'codex-process');
+    const session = await runCodexReviewSession({ ...processOptions, cwd: checkout, prompt: ticket.prompt, binding: { featureId: this.featureId, reviewId: open.review_id, dispatchId: open.dispatch_id, inputsSha256: open.inputs_sha256, criteria: packet.criteria.map((c) => c.id) }, evidenceDir });
+    const lockDir = join(this.paths.featureDir, 'reviews');
+    mkdirSync(lockDir, { recursive: true });
+    return withLock(join(lockDir, 'settle.lock'), () => {
+      const fresh = check();
+      if (fresh.open.dispatch_id !== open.dispatch_id || fresh.open.packet_sha256 !== open.packet_sha256) throw new Error('CODEX_REVIEW_STALE_GENERATION');
+      const evidence = readRegular(session.receiptPath, 64 * 1024);
+      const transcript = readRegular(session.jsonlPath, 8 * 1024 * 1024);
+      if (!evidence || !transcript || createHash('sha256').update(transcript.bytes).digest('hex') !== session.receipt.jsonl_sha256 || createHash('sha256').update(codexReviewerPaths(ticket.prompt, checkout, processOptions.wsl === true).prompt).digest('hex') !== session.receipt.prompt_sha256 || JSON.stringify(JSON.parse(evidence.bytes.toString('utf8'))) !== JSON.stringify(session.receipt)) throw new Error('CODEX_REVIEW_EVIDENCE_CHANGED');
+      const judged = judgeVerdict(session.verdict, verdictContext(fresh.packet, this.workspace));
+      if (!judged.ok) throw new Error(`CODEX_REVIEW_JUDGE_REFUSED: ${judged.code}: ${judged.detail}`);
+      return this.recordVerdict(open, judged, { agent_id: session.receipt.thread_id, session_id: session.receipt.process_session_id, verdict_sha256: canonicalVerdictSha256(JSON.stringify(session.verdict)), transport: { kind: 'agent-result', agent_id: session.receipt.thread_id, session_id: session.receipt.process_session_id, tool_use_id: null, result_sha256: session.receipt.verdict_sha256, transcript_sha256: session.receipt.jsonl_sha256, transcript_path: session.jsonlPath, extraction: 'json' } }, 'codex-process');
+    }, { timeoutMs: 15_000, pollMs: 50, purpose: 'Codex review settle' });
   }
 
   private settleOpenReview(by: 'host' | 'dispatch' | 'resume', dispatchId: string): ReviewSettleReport {

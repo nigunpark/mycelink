@@ -39,6 +39,8 @@ import { isGitRepository, isWorktreeClean, resolveRef, runGit } from '../git/git
 import { Orchestrator, REVIEW_AWAIT_MAX_SECONDS, REVIEW_AWAIT_SECONDS } from '../engine/orchestrator.js';
 import { ClaudeCliAdapter } from '../sessions/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../sessions/codex-cli-adapter.js';
+import { wslCodexPrefix } from '../sessions/codex-cli-adapter.js';
+import { codexReviewPrompt } from '../engine/codex-review-session.js';
 import { liveSessions, loadRegistry } from '../sessions/registry.js';
 import { defaultLoops, loadLoops, writeLoops } from '../loops/contracts.js';
 import { runSummary } from '../loops/runs.js';
@@ -116,6 +118,7 @@ const USAGE = `mycelink <group> <command> [options]
   codex status <feature>                     inspect local plan and runtime denial
   codex run <feature>                      run one disposable worker with held authority
   codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations
+  codex review <feature>                    launch one separate read-only reviewer with held authority (experimental)
   codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
   init <control-repo-path>                   create a control repository
@@ -437,7 +440,7 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
 /** Codex host workflow: opt-in disposable worker slice, not review or delivery. */
 async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
-  const sub = requirePositional(args, 1, 'init|status|run|continue|resume|verify|deliver');
+  const sub = requirePositional(args, 1, 'init|status|run|continue|review|resume|verify|deliver');
   if (sub === 'init') {
     assertControllerRole(args, 'codex init');
     const target = resolve(requirePositional(args, 2, 'control-repo-path'));
@@ -449,12 +452,26 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     emit(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
-  if (!['status', 'run', 'continue', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  if (!['status', 'run', 'continue', 'review', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
   if (loadConfig(controlRoot).provider.provider !== 'codex' || !existsSync(controlPaths(controlRoot).config)) {
     throw new Error('CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.');
   }
   const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  const runReview = async (featureId: string) => {
+    const orchestrator = orchestratorFor(controlRoot, featureId);
+    const dispatched = await orchestrator.dispatchNext();
+    if (dispatched.ticket?.schema !== 'mycelink-review-ticket/1' || dispatched.status !== 'DISPATCHED') throw new Error(`CODEX_REVIEW_NOT_READY: ${dispatched.status}: ${dispatched.detail}`);
+    const ticket = dispatched.ticket;
+    if (ticket.refinement !== null || ticket.correction !== null) throw new Error('CODEX_REVIEW_CORRECTION_UNSUPPORTED');
+    const config = loadConfig(controlRoot);
+    const wsl = config.experimental_codex?.wsl;
+    return orchestrator.settleCodexReview({ ...ticket, prompt: codexReviewPrompt(ticket.prompt, ticket.packet_path) }, {
+      executable: wsl ? 'wsl.exe' : config.provider.executable ?? 'codex',
+      ...(wsl ? { prefixArgs: wslCodexPrefix(wsl), wsl: true } : {}),
+      timeoutMs: 20 * 60_000,
+    });
+  };
   if (sub === 'continue' && gate.ok) {
     assertControllerRole(args, 'codex continue');
     if (args.flags['authority'] !== undefined || args.flags['recover'] !== undefined || args.flags['takeover'] !== undefined) {
@@ -494,13 +511,20 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
         return { node_id: report.node_id, outcome: code === 0 ? report.outcome : 'NODE_NOT_DONE' };
       },
     });
-    emit(io, args, { ...result, reports: detail }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}`);
-    return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? 0 : 1;
+    const reviewed = args.flags['review'] === true && result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? await runReview(featureId) : null;
+    emit(io, args, { ...result, reports: detail, review: reviewed }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}${reviewed ? `; review ${reviewed.outcome}` : ''}`);
+    return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') && (reviewed === null || reviewed.outcome === 'PASS' || reviewed.outcome === 'GAPS') ? 0 : 1;
   }
   if (sub === 'run' && gate.ok) {
     requireController(args, 'codex run');
     const featureId = requirePositional(args, 2, 'feature-id');
     return orchestrateGroup({ ...args, positional: ['orchestrate', 'once', featureId] }, io);
+  }
+  if (sub === 'review' && gate.ok) {
+    requireController(args, 'codex review');
+    const report = await runReview(requirePositional(args, 2, 'feature-id'));
+    emit(io, args, report, () => `Codex review ${report.review_id}: ${report.outcome}; ${report.reworked.join(', ')}`);
+    return report.outcome === 'PASS' || report.outcome === 'GAPS' ? 0 : 1;
   }
   if (sub !== 'status') {
     throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${sub} is not enabled for this Codex control. No reviewer, verifier or delivery was started.`);

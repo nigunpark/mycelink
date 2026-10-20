@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCodexReviewSession } from '../../src/engine/codex-review-session.js';
+import { codexReviewerPaths, codexReviewPrompt } from '../../src/engine/codex-review-session.js';
 
 const roots: string[] = [];
 afterAll(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -16,6 +17,15 @@ const binding = { featureId: 'ORD-101', reviewId: 'ORD-101-R001', dispatchId: 'd
 const verdict = { schema: 'mycelink-acceptance-review/1', feature_id: binding.featureId, review_id: binding.reviewId, dispatch_id: binding.dispatchId, inputs_sha256: binding.inputsSha256, criteria: [{ criterion: 'AC-1', verdict: 'PASS' }, { criterion: 'AC-2', verdict: 'GAP', gap: { missing: 'status on timeout', reproduction: 'timeout request; expect status' } }], overall: 'GAPS' };
 
 describe('separate Codex reviewer process evidence (not acceptance settlement)', () => {
+  it('maps only Windows drive paths in the WSL review prompt and process cwd', () => {
+    expect(codexReviewerPaths('C:/control/packet.json and D:/repo/file.ts', 'D:/repo', true)).toEqual({ prompt: '/mnt/c/control/packet.json and /mnt/d/repo/file.ts', cwd: '/mnt/d/repo' });
+  });
+  it('gives the separate read-only process a final-answer-only brief without Claude Write instructions', () => {
+    const prompt = codexReviewPrompt('Read the packet and inspect criteria.', 'C:/control/packet.json');
+    expect(prompt).toContain('C:/control/packet.json');
+    expect(prompt).toContain('exactly one JSON object');
+    expect(prompt).not.toMatch(/Write tool|Agent tool|verdict file/i);
+  });
   it('records a hash-bound separate JSONL session with a per-criterion gap and no authority in its prompt', async () => {
     const { root, script } = fixture(verdict);
     const result = await runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root, prompt: 'Review these criteria', binding, evidenceDir: join(root, 'evidence'), timeoutMs: 5000 });

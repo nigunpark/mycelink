@@ -75,6 +75,9 @@ describe('adapter preflight', () => {
       expect(r.err).toContain('CODEX_RUNTIME_DENIED');
     }
     expect((await cli(p, ['codex', 'run', FEATURE_ID, '--json'])).err).toContain('CONTROLLER_AUTHORITY_REQUIRED');
+    // Review is controller-owned; it must not fall through the generic Claude transport.
+    const review = await cli(p, ['codex', 'review', FEATURE_ID, '--json']);
+    expect(review.err).toContain('CONTROLLER_AUTHORITY_REQUIRED');
   });
   it('never certifies an unimplemented Codex adapter through Claude or fake overrides', () => {
     const fake = join(process.cwd(), 'tests', 'fake-claude', 'claude.mjs');
