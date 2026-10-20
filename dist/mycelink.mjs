@@ -42240,6 +42240,21 @@ var CodexTranscriptReader = class {
 };
 
 // src/sessions/codex-cli-adapter.ts
+var WSL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function wslCodexPrefix(wsl) {
+  if (!WSL_NAME.test(wsl.distribution) || !WSL_NAME.test(wsl.user)) throw new Error("WSL_CONFIG: invalid distribution or user");
+  return ["-d", wsl.distribution, "-u", wsl.user, "--", "/usr/local/bin/npx", "--yes", "@openai/codex@0.163.0"];
+}
+function windowsToWslPath(path) {
+  const normalized = path.replaceAll("\\", "/");
+  if (!/^[A-Za-z]:\//.test(normalized) || /[\u0000-\u001f\u007f]/.test(path)) {
+    throw new Error("WSL_PATH: expected absolute drive path without traversal or control characters");
+  }
+  if (normalized.slice(3).split("/").some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error("WSL_PATH: invalid path segment");
+  }
+  return `/mnt/${normalized[0].toLowerCase()}${normalized.slice(2)}`;
+}
 var CodexStreamParser = class {
   reader = new CodexTranscriptReader();
   evidence() {
@@ -42282,6 +42297,10 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
   constructor(options) {
     super();
     if (options.extraArgs?.length) throw new Error("CODEX_ARGS_DENIED: arbitrary Codex exec flags are not allowed");
+    if (options.wsl) {
+      if (process.platform !== "win32" || !options.disposableRepositories || options.sandbox === "read-only") throw new Error("WSL_CONFIG: requires Windows disposable workspace-write workers");
+      wslCodexPrefix(options.wsl);
+    }
     this.options = options;
     this.executable = options.executable;
   }
@@ -42296,14 +42315,14 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
       throw new Error("CODEX_ARGS_DENIED: Claude tool and extra writable-directory grants cannot be translated safely");
     }
     return [
-      ...this.options.prefixArgs ?? [],
+      ...this.options.wsl ? wslCodexPrefix(this.options.wsl) : this.options.prefixArgs ?? [],
       "exec",
       "--json",
       "--cd",
-      request.cwd,
+      this.options.wsl ? windowsToWslPath(request.cwd) : request.cwd,
       "--sandbox",
       this.options.sandbox ?? "workspace-write",
-      ...process.platform === "win32" && this.options.disposableRepositories === true ? ["-c", "windows.sandbox=mxc"] : [],
+      ...process.platform === "win32" && this.options.disposableRepositories === true && !this.options.wsl ? ["-c", "windows.sandbox=mxc"] : [],
       ...request.model === "codex-default" ? [] : ["--model", request.model],
       "-"
     ];
@@ -45067,11 +45086,19 @@ function preflightAdapter(input, env = process.env, controlRoot) {
     if (!Array.isArray(disposable) || registered.length === 0 || registered.length !== disposable.length || new Set(disposable).size !== disposable.length || registered.some((name) => !disposable.includes(name))) {
       return { ...denied, detail: "Codex experimental dispatch requires every registered repository to be explicitly marked disposable by name." };
     }
-    const executable2 = config.provider.executable ?? "codex";
+    const wsl = opt.wsl;
+    if (wsl && (process.platform !== "win32" || config.provider.sandbox === "read-only")) return { ...denied, detail: "WSL transport requires Windows workspace-write workers." };
+    let prefix = [];
+    try {
+      if (wsl) prefix = wslCodexPrefix(wsl);
+    } catch {
+      return { ...denied, detail: "WSL_CONFIG: invalid distribution or user." };
+    }
+    const executable2 = wsl ? "wsl.exe" : config.provider.executable ?? "codex";
     const resolved2 = resolveExecutable(executable2, env);
     const base2 = { ...denied, executable: executable2, resolved: resolved2, version: null };
     if (resolved2 === null) return { ...base2, detail: `Codex executable "${executable2}" not found on PATH` };
-    return probe([resolved2, "--version"], base2);
+    return probe([resolved2, ...prefix, "--version"], base2);
   }
   const legacyAdapter = input.session_adapter;
   const legacyExecutable = input.claude_executable;
@@ -45679,10 +45706,11 @@ function adapterFor(controlRoot) {
   const config = loadConfig(controlRoot);
   if (config.provider.provider === "codex") {
     return new CodexCliAdapter({
-      executable: config.provider.executable ?? "codex",
+      executable: config.experimental_codex?.wsl ? "wsl.exe" : config.provider.executable ?? "codex",
       extraArgs: config.provider.extra_args,
       sandbox: config.provider.sandbox ?? "workspace-write",
-      disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok
+      disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok,
+      wsl: config.experimental_codex?.wsl
     });
   }
   const fakeExecutable = process.env["MYCELINK_FAKE_CLAUDE"];

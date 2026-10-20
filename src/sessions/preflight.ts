@@ -16,6 +16,7 @@ import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { resolveWindowsExecutable, runCommandSync } from '../security/exec.js';
 import { isGitRepository } from '../git/git.js';
 import { loadRepositories, normalizeConfig, type MycelinkConfigInput } from '../workspace/workspace.js';
+import { wslCodexPrefix } from './codex-cli-adapter.js';
 import type { SessionAdapterId } from './adapter.js';
 
 export interface PreflightResult {
@@ -90,11 +91,16 @@ export function preflightAdapter(input: MycelinkConfigInput, env: NodeJS.Process
         new Set(disposable).size !== disposable.length || registered.some((name) => !disposable.includes(name))) {
       return { ...denied, detail: 'Codex experimental dispatch requires every registered repository to be explicitly marked disposable by name.' };
     }
-    const executable = config.provider.executable ?? 'codex';
+    const wsl = opt.wsl;
+    if (wsl && (process.platform !== 'win32' || config.provider.sandbox === 'read-only')) return { ...denied, detail: 'WSL transport requires Windows workspace-write workers.' };
+    let prefix: string[] = [];
+    try { if (wsl) prefix = wslCodexPrefix(wsl); }
+    catch { return { ...denied, detail: 'WSL_CONFIG: invalid distribution or user.' }; }
+    const executable = wsl ? 'wsl.exe' : config.provider.executable ?? 'codex';
     const resolved = resolveExecutable(executable, env);
     const base: PreflightResult = { ...denied, executable, resolved, version: null };
     if (resolved === null) return { ...base, detail: `Codex executable "${executable}" not found on PATH` };
-    return probe([resolved, '--version'], base);
+    return probe([resolved, ...prefix, '--version'], base);
   }
   // Preserve the legacy direct-call overrides used by existing integrations.
   const legacyAdapter = input.session_adapter;

@@ -231,10 +231,11 @@ function adapterFor(controlRoot: string): ClaudeCliAdapter | CodexCliAdapter {
   if (config.provider.provider === 'codex') {
     // The CLI gate and preflight require explicit disposable-repository opt-in.
     return new CodexCliAdapter({
-      executable: config.provider.executable ?? 'codex',
+      executable: config.experimental_codex?.wsl ? 'wsl.exe' : config.provider.executable ?? 'codex',
       extraArgs: config.provider.extra_args,
       sandbox: config.provider.sandbox ?? 'workspace-write',
       disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok,
+      wsl: config.experimental_codex?.wsl,
     });
   }
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];

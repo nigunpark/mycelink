@@ -14,6 +14,25 @@ export interface CodexCliAdapterOptions {
   sandbox?: 'read-only' | 'workspace-write';
   /** Supplied only after the controller validates disposable repository opt-in. */
   disposableRepositories?: boolean;
+  /** Opt-in WSL transport; only the registered disposable Windows worktrees are mapped. */
+  wsl?: { distribution: string; user: string };
+}
+
+const WSL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export function wslCodexPrefix(wsl: { distribution: string; user: string }): string[] {
+  if (!WSL_NAME.test(wsl.distribution) || !WSL_NAME.test(wsl.user)) throw new Error('WSL_CONFIG: invalid distribution or user');
+  return ['-d', wsl.distribution, '-u', wsl.user, '--', '/usr/local/bin/npx', '--yes', '@openai/codex@0.163.0'];
+}
+
+export function windowsToWslPath(path: string): string {
+  const normalized = path.replaceAll('\\', '/');
+  if (!/^[A-Za-z]:\//.test(normalized) || /[\u0000-\u001f\u007f]/.test(path)) {
+    throw new Error('WSL_PATH: expected absolute drive path without traversal or control characters');
+  }
+  if (normalized.slice(3).split('/').some((part) => part === '' || part === '.' || part === '..')) {
+    throw new Error('WSL_PATH: invalid path segment');
+  }
+  return `/mnt/${normalized[0]!.toLowerCase()}${normalized.slice(2)}`;
 }
 
 /** Usage in Codex turn.completed is the thread total, not an incremental turn delta. */
@@ -54,6 +73,10 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     super();
     // Do not let provider config override sandbox, approvals, cwd, JSON transport or stdin.
     if (options.extraArgs?.length) throw new Error('CODEX_ARGS_DENIED: arbitrary Codex exec flags are not allowed');
+    if (options.wsl) {
+      if (process.platform !== 'win32' || !options.disposableRepositories || options.sandbox === 'read-only') throw new Error('WSL_CONFIG: requires Windows disposable workspace-write workers');
+      wslCodexPrefix(options.wsl);
+    }
     this.options = options;
     this.executable = options.executable;
   }
@@ -67,9 +90,9 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     if (request.addDirs?.length || request.allowedTools?.length || request.disallowedTools?.length) {
       throw new Error('CODEX_ARGS_DENIED: Claude tool and extra writable-directory grants cannot be translated safely');
     }
-    return [...(this.options.prefixArgs ?? []), 'exec', '--json', '--cd', request.cwd,
+    return [...(this.options.wsl ? wslCodexPrefix(this.options.wsl) : this.options.prefixArgs ?? []), 'exec', '--json', '--cd', this.options.wsl ? windowsToWslPath(request.cwd) : request.cwd,
       '--sandbox', this.options.sandbox ?? 'workspace-write',
-      ...(process.platform === 'win32' && this.options.disposableRepositories === true ? ['-c', 'windows.sandbox=mxc'] : []),
+      ...(process.platform === 'win32' && this.options.disposableRepositories === true && !this.options.wsl ? ['-c', 'windows.sandbox=mxc'] : []),
       ...(request.model === 'codex-default' ? [] : ['--model', request.model]), '-'];
   }
 }

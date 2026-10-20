@@ -39,6 +39,31 @@ async function run(scenario: Record<string, unknown>, overrides: Partial<SpawnRe
 }
 
 describe('isolated Codex session using fake executable', () => {
+  it('uses a fake WSL executable for stdin, JSONL, usage and result through mapped worktree', async () => {
+    if (process.platform !== 'win32') return;
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const request = setup({ result: { outcome: 'SUBMITTED' }, usage: { input_tokens: 31, output_tokens: 7 } });
+    const argvPath = join(dirname(request.resultPath), 'argv.json');
+    request.env = { ...request.env, FAKE_WSL_ARGV: argvPath };
+    const adapter = new CodexCliAdapter({ executable: resolve('tests/fake-codex/wsl.cmd'), disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'psh09' } });
+    const observation = await adapter.wait(adapter.spawn(request));
+    expect(observation.status).toBe('done');
+    expect(observation.usage).toMatchObject({ input_tokens: 31, output_tokens: 7 });
+    expect(observation.result).toMatchObject({ outcome: 'SUBMITTED', node_id: request.nodeId });
+    expect(JSON.parse(readFileSync(argvPath, 'utf8'))).toEqual(adapter.buildArgs(request, 'id'));
+    expect(readFileSync(join(request.cwd, 'prompt-captured.txt'), 'utf8')).toContain('Codex worker');
+  });
+  it('fails closed with a fake WSL process whose completed turn omits the result slot', async () => {
+    if (process.platform !== 'win32') return;
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const request = setup({ omit_result: true });
+    request.env = { ...request.env, FAKE_WSL_ARGV: join(dirname(request.resultPath), 'argv.json') };
+    const adapter = new CodexCliAdapter({ executable: resolve('tests/fake-codex/wsl.cmd'), disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'psh09' } });
+    const observation = await adapter.wait(adapter.spawn(request));
+    expect(observation.status).toBe('failed');
+    expect(observation.failure_reason).toMatch(/RESULT_MISSING/);
+    expect(observation.result).toBeNull();
+  });
   it('reads prompt on stdin, captures a schema-bound result and usage without inlining stream as authority', async () => {
     const { request, handle, observation } = await run({ result: { outcome: 'SUBMITTED' }, usage: { input_tokens: 42, output_tokens: 9 } });
     expect(handle.adapter).toBe('codex-cli');

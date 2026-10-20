@@ -43,6 +43,20 @@ describe('Codex CLI adapter contract', () => {
     expect(() => new CodexCliAdapter({ executable: 'codex', disposableRepositories: true, extraArgs: ['-c', 'windows.sandbox=disabled'] })).toThrow(/CODEX_ARGS_DENIED/);
   });
 
+  it('maps only absolute Windows drive paths and builds a bounded WSL argv without shell interpolation', async () => {
+    const { CodexCliAdapter, windowsToWslPath } = await import('../../src/sessions/codex-cli-adapter.js');
+    expect(windowsToWslPath('C:\\Users\\psh09\\two repos\\api')).toBe('/mnt/c/Users/psh09/two repos/api');
+    for (const bad of ['relative\\repo', '\\\\server\\share', 'C:relative', 'C:\\a\\..\\b', 'C:\\a\nmalicious']) {
+      expect(() => windowsToWslPath(bad)).toThrow(/WSL_PATH/);
+    }
+    const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'psh09' } });
+    expect(adapter.buildArgs({ ...request, cwd: 'C:\\Users\\psh09\\two repos\\api', model: 'codex-default' }, 'id')).toEqual([
+      '-d', 'Ubuntu', '-u', 'psh09', '--', '/usr/local/bin/npx', '--yes', '@openai/codex@0.163.0',
+      'exec', '--json', '--cd', '/mnt/c/Users/psh09/two repos/api', '--sandbox', 'workspace-write', '-',
+    ]);
+    expect(() => new CodexCliAdapter({ executable: 'wsl.exe', wsl: { distribution: '--exec', user: 'psh09' } })).toThrow(/WSL_CONFIG/);
+  });
+
   it('counts completed turns and replacement usage totals, and records top-level provider failure', async () => {
     const module = await import('../../src/sessions/codex-cli-adapter.js').catch(() => null);
     expect(module?.CodexStreamParser).toBeTypeOf('function');
