@@ -26,6 +26,11 @@ describe('separate Codex reviewer process evidence (not acceptance settlement)',
     expect(prompt).toContain('exactly one JSON object');
     expect(prompt).not.toMatch(/Write tool|Agent tool|verdict file/i);
   });
+  it('tells the WSL reviewer how to read Windows checkout and evidence paths inside its packet', () => {
+    const prompt = codexReviewPrompt('Read the packet and inspect criteria.', 'C:/control/packet.json');
+    expect(prompt).toContain('/mnt/c/');
+    expect(prompt).toMatch(/WSL, Windows drive-letter paths inside the packet/);
+  });
   it('records a hash-bound separate JSONL session with a per-criterion gap and no authority in its prompt', async () => {
     const { root, script } = fixture(verdict);
     const result = await runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root, prompt: 'Review these criteria', binding, evidenceDir: join(root, 'evidence'), timeoutMs: 5000 });

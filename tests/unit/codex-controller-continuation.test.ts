@@ -1,7 +1,41 @@
 import { describe, expect, it, vi } from 'vitest';
-import { continueController } from '../../src/engine/codex-continuation.js';
+import { continueController, continueReviewedController } from '../../src/engine/codex-continuation.js';
 
-describe('bounded Codex controller continuation', () => {
+describe('Codex controller continuation', () => {
+  it('holds one authority through GAP, bounded producer rework and fresh review without leaking the key', async () => {
+    let opens = 0;
+    const steps = ['api', 'web', null, 'api', null];
+    const reviews = ['GAPS', 'PASS'];
+    const result = await continueReviewedController({ maxNodes: 3, maxReviews: 2,
+      open: () => { opens++; return 'secret'; },
+      run: async (key) => { expect(key).toBe('secret'); return { outcome: 'DONE', node_id: steps.shift() ?? undefined }; },
+      review: async (key) => { expect(key).toBe('secret'); return { outcome: reviews.shift()! }; },
+    });
+    expect(opens).toBe(1);
+    expect(result).toEqual({ stop_reason: 'REVIEW_PASS', nodes: ['api', 'web', 'api'], reviews: ['GAPS', 'PASS'] });
+    expect(JSON.stringify(result)).not.toContain('secret');
+  });
+  it('never reports PASS when a gap has no remaining worker or reviewer budget', async () => {
+    let reviewed = 0;
+    let calls = 0;
+    const result = await continueReviewedController({ maxNodes: 2, maxReviews: 1, open: () => 'key',
+      run: async () => ({ outcome: 'DONE', node_id: calls++ === 0 ? 'api' : undefined }),
+      review: async () => { reviewed++; return { outcome: 'GAPS' }; },
+    });
+    expect(result.stop_reason).toBe('REVIEW_GAPS_UNRESOLVED');
+    expect(reviewed).toBe(1);
+  });
+  it('does not launch a reviewer after a failed worker or an unrotated duplicate', async () => {
+    let reviewed = 0;
+    const review = async () => { reviewed++; return { outcome: 'PASS' }; };
+    const failure = await continueReviewedController({ maxNodes: 3, maxReviews: 2, open: () => 'key',
+      run: async () => ({ outcome: 'RETRY', node_id: 'api' }), review });
+    expect(failure.stop_reason).toBe('NODE_NOT_DONE');
+    const duplicate = await continueReviewedController({ maxNodes: 3, maxReviews: 2, open: () => 'key',
+      run: async () => ({ outcome: 'DONE', node_id: 'api' }), review });
+    expect(duplicate.stop_reason).toBe('NO_PROGRESS');
+    expect(reviewed).toBe(0);
+  });
   it('keeps authority in the host across distinct invocations and emits no key', async () => {
     const opened = vi.fn(() => 'secret-key');
     const observed: string[] = [];

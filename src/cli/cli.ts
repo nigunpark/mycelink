@@ -67,7 +67,7 @@ import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
-import { continueController } from '../engine/codex-continuation.js';
+import { continueController, continueReviewedController } from '../engine/codex-continuation.js';
 import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { changedInputs, runWorktreeSetup, setupInputs, worktreeSetupOf, worktreeSetupSha256 } from '../engine/worktree-setup.js';
 import { modulesOf, verifierFor } from '../engine/modules.js';
@@ -481,13 +481,11 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     const validation = validateFeatureGraph(controlRoot, featureId);
     if (!validation.ok) throw new Error(`CODEX_GRAPH_INVALID: ${validation.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join('; ')}`);
     const rawBound = args.flags['max-nodes'];
-    const maxNodes = rawBound === undefined ? 2 : typeof rawBound === 'string' ? Number(rawBound) : NaN;
+    const maxNodes = rawBound === undefined ? args.flags['review'] === true ? 3 : 2 : typeof rawBound === 'string' ? Number(rawBound) : NaN;
     if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > 8) throw new Error('CODEX_CONTINUATION_BOUND: --max-nodes must be an integer from 1 to 8.');
     const detail: { node_id: string; outcome: string; state: string }[] = [];
-    const result = await continueController({
-      maxNodes,
-      open: () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority,
-      run: async (authority) => {
+    const open = () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority;
+    const run = async (authority: string) => {
         // A newly approved graph has no STATE.json. Initialise it once under
         // this same controller key, without printing or persisting the key.
         if (loadState(featurePaths(controlRoot, featureId).featureDir) === null) {
@@ -509,11 +507,24 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
         const report = cycle.reports[0]!;
         detail.push({ node_id: report.node_id, outcome: report.outcome, state: report.state });
         return { node_id: report.node_id, outcome: code === 0 ? report.outcome : 'NODE_NOT_DONE' };
-      },
-    });
-    const reviewed = args.flags['review'] === true && result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? await runReview(featureId) : null;
-    emit(io, args, { ...result, reports: detail, review: reviewed }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}${reviewed ? `; review ${reviewed.outcome}` : ''}`);
-    return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') && (reviewed === null || reviewed.outcome === 'PASS' || reviewed.outcome === 'GAPS') ? 0 : 1;
+    };
+    if (args.flags['review'] === true) {
+      const rawReviews = args.flags['max-reviews'];
+      const maxReviews = rawReviews === undefined ? 2 : typeof rawReviews === 'string' ? Number(rawReviews) : NaN;
+      if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 3) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 3.');
+      const reviewReports: Awaited<ReturnType<typeof runReview>>[] = [];
+      const result = await continueReviewedController({ maxNodes, maxReviews, open, run, review: async () => {
+        const report = await runReview(featureId);
+        reviewReports.push(report);
+        return report;
+      } });
+      emit(io, args, { ...result, reports: detail, review: reviewReports.at(-1) ?? null }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome}`).join(', ') || '(no node)'}`);
+      return result.stop_reason === 'REVIEW_PASS' ? 0 : 1;
+    }
+    if (args.flags['max-reviews'] !== undefined) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews requires --review.');
+    const result = await continueController({ maxNodes, open, run });
+    emit(io, args, { ...result, reports: detail }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}`);
+    return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? 0 : 1;
   }
   if (sub === 'run' && gate.ok) {
     requireController(args, 'codex run');
