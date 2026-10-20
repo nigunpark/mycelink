@@ -192,11 +192,28 @@ const problem = (code: string, detail: string): Problem => ({ code, path: '/cont
 /** Readback gate for imported DONE nodes; called before any subsequent claim. */
 export function completionImportProblems(controlRoot: string, state: FeatureState_): Problem[] {
   const problems: Problem[] = [];
-  for (const receipt of state.completion_imports ?? []) {
+  const receipts = state.completion_imports ?? [];
+  const counts = new Map<string, number>();
+  for (const receipt of receipts) counts.set(receipt.node_id, (counts.get(receipt.node_id) ?? 0) + 1);
+  // An imported producer has no local attempt. Losing its receipt must not
+  // silently turn the imported DONE into an unproven ordinary completion.
+  for (const [id, rt] of Object.entries(state.nodes)) {
+    if (rt.state === 'DONE' && rt.attempts === 0 && (rt.criterion_ledger?.length ?? 0) > 0 && counts.get(id) !== 1) {
+      problems.push(problem('IMPORT_PROVENANCE_INVALID', `${id} requires exactly one imported completion receipt.`));
+    }
+  }
+  for (const receipt of receipts) {
     const rt = state.nodes[receipt.node_id];
     const sourcePath = `features/${state.feature_id}/imports/${receipt.source_state_sha256}/STATE.json`;
-    if (rt?.state !== 'DONE' || rt.integrated_sha === null ||
-      state.integration_heads?.[receipt.repository] !== receipt.integration_sha ||
+    const current = state.integration_heads?.[receipt.repository];
+    let trusted = false;
+    try {
+      const repo = repositoryPath(loadWorkspace(controlRoot), receipt.repository);
+      trusted = typeof current === 'string' &&
+        resolveRef(repo, integrationBranchName(state.feature_id)) === current &&
+        isAncestor(repo, receipt.integration_sha, current);
+    } catch { /* A missing repository or ref is not eligible. */ }
+    if (rt?.state !== 'DONE' || rt.integrated_sha === null || !trusted ||
       !receipt.files.some((f) => f.path === sourcePath && f.sha256 === receipt.source_state_sha256)) {
       problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} lacks its imported DONE head or pinned source document.`));
       continue;

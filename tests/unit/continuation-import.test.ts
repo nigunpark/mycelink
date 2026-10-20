@@ -210,6 +210,30 @@ describe('durable continuation import', () => {
     expect(completionImportProblems(f.targetRoot, loadState(f.targetDir)!.data).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
     expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(false);
   });
+  it('keeps imported proof eligible after a later integration, but refuses moved refs and missing or duplicate receipts', () => {
+    const f = diskFixture();
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(true);
+    const state = loadState(f.targetDir)!.data;
+    // A later producer extends the feature ref: the import remains pinned to
+    // its original SHA, while the controller's current integration head moves.
+    writeFileSync(join(f.repo, 'src', 'index.mjs'), 'export const value = 2;\n');
+    const later = commitAll(f.repo, 'fix: later producer');
+    git(f.repo, ['branch', '-f', `feature/${feature}`, later]);
+    state.integration_heads = { app: later };
+    expect(completionImportProblems(f.targetRoot, state)).toEqual([]);
+    git(f.repo, ['branch', '-f', `feature/${feature}`, f.head]);
+    expect(completionImportProblems(f.targetRoot, state).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    git(f.repo, ['branch', '-f', `feature/${feature}`, later]);
+    const missing = structuredClone(state);
+    missing.completion_imports = [];
+    expect(completionImportProblems(f.targetRoot, missing).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    const duplicate = structuredClone(state);
+    duplicate.completion_imports!.push(structuredClone(duplicate.completion_imports![0]!));
+    expect(completionImportProblems(f.targetRoot, duplicate).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    state.integration_heads = { app: f.base };
+    git(f.repo, ['branch', '-f', `feature/${feature}`, f.base]);
+    expect(completionImportProblems(f.targetRoot, state).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+  });
   it('refuses stale checkout, wrong registered repository, tampered evidence and missing dependencies without writing state', () => {
     const f = diskFixture();
     const state = readFileSync(join(f.targetDir, 'STATE.json'));

@@ -29426,10 +29426,25 @@ import { existsSync as existsSync25, lstatSync as lstatSync14, mkdirSync as mkdi
 var problem = (code, detail) => ({ code, path: "/continuation_import", detail });
 function completionImportProblems(controlRoot, state) {
   const problems = [];
-  for (const receipt of state.completion_imports ?? []) {
+  const receipts = state.completion_imports ?? [];
+  const counts = /* @__PURE__ */ new Map();
+  for (const receipt of receipts) counts.set(receipt.node_id, (counts.get(receipt.node_id) ?? 0) + 1);
+  for (const [id2, rt] of Object.entries(state.nodes)) {
+    if (rt.state === "DONE" && rt.attempts === 0 && (rt.criterion_ledger?.length ?? 0) > 0 && counts.get(id2) !== 1) {
+      problems.push(problem("IMPORT_PROVENANCE_INVALID", `${id2} requires exactly one imported completion receipt.`));
+    }
+  }
+  for (const receipt of receipts) {
     const rt = state.nodes[receipt.node_id];
     const sourcePath = `features/${state.feature_id}/imports/${receipt.source_state_sha256}/STATE.json`;
-    if (rt?.state !== "DONE" || rt.integrated_sha === null || state.integration_heads?.[receipt.repository] !== receipt.integration_sha || !receipt.files.some((f) => f.path === sourcePath && f.sha256 === receipt.source_state_sha256)) {
+    const current = state.integration_heads?.[receipt.repository];
+    let trusted = false;
+    try {
+      const repo = repositoryPath(loadWorkspace(controlRoot), receipt.repository);
+      trusted = typeof current === "string" && resolveRef(repo, integrationBranchName(state.feature_id)) === current && isAncestor(repo, receipt.integration_sha, current);
+    } catch {
+    }
+    if (rt?.state !== "DONE" || rt.integrated_sha === null || !trusted || !receipt.files.some((f) => f.path === sourcePath && f.sha256 === receipt.source_state_sha256)) {
       problems.push(problem("IMPORT_PROVENANCE_INVALID", `${receipt.node_id} lacks its imported DONE head or pinned source document.`));
       continue;
     }
