@@ -2677,7 +2677,9 @@ export class Orchestrator {
           return executeHostClaimGate({
             controlRoot: this.controlRoot, featureId: this.featureId, gate, cwd, argv,
             deadlineMs: Math.min(600_000, request.maxWallClockMs),
-            requireTests: node.required_evidence.includes('red'),
+            // RED/GREEN need canonical test identities. A declared full-suite
+            // regression may have only exit/output evidence (e.g. node --test).
+            requireTests: gate !== 'regression' && node.required_evidence.includes('red'),
             readRecord: () => this.state().nodes[nodeId]?.evidence[gate],
           });
         });

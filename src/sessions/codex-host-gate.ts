@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import { samePath } from '../security/paths.js';
 import { checkEvidenceOutput, observeEvidenceOutput } from '../evidence/paths.js';
 import { readGateTests } from '../evidence/gate-tests.js';
@@ -30,7 +31,11 @@ export function executeHostClaimGate(args: HostGateOptions): { exitCode: number;
   if (run.error || run.status === null) return fail(run.error && 'code' in run.error && run.error.code === 'ETIMEDOUT' ? 'CHANNEL_GATE_TIMEOUT' : 'CHANNEL_GATE_EXEC_FAILED');
   if (run.status !== 0) return { exitCode: run.status, output };
   const record = args.readRecord();
-  if (!record || record.output_sha256 === before || record.kind !== args.gate || record.exit_code !== 0 || !samePath(record.cwd, args.cwd)) return fail('CHANNEL_GATE_EVIDENCE_MISSING');
+  // The tdd CLI exits zero on an accepted RED, but its evidence records the
+  // verifier's nonzero exit; GREEN and regression record zero instead.
+  if (!record || record.output_sha256 === before || record.kind !== args.gate ||
+      (args.gate === 'red' ? record.exit_code === 0 : record.exit_code !== 0) ||
+      !samePath(isAbsolute(record.cwd) ? record.cwd : resolve(args.controlRoot, record.cwd), args.cwd)) return fail('CHANNEL_GATE_EVIDENCE_MISSING');
   if (checkEvidenceOutput(args.controlRoot, args.featureId, record, { overlay: false }) !== null) return fail('CHANNEL_GATE_OUTPUT_INVALID');
   if (!record.results) return args.requireTests === false ? { exitCode: 0, output, outputSha256: record.output_sha256, testIds: [] } : fail('CHANNEL_GATE_TESTS_MISSING');
   const observed = observeEvidenceOutput(args.controlRoot, args.featureId, record.results.path);

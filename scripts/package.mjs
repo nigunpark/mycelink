@@ -119,7 +119,9 @@ const runtimePkg = {
   engines: pkg.engines,
   bin: pkg.bin,
 };
-entries.push({ name: 'package.json', data: Buffer.from(JSON.stringify(runtimePkg, null, 2) + '\n', 'utf8'), mode: 0o644 });
+const runtimePkgBytes = Buffer.from(JSON.stringify(runtimePkg, null, 2) + '\n', 'utf8');
+entries.push({ name: 'package.json', data: runtimePkgBytes, mode: 0o644 });
+entries.push({ name: 'codex-plugin/package.json', data: runtimePkgBytes, mode: 0o644 });
 entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
 const zip = buildZip(entries);

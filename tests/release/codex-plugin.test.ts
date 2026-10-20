@@ -86,6 +86,7 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     }
     expect(names).toContain('codex-plugin/bin/mycelink.mjs');
     expect(names).toContain('codex-plugin/dist/mycelink.mjs');
+    expect(names).toContain('codex-plugin/package.json');
     expect(names).toContain('codex-plugin/schemas/portfolio-graph.schema.json');
 
     const manifest = JSON.parse(readFileSync(join(source, 'codex-plugin/plugin.json'), 'utf8')) as { name: string; version: string; description: string };
@@ -182,6 +183,9 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(existsSync(join(cache, 'bin/mycelink.mjs'))).toBe(true);
     expect(existsSync(join(cache, 'dist/mycelink.mjs'))).toBe(true);
     expect(existsSync(join(cache, 'schemas/portfolio-graph.schema.json'))).toBe(true);
+    const installedVersion = spawnSync(process.execPath, [join(cache, 'bin/mycelink.mjs'), '--version'], { cwd: output, encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    expect(installedVersion.status, installedVersion.stderr).toBe(0);
+    expect(installedVersion.stdout).toContain(VERSION);
     const cachedRun = spawnSync(process.execPath, [join(cache, 'bin/mycelink.mjs'), 'codex', 'init', join(output, 'installed-codex-control'), '--json'], {
       cwd: output, env: { ...process.env, CODEX_HOME: home }, encoding: 'utf8', timeout: 30_000, windowsHide: true,
     });
