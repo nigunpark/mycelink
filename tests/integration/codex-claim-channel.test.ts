@@ -5,6 +5,7 @@ import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
 import { git, makeGitRepo } from '../helpers/git-fixture.js';
 import { createWorkerWorktree } from '../../src/git/worktree.js';
 import { ClaimChannel, type LiveClaim } from '../../src/sessions/codex-claim-channel.js';
+import { tddPolicyFor } from '../../src/engine/tdd-history.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -20,6 +21,7 @@ function fixture() {
     claimId: 'claim-1', featureId: 'FEAT-101', nodeId: 'FEAT-101.api.impl',
     repoPath: repo, worktree: wt, expectedHead: git(wt, ['rev-parse', 'HEAD']),
     allowedPaths: ['tests/**', 'src/**'], forbiddenPaths: ['src/forbidden.js'],
+    tddPolicy: tddPolicyFor(undefined),
     nextGate, gateCommands: [
       { gate: 'red', argv: ['node', 'controller', 'tdd', 'red'] },
       { gate: 'green', argv: ['node', 'controller', 'tdd', 'green'] },
@@ -32,6 +34,19 @@ function fixture() {
 }
 
 describe('claim-scoped controller channel core', () => {
+  it('refuses GREEN on the accepted RED test commit without a production edit, then permits it after an edit', () => {
+    const f = fixture();
+    writeFileSync(join(f.wt, 'tests/a.test.js'), 'failing assertion\n');
+    expect(f.channel.handle({ ...f.identity, sequence: 1, operation: 'gate', gate: 'red' })).toMatchObject({ ok: true });
+    expect(f.channel.handle({ ...f.identity, sequence: 2, operation: 'commit', paths: ['tests/a.test.js'], message: 'test: red' })).toMatchObject({ ok: true });
+    f.setNext('green');
+    expect(f.channel.handle({ ...f.identity, sequence: 3, operation: 'gate', gate: 'green' })).toMatchObject({ ok: false, code: 'CHANNEL_GREEN_UNCHANGED_RED' });
+    expect(f.executed).toHaveLength(1);
+    writeFileSync(join(f.wt, 'src/a.js'), 'implementation\n');
+    expect(f.channel.handle({ ...f.identity, sequence: 4, operation: 'gate', gate: 'green' })).toMatchObject({ ok: true, exitCode: 0 });
+    expect(f.executed).toHaveLength(2);
+  });
+
   it('executes only live declared gate argv and commits only owned explicit paths', () => {
     const f = fixture();
     const gate = f.channel.handle({ ...f.identity, sequence: 1, operation: 'gate', gate: 'red' });

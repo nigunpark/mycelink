@@ -1842,6 +1842,7 @@ export class Orchestrator {
       repoPath: repositoryPath(this.workspace, node.repository), worktree: claim.worktree,
       expectedHead: resolveRef(claim.worktree, 'HEAD'),
       allowedPaths: [...node.allowed_paths], forbiddenPaths: [...(node.forbidden_paths ?? [])],
+      tddPolicy: claim.tdd_policy ?? this.claimTddPolicy(node.repository),
       nextGate, gateCommands: this.gateCommands(nodeId, capability),
     };
   }

@@ -30949,6 +30949,8 @@ var ClaimChannel = class {
   liveClaim;
   runGate;
   sequence = 0;
+  acceptedRed = false;
+  redHead = null;
   handle(input) {
     const request = parse2(input);
     if (!request) return { ok: false, sequence: null, code: "CHANNEL_REQUEST_INVALID" };
@@ -30967,12 +30969,26 @@ var ClaimChannel = class {
     }
     this.sequence = sequence;
     if (request.operation === "gate") {
+      if (request.gate === "green" && this.acceptedRed && scope.tddPolicy) {
+        try {
+          const working = redBinding(scope.worktree, scope.tddPolicy, null).production;
+          const committed = this.redHead === null ? [] : runGit(scope.worktree, ["diff", "--name-only", "-z", this.redHead, "HEAD"]).stdout.split("\0").filter((p) => p && !isTestPath(scope.tddPolicy, p));
+          if (working.length === 0 && committed.length === 0) return fail("CHANNEL_GREEN_UNCHANGED_RED");
+        } catch {
+          return fail("CHANNEL_CLAIM_STALE");
+        }
+      }
       const argv = scope.gateCommands.find((g) => g.gate === request.gate).argv;
       try {
         const result = this.runGate(argv, scope.worktree);
         if (!Number.isInteger(result.exitCode) || typeof result.output !== "string") throw new Error("invalid gate response");
         const now3 = this.liveClaim();
         if (!now3 || now3.claimId !== scope.claimId || now3.featureId !== scope.featureId || now3.nodeId !== scope.nodeId || !samePath(now3.worktree, scope.worktree)) return fail("CHANNEL_CLAIM_STALE");
+        if (request.gate === "red" && result.exitCode === 0) {
+          this.acceptedRed = true;
+          this.redHead = scope.tddPolicy ? resolveRef(scope.worktree, "HEAD") : null;
+        }
+        if (request.gate === "green" && result.exitCode === 0) this.acceptedRed = false;
         const output = result.output.slice(0, 64 * 1024);
         return result.exitCode === 0 ? {
           ok: true,
@@ -34161,6 +34177,7 @@ var Orchestrator = class _Orchestrator {
       expectedHead: resolveRef(claim.worktree, "HEAD"),
       allowedPaths: [...node.allowed_paths],
       forbiddenPaths: [...node.forbidden_paths ?? []],
+      tddPolicy: claim.tdd_policy ?? this.claimTddPolicy(node.repository),
       nextGate,
       gateCommands: this.gateCommands(nodeId, capability)
     };

@@ -1,6 +1,8 @@
 /** Bounded request protocol core. Transport and live-claim lookup are controller-owned. */
 import { commitClaimPaths } from './codex-controller-git.js';
 import { samePath } from '../security/paths.js';
+import { isTestPath, redBinding, type TddPolicy } from '../engine/tdd-history.js';
+import { resolveRef, runGit } from '../git/git.js';
 
 export interface LiveClaim {
   claimId: string;
@@ -11,6 +13,8 @@ export interface LiveClaim {
   expectedHead: string;
   allowedPaths: string[];
   forbiddenPaths: string[];
+  /** Controller-bound test classification for this claim, never worker input. */
+  tddPolicy?: TddPolicy;
   /** Derived from the current graph and runtime state, never the request. */
   nextGate: 'red' | 'green' | 'regression' | null;
   gateCommands: { gate: 'red' | 'green' | 'regression'; argv: string[] }[];
@@ -44,6 +48,8 @@ function parse(input: unknown): Request | null {
 /** One instance per dispatched claim; each well-formed numbered request is consumed once. */
 export class ClaimChannel {
   private sequence = 0;
+  private acceptedRed = false;
+  private redHead: string | null = null;
   constructor(
     private readonly liveClaim: () => LiveClaim | null,
     private readonly runGate: (argv: readonly string[], cwd: string) => { exitCode: number; output: string; outputSha256?: string; testIds?: string[] },
@@ -63,6 +69,16 @@ export class ClaimChannel {
     }
     this.sequence = sequence;
     if (request.operation === 'gate') {
+      // A test-only commit changes HEAD but not production. Do not spend a
+      // verifier run on that identical RED production snapshot. The real gate
+      // still decides whether an edited implementation actually passes.
+      if (request.gate === 'green' && this.acceptedRed && scope.tddPolicy) {
+        try {
+          const working = redBinding(scope.worktree, scope.tddPolicy, null).production;
+          const committed = this.redHead === null ? [] : runGit(scope.worktree, ['diff', '--name-only', '-z', this.redHead, 'HEAD']).stdout.split('\0').filter((p) => p && !isTestPath(scope.tddPolicy!, p));
+          if (working.length === 0 && committed.length === 0) return fail('CHANNEL_GREEN_UNCHANGED_RED');
+        } catch { return fail('CHANNEL_CLAIM_STALE'); }
+      }
       const argv = scope.gateCommands.find((g) => g.gate === request.gate)!.argv;
       try {
         const result = this.runGate(argv, scope.worktree);
@@ -70,6 +86,11 @@ export class ClaimChannel {
         // A gate may rotate the claim; its CLI records evidence only for the live holder.
         const now = this.liveClaim();
         if (!now || now.claimId !== scope.claimId || now.featureId !== scope.featureId || now.nodeId !== scope.nodeId || !samePath(now.worktree, scope.worktree)) return fail('CHANNEL_CLAIM_STALE');
+        if (request.gate === 'red' && result.exitCode === 0) {
+          this.acceptedRed = true;
+          this.redHead = scope.tddPolicy ? resolveRef(scope.worktree, 'HEAD') : null;
+        }
+        if (request.gate === 'green' && result.exitCode === 0) this.acceptedRed = false;
         const output = result.output.slice(0, 64 * 1024);
         return result.exitCode === 0
           ? { ok: true, sequence, exitCode: 0, output,
