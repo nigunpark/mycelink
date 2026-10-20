@@ -12,6 +12,8 @@ export interface CodexCliAdapterOptions {
   prefixArgs?: string[];
   extraArgs?: string[];
   sandbox?: 'read-only' | 'workspace-write';
+  /** Supplied only after the controller validates disposable repository opt-in. */
+  disposableRepositories?: boolean;
 }
 
 /** Usage in Codex turn.completed is the thread total, not an incremental turn delta. */
@@ -67,6 +69,7 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     }
     return [...(this.options.prefixArgs ?? []), 'exec', '--json', '--cd', request.cwd,
       '--sandbox', this.options.sandbox ?? 'workspace-write',
+      ...(process.platform === 'win32' && this.options.disposableRepositories === true ? ['-c', 'windows.sandbox=mxc'] : []),
       ...(request.model === 'codex-default' ? [] : ['--model', request.model]), '-'];
   }
 }

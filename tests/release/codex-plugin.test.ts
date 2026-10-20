@@ -86,6 +86,7 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     }
     expect(names).toContain('codex-plugin/bin/mycelink.mjs');
     expect(names).toContain('codex-plugin/dist/mycelink.mjs');
+    expect(names).toContain('codex-plugin/schemas/portfolio-graph.schema.json');
 
     const manifest = JSON.parse(readFileSync(join(source, 'codex-plugin/plugin.json'), 'utf8')) as { name: string; version: string; description: string };
     expect(manifest).toMatchObject({ name: 'mycelink', version: VERSION });
@@ -180,6 +181,7 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     const cachedSkill = join(cache, 'skills/mycelink-status/SKILL.md');
     expect(existsSync(join(cache, 'bin/mycelink.mjs'))).toBe(true);
     expect(existsSync(join(cache, 'dist/mycelink.mjs'))).toBe(true);
+    expect(existsSync(join(cache, 'schemas/portfolio-graph.schema.json'))).toBe(true);
     const cachedRun = spawnSync(process.execPath, [join(cache, 'bin/mycelink.mjs'), 'codex', 'init', join(output, 'installed-codex-control'), '--json'], {
       cwd: output, env: { ...process.env, CODEX_HOME: home }, encoding: 'utf8', timeout: 30_000, windowsHide: true,
     });
@@ -196,7 +198,7 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(installedChecks.find((entry) => entry.name === 'codex login')?.ok).toBe(false);
     expect(installedChecks.find((entry) => entry.name === 'codex runtime')?.ok).toBe(false);
     expect(existsSync(join(output, 'installed-codex-control', '.claude', 'settings.json'))).toBe(false);
-    expect(readFileSync(cachedSkill, 'utf8')).toContain('execution is disabled pending security review');
+    expect(readFileSync(cachedSkill, 'utf8')).toContain('experimental disposable worker preflight');
     const discovered = (await discoveredSkills(home, output)).filter((skill) => skill.pluginId === `mycelink@${MARKETPLACE}`);
     expect(discovered.map((s) => s.name).sort()).toEqual(['init', 'prd', 'plan', 'status', 'run', 'resume', 'verify', 'deliver'].map((n) => `mycelink:mycelink-${n}`).sort());
     for (const skill of discovered) expect(skill).toMatchObject({ enabled: true, pluginId: `mycelink@${MARKETPLACE}`, path: join(cache, 'skills', skill.name.split(':')[1]!, 'SKILL.md') });

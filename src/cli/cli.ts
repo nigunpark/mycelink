@@ -234,6 +234,7 @@ function adapterFor(controlRoot: string): ClaudeCliAdapter | CodexCliAdapter {
       executable: config.provider.executable ?? 'codex',
       extraArgs: config.provider.extra_args,
       sandbox: config.provider.sandbox ?? 'workspace-write',
+      disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok,
     });
   }
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];

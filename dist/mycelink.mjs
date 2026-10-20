@@ -42303,6 +42303,7 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
       request.cwd,
       "--sandbox",
       this.options.sandbox ?? "workspace-write",
+      ...process.platform === "win32" && this.options.disposableRepositories === true ? ["-c", "windows.sandbox=mxc"] : [],
       ...request.model === "codex-default" ? [] : ["--model", request.model],
       "-"
     ];
@@ -45680,7 +45681,8 @@ function adapterFor(controlRoot) {
     return new CodexCliAdapter({
       executable: config.provider.executable ?? "codex",
       extraArgs: config.provider.extra_args,
-      sandbox: config.provider.sandbox ?? "workspace-write"
+      sandbox: config.provider.sandbox ?? "workspace-write",
+      disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok
     });
   }
   const fakeExecutable = process.env["MYCELINK_FAKE_CLAUDE"];

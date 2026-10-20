@@ -30,6 +30,19 @@ describe('Codex CLI adapter contract', () => {
     expect(new module.CodexCliAdapter({ executable: 'codex', sandbox: 'read-only' }).buildArgs(request, 'id')).toContain('read-only');
   });
 
+  it('selects native Windows MXC only for explicitly opted-in disposable workers', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const defaults = new CodexCliAdapter({ executable: 'codex' }).buildArgs(request, 'id');
+    const opted = new CodexCliAdapter({ executable: 'codex', disposableRepositories: true }).buildArgs(request, 'id');
+    expect(defaults).not.toContain('windows.sandbox=mxc');
+    expect(opted).toEqual(process.platform === 'win32'
+      ? ['exec', '--json', '--cd', request.cwd, '--sandbox', 'workspace-write', '-c', 'windows.sandbox=mxc', '--model', request.model, '-']
+      : defaults);
+    expect(opted).not.toContain('danger-full-access');
+    expect(opted).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(() => new CodexCliAdapter({ executable: 'codex', disposableRepositories: true, extraArgs: ['-c', 'windows.sandbox=disabled'] })).toThrow(/CODEX_ARGS_DENIED/);
+  });
+
   it('counts completed turns and replacement usage totals, and records top-level provider failure', async () => {
     const module = await import('../../src/sessions/codex-cli-adapter.js').catch(() => null);
     expect(module?.CodexStreamParser).toBeTypeOf('function');
