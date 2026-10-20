@@ -236,6 +236,9 @@ function adapterFor(controlRoot: string): ClaudeCliAdapter | CodexCliAdapter {
       sandbox: config.provider.sandbox ?? 'workspace-write',
       disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok,
       wsl: config.experimental_codex?.wsl,
+      ...(config.experimental_codex?.wsl ? {
+        gitTrustRoots: [controlRoot, ...loadRepositories(controlRoot).repositories.map((repo) => resolve(controlRoot, repo.path))],
+      } : {}),
     });
   }
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];

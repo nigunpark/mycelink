@@ -42324,6 +42324,7 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
     if (options.wsl) {
       if (process.platform !== "win32" || !options.disposableRepositories || options.sandbox === "read-only") throw new Error("WSL_CONFIG: requires Windows disposable workspace-write workers");
       wslCodexPrefix(options.wsl);
+      options.gitTrustRoots?.forEach(windowsToWslPath);
     }
     this.options = options;
     this.executable = options.executable;
@@ -42341,8 +42342,15 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
     if (request.addDirs?.length || request.allowedTools?.length || request.disallowedTools?.length) {
       throw new Error("CODEX_ARGS_DENIED: Claude tool and extra writable-directory grants cannot be translated safely");
     }
+    const roots = this.options.wsl && this.options.gitTrustRoots?.length ? [...new Set([...this.options.gitTrustRoots, request.cwd].map(windowsToWslPath))] : [];
+    const trust = roots.length ? [
+      "/usr/bin/env",
+      `GIT_CONFIG_COUNT=${roots.length}`,
+      ...roots.flatMap((root, i) => [`GIT_CONFIG_KEY_${i}=safe.directory`, `GIT_CONFIG_VALUE_${i}=${root}`])
+    ] : [];
+    const prefix = this.options.wsl ? wslCodexPrefix(this.options.wsl) : null;
     return [
-      ...this.options.wsl ? wslCodexPrefix(this.options.wsl) : this.options.prefixArgs ?? [],
+      ...prefix ? [...prefix.slice(0, -3), ...trust, ...prefix.slice(-3)] : this.options.prefixArgs ?? [],
       "exec",
       "--json",
       "--cd",
@@ -45737,7 +45745,10 @@ function adapterFor(controlRoot) {
       extraArgs: config.provider.extra_args,
       sandbox: config.provider.sandbox ?? "workspace-write",
       disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok,
-      wsl: config.experimental_codex?.wsl
+      wsl: config.experimental_codex?.wsl,
+      ...config.experimental_codex?.wsl ? {
+        gitTrustRoots: [controlRoot, ...loadRepositories(controlRoot).repositories.map((repo) => resolve27(controlRoot, repo.path))]
+      } : {}
     });
   }
   const fakeExecutable = process.env["MYCELINK_FAKE_CLAUDE"];

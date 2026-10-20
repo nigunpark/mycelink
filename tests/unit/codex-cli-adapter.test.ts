@@ -65,6 +65,22 @@ describe('Codex CLI adapter contract', () => {
     expect(new CodexCliAdapter({ executable: 'codex' }).gateLines({ ...request, gateCommands: gates })[0]?.line).toContain('C:/scratch/control');
   });
 
+  it('trusts only declared disposable Git locations in WSL, never a wildcard', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true,
+      wsl: { distribution: 'Ubuntu', user: 'example-user' },
+      gitTrustRoots: ['C:/scratch/control', 'C:/scratch/orders-api', 'C:/scratch/orders-web'] });
+    const argv = adapter.buildArgs({ ...request, cwd: 'C:/scratch/control/worktrees/orders-api__ORD-101.api' }, 'id');
+    expect(argv.slice(0, 8)).toEqual(['-d', 'Ubuntu', '-u', 'example-user', '--', '/usr/bin/env', 'GIT_CONFIG_COUNT=4', 'GIT_CONFIG_KEY_0=safe.directory']);
+    expect(argv).toContain('GIT_CONFIG_VALUE_0=/mnt/c/scratch/control');
+    expect(argv).toContain('GIT_CONFIG_VALUE_1=/mnt/c/scratch/orders-api');
+    expect(argv).toContain('GIT_CONFIG_VALUE_2=/mnt/c/scratch/orders-web');
+    expect(argv).toContain('GIT_CONFIG_VALUE_3=/mnt/c/scratch/control/worktrees/orders-api__ORD-101.api');
+    expect(argv).not.toContain('GIT_CONFIG_VALUE_0=*');
+    expect(() => new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true,
+      wsl: { distribution: 'Ubuntu', user: 'example-user' }, gitTrustRoots: ['*'] })).toThrow(/WSL_PATH/);
+  });
+
   it('counts completed turns and replacement usage totals, and records top-level provider failure', async () => {
     const module = await import('../../src/sessions/codex-cli-adapter.js').catch(() => null);
     expect(module?.CodexStreamParser).toBeTypeOf('function');
