@@ -46028,6 +46028,22 @@ function acceptance(controlRoot, workspace, name, step, candidateId, evidenceDir
   }
 }
 
+// src/engine/codex-continuation.ts
+async function continueController(options) {
+  if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1 || options.maxNodes > 8) {
+    throw new Error("CODEX_CONTINUATION_BOUND: --max-nodes must be an integer from 1 to 8.");
+  }
+  const authority = options.open();
+  const nodes = [];
+  for (let i = 0; i < options.maxNodes; i++) {
+    const result = await options.run(authority);
+    if (!result.node_id || nodes.includes(result.node_id)) return { stop_reason: "NO_PROGRESS", nodes };
+    nodes.push(result.node_id);
+    if (result.outcome !== "DONE") return { stop_reason: "NODE_NOT_DONE", nodes };
+  }
+  return { stop_reason: "BOUND_REACHED", nodes };
+}
+
 // src/cli/cli.ts
 function isLink2(path) {
   try {
@@ -46051,7 +46067,9 @@ var USAGE = `mycelink <group> <command> [options]
   doctor                                     environment and workspace health
   codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
   codex status <feature>                     inspect local plan and runtime denial
-  codex run|resume|verify|deliver <feature>  refuse unsupported Codex execution
+  codex run <feature>                      run one disposable worker with held authority
+  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations
+  codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
   init <control-repo-path>                   create a control repository
   repo register|modules|audit|lock           repository manifest operations (register --worktree-setup <argv JSON>|none; modules: the verifier allowlist)
@@ -46326,7 +46344,7 @@ ${USAGE}`);
   }
 }
 async function codexGroup(args, io) {
-  const sub = requirePositional(args, 1, "init|status|run|resume|verify|deliver");
+  const sub = requirePositional(args, 1, "init|status|run|continue|resume|verify|deliver");
   if (sub === "init") {
     assertControllerRole(args, "codex init");
     const target = resolve28(requirePositional(args, 2, "control-repo-path"));
@@ -46337,12 +46355,57 @@ async function codexGroup(args, io) {
     emit2(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
-  if (!["status", "run", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  if (!["status", "run", "continue", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
   if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync45(controlPaths(controlRoot).config)) {
     throw new Error("CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.");
   }
   const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === "continue" && gate.ok) {
+    assertControllerRole(args, "codex continue");
+    if (args.flags["authority"] !== void 0 || args.flags["recover"] !== void 0 || args.flags["takeover"] !== void 0) {
+      throw new Error("CODEX_CONTINUATION_AUTHORITY: continue opens its own new authority; it does not recover, take over or accept a key.");
+    }
+    const featureId2 = requirePositional(args, 2, "feature-id");
+    const validation = validateFeatureGraph(controlRoot, featureId2);
+    if (!validation.ok) throw new Error(`CODEX_GRAPH_INVALID: ${validation.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("; ")}`);
+    const rawBound = args.flags["max-nodes"];
+    const maxNodes = rawBound === void 0 ? 2 : typeof rawBound === "string" ? Number(rawBound) : NaN;
+    if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > 8) throw new Error("CODEX_CONTINUATION_BOUND: --max-nodes must be an integer from 1 to 8.");
+    const detail = [];
+    const result = await continueController({
+      maxNodes,
+      open: () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority,
+      run: async (authority) => {
+        if (loadState(featurePaths(controlRoot, featureId2).featureDir) === null) {
+          const initOutput = [];
+          const initCode = featureGroup({ ...args, positional: ["feature", "init", featureId2], flags: { ...args.flags, authority, json: true } }, {
+            out: (text) => initOutput.push(text),
+            err: (text) => {
+              throw new Error(text);
+            }
+          });
+          if (initCode !== 0) throw new Error(`CODEX_CONTINUATION_INIT_FAILED: ${initOutput.join(" ").slice(0, 500)}`);
+        }
+        const plan = orchestratorFor(controlRoot, featureId2).plan();
+        if (plan.scheduled.length !== 1) return { outcome: "NO_PROGRESS" };
+        const output = [];
+        const code = await orchestrateGroup({ ...args, positional: ["orchestrate", "once", featureId2], flags: { ...args.flags, authority, json: true } }, {
+          out: (text) => output.push(text),
+          err: (text) => {
+            throw new Error(text);
+          }
+        });
+        const cycle = JSON.parse(output.join("\n"));
+        if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error("CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.");
+        const report2 = cycle.reports[0];
+        detail.push({ node_id: report2.node_id, outcome: report2.outcome, state: report2.state });
+        return { node_id: report2.node_id, outcome: code === 0 ? report2.outcome : "NODE_NOT_DONE" };
+      }
+    });
+    emit2(io, args, { ...result, reports: detail }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(", ") || "(no node)"}`);
+    return result.stop_reason === "BOUND_REACHED" && detail.every((r) => r.outcome === "DONE") ? 0 : 1;
+  }
   if (sub === "run" && gate.ok) {
     requireController(args, "codex run");
     const featureId2 = requirePositional(args, 2, "feature-id");

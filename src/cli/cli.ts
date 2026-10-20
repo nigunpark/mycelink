@@ -65,6 +65,7 @@ import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
+import { continueController } from '../engine/codex-continuation.js';
 import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { changedInputs, runWorktreeSetup, setupInputs, worktreeSetupOf, worktreeSetupSha256 } from '../engine/worktree-setup.js';
 import { modulesOf, verifierFor } from '../engine/modules.js';
@@ -113,7 +114,9 @@ const USAGE = `mycelink <group> <command> [options]
   doctor                                     environment and workspace health
   codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
   codex status <feature>                     inspect local plan and runtime denial
-  codex run|resume|verify|deliver <feature>  refuse unsupported Codex execution
+  codex run <feature>                      run one disposable worker with held authority
+  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations
+  codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
   init <control-repo-path>                   create a control repository
   repo register|modules|audit|lock           repository manifest operations (register --worktree-setup <argv JSON>|none; modules: the verifier allowlist)
@@ -434,7 +437,7 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
 /** Codex host workflow: opt-in disposable worker slice, not review or delivery. */
 async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
-  const sub = requirePositional(args, 1, 'init|status|run|resume|verify|deliver');
+  const sub = requirePositional(args, 1, 'init|status|run|continue|resume|verify|deliver');
   if (sub === 'init') {
     assertControllerRole(args, 'codex init');
     const target = resolve(requirePositional(args, 2, 'control-repo-path'));
@@ -446,12 +449,54 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     emit(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
-  if (!['status', 'run', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  if (!['status', 'run', 'continue', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
   if (loadConfig(controlRoot).provider.provider !== 'codex' || !existsSync(controlPaths(controlRoot).config)) {
     throw new Error('CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.');
   }
   const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === 'continue' && gate.ok) {
+    assertControllerRole(args, 'codex continue');
+    if (args.flags['authority'] !== undefined || args.flags['recover'] !== undefined || args.flags['takeover'] !== undefined) {
+      throw new Error('CODEX_CONTINUATION_AUTHORITY: continue opens its own new authority; it does not recover, take over or accept a key.');
+    }
+    const featureId = requirePositional(args, 2, 'feature-id');
+    const validation = validateFeatureGraph(controlRoot, featureId);
+    if (!validation.ok) throw new Error(`CODEX_GRAPH_INVALID: ${validation.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join('; ')}`);
+    const rawBound = args.flags['max-nodes'];
+    const maxNodes = rawBound === undefined ? 2 : typeof rawBound === 'string' ? Number(rawBound) : NaN;
+    if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > 8) throw new Error('CODEX_CONTINUATION_BOUND: --max-nodes must be an integer from 1 to 8.');
+    const detail: { node_id: string; outcome: string; state: string }[] = [];
+    const result = await continueController({
+      maxNodes,
+      open: () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority,
+      run: async (authority) => {
+        // A newly approved graph has no STATE.json. Initialise it once under
+        // this same controller key, without printing or persisting the key.
+        if (loadState(featurePaths(controlRoot, featureId).featureDir) === null) {
+          const initOutput: string[] = [];
+          const initCode = featureGroup({ ...args, positional: ['feature', 'init', featureId], flags: { ...args.flags, authority, json: true } }, {
+            out: (text) => initOutput.push(text), err: (text) => { throw new Error(text); },
+          });
+          if (initCode !== 0) throw new Error(`CODEX_CONTINUATION_INIT_FAILED: ${initOutput.join(' ').slice(0, 500)}`);
+        }
+        // Refuse parallel schedules: the bound counts actual node invocations.
+        const plan = orchestratorFor(controlRoot, featureId).plan();
+        if (plan.scheduled.length !== 1) return { outcome: 'NO_PROGRESS' };
+        const output: string[] = [];
+        const code = await orchestrateGroup({ ...args, positional: ['orchestrate', 'once', featureId], flags: { ...args.flags, authority, json: true } }, {
+          out: (text) => output.push(text), err: (text) => { throw new Error(text); },
+        });
+        const cycle = JSON.parse(output.join('\n')) as { reports: { node_id: string; outcome: string; state: string }[] };
+        if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error('CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.');
+        const report = cycle.reports[0]!;
+        detail.push({ node_id: report.node_id, outcome: report.outcome, state: report.state });
+        return { node_id: report.node_id, outcome: code === 0 ? report.outcome : 'NODE_NOT_DONE' };
+      },
+    });
+    emit(io, args, { ...result, reports: detail }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}`);
+    return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? 0 : 1;
+  }
   if (sub === 'run' && gate.ok) {
     requireController(args, 'codex run');
     const featureId = requirePositional(args, 2, 'feature-id');
