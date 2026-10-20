@@ -88,7 +88,9 @@ describe('read-only continuation completion import preflight', () => {
   });
   it('rejects unrelated ancestry, missing proof, and duplicate or replayed target state', () => {
     const f = fixture();
+    git(f.repo, ['reset', '--hard', f.base]);
     expect(codes({ ...f.args, head: f.base })).toContain('IMPORT_ANCESTRY');
+    git(f.repo, ['reset', '--hard', f.head]);
     expect(codes({ ...f.args, completedNodes: [producer, producer] })).toContain('IMPORT_DUPLICATE');
     const target = structuredClone(f.args.targetState);
     target.nodes[producer]!.state = 'DONE';
@@ -97,6 +99,12 @@ describe('read-only continuation completion import preflight', () => {
     source.data.nodes[producer]!.criteria = [];
     const bytes = Buffer.from(JSON.stringify(source));
     expect(codes({ ...f.args, sourceStateBytes: bytes, expectedSourceSha256: sha(bytes) })).toContain('IMPORT_CRITERION_MISSING');
+  });
+  it('does not accept a declared head that is not the checkout HEAD', () => {
+    const f = fixture();
+    git(f.repo, ['reset', '--hard', f.base]);
+    expect(codes(f.args)).toContain('IMPORT_HEAD_MISMATCH');
+    expect(f.args.targetState.nodes[producer]!.state).toBe('PLANNED');
   });
   it('does not import a dependent completion without its producer or with a duplicate accepted proof', () => {
     const f = fixture();

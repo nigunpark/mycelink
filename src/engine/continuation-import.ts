@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import type { FeatureState_, PortfolioGraph, Problem } from '../model/types.js';
 import { checkEvidenceOutput } from '../evidence/paths.js';
-import { isAncestor } from '../git/git.js';
+import { isAncestor, runGit } from '../git/git.js';
 import { hashGraph } from '../graph/validate.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { completionStanding } from './criterion-coverage.js';
@@ -51,6 +51,11 @@ export function validateCompletionImport(input: CompletionImportInput): { ok: bo
   const targetHash = hashGraph(input.targetGraph);
   if (sourceHash !== targetHash || data.graph_hash !== sourceHash || input.targetState.graph_hash !== targetHash || data.feature_id !== input.sourceGraph.feature_id || input.targetState.feature_id !== input.targetGraph.feature_id || data.acceptance?.sha256 === undefined || data.acceptance.sha256 !== input.targetState.acceptance?.sha256) {
     fail('IMPORT_GRAPH_MISMATCH', 'The source and new control must bind the exact same graph, feature and approved acceptance manifest.');
+    return { ok: false, problems };
+  }
+  const checkout = runGit(input.repositoryPath, ['rev-parse', 'HEAD'], { allowFail: true });
+  if (checkout.exitCode !== 0 || checkout.stdout.trim() !== input.head) {
+    fail('IMPORT_HEAD_MISMATCH', 'The declared authoritative head is not the target repository checkout HEAD.');
     return { ok: false, problems };
   }
   const seen = new Set<string>();
