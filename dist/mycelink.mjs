@@ -46226,6 +46226,37 @@ async function continueReviewedController(options) {
   }
 }
 
+// src/engine/codex-finalize.ts
+async function finalizeCodexDelivery(controlRoot, featureId, orchestrator) {
+  const paths = featurePaths(controlRoot, featureId);
+  const state = loadState(paths.featureDir)?.data;
+  if (!state) throw new Error("CODEX_FINALIZE_NO_STATE");
+  if (state.current_candidate || state.accepted_deliveries && Object.keys(state.accepted_deliveries).length > 0) {
+    throw new Error("CODEX_FINALIZE_REPLAY: candidate or delivery already exists");
+  }
+  const review = reviewGateProblems(controlRoot, featureId);
+  if (review.length > 0) throw new Error(`CODEX_FINALIZE_REVIEW_REQUIRED: ${review.join("; ")}`);
+  const graph = loadGraph(controlRoot, featureId);
+  const pending = graph.nodes.filter((node) => state.nodes[node.id]?.state !== "DONE" && state.nodes[node.id]?.state !== "EXCLUDED");
+  if (pending.length !== 1 || pending[0]?.node_type !== "candidate-build" || !["READY", "PLANNED"].includes(state.nodes[pending[0].id]?.state ?? "")) {
+    throw new Error(`CODEX_FINALIZE_NOT_READY: expected only an unclaimed candidate-build node, got ${pending.map((n) => `${n.id}:${state.nodes[n.id]?.state}`).join(", ")}`);
+  }
+  const dispatched = await orchestrator.dispatchNext();
+  if (dispatched.status !== "ALL_SETTLED" || dispatched.controller_reports.length !== 1 || dispatched.controller_reports[0]?.node_id !== pending[0].id || dispatched.controller_reports[0]?.outcome !== "DONE") {
+    throw new Error(`CODEX_FINALIZE_CANDIDATE_FAILED: ${dispatched.status}: ${dispatched.detail}`);
+  }
+  const candidateId = loadState(paths.featureDir)?.data.current_candidate;
+  if (!candidateId) throw new Error("CODEX_FINALIZE_CANDIDATE_MISSING");
+  const candidate = loadCandidate(paths.featureDir, candidateId);
+  const workspace = loadWorkspace(controlRoot);
+  const expected = portfolioRefs(workspace, featureId, { trust: { graph, state: loadState(paths.featureDir).data } });
+  const drift = verifyCandidate(candidate, { controlRepo: controlRoot, repositories: expected, requiredRepositories: registeredRepositories(workspace) });
+  if (!drift.ok) throw new Error(`CODEX_FINALIZE_CANDIDATE_DRIFT: ${drift.problems.map((p) => p.code).join(", ")}`);
+  const gate = featureVerifyProblems(controlRoot, featureId);
+  if (gate.length > 0) throw new Error(`CODEX_FINALIZE_NOT_VERIFIED: ${gate.join("; ")}`);
+  return deliverFeature(controlRoot, featureId, { candidateId });
+}
+
 // src/cli/cli.ts
 function isLink2(path) {
   try {
@@ -46250,7 +46281,7 @@ var USAGE = `mycelink <group> <command> [options]
   codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
   codex status <feature>                     inspect local plan and runtime denial
   codex run <feature>                      run one disposable worker with held authority
-  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations
+  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations (--review --deliver: one-shot candidate/delivery)
   codex review <feature>                    launch one separate read-only reviewer with held authority (experimental)
   codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
@@ -46560,6 +46591,12 @@ async function codexGroup(args, io) {
   };
   if (sub === "continue" && gate.ok) {
     assertControllerRole(args, "codex continue");
+    if (args.flags["deliver"] !== void 0 && args.flags["review"] !== true) {
+      throw new Error("CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a fresh PASS in this held-authority continuation.");
+    }
+    if (args.flags["deliver"] !== void 0 && args.flags["deliver"] !== true) {
+      throw new Error("CODEX_DELIVERY_FLAG_INVALID: --deliver takes no value.");
+    }
     if (args.flags["authority"] !== void 0 || args.flags["recover"] !== void 0 || args.flags["takeover"] !== void 0) {
       throw new Error("CODEX_CONTINUATION_AUTHORITY: continue opens its own new authority; it does not recover, take over or accept a key.");
     }
@@ -46607,8 +46644,9 @@ async function codexGroup(args, io) {
         reviewReports.push(report2);
         return report2;
       } });
-      emit2(io, args, { ...result2, reports: detail, review: reviewReports.at(-1) ?? null }, () => `${result2.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome}`).join(", ") || "(no node)"}`);
-      return result2.stop_reason === "REVIEW_PASS" ? 0 : 1;
+      const delivery = args.flags["deliver"] === true && result2.stop_reason === "REVIEW_PASS" ? await finalizeCodexDelivery(controlRoot, featureId2, orchestratorFor(controlRoot, featureId2)) : null;
+      emit2(io, args, { ...result2, reports: detail, review: reviewReports.at(-1) ?? null, ...delivery ? { delivery } : {} }, () => `${result2.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome}`).join(", ") || "(no node)"}${delivery ? `; ${delivery.candidate_id} ${delivery.status}` : ""}`);
+      return result2.stop_reason === "REVIEW_PASS" && (delivery === null || delivery.ok) ? 0 : 1;
     }
     if (args.flags["max-reviews"] !== void 0) throw new Error("CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews requires --review.");
     const result = await continueController({ maxNodes, open, run });

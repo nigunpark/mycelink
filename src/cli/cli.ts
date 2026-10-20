@@ -68,6 +68,7 @@ import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
 import { continueController, continueReviewedController } from '../engine/codex-continuation.js';
+import { finalizeCodexDelivery } from '../engine/codex-finalize.js';
 import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { changedInputs, runWorktreeSetup, setupInputs, worktreeSetupOf, worktreeSetupSha256 } from '../engine/worktree-setup.js';
 import { modulesOf, verifierFor } from '../engine/modules.js';
@@ -117,7 +118,7 @@ const USAGE = `mycelink <group> <command> [options]
   codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
   codex status <feature>                     inspect local plan and runtime denial
   codex run <feature>                      run one disposable worker with held authority
-  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations
+  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations (--review --deliver: one-shot candidate/delivery)
   codex review <feature>                    launch one separate read-only reviewer with held authority (experimental)
   codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
@@ -474,6 +475,12 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   };
   if (sub === 'continue' && gate.ok) {
     assertControllerRole(args, 'codex continue');
+    if (args.flags['deliver'] !== undefined && args.flags['review'] !== true) {
+      throw new Error('CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a fresh PASS in this held-authority continuation.');
+    }
+    if (args.flags['deliver'] !== undefined && args.flags['deliver'] !== true) {
+      throw new Error('CODEX_DELIVERY_FLAG_INVALID: --deliver takes no value.');
+    }
     if (args.flags['authority'] !== undefined || args.flags['recover'] !== undefined || args.flags['takeover'] !== undefined) {
       throw new Error('CODEX_CONTINUATION_AUTHORITY: continue opens its own new authority; it does not recover, take over or accept a key.');
     }
@@ -518,8 +525,11 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
         reviewReports.push(report);
         return report;
       } });
-      emit(io, args, { ...result, reports: detail, review: reviewReports.at(-1) ?? null }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome}`).join(', ') || '(no node)'}`);
-      return result.stop_reason === 'REVIEW_PASS' ? 0 : 1;
+      const delivery = args.flags['deliver'] === true && result.stop_reason === 'REVIEW_PASS'
+        ? await finalizeCodexDelivery(controlRoot, featureId, orchestratorFor(controlRoot, featureId))
+        : null;
+      emit(io, args, { ...result, reports: detail, review: reviewReports.at(-1) ?? null, ...(delivery ? { delivery } : {}) }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome}`).join(', ') || '(no node)'}${delivery ? `; ${delivery.candidate_id} ${delivery.status}` : ''}`);
+      return result.stop_reason === 'REVIEW_PASS' && (delivery === null || delivery.ok) ? 0 : 1;
     }
     if (args.flags['max-reviews'] !== undefined) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews requires --review.');
     const result = await continueController({ maxNodes, open, run });

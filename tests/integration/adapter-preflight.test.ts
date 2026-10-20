@@ -69,6 +69,10 @@ describe('adapter preflight', () => {
     const status = await cli(p, ['codex', 'status', FEATURE_ID, '--json']);
     expect(status.code).toBe(0);
     expect(JSON.parse(status.out)).toMatchObject({ runtime_enabled: true, state_present: false });
+    const unreviewedDelivery = await cli(p, ['codex', 'continue', FEATURE_ID, '--deliver', '--json']);
+    expect(unreviewedDelivery.code).not.toBe(0);
+    expect(unreviewedDelivery.err).toContain('CODEX_DELIVERY_REQUIRES_REVIEW');
+    expect(loadState(p.featureDir)).toBeNull();
     for (const command of [['codex', 'deliver'], ['codex', 'verify'], ['codex', 'resume'], ['review', 'settle'], ['deliver'], ['orchestrate', 'run']]) {
       const r = await cli(p, [...command, FEATURE_ID, '--json']);
       expect(r.code, command.join(' ')).not.toBe(0);
