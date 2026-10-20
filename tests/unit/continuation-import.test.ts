@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { validateCompletionImport } from '../../src/engine/continuation-import.js';
+import { completionImportProblems, importCompletions, validateCompletionImport } from '../../src/engine/continuation-import.js';
 import { COMPLETION_SCHEMA, productionDelta, sealCompletion } from '../../src/engine/criterion-ledger.js';
 import { DEFAULT_TDD_POLICY } from '../../src/engine/tdd-history.js';
 import { hashGraph } from '../../src/graph/validate.js';
@@ -10,6 +10,11 @@ import { initialState } from '../../src/state/feature-state.js';
 import type { EvidenceRecord, PortfolioGraph } from '../../src/model/types.js';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { commitAll, git, makeGitRepo } from '../helpers/git-fixture.js';
+import { loadState, saveState } from '../../src/state/feature-state.js';
+import YAML from 'yaml';
+import { buildManifest } from '../../src/engine/acceptance.js';
+import { completionStanding } from '../../src/engine/criterion-coverage.js';
+import { validateFeatureGraph } from '../../src/workspace/workspace.js';
 
 afterAll(() => cleanupTmpRoots());
 const sha = (x: Buffer | string): string => createHash('sha256').update(x).digest('hex');
@@ -27,7 +32,8 @@ function fixture() {
   commitAll(repo, 'test: value');
   writeFileSync(join(repo, 'src', 'index.mjs'), 'export const value = 1;\n');
   const head = commitAll(repo, 'fix: value');
-  const graph = { feature_id: feature, acceptance_criteria: [{ id: 'AC-1', kind: 'new-behavior', text: 'value works' }, { id: 'AC-2', kind: 'new-behavior', text: 'read works' }], nodes: [{ id: producer, repository: 'app', node_type: 'implementation', acceptance_criteria: ['AC-1'], required_evidence: ['red', 'green', 'regression'] }, { id: remaining, repository: 'app', node_type: 'implementation', acceptance_criteria: ['AC-2'], depends_on: [producer] }] } as PortfolioGraph;
+  const node = (id: string, capability: string, criterion: string, depends_on: string[]) => ({ id, level: 'executable-node', repository: 'app', capability, node_type: 'implementation', acceptance_criteria: [criterion], depends_on, allowed_paths: ['src/**', 'test/**'], required_resources: [], required_evidence: ['red', 'green', 'regression'], verification_commands: [{ id: 'unit', command: ['node', '--test'] }], worker: { model: 'test', max_turns: 10, max_wall_clock_minutes: 10, max_attempts: 1, nested_delegation: false } });
+  const graph = { schema_version: 1, feature_id: feature, title: 'Continuation', repositories: ['app'], resources: { repo: { capacity: 1 } }, capabilities: [{ id: 'CAP-1', repository: 'app', title: 'value', acceptance_criteria: ['AC-1'] }, { id: 'CAP-2', repository: 'app', title: 'read', acceptance_criteria: ['AC-2'] }], acceptance_criteria: [{ id: 'AC-1', kind: 'new-behavior', text: 'value works' }, { id: 'AC-2', kind: 'new-behavior', text: 'read works' }], nodes: [node(producer, 'CAP-1', 'AC-1', []), node(remaining, 'CAP-2', 'AC-2', [producer]), { id: `${feature}.candidate.build`, level: 'executable-node', repository: null, capability: null, node_type: 'candidate-build', depends_on: [producer, remaining], allowed_paths: [], required_resources: [], required_evidence: ['candidate'], verification_commands: [{ id: 'candidate', command: ['node', '--version'] }], worker: { model: 'test', max_turns: 1, max_wall_clock_minutes: 1, max_attempts: 1, nested_delegation: false }, acceptance_criteria: [] }] } as PortfolioGraph;
   const sourceRoot = join(root, 'source');
   const log = `features/${feature}/evidence/${producer}/ledger/AC-1.g0.claim/red.log`;
   mkdirSync(join(sourceRoot, ...log.split('/').slice(0, -1)), { recursive: true });
@@ -117,5 +123,90 @@ describe('read-only continuation completion import preflight', () => {
     duplicated.data.nodes[producer]!.criteria!.push(structuredClone(duplicated.data.nodes[producer]!.criteria![0]!));
     const replay = Buffer.from(JSON.stringify(duplicated));
     expect(codes({ ...f.args, sourceStateBytes: replay, expectedSourceSha256: sha(replay) })).toContain('IMPORT_CRITERION_MISSING');
+  });
+});
+
+function diskFixture() {
+  const f = fixture();
+  const targetRoot = join(f.root, 'target');
+  const sourceDir = join(f.args.sourceControlRoot, 'features', feature);
+  const targetDir = join(targetRoot, 'features', feature);
+  mkdirSync(targetDir, { recursive: true });
+  const requirement = Buffer.from('Approved: value works; read works.');
+  const manifest = JSON.stringify(buildManifest(feature, `features/${feature}/PRD.md`, requirement, f.args.sourceGraph.acceptance_criteria));
+  const source = JSON.parse(f.args.sourceStateBytes.toString()) as { revision: number; data: typeof f.args.targetState };
+  source.data.acceptance = { path: `features/${feature}/ACCEPTANCE.json`, sha256: sha(manifest) };
+  source.data.integration_heads = { app: f.head };
+  const target = structuredClone(f.args.targetState);
+  target.acceptance = { ...source.data.acceptance };
+  const sourceStateBytes = Buffer.from(JSON.stringify(source));
+  writeFileSync(join(sourceDir, 'STATE.json'), sourceStateBytes);
+  saveState(targetDir, target);
+  for (const root of [f.args.sourceControlRoot, targetRoot]) {
+    writeFileSync(join(root, 'repositories.yaml'), `schema_version: 1\nrepositories:\n  - name: app\n    path: ../app\n    base_branch: main\n    commands:\n      test: [node, --test]\n`);
+    writeFileSync(join(root, 'features', feature, 'PORTFOLIO-GRAPH.yaml'), YAML.stringify(f.args.sourceGraph));
+    writeFileSync(join(root, 'features', feature, 'ACCEPTANCE.json'), manifest);
+    writeFileSync(join(root, 'features', feature, 'PRD.md'), requirement);
+  }
+  git(f.repo, ['branch', `feature/${feature}`, f.head]);
+  return { ...f, args: { ...f.args, sourceStateBytes, expectedSourceSha256: sha(sourceStateBytes), targetState: target }, targetRoot, targetDir, sourceDir };
+}
+
+describe('durable continuation import', () => {
+  it('copies producer evidence with pinned provenance before committing DONE under the feature lock', () => {
+    const f = diskFixture();
+    const result = importCompletions({ ...f.args, targetControlRoot: f.targetRoot });
+    expect(result).toEqual({ ok: true, problems: [] });
+    const target = loadState(f.targetDir)!.data;
+    expect(target.nodes[producer]!.state).toBe('DONE');
+    expect(target.nodes[remaining]!.state).toBe('PLANNED');
+    const receipt = target.completion_imports?.[0];
+    expect(receipt?.source_state_sha256).toBe(f.args.expectedSourceSha256);
+    expect(receipt?.files.some((file) => file.path === f.log && file.sha256 === sha(readFileSync(join(f.targetRoot, ...f.log.split('/')))))).toBe(true);
+    expect(readFileSync(join(f.targetRoot, ...f.log.split('/')))).toEqual(readFileSync(join(f.args.sourceControlRoot, ...f.log.split('/'))));
+    expect(completionImportProblems(f.targetRoot, target)).toEqual([]);
+    expect(validateFeatureGraph(f.targetRoot, feature).ok).toBe(true);
+    expect(completionStanding({ controlRoot: f.targetRoot, featureId: feature, record: target.nodes[producer]!.criterion_ledger![0]!, ledger: target.nodes[producer]!.criterion_ledger!, repoPath: f.repo, head: f.head, policy }).holds).toBe(true);
+    writeFileSync(join(f.targetRoot, ...f.log.split('/')), 'changed after import');
+    expect(completionImportProblems(f.targetRoot, loadState(f.targetDir)!.data).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(false);
+  });
+  it('refuses stale checkout, wrong registered repository, tampered evidence and missing dependencies without writing state', () => {
+    const f = diskFixture();
+    const state = readFileSync(join(f.targetDir, 'STATE.json'));
+    for (const input of [
+      { ...f.args, targetControlRoot: f.targetRoot, repositoryPath: f.root },
+      { ...f.args, targetControlRoot: f.targetRoot, completedNodes: [remaining] },
+    ]) {
+      expect(importCompletions(input).ok).toBe(false);
+      expect(readFileSync(join(f.targetDir, 'STATE.json'))).toEqual(state);
+    }
+    git(f.repo, ['reset', '--hard', f.base]);
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(false);
+    expect(readFileSync(join(f.targetDir, 'STATE.json'))).toEqual(state);
+    git(f.repo, ['reset', '--hard', f.head]);
+    writeFileSync(join(f.args.sourceControlRoot, ...f.log.split('/')), 'changed');
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(false);
+    expect(readFileSync(join(f.targetDir, 'STATE.json'))).toEqual(state);
+  });
+  it('refuses conflicting copies and leaves target state untouched', () => {
+    const f = diskFixture();
+    const state = readFileSync(join(f.targetDir, 'STATE.json'));
+    mkdirSync(join(f.targetRoot, ...f.log.split('/').slice(0, -1)), { recursive: true });
+    writeFileSync(join(f.targetRoot, ...f.log.split('/')), 'conflict');
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(false);
+    expect(readFileSync(join(f.targetDir, 'STATE.json'))).toEqual(state);
+    expect(existsSync(join(f.targetRoot, 'features', feature, 'evidence', producer, 'green.log'))).toBe(false);
+  });
+  it('refuses an interrupted partial copy and a moved integration ref', () => {
+    const f = diskFixture();
+    const state = readFileSync(join(f.targetDir, 'STATE.json'));
+    mkdirSync(join(f.targetRoot, ...f.log.split('/').slice(0, -1)), { recursive: true });
+    writeFileSync(join(f.targetRoot, ...f.log.split('/')), readFileSync(join(f.args.sourceControlRoot, ...f.log.split('/'))));
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).problems[0]?.code).toBe('IMPORT_COPY_CONFLICT');
+    expect(readFileSync(join(f.targetDir, 'STATE.json'))).toEqual(state);
+    git(f.repo, ['branch', '-f', `feature/${feature}`, f.base]);
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).problems[0]?.code).toBe('IMPORT_INTEGRATION_REF');
+    expect(readFileSync(join(f.targetDir, 'STATE.json'))).toEqual(state);
   });
 });

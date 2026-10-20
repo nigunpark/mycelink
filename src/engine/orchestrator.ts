@@ -127,6 +127,7 @@ import { admitReworkReason, reasonSha256, reworkAcceptance, ReworkBriefError, re
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { applyIntegration, DirtyWorktreeError, fastForwardIntegration, IntegrationConflictError, planIntegration, type IntegrateResult } from '../git/integrate.js';
 import { coverageManifest, declaredAt, lostCompletions, type CompletionCoverage, type CoverageManifest } from './criterion-coverage.js';
+import { completionImportProblems } from './continuation-import.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
 import { quarantineStash, type StashQuarantine } from '../git/stash.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
@@ -1279,9 +1280,12 @@ export class Orchestrator {
 
   /** Throw GraphDriftError unless the graph still hashes to the one STATE.json was initialised for. */
   assertGraphUnchanged(): void {
-    const recorded = this.state().graph_hash;
+    const state = this.state();
+    const recorded = state.graph_hash;
     const current = hashGraph(this.graph());
     if (current !== recorded) throw new GraphDriftError(this.featureId, recorded, current);
+    const importProblems = completionImportProblems(this.controlRoot, state);
+    if (importProblems.length > 0) throw new Error(`IMPORT_PROVENANCE_INVALID: ${importProblems.map((p) => p.detail).join('; ')}`);
   }
 
   node(id: string): GraphNode {
