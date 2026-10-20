@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--version')) { process.stdout.write('codex-cli 0.163.0\n'); process.exit(0); }
-if (argv[0] !== 'exec' || !argv.includes('--json') || !argv.includes('-') || !argv.includes('--cd') || !argv.includes('--sandbox') || !argv.includes('-c')) process.exit(2);
+if (argv[0] !== 'exec' || !argv.includes('--json') || !argv.includes('-') || !argv.includes('--cd') || !argv.includes('--sandbox') || argv.includes('-c')) process.exit(2);
 const prompt = readFileSync(0, 'utf8');
 writeFileSync(join(process.cwd(), 'prompt-captured.txt'), prompt);
 const scenario = JSON.parse(readFileSync(process.env.FAKE_CODEX_SCENARIO, 'utf8'));

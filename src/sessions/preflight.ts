@@ -12,9 +12,10 @@
  */
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { resolveWindowsExecutable, runCommandSync } from '../security/exec.js';
-import { normalizeConfig, type MycelinkConfigInput } from '../workspace/workspace.js';
+import { isGitRepository } from '../git/git.js';
+import { loadRepositories, normalizeConfig, type MycelinkConfigInput } from '../workspace/workspace.js';
 import type { SessionAdapterId } from './adapter.js';
 
 export interface PreflightResult {
@@ -69,10 +70,31 @@ function probe(argv: string[], base: PreflightResult): PreflightResult {
 }
 
 /** Check that the configured worker adapter can start, without claiming anything. */
-export function preflightAdapter(input: MycelinkConfigInput, env: NodeJS.ProcessEnv = process.env): PreflightResult {
+export function preflightAdapter(input: MycelinkConfigInput, env: NodeJS.ProcessEnv = process.env, controlRoot?: string): PreflightResult {
   const config = normalizeConfig(input);
   if (config.provider.provider === 'codex') {
-    return { ok: false, adapter: 'codex-cli', auth: 'not-checked', detail: 'Codex worker adapter is not supported for production dispatch: the per-command and allowed-path security fence is unverified (isolated CLI adapter tests only).' };
+    const denied: PreflightResult = { ok: false, adapter: 'codex-cli', auth: 'not-checked', detail: 'Codex worker dispatch requires explicit experimental opt-in and disposable repository registration.' };
+    const opt = config.experimental_codex;
+    if (opt?.enabled !== true || controlRoot === undefined || config.provider.extra_args?.length || config.allow_dangerous_permission_bypass || config.allow_shell_commands) return denied;
+    let registered: string[];
+    try {
+      const repos = loadRepositories(controlRoot).repositories;
+      if (repos.some((r) => resolve(controlRoot, r.path) === resolve(controlRoot) || !isGitRepository(resolve(controlRoot, r.path)))) {
+        return { ...denied, detail: 'Codex experimental dispatch requires separate registered Git repositories (not the control repository).' };
+      }
+      registered = repos.map((r) => r.name);
+    }
+    catch { return { ...denied, detail: 'Codex experimental dispatch requires a valid registered repository manifest.' }; }
+    const disposable = opt.disposable_repositories;
+    if (!Array.isArray(disposable) || registered.length === 0 || registered.length !== disposable.length ||
+        new Set(disposable).size !== disposable.length || registered.some((name) => !disposable.includes(name))) {
+      return { ...denied, detail: 'Codex experimental dispatch requires every registered repository to be explicitly marked disposable by name.' };
+    }
+    const executable = config.provider.executable ?? 'codex';
+    const resolved = resolveExecutable(executable, env);
+    const base: PreflightResult = { ...denied, executable, resolved, version: null };
+    if (resolved === null) return { ...base, detail: `Codex executable "${executable}" not found on PATH` };
+    return probe([resolved, '--version'], base);
   }
   // Preserve the legacy direct-call overrides used by existing integrations.
   const legacyAdapter = input.session_adapter;

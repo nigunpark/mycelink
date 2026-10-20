@@ -229,8 +229,7 @@ function emit(io: CliIo, args: ParsedArgs, value: unknown, human: () => string):
 function adapterFor(controlRoot: string): ClaudeCliAdapter | CodexCliAdapter {
   const config = loadConfig(controlRoot);
   if (config.provider.provider === 'codex') {
-    // Constructible for the standalone adapter contract, never dispatched:
-    // preflightAdapter and the CLI runtime gate still deny every Codex run.
+    // The CLI gate and preflight require explicit disposable-repository opt-in.
     return new CodexCliAdapter({
       executable: config.provider.executable ?? 'codex',
       extraArgs: config.provider.extra_args,
@@ -265,7 +264,7 @@ function orchestratorFor(controlRoot: string, featureId: string): Orchestrator {
     controlRoot,
     featureId,
     adapter: adapterFor(controlRoot),
-    preflight: () => preflightAdapter(loadConfig(controlRoot)),
+    preflight: () => preflightAdapter(loadConfig(controlRoot), process.env, controlRoot),
     ...(crashAt !== undefined && crashAt !== ''
       ? {
           settleFault: (point: string) => {
@@ -348,16 +347,17 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
   try {
     const sub = args.positional[1] ?? '';
-    if (group === 'codex') return codexGroup(args, io);
-    // A planning-only Codex control must not reach legacy Claude hooks or any
-    // mutable runtime path by spelling a generic command instead of a skill.
+    if (group === 'codex') return await codexGroup(args, io);
+    // Codex controls cannot reach other mutable paths by spelling a generic command.
     const target = group === 'init' ? resolve(args.positional[1] ?? '.') : resolveControlRoot(args);
     if (existsSync(controlPaths(target).config) && loadConfig(target).provider.provider === 'codex') {
       const planning = (group === 'graph' && ['compile', 'validate', 'import', 'adapters', 'ready'].includes(sub)) ||
         (group === 'feature' && ['acceptance', 'init'].includes(sub)) ||
         (group === 'repo' && ['register', 'modules', 'audit'].includes(sub)) ||
         (group === 'controller' && sub === 'open') || group === 'doctor';
-      if (!planning) throw new Error(`CODEX_RUNTIME_DENIED: ${preflightAdapter(loadConfig(target)).detail}; security review has not authorised ${group} ${sub}. Use codex status for read-only inspection.`);
+      const experimentalWorker = (group === 'orchestrate' && ['ready', 'once'].includes(sub)) || group === 'tdd';
+      const gate = preflightAdapter(loadConfig(target), process.env, target);
+      if (!planning && !(experimentalWorker && gate.ok)) throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${group} ${sub} is not enabled for this Codex control. Use codex status for read-only inspection.`);
     }
     const only = CONTROLLER_ONLY[group];
     if (only === '*' || only?.has(sub)) requireController(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
@@ -427,8 +427,8 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
 // ---- doctor / init --------------------------------------------------------
 
-/** Codex host workflow: planning is possible, dispatch and delivery are not. */
-function codexGroup(args: ParsedArgs, io: CliIo): number {
+/** Codex host workflow: opt-in disposable worker slice, not review or delivery. */
+async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   const sub = requirePositional(args, 1, 'init|status|run|resume|verify|deliver');
   if (sub === 'init') {
     assertControllerRole(args, 'codex init');
@@ -446,12 +446,14 @@ function codexGroup(args: ParsedArgs, io: CliIo): number {
   if (loadConfig(controlRoot).provider.provider !== 'codex' || !existsSync(controlPaths(controlRoot).config)) {
     throw new Error('CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.');
   }
-  const gate = preflightAdapter(loadConfig(controlRoot));
+  const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === 'run' && gate.ok) {
+    requireController(args, 'codex run');
+    const featureId = requirePositional(args, 2, 'feature-id');
+    return orchestrateGroup({ ...args, positional: ['orchestrate', 'once', featureId] }, io);
+  }
   if (sub !== 'status') {
-    // A preflight warning or a writable STATE is never an execution grant.
-    // Even a future adapter must be separately authorised for the complete
-    // worker/reviewer/settlement/delivery transaction before this changes.
-    throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; security review has not authorised ${sub}. No worker, reviewer, verifier or delivery was started.`);
+    throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${sub} is not enabled for this Codex control. No reviewer, verifier or delivery was started.`);
   }
   const featureId = requirePositional(args, 2, 'feature-id');
   const paths = featurePaths(controlRoot, featureId);
@@ -462,9 +464,9 @@ function codexGroup(args: ParsedArgs, io: CliIo): number {
     graph_problems: graph?.problems ?? [], state_present: state !== null,
     feature_state: state?.feature_state ?? null,
     nodes: state ? Object.fromEntries(Object.entries(state.nodes).map(([id, runtime]) => [id, runtime.state])) : {},
-    runtime_enabled: false, runtime_reason: gate.detail,
+    runtime_enabled: gate.ok, runtime_reason: gate.ok ? 'Experimental disposable worker only; review, verification and delivery are not enabled.' : gate.detail,
   };
-  emit(io, args, report, () => `${featureId}: graph ${report.graph_valid ? 'valid' : 'not valid'}, state ${report.feature_state ?? 'not initialised'}; Codex runtime denied: ${gate.detail}`);
+  emit(io, args, report, () => `${featureId}: graph ${report.graph_valid ? 'valid' : 'not valid'}, state ${report.feature_state ?? 'not initialised'}; ${report.runtime_reason}`);
   return 0;
 }
 
@@ -517,7 +519,7 @@ function doctor(args: ParsedArgs, io: CliIo): number {
     ok: true,
     level: adapter.ok ? 'ok' : 'warn',
     detail: config.provider.provider === 'codex'
-      ? `Codex worker preflight denied: ${adapter.detail}; host dispatch and delivery are also disabled.`
+      ? `Codex worker preflight ${adapter.ok ? 'ready (experimental disposable only)' : 'denied'}: ${adapter.detail}; reviewer and delivery are disabled.`
       : adapter.ok
         ? `${adapter.detail}`
         : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,

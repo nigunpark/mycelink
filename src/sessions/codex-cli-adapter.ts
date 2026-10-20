@@ -1,4 +1,4 @@
-/** Isolated Codex exec worker transport. Production dispatch remains denied by preflight. */
+/** Opt-in Codex exec worker transport for disposable registered repositories. */
 import type { SpawnRequest } from './adapter.js';
 import { ProcessSessionAdapter } from './process-session.js';
 import type { ProviderStreamParser, StreamProgress } from './provider-stream.js';
@@ -66,6 +66,7 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
       throw new Error('CODEX_ARGS_DENIED: Claude tool and extra writable-directory grants cannot be translated safely');
     }
     return [...(this.options.prefixArgs ?? []), 'exec', '--json', '--cd', request.cwd,
-      '--sandbox', this.options.sandbox ?? 'workspace-write', '-c', 'approval_policy=never', '--model', request.model, '-'];
+      '--sandbox', this.options.sandbox ?? 'workspace-write',
+      ...(request.model === 'codex-default' ? [] : ['--model', request.model]), '-'];
   }
 }

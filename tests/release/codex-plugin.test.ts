@@ -89,9 +89,9 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
 
     const manifest = JSON.parse(readFileSync(join(source, 'codex-plugin/plugin.json'), 'utf8')) as { name: string; version: string; description: string };
     expect(manifest).toMatchObject({ name: 'mycelink', version: VERSION });
-    expect(manifest.description).toMatch(/planning.*disabled.*security review/i);
+    expect(manifest.description).toMatch(/planning.*opt-in disposable worker.*delivery disabled/i);
     const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-status/SKILL.md'), 'utf8');
-    expect(skill).toMatch(/worker\/runtime execution is disabled pending security review/i);
+    expect(skill).toMatch(/experimental disposable worker preflight/i);
     expect(existsSync(join(source, 'codex-plugin/hooks/hooks.json'))).toBe(false);
   });
 
@@ -137,11 +137,11 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(run(['graph', 'validate', 'FEAT-101', '--control-root', control, '--json']).status).toBe(0);
     const status = run(['codex', 'status', 'FEAT-101', '--control-root', control, '--json']);
     expect(status.status, status.stderr).toBe(0);
-    expect(JSON.parse(status.stdout)).toMatchObject({ graph_valid: true, state_present: false, runtime_enabled: false, runtime_reason: expect.stringMatching(/security fence/) });
+    expect(JSON.parse(status.stdout)).toMatchObject({ graph_valid: true, state_present: false, runtime_enabled: false, runtime_reason: expect.stringMatching(/experimental opt-in/) });
     for (const action of ['run', 'resume', 'verify', 'deliver']) {
       const denied = run(['codex', action, 'FEAT-101', '--control-root', control, '--json']);
       expect(denied.status, `${action}: ${denied.stdout} ${denied.stderr}`).toBe(1);
-      expect(denied.stderr).toMatch(/CODEX_RUNTIME_DENIED.*security|CODEX_RUNTIME_DENIED.*unverified/i);
+      expect(denied.stderr).toMatch(/CODEX_RUNTIME_DENIED.*experimental opt-in/i);
     }
     for (const command of [
       ['init', control], ['dispatch', 'FEAT-101'], ['session', 'spawn', 'FEAT-101'],

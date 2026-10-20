@@ -12,9 +12,12 @@ describe('Codex CLI adapter contract', () => {
     if (!module) return;
     const adapter = new module.CodexCliAdapter({ executable: 'codex' });
     expect(adapter.buildArgs(request, 'session')).toEqual([
-      'exec', '--json', '--cd', request.cwd, '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--model', request.model, '-',
+      'exec', '--json', '--cd', request.cwd, '--sandbox', 'workspace-write', '--model', request.model, '-',
     ]);
     expect(adapter.gateLines(request)).toEqual([{ gate: 'red', line: 'node --test' }]);
+    expect(adapter.buildArgs({ ...request, model: 'codex-default' }, 'session')).toEqual([
+      'exec', '--json', '--cd', request.cwd, '--sandbox', 'workspace-write', '-',
+    ]);
   });
 
   it('rejects extra CLI arguments that could override the sandbox or open writable roots', async () => {

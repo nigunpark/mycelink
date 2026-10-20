@@ -55,6 +55,8 @@ export interface MycelinkConfig {
    * Off by default.
    */
   allow_dangerous_permission_bypass: boolean;
+  /** Explicit, local-only opt-in; names must cover exactly the registered disposable repositories. */
+  experimental_codex?: { enabled: boolean; disposable_repositories: string[] };
   /**
    * The independent acceptance review before any candidate
    * (engine/acceptance-review.ts): required unless `required: false`; per

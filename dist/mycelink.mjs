@@ -10320,7 +10320,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve27.call(this, root, ref);
+      let _sch = resolve28.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -10347,7 +10347,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve27(root, ref) {
+    function resolve28(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -11177,7 +11177,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve27(baseURI, relativeURI, options) {
+    function resolve28(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -11546,7 +11546,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve27,
+      resolve: resolve28,
       resolveComponent,
       equal,
       serialize,
@@ -15363,7 +15363,7 @@ var require_dist2 = __commonJS({
 var import_yaml7 = __toESM(require_dist(), 1);
 import { existsSync as existsSync44, lstatSync as lstatSync18, mkdirSync as mkdirSync25, readFileSync as readFileSync39, readSync as readSync5, readdirSync as readdirSync25, realpathSync as realpathSync5 } from "node:fs";
 import { createHash as createHash41 } from "node:crypto";
-import { dirname as dirname21, join as join55, resolve as resolve26 } from "node:path";
+import { dirname as dirname21, join as join55, resolve as resolve27 } from "node:path";
 
 // src/cli/args.ts
 function parseArgs(argv) {
@@ -31900,7 +31900,7 @@ function shellWrites(command, scope, depth2 = 0) {
   const scripts = /* @__PURE__ */ new Map();
   for (const cmd2 of readShell(command)) {
     const s = { vars, home: scope.home, cwd: dir };
-    const resolve27 = (word) => {
+    const resolve28 = (word) => {
       const v = evaluate(word, s);
       let p = v.literal;
       if (p === null) {
@@ -31914,7 +31914,7 @@ function shellWrites(command, scope, depth2 = 0) {
       const at = path ?? (dir === null ? null : absolute(".", dir, scope.home));
       if (at !== null) out.writes.push({ action, path: at });
     };
-    commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, depth2);
+    commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, depth2);
     for (const a of cmd2.assigns) {
       const v = evaluate(a.value, s);
       if (v.literal !== null) vars[a.name] = v.literal;
@@ -31925,20 +31925,20 @@ function shellWrites(command, scope, depth2 = 0) {
   }
   return out;
 }
-function commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, depth2) {
+function commandWrites(cmd2, s, resolve28, write2, out, scripts, scope, dir, depth2) {
   const redirected = cmd2.redirects.filter((r) => WRITE_REDIRECTS.has(r.op));
-  for (const r of redirected) write2("write", resolve27(r.target));
+  for (const r of redirected) write2("write", resolve28(r.target));
   const k = commandIndex(cmd2.words);
   const words = cmd2.words.slice(k).map((w) => ({ text: wordText(w), word: w }));
   const body = cmd2.heredocs.find((h) => h.data !== false)?.body;
   if (body !== void 0) {
     for (const r of redirected) {
-      const p = resolve27(r.target);
+      const p = resolve28(r.target);
       if (p !== null) scripts.set(p, body);
     }
     if (words[0] && posix2.basename(words[0].text) === "tee") {
       for (const w of words.slice(1)) if (!w.text.startsWith("-")) {
-        const p = resolve27(w.word);
+        const p = resolve28(w.word);
         if (p !== null) scripts.set(p, body);
       }
     }
@@ -31981,7 +31981,7 @@ function commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, dep
       const scriptOptions = name === "sed" ? /* @__PURE__ */ new Set(["-e", "-f", "--expression", "--file"]) : /* @__PURE__ */ new Set(["-e", "-E"]);
       const { operands: operands2, options: options2 } = operandsOf(args, scriptOptions);
       const files2 = options2.some(([o]) => scriptOptions.has(o)) ? operands2 : operands2.slice(1);
-      for (const w of files2) write2(`${name} -i`, resolve27(w.word));
+      for (const w of files2) write2(`${name} -i`, resolve28(w.word));
       return;
     }
     if (name === "sed") return;
@@ -31990,7 +31990,7 @@ function commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, dep
     const inplace = args.findIndex((w, i) => w.text === "-i" && args[i + 1]?.text === "inplace");
     if (inplace >= 0) {
       const operands2 = args.slice(inplace + 2).filter((w) => !w.text.startsWith("-"));
-      for (const w of operands2.slice(1)) write2(`${name} -i inplace`, resolve27(w.word));
+      for (const w of operands2.slice(1)) write2(`${name} -i inplace`, resolve28(w.word));
     }
     return;
   }
@@ -31998,19 +31998,19 @@ function commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, dep
     const at = args.findIndex((w) => w.text.startsWith("-") || w.text === "(" || w.text === "!");
     const expr = at < 0 ? [] : args.slice(at);
     if (expr.some((w) => ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"].includes(w.text))) {
-      for (const w of at < 0 ? args : args.slice(0, at)) write2("find", resolve27(w.word));
+      for (const w of at < 0 ? args : args.slice(0, at)) write2("find", resolve28(w.word));
     }
     return;
   }
   if (INTERPRETERS.test(name)) {
-    interpreterWrites(name.replace(/\.exe$/, ""), args, cmd2, resolve27, write2, out, scripts, scope, dir, depth2);
+    interpreterWrites(name.replace(/\.exe$/, ""), args, cmd2, resolve28, write2, out, scripts, scope, dir, depth2);
     return;
   }
   const sourced = name === "source" || name === ".";
   if (sourced || SHELLS2.has(name) && !args.some((w) => /^-[A-Za-z]*c[A-Za-z]*$/.test(w.text))) {
     const script = sourced ? args[0] : args.find((w) => !w.text.startsWith("-"));
     if (script === void 0) return;
-    const p = resolve27(script.word);
+    const p = resolve28(script.word);
     const body2 = p === null ? null : scripts.get(p) ?? scope.readFile?.(p) ?? null;
     if (body2 === null) {
       out.writes.push({ action: `${name} ${posix2.basename(script.text)}`, path: dir === null ? "." : absolute(".", dir, scope.home), unknown: true });
@@ -32032,10 +32032,10 @@ function commandWrites(cmd2, s, resolve27, write2, out, scripts, scope, dir, dep
   let files = MODE_FIRST.has(name) ? operands.slice(1) : operands;
   if (name === "patch") files = files.length ? files.slice(0, 1) : [{ text: ".", word: [{ text: ".", quoted: true }] }];
   else if (DESTINATION.has(name) && !(name === "install" && options.some(([o]) => o === "-d"))) files = target ? [] : files.slice(-1);
-  for (const w of files) write2(name, resolve27(w.word));
-  if (target) write2(name, target[2] ? resolve27(target[2]) : absolute(target[1] ?? "", dir, scope.home));
+  for (const w of files) write2(name, resolve28(w.word));
+  if (target) write2(name, target[2] ? resolve28(target[2]) : absolute(target[1] ?? "", dir, scope.home));
 }
-function interpreterWrites(name, args, cmd2, resolve27, write2, out, scripts, scope, dir, depth2) {
+function interpreterWrites(name, args, cmd2, resolve28, write2, out, scripts, scope, dir, depth2) {
   const codes = [];
   const inline = /^python/.test(name) ? ["-c"] : name === "deno" ? ["eval"] : ["-e", "-E", "--eval", "-p", "--print"];
   let script = null;
@@ -32062,7 +32062,7 @@ function interpreterWrites(name, args, cmd2, resolve27, write2, out, scripts, sc
   if (stdin) for (const w of cmd2.strings) codes.push({ action: `${name} -`, code: wordText(w) });
   const here = dir === null ? "." : absolute(".", dir, scope.home);
   if (script !== null) {
-    const p = resolve27(script.word);
+    const p = resolve28(script.word);
     const body = p === null ? null : scripts.get(p) ?? scope.readFile?.(p) ?? null;
     if (body !== null) codes.push({ action: `${name} ${posix2.basename(script.text)}`, code: body });
     else out.writes.push({ action: `${name} ${posix2.basename(script.text)}`, path: here, unknown: true });
@@ -42303,10 +42303,7 @@ var CodexCliAdapter = class extends ProcessSessionAdapter {
       request.cwd,
       "--sandbox",
       this.options.sandbox ?? "workspace-write",
-      "-c",
-      "approval_policy=never",
-      "--model",
-      request.model,
+      ...request.model === "codex-default" ? [] : ["--model", request.model],
       "-"
     ];
   }
@@ -45013,7 +45010,7 @@ registerAdapter(eccAdapter);
 // src/sessions/preflight.ts
 import { accessSync, constants as constants7, existsSync as existsSync41, statSync as statSync6 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join52 } from "node:path";
+import { delimiter as delimiter2, isAbsolute as isAbsolute15, join as join52, resolve as resolve26 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
 var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
@@ -45049,10 +45046,31 @@ function probe(argv, base) {
   if (version === null) return { ...base, ok: false, detail: "--version printed no version number" };
   return { ...base, ok: true, version, detail: `${base.resolved} answers --version ${version}; authentication not checked` };
 }
-function preflightAdapter(input, env = process.env) {
+function preflightAdapter(input, env = process.env, controlRoot) {
   const config = normalizeConfig(input);
   if (config.provider.provider === "codex") {
-    return { ok: false, adapter: "codex-cli", auth: "not-checked", detail: "Codex worker adapter is not supported for production dispatch: the per-command and allowed-path security fence is unverified (isolated CLI adapter tests only)." };
+    const denied = { ok: false, adapter: "codex-cli", auth: "not-checked", detail: "Codex worker dispatch requires explicit experimental opt-in and disposable repository registration." };
+    const opt = config.experimental_codex;
+    if (opt?.enabled !== true || controlRoot === void 0 || config.provider.extra_args?.length || config.allow_dangerous_permission_bypass || config.allow_shell_commands) return denied;
+    let registered;
+    try {
+      const repos = loadRepositories(controlRoot).repositories;
+      if (repos.some((r) => resolve26(controlRoot, r.path) === resolve26(controlRoot) || !isGitRepository(resolve26(controlRoot, r.path)))) {
+        return { ...denied, detail: "Codex experimental dispatch requires separate registered Git repositories (not the control repository)." };
+      }
+      registered = repos.map((r) => r.name);
+    } catch {
+      return { ...denied, detail: "Codex experimental dispatch requires a valid registered repository manifest." };
+    }
+    const disposable = opt.disposable_repositories;
+    if (!Array.isArray(disposable) || registered.length === 0 || registered.length !== disposable.length || new Set(disposable).size !== disposable.length || registered.some((name) => !disposable.includes(name))) {
+      return { ...denied, detail: "Codex experimental dispatch requires every registered repository to be explicitly marked disposable by name." };
+    }
+    const executable2 = config.provider.executable ?? "codex";
+    const resolved2 = resolveExecutable(executable2, env);
+    const base2 = { ...denied, executable: executable2, resolved: resolved2, version: null };
+    if (resolved2 === null) return { ...base2, detail: `Codex executable "${executable2}" not found on PATH` };
+    return probe([resolved2, "--version"], base2);
   }
   const legacyAdapter = input.session_adapter;
   const legacyExecutable = input.claude_executable;
@@ -45640,17 +45658,17 @@ var CONTROLLER_ONLY = {
 };
 function resolveControlRoot(args, cwd = process.cwd()) {
   const flag = args.flags["control-root"];
-  if (typeof flag === "string") return resolve26(flag);
+  if (typeof flag === "string") return resolve27(flag);
   const env = process.env["MYCELINK_CONTROL_ROOT"];
-  if (env) return resolve26(env);
-  let dir = resolve26(cwd);
+  if (env) return resolve27(env);
+  let dir = resolve27(cwd);
   for (let i = 0; i < 12; i++) {
     if (existsSync44(join55(dir, "mycelink.config.json"))) return dir;
     const parent = dirname21(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return resolve26(cwd);
+  return resolve27(cwd);
 }
 function emit2(io, args, value, human) {
   if (flagBool(args, "json")) io.out(JSON.stringify(value, null, 2));
@@ -45690,7 +45708,7 @@ function orchestratorFor(controlRoot, featureId) {
     controlRoot,
     featureId,
     adapter: adapterFor(controlRoot),
-    preflight: () => preflightAdapter(loadConfig(controlRoot)),
+    preflight: () => preflightAdapter(loadConfig(controlRoot), process.env, controlRoot),
     ...crashAt !== void 0 && crashAt !== "" ? {
       settleFault: (point) => {
         if (point === crashAt) process.kill(process.pid, "SIGKILL");
@@ -45700,7 +45718,7 @@ function orchestratorFor(controlRoot, featureId) {
 }
 function requireController(args, operation) {
   if (args.positional[0] === "init") {
-    const target = resolve26(args.positional[1] ?? ".");
+    const target = resolve27(args.positional[1] ?? ".");
     if (!existsSync44(controlPaths(target).config)) {
       assertControllerRole(args, operation);
       return;
@@ -45757,11 +45775,13 @@ async function main(argv, io = defaultIo) {
   }
   try {
     const sub = args.positional[1] ?? "";
-    if (group === "codex") return codexGroup(args, io);
-    const target = group === "init" ? resolve26(args.positional[1] ?? ".") : resolveControlRoot(args);
+    if (group === "codex") return await codexGroup(args, io);
+    const target = group === "init" ? resolve27(args.positional[1] ?? ".") : resolveControlRoot(args);
     if (existsSync44(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
       const planning = group === "graph" && ["compile", "validate", "import", "adapters", "ready"].includes(sub) || group === "feature" && ["acceptance", "init"].includes(sub) || group === "repo" && ["register", "modules", "audit"].includes(sub) || group === "controller" && sub === "open" || group === "doctor";
-      if (!planning) throw new Error(`CODEX_RUNTIME_DENIED: ${preflightAdapter(loadConfig(target)).detail}; security review has not authorised ${group} ${sub}. Use codex status for read-only inspection.`);
+      const experimentalWorker = group === "orchestrate" && ["ready", "once"].includes(sub) || group === "tdd";
+      const gate = preflightAdapter(loadConfig(target), process.env, target);
+      if (!planning && !(experimentalWorker && gate.ok)) throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${group} ${sub} is not enabled for this Codex control. Use codex status for read-only inspection.`);
     }
     const only = CONTROLLER_ONLY[group];
     if (only === "*" || only?.has(sub)) requireController(args, `${group}${only === "*" ? "" : ` ${sub}`}`);
@@ -45830,11 +45850,11 @@ ${USAGE}`);
     return 1;
   }
 }
-function codexGroup(args, io) {
+async function codexGroup(args, io) {
   const sub = requirePositional(args, 1, "init|status|run|resume|verify|deliver");
   if (sub === "init") {
     assertControllerRole(args, "codex init");
-    const target = resolve26(requirePositional(args, 2, "control-repo-path"));
+    const target = resolve27(requirePositional(args, 2, "control-repo-path"));
     if (existsSync44(controlPaths(target).config) && loadConfig(target).provider.provider !== "codex") throw new Error("CODEX_INIT_EXISTS: existing Claude control configuration must not be replaced.");
     if (existsSync44(join55(target, ".claude")) || existsSync44(join55(target, "CLAUDE.md"))) throw new Error("CODEX_INIT_OCCUPIED: Claude assets must not be modified.");
     const paths2 = initControlRepo(target, { provider: { provider: "codex", executable: "codex", extra_args: [] } });
@@ -45847,9 +45867,14 @@ function codexGroup(args, io) {
   if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync44(controlPaths(controlRoot).config)) {
     throw new Error("CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.");
   }
-  const gate = preflightAdapter(loadConfig(controlRoot));
+  const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === "run" && gate.ok) {
+    requireController(args, "codex run");
+    const featureId2 = requirePositional(args, 2, "feature-id");
+    return orchestrateGroup({ ...args, positional: ["orchestrate", "once", featureId2] }, io);
+  }
   if (sub !== "status") {
-    throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; security review has not authorised ${sub}. No worker, reviewer, verifier or delivery was started.`);
+    throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${sub} is not enabled for this Codex control. No reviewer, verifier or delivery was started.`);
   }
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
@@ -45862,10 +45887,10 @@ function codexGroup(args, io) {
     state_present: state !== null,
     feature_state: state?.feature_state ?? null,
     nodes: state ? Object.fromEntries(Object.entries(state.nodes).map(([id, runtime]) => [id, runtime.state])) : {},
-    runtime_enabled: false,
-    runtime_reason: gate.detail
+    runtime_enabled: gate.ok,
+    runtime_reason: gate.ok ? "Experimental disposable worker only; review, verification and delivery are not enabled." : gate.detail
   };
-  emit2(io, args, report, () => `${featureId}: graph ${report.graph_valid ? "valid" : "not valid"}, state ${report.feature_state ?? "not initialised"}; Codex runtime denied: ${gate.detail}`);
+  emit2(io, args, report, () => `${featureId}: graph ${report.graph_valid ? "valid" : "not valid"}, state ${report.feature_state ?? "not initialised"}; ${report.runtime_reason}`);
   return 0;
 }
 function doctor(args, io) {
@@ -45894,7 +45919,7 @@ function doctor(args, io) {
   if (repoOk) {
     const manifest = loadRepositories(controlRoot);
     for (const repo of manifest.repositories) {
-      const path = resolve26(controlRoot, repo.path);
+      const path = resolve27(controlRoot, repo.path);
       push(`repo:${repo.name}`, isGitRepository(path), path);
     }
   }
@@ -45905,7 +45930,7 @@ function doctor(args, io) {
     name: "worker adapter (standalone)",
     ok: true,
     level: adapter.ok ? "ok" : "warn",
-    detail: config.provider.provider === "codex" ? `Codex worker preflight denied: ${adapter.detail}; host dispatch and delivery are also disabled.` : adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
+    detail: config.provider.provider === "codex" ? `Codex worker preflight ${adapter.ok ? "ready (experimental disposable only)" : "denied"}: ${adapter.detail}; reviewer and delivery are disabled.` : adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
   if (existsSync44(paths.config)) {
     if (config.provider.provider === "codex") checks.push(...codexHealth(controlRoot, config.provider.executable ?? "codex"));
@@ -45926,7 +45951,7 @@ function doctor(args, io) {
   return ok ? 0 : 1;
 }
 function cmdInit(args, io) {
-  const target = resolve26(requirePositional(args, 1, "control-repo-path"));
+  const target = resolve27(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
   if (!existsSync44(paths.repositoriesManifest)) {
     writeTextAtomic(
@@ -45983,7 +46008,7 @@ function repoGroup(args, io) {
     const manifest = existsSync44(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync39(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     const existing = manifest.repositories.find((r) => r["name"] === name);
     const path = flagString(args, "path", typeof existing?.["path"] === "string" ? existing["path"] : void 0);
-    const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve26(controlRoot, r["path"]), resolve26(controlRoot, path)));
+    const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve27(controlRoot, r["path"]), resolve27(controlRoot, path)));
     if (other !== void 0) {
       io.err(
         `REPOSITORY_ALREADY_REGISTERED: ${path} is registered as "${String(other["name"])}"; register that name again to change it (its worktree_setup and tdd policy are kept). One repository has one name.`
@@ -46063,7 +46088,7 @@ function repoGroup(args, io) {
   if (sub === "audit") {
     const manifest = loadRepositories(controlRoot);
     const rows = manifest.repositories.map((repo) => {
-      const path = resolve26(controlRoot, repo.path);
+      const path = resolve27(controlRoot, repo.path);
       const exists2 = isGitRepository(path);
       const setup = worktreeSetupOf(repo);
       return {
@@ -46091,7 +46116,7 @@ function repoGroup(args, io) {
     const manifest = loadRepositories(controlRoot);
     const lock = { schema_version: 1, generated_at: (/* @__PURE__ */ new Date()).toISOString(), repositories: {} };
     for (const repo of manifest.repositories) {
-      const path = resolve26(controlRoot, repo.path);
+      const path = resolve27(controlRoot, repo.path);
       const branch = featureId ? integrationBranchName(featureId) : repo.base_branch;
       const exists2 = runGit(path, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
         allowFail: true
@@ -46141,7 +46166,7 @@ function featureGroup(args, io) {
     initFeatureDirs(controlRoot, featureId);
     const graphPath = args.flags["graph"];
     if (typeof graphPath === "string") {
-      writeTextAtomic(paths.graph, readFileSync39(resolve26(graphPath), "utf8"));
+      writeTextAtomic(paths.graph, readFileSync39(resolve27(graphPath), "utf8"));
     }
     if (!existsSync44(paths.graph)) {
       io.err(
@@ -46379,7 +46404,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   if (loadState(paths.featureDir) !== null) {
     throw new AcceptanceError("ACCEPTANCE_IMMUTABLE", `${featureId} is initialised: its approved criteria are bound (STATE.json); plan a change as a new feature`);
   }
-  const sourceFile = resolve26(controlRoot, source);
+  const sourceFile = resolve27(controlRoot, source);
   const sourceRel = relativeInside(controlRoot, sourceFile);
   if (sourceRel === null || !existsSync44(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
   const bytes2 = readFileSync39(sourceFile);
@@ -46392,7 +46417,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
     }
     kinds.set(id, kind);
   }
-  const sidecar = resolve26(controlRoot, sidecarPath(sourceRel));
+  const sidecar = resolve27(controlRoot, sidecarPath(sourceRel));
   mkdirSync25(paths.featureDir, { recursive: true });
   if (existsSync44(sidecar)) {
     const raw = readFileSync39(sidecar);
@@ -46454,13 +46479,13 @@ function graphGroup(args, io) {
         io.err(`Adapter "${adapter.name}" needs --${role} <file>.`);
         return 2;
       }
-      files[role] = readFileSync39(resolve26(file), "utf8");
+      files[role] = readFileSync39(resolve27(file), "utf8");
     }
     const repositories = existsSync44(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
-    const out = typeof args.flags["out"] === "string" ? resolve26(args.flags["out"]) : join55(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
-    if (resolve26(out) === resolve26(paths.graph)) {
+    const out = typeof args.flags["out"] === "string" ? resolve27(args.flags["out"]) : join55(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
+    if (resolve27(out) === resolve27(paths.graph)) {
       io.err("Refusing to write an adapter draft over the canonical PORTFOLIO-GRAPH.yaml; review it and copy it yourself.");
       return 2;
     }
@@ -46488,7 +46513,7 @@ function graphGroup(args, io) {
   }
   if (sub === "compile") {
     const source = flagString(args, "from");
-    const parsed = import_yaml7.default.parse(readFileSync39(resolve26(source), "utf8"));
+    const parsed = import_yaml7.default.parse(readFileSync39(resolve27(source), "utf8"));
     const repositories = existsSync44(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
@@ -47549,7 +47574,7 @@ var WORKER_EVIDENCE_KINDS = /* @__PURE__ */ new Set(["red", "green", "refactor"]
 function claimedCwd(worktree, args, controlRoot) {
   const base = worktree ?? controlRoot;
   if (typeof args.flags["cwd"] !== "string") return base;
-  const requested = resolve26(String(args.flags["cwd"]));
+  const requested = resolve27(String(args.flags["cwd"]));
   if (!isInsideReal(base, requested)) {
     throw new Error(`CWD_OUTSIDE_WORKTREE: ${requested} is outside the claim's working directory ${base}.`);
   }
@@ -48086,7 +48111,7 @@ function hostResultCopy(spec, controlRoot, io) {
     const text = io.stdin ?? readStdinBounded(MAX_RESULT_BYTES + 1);
     return Buffer.byteLength(text, "utf8") > MAX_RESULT_BYTES ? { ok: false, detail: `the copy on standard input is over ${MAX_RESULT_BYTES} bytes` } : { ok: true, text };
   }
-  const file = resolve26(spec);
+  const file = resolve27(spec);
   try {
     if (!isInsideReal(realpathSync5.native(controlRoot), realpathSync5.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
   } catch {
