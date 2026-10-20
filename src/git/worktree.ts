@@ -6,8 +6,8 @@
  * other's working tree. Path ownership is then enforced against a real diff,
  * not against a promise.
  */
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import {
   branchExists,
   changedPathsSince,
@@ -66,6 +66,8 @@ export interface CreateWorktreeArgs {
   baseBranch: string;
   worktreeRoot: string;
   repositoryName?: string;
+  /** Relative bidirectional Git admin pointers readable by Windows Git and WSL Git. */
+  crossPlatformGit?: boolean;
   /**
    * The exact commit a new branch starts from (the repository's integration
    * head once anything is integrated). Defaults to `baseBranch`. Ignored when
@@ -103,6 +105,7 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
   // live worktree below and then fail to re-add it.
   const registered = listWorktrees(repo).find((w) => samePath(w.path, target));
   if (registered && existsSync(target)) {
+    if (args.crossPlatformGit) makeRelativeGitPointers(target);
     return { worktree: target, branch, base: args.baseBranch, created: false, startSha: null };
   }
   if (registered && !existsSync(target)) {
@@ -125,8 +128,26 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
   // Deterministic line endings: a worker diff must not be polluted by CRLF.
   runGit(target, ['config', 'core.autocrlf', 'false']);
   runGit(target, ['config', 'commit.gpgsign', 'false']);
+  if (args.crossPlatformGit) makeRelativeGitPointers(target);
 
   return { worktree: target, branch, base: args.baseBranch, created: true, startSha };
+}
+
+function makeRelativeGitPointers(worktree: string): void {
+  const dotGit = join(worktree, '.git');
+  const pointer = readFileSync(dotGit, 'utf8').trim();
+  if (!pointer.startsWith('gitdir: ')) throw new Error('WORKTREE_GIT_POINTER: expected linked worktree');
+  const admin = resolve(worktree, pointer.slice('gitdir: '.length));
+  if (!existsSync(join(admin, 'gitdir'))) throw new Error('WORKTREE_GIT_POINTER: missing admin metadata');
+  const forward = relative(worktree, admin).replaceAll('\\', '/');
+  const backward = relative(admin, dotGit).replaceAll('\\', '/');
+  if (!forward || !backward || /^[A-Za-z]:/.test(forward + backward)) throw new Error('WORKTREE_GIT_POINTER: different volumes');
+  // Windows marks linked .git files hidden; CREATE_ALWAYS ('w') fails with EPERM.
+  for (const [file, value] of [[dotGit, `gitdir: ${forward}\n`], [join(admin, 'gitdir'), `${backward}\n`]] as const) {
+    const fd = openSync(file, 'r+');
+    try { writeSync(fd, value, 0, 'utf8'); ftruncateSync(fd, Buffer.byteLength(value)); }
+    finally { closeSync(fd); }
+  }
 }
 
 function baseName(p: string): string {

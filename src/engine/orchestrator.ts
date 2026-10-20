@@ -1529,6 +1529,8 @@ export class Orchestrator {
       worktreeRoot: this.workspace.paths.worktreesDir,
       repositoryName: node.repository,
       startPoint,
+      crossPlatformGit: process.platform === 'win32' && this.workspace.config.provider.provider === 'codex'
+        && this.workspace.config.experimental_codex?.enabled === true && !!this.workspace.config.experimental_codex.wsl,
     });
     // An existing branch with no recorded base (made by `branch create`, or
     // before bases were recorded) is fenced from where it meets the start point.

@@ -45,16 +45,24 @@ describe('Codex CLI adapter contract', () => {
 
   it('maps only absolute Windows drive paths and builds a bounded WSL argv without shell interpolation', async () => {
     const { CodexCliAdapter, windowsToWslPath } = await import('../../src/sessions/codex-cli-adapter.js');
-    expect(windowsToWslPath('C:\\Users\\psh09\\two repos\\api')).toBe('/mnt/c/Users/psh09/two repos/api');
+    expect(windowsToWslPath('C:\\Users\\<user>\\two repos\\api')).toBe('/mnt/c/Users/<user>/two repos/api');
     for (const bad of ['relative\\repo', '\\\\server\\share', 'C:relative', 'C:\\a\\..\\b', 'C:\\a\nmalicious']) {
       expect(() => windowsToWslPath(bad)).toThrow(/WSL_PATH/);
     }
-    const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'psh09' } });
-    expect(adapter.buildArgs({ ...request, cwd: 'C:\\Users\\psh09\\two repos\\api', model: 'codex-default' }, 'id')).toEqual([
-      '-d', 'Ubuntu', '-u', 'psh09', '--', '/usr/local/bin/npx', '--yes', '@openai/codex@0.163.0',
-      'exec', '--json', '--cd', '/mnt/c/Users/psh09/two repos/api', '--sandbox', 'workspace-write', '-',
+    const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'example-user' } });
+    expect(adapter.buildArgs({ ...request, cwd: 'C:\\Users\\<user>\\two repos\\api', model: 'codex-default' }, 'id')).toEqual([
+      '-d', 'Ubuntu', '-u', 'example-user', '--', '/usr/local/bin/npx', '--yes', '@openai/codex@0.163.0',
+      'exec', '--json', '--cd', '/mnt/c/Users/<user>/two repos/api', '--sandbox', 'workspace-write', '-',
     ]);
-    expect(() => new CodexCliAdapter({ executable: 'wsl.exe', wsl: { distribution: '--exec', user: 'psh09' } })).toThrow(/WSL_CONFIG/);
+    expect(() => new CodexCliAdapter({ executable: 'wsl.exe', wsl: { distribution: '--exec', user: 'example-user' } })).toThrow(/WSL_CONFIG/);
+  });
+
+  it('maps only controller-owned gate path arguments for WSL, retaining literal capability', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'example-user' } });
+    const gates = [{ gate: 'red' as const, argv: ['node', 'C:/scratch/plugin/bin/mycelink.mjs', 'tdd', 'red', 'ORD-101', 'ORD-101.api', '--control-root', 'C:/scratch/control', '--capability', 'literal-value'] }];
+    expect(adapter.gateLines({ ...request, gateCommands: gates })).toEqual([{ gate: 'red', line: 'node /mnt/c/scratch/plugin/bin/mycelink.mjs tdd red ORD-101 ORD-101.api --control-root /mnt/c/scratch/control --capability literal-value' }]);
+    expect(new CodexCliAdapter({ executable: 'codex' }).gateLines({ ...request, gateCommands: gates })[0]?.line).toContain('C:/scratch/control');
   });
 
   it('counts completed turns and replacement usage totals, and records top-level provider failure', async () => {

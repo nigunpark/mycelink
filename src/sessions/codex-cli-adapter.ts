@@ -81,7 +81,12 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     this.executable = options.executable;
   }
   gateLines(request: SpawnRequest): { gate: WorkerGate; line: string }[] {
-    return (request.gateCommands ?? []).map((g) => ({ gate: g.gate, line: renderGateCommand(g.argv) }));
+    return (request.gateCommands ?? []).map((g) => {
+      const argv = this.options.wsl && g.argv[0] === 'node' && g.argv[2] === 'tdd' && g.argv[6] === '--control-root'
+        ? g.argv.map((arg, index) => index === 1 || index === 7 ? windowsToWslPath(arg) : arg)
+        : g.argv;
+      return { gate: g.gate, line: renderGateCommand(argv) };
+    });
   }
   protected override workerPrompt(pack: ContextPack, request: SpawnRequest): string {
     return buildWorkerPrompt({ pack, gates: this.gateLines(request), provider: 'codex' });

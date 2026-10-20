@@ -1,6 +1,6 @@
 # Codex plugin: experimental functional worker slice
 
-**Status (local development branch, October 2026): experimental disposable worker slice, not a delivered Codex feature.** Claude Code remains the supported host described in the README. Explicit opt-in permits one Codex CLI worker orchestration cycle in registered repositories marked disposable; reviewer, resume, verification and delivery are still denied. A plugin install or model-free test is not real worker acceptance. See [functional acceptance ledger](CODEX_FUNCTIONAL_ACCEPTANCE.md). Nothing here advertises a published Codex listing.
+**Status (local development branch, October 2026): experimental disposable worker slice, not a delivered Codex feature.** Claude Code remains the supported host described in the README. Explicit opt-in permits one Codex CLI worker orchestration cycle in registered repositories marked disposable; reviewer, resume, verification and delivery are still denied. A plugin install or model-free test is not real worker acceptance. The source-only `docs/CODEX_FUNCTIONAL_ACCEPTANCE.md` ledger tracks the functional pilot. Nothing here advertises a published Codex listing.
 
 Without explicit opt-in, runtime requests return `CODEX_RUNTIME_DENIED`. Opt-in never grants review or delivery.
 
@@ -50,7 +50,7 @@ For a concrete model-free planning check, the ZIP-based test binds two approved 
 - A configured MCP server wrote to scratch during a read-only Codex turn with explicit approval. Local shell sandbox policy alone cannot fence MCP/apps or seal output. Codex `PreToolUse` lacks proven per-call worker/reviewer identity and covered hook denials are not a fail-closed boundary for omitted/failing callbacks. An observed JSONL thread/final message and an unattended result slot are not independently authenticated role or reviewer provenance.
 - Custom `.codex/agents/<role>.toml` values for `sandbox_mode`, `approval_policy` and `mcp_servers` do **not** override the parent's corresponding policies in the tagged 0.163.0 role implementation. Separate worktrees and role labels are not independent OS identities. The source checkout's `docs/CODEX_ORCA_ROLE_MATRIX.md` distinguishes observed behavior from unsupported inferences.
 
-The experiments above do not establish a hardened hostile-worker OS boundary and are not a prerequisite to the functional disposable-repository pilot. Worker results and reviewer verdicts still need end-to-end validation before a Codex delivery can be claimed. See [functional acceptance](CODEX_FUNCTIONAL_ACCEPTANCE.md), [Permission model](PERMISSION_MODEL.md), and [Adapters](ADAPTERS.md).
+The experiments above do not establish a hardened hostile-worker OS boundary and are not a prerequisite to the functional disposable-repository pilot. Worker results and reviewer verdicts still need end-to-end validation before a Codex delivery can be claimed. The source-only `docs/CODEX_FUNCTIONAL_ACCEPTANCE.md` records pilot results; see also [Permission model](PERMISSION_MODEL.md) and [Adapters](ADAPTERS.md).
 
 ## Migration, update and removal
 
