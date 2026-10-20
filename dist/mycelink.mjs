@@ -30825,16 +30825,20 @@ function removeReviewCheckouts(controlRoot, featureId, reviewId, workspace) {
     if (repo !== void 0) removeWorkerWorktree(repositoryPath(workspace, name), join40(root, name));
   }
 }
-function checkout(repoPath, at, sha2) {
+function checkout(repoPath, at, sha2, crossPlatformGit) {
   if (existsSync28(at)) {
     const head = runGit(at, ["rev-parse", "HEAD"], { allowFail: true });
-    if (head.exitCode === 0 && head.stdout.trim() === sha2) return;
+    if (head.exitCode === 0 && head.stdout.trim() === sha2) {
+      if (crossPlatformGit) makeRelativeGitPointers(at);
+      return;
+    }
     removeWorkerWorktree(repoPath, at);
   }
   mkdirSync18(join40(at, ".."), { recursive: true });
   runGit(repoPath, ["worktree", "prune"], { allowFail: true });
   runGit(repoPath, ["worktree", "add", "--detach", at, sha2]);
   runGit(at, ["config", "core.autocrlf", "false"], { allowFail: true });
+  if (crossPlatformGit) makeRelativeGitPointers(at);
 }
 function featureBase(controlRoot, featureId, workspace, repository, head) {
   const repoPath = repositoryPath(workspace, repository);
@@ -30863,7 +30867,7 @@ function buildReviewPacket(args) {
   const repositories = args.inputs.repositories.map((r) => {
     const repoPath = repositoryPath(workspace, r.name);
     const at = checkoutOf(controlRoot, featureId, args.reviewId, r.name);
-    checkout(repoPath, at, r.head_sha);
+    checkout(repoPath, at, r.head_sha, workspace.config.provider.provider === "codex" && workspace.config.experimental_codex?.wsl !== void 0);
     const base = featureBase(controlRoot, featureId, workspace, r.name, r.head_sha);
     const diffFile = join40(dir, `${r.name}.diff`);
     {

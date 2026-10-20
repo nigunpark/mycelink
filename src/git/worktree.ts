@@ -133,7 +133,7 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
   return { worktree: target, branch, base: args.baseBranch, created: true, startSha };
 }
 
-function makeRelativeGitPointers(worktree: string): void {
+export function makeRelativeGitPointers(worktree: string): void {
   const dotGit = join(worktree, '.git');
   const pointer = readFileSync(dotGit, 'utf8').trim();
   if (!pointer.startsWith('gitdir: ')) throw new Error('WORKTREE_GIT_POINTER: expected linked worktree');

@@ -6,6 +6,9 @@ import { fulfil } from '../helpers/shop-worker.js';
 import { reviewPacket, verdictFor } from '../helpers/review-agent.js';
 import { Orchestrator } from '../../src/engine/orchestrator.js';
 import { codexReviewPrompt } from '../../src/engine/codex-review-session.js';
+import { buildReviewPacket } from '../../src/engine/review-packet.js';
+import { loadGraph, loadWorkspace } from '../../src/workspace/workspace.js';
+import { loadState } from '../../src/state/feature-state.js';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
 import type { SessionAdapter } from '../../src/sessions/adapter.js';
 
@@ -13,7 +16,11 @@ const roots: string[] = [];
 afterAll(() => { cleanupTmpRoots(); roots.forEach((r) => rmSync(r, { recursive: true, force: true })); });
 async function ready() {
   const s = await createVer({ review: {} });
-  const dispatch = async () => JSON.parse((await verCli(s, ['dispatch', VER_FEATURE, '--json'])).out);
+  const dispatch = async () => {
+    const result = await verCli(s, ['dispatch', VER_FEATURE, '--json']);
+    if (result.code !== 0) throw new Error(`dispatch: ${result.err}`);
+    return JSON.parse(result.out);
+  };
   const a = (await dispatch()).ticket;
   fulfil(a, { tests: { [ARP_TESTS]: ARP_RED }, impl: { [ARP_SRC]: ARP_GAPPY_IMPL }, criteria: [{ criterion: 'AC-1', gate: 'red', full_name: ARP_ROLLBACK_TEST }, { criterion: 'AC-2', gate: 'red', full_name: ARP_JOURNAL_TEST }] }, s.control);
   expect(JSON.parse((await verCli(s, ['settle', VER_FEATURE, ARP, '--capability', a.capability, '--json'])).out).outcome).toBe('DONE');
@@ -24,6 +31,23 @@ async function ready() {
   expect(t.kind).toBe('acceptance-review');
   return { s, t, engine: new Orchestrator({ controlRoot: s.control, featureId: VER_FEATURE, adapter: {} as SessionAdapter }) };
 }
+it('makes a WSL Codex reviewer checkout readable by Git on both hosts', async () => {
+  const { s, t } = await ready();
+  const configPath = join(s.control, 'mycelink.config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.provider = { provider: 'codex', executable: 'codex', extra_args: [] };
+  config.experimental_codex = { enabled: true, disposable_repositories: ['changesets'], wsl: { distribution: 'Ubuntu', user: 'psh09' } };
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  const original = reviewPacket(t);
+  const reviewId = `${t.review_id}-WSL`;
+  const slotDir = join(s.control, '.mycelink', 'reviews', VER_FEATURE, reviewId, t.dispatch_id);
+  const built = buildReviewPacket({ controlRoot: s.control, featureId: VER_FEATURE, workspace: loadWorkspace(s.control), graph: loadGraph(s.control, VER_FEATURE), state: loadState(s.featureDir)!.data, reviewId, dispatchId: t.dispatch_id, review: 1, roundsUsed: 0, maxRounds: 2, inputs: original.inputs, inputsSha256: original.inputs_sha256, slotDir, verdictFile: join(slotDir, 'verdict.json') });
+  const checkout = built.packet.repositories[0]!.checkout;
+  const pointer = readFileSync(join(checkout, '.git'), 'utf8').trim();
+  expect(pointer).toMatch(/^gitdir: \.\./);
+  expect(pointer).not.toMatch(/[A-Za-z]:[\\/]/);
+  expect(readFileSync(join(checkout, pointer.slice('gitdir: '.length), 'gitdir'), 'utf8').trim()).toMatch(/^\.\./);
+});
 function fake(final: unknown) {
   const root = mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? '.', 'codex-review-bridge-'));
   roots.push(root);
