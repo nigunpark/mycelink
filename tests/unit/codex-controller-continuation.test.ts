@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from 'vitest';
 import { continueController, continueReviewedController } from '../../src/engine/codex-continuation.js';
 
 describe('Codex controller continuation', () => {
+  it('prepares an imported fresh feature under the single held key before dispatch', async () => {
+    const calls: string[] = [];
+    const result = await continueController({ maxNodes: 1,
+      open: () => { calls.push('open'); return 'secret-key'; },
+      prepare: async (key) => { expect(key).toBe('secret-key'); calls.push('init-and-import'); },
+      run: async (key) => { expect(key).toBe('secret-key'); calls.push('dispatch'); return { outcome: 'DONE', node_id: 'remaining' }; },
+    });
+    expect(calls).toEqual(['open', 'init-and-import', 'dispatch']);
+    expect(result).toEqual({ stop_reason: 'BOUND_REACHED', nodes: ['remaining'] });
+    expect(JSON.stringify(result)).not.toContain('secret-key');
+  });
+  it('refuses dispatch if fresh-state import validation fails after opening', async () => {
+    const run = vi.fn();
+    await expect(continueController({ maxNodes: 1, open: () => 'secret-key',
+      prepare: async () => { throw new Error('IMPORT_SOURCE_HASH'); }, run,
+    })).rejects.toThrow('IMPORT_SOURCE_HASH');
+    expect(run).not.toHaveBeenCalled();
+  });
   it('holds one authority through GAP, bounded producer rework and fresh review without leaking the key', async () => {
     let opens = 0;
     const steps = ['api', 'web', null, 'api', null];

@@ -68,6 +68,7 @@ import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
 import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
 import { continueController, continueReviewedController } from '../engine/codex-continuation.js';
+import { importCompletions } from '../engine/continuation-import.js';
 import { finalizeCodexDelivery } from '../engine/codex-finalize.js';
 import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { changedInputs, runWorktreeSetup, setupInputs, worktreeSetupOf, worktreeSetupSha256 } from '../engine/worktree-setup.js';
@@ -119,6 +120,8 @@ const USAGE = `mycelink <group> <command> [options]
   codex status <feature>                     inspect local plan and runtime denial
   codex run <feature>                      run one disposable worker with held authority
   codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations (--review --deliver: one-shot candidate/delivery)
+    [--import-source-control <separate-control> --import-state-sha256 <pinned-sha256> --import-nodes <id,id>]
+                                           on a fresh target only: initialise and validate pinned DONE imports under that same held key before dispatch
   codex review <feature>                    launch one separate read-only reviewer with held authority (experimental)
   codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
@@ -490,9 +493,22 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     const rawBound = args.flags['max-nodes'];
     const maxNodes = rawBound === undefined ? args.flags['review'] === true ? 3 : 2 : typeof rawBound === 'string' ? Number(rawBound) : NaN;
     if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > 8) throw new Error('CODEX_CONTINUATION_BOUND: --max-nodes must be an integer from 1 to 8.');
+    const importFlags = ['import-source-control', 'import-state-sha256', 'import-nodes'];
+    const importing = importFlags.some((name) => args.flags[name] !== undefined);
+    if (importing && (importFlags.some((name) => typeof args.flags[name] !== 'string') || loadState(featurePaths(controlRoot, featureId).featureDir) !== null)) {
+      throw new Error('CODEX_CONTINUATION_IMPORT_FRESH: import requires all three explicit flags and no existing target STATE.json.');
+    }
+    const sourceControlRoot = importing ? resolve(args.flags['import-source-control'] as string) : null;
+    const sourceSha = importing ? args.flags['import-state-sha256'] as string : null;
+    const completedNodes = importing ? (args.flags['import-nodes'] as string).split(',') : [];
+    if (importing && (sourceControlRoot === controlRoot || !/^[0-9a-f]{64}$/.test(sourceSha!) || completedNodes.length === 0 || completedNodes.some((id) => !id || !loadGraph(controlRoot, featureId).nodes.some((n) => n.id === id)))) {
+      throw new Error('CODEX_CONTINUATION_IMPORT_INPUT: separate source, pinned SHA-256 and named graph nodes required.');
+    }
+    const sourceBytes = importing ? readFileSync(featurePaths(sourceControlRoot!, featureId).state) : null;
+    if (sourceBytes && createHash('sha256').update(sourceBytes).digest('hex') !== sourceSha) throw new Error('IMPORT_SOURCE_HASH: source STATE.json differs from the independently pinned SHA-256.');
     const detail: { node_id: string; outcome: string; state: string }[] = [];
     const open = () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority;
-    const run = async (authority: string) => {
+    const prepare = (authority: string) => {
         // A newly approved graph has no STATE.json. Initialise it once under
         // this same controller key, without printing or persisting the key.
         if (loadState(featurePaths(controlRoot, featureId).featureDir) === null) {
@@ -502,6 +518,22 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
           });
           if (initCode !== 0) throw new Error(`CODEX_CONTINUATION_INIT_FAILED: ${initOutput.join(' ').slice(0, 500)}`);
         }
+        if (importing) {
+          const workspace = loadWorkspace(controlRoot);
+          const graph = loadGraph(controlRoot, featureId);
+          const repos = [...new Set(completedNodes.map((id) => graph.nodes.find((n) => n.id === id)?.repository))];
+          if (repos.length !== 1 || repos[0] === null || repos[0] === undefined) throw new Error('CODEX_CONTINUATION_IMPORT_REPOSITORY: one registered producer repository required.');
+          const repo = repositoryPath(workspace, repos[0]);
+          const head = resolveRef(repo, 'HEAD');
+          const state = loadState(featurePaths(controlRoot, featureId).featureDir)?.data;
+          if (!state) throw new Error('CODEX_CONTINUATION_INIT_FAILED: missing fresh state.');
+          const imported = importCompletions({ sourceControlRoot: sourceControlRoot!, targetControlRoot: controlRoot,
+            sourceStateBytes: sourceBytes!, expectedSourceSha256: sourceSha!, sourceGraph: loadGraph(sourceControlRoot!, featureId), targetGraph: graph,
+            targetState: state, repositoryPath: repo, head, policy: tddPolicyFor(loadRepositories(controlRoot).repositories.find((r) => r.name === repos[0])), completedNodes });
+          if (!imported.ok) throw new Error(`CODEX_CONTINUATION_IMPORT_FAILED: ${imported.problems.map((p) => `${p.code}: ${p.detail}`).join('; ')}`);
+        }
+    };
+    const run = async (authority: string) => {
         // Refuse parallel schedules: the bound counts actual node invocations.
         const plan = orchestratorFor(controlRoot, featureId).plan();
         if (plan.scheduled.length !== 1) return { outcome: 'NO_PROGRESS' };
@@ -520,7 +552,7 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
       const maxReviews = rawReviews === undefined ? 2 : typeof rawReviews === 'string' ? Number(rawReviews) : NaN;
       if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 3) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 3.');
       const reviewReports: Awaited<ReturnType<typeof runReview>>[] = [];
-      const result = await continueReviewedController({ maxNodes, maxReviews, open, run, review: async () => {
+      const result = await continueReviewedController({ maxNodes, maxReviews, open, prepare, run, review: async () => {
         const report = await runReview(featureId);
         reviewReports.push(report);
         return report;
@@ -532,7 +564,7 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
       return result.stop_reason === 'REVIEW_PASS' && (delivery === null || delivery.ok) ? 0 : 1;
     }
     if (args.flags['max-reviews'] !== undefined) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews requires --review.');
-    const result = await continueController({ maxNodes, open, run });
+    const result = await continueController({ maxNodes, open, prepare, run });
     emit(io, args, { ...result, reports: detail }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}`);
     return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? 0 : 1;
   }

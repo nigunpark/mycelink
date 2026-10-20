@@ -1,6 +1,7 @@
 export async function continueController(options: {
   maxNodes: number;
   open: () => string;
+  prepare?: (authority: string) => Promise<void> | void;
   run: (authority: string) => Promise<{ outcome: string; node_id?: string }>;
 }): Promise<{ stop_reason: string; nodes: string[] }> {
   if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1 || options.maxNodes > 8) {
@@ -9,6 +10,7 @@ export async function continueController(options: {
   // The key lives only in this host call stack, never in a worker environment,
   // serialized report, credential file or result slot.
   const authority = options.open();
+  await options.prepare?.(authority);
   const nodes: string[] = [];
   for (let i = 0; i < options.maxNodes; i++) {
     const result = await options.run(authority);
@@ -23,6 +25,7 @@ export async function continueController(options: {
 export async function continueReviewedController(options: {
   maxNodes: number; maxReviews: number;
   open: () => string;
+  prepare?: (authority: string) => Promise<void> | void;
   run: (authority: string) => Promise<{ outcome: string; node_id?: string }>;
   review: (authority: string) => Promise<{ outcome: string }>;
 }): Promise<{ stop_reason: string; nodes: string[]; reviews: string[] }> {
@@ -31,6 +34,7 @@ export async function continueReviewedController(options: {
     throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: max-nodes must be 1..8 and max-reviews must be 1..3.');
   }
   const authority = options.open();
+  await options.prepare?.(authority);
   const nodes: string[] = [];
   const reviews: string[] = [];
   let sinceReview = new Set<string>();
