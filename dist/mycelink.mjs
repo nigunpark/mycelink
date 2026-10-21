@@ -31039,7 +31039,20 @@ function executeHostClaimGate(args) {
   });
   const output = `${run.stdout ?? ""}${run.stderr ?? ""}`.slice(0, 32 * 1024);
   if (run.error || run.status === null) return fail(run.error && "code" in run.error && run.error.code === "ETIMEDOUT" ? "CHANNEL_GATE_TIMEOUT" : "CHANNEL_GATE_EXEC_FAILED");
-  if (run.status !== 0) return { exitCode: run.status, output };
+  if (run.status !== 0) {
+    const record2 = args.readRecord();
+    if (record2 && record2.output_sha256 !== before && record2.kind === args.gate && record2.exit_code !== 0 && samePath(isAbsolute9(record2.cwd) ? record2.cwd : resolve19(args.controlRoot, record2.cwd), args.cwd) && checkEvidenceOutput(args.controlRoot, args.featureId, record2, { overlay: false }) === null) {
+      const observed2 = observeEvidenceOutput(args.controlRoot, args.featureId, record2.output_path);
+      if (observed2.kind === "file" && observed2.sha256 === record2.output_sha256) {
+        const native = observed2.path;
+        const wsl = process.platform === "win32" && /^[A-Za-z]:[\\/]/.test(native) ? native.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, drive) => `/mnt/${drive.toLowerCase()}`) : null;
+        return { exitCode: run.status, output: `${output}
+Controller evidence log: ${native}${wsl ? `
+WSL evidence log: ${wsl}` : ""}` };
+      }
+    }
+    return { exitCode: run.status, output };
+  }
   const record = args.readRecord();
   if (!record || record.output_sha256 === before || record.kind !== args.gate || (args.gate === "red" ? record.exit_code === 0 : record.exit_code !== 0) || !samePath(isAbsolute9(record.cwd) ? record.cwd : resolve19(args.controlRoot, record.cwd), args.cwd)) return fail("CHANNEL_GATE_EVIDENCE_MISSING");
   if (checkEvidenceOutput(args.controlRoot, args.featureId, record, { overlay: false }) !== null) return fail("CHANNEL_GATE_OUTPUT_INVALID");

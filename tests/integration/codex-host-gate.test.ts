@@ -52,6 +52,29 @@ describe('host-owned claim gate', () => {
     expect(executeHostClaimGate({ controlRoot: root, featureId: 'FEAT-1', gate: 'red', cwd: root, argv: [process.execPath, '-e', ''], deadlineMs: 5_000, readRecord: () => wrong }).exitCode).not.toBe(0);
   });
 
+  it('returns a controller-resolved diagnostic path after a failed verifier with intact evidence', () => {
+    const root = makeTmpDir('host-gate-failed-evidence-');
+    const output = 'features/FEAT-1/evidence/green.log';
+    mkdirSync(join(root, 'features', 'FEAT-1', 'evidence'), { recursive: true });
+    const script = `require('fs').writeFileSync(${JSON.stringify(join(root, output))}, 'assertion failed');process.exit(1);`;
+    const record: EvidenceRecord = { kind: 'green', node_id: 'F.n', command: [process.execPath, '-e', script], exit_code: 1,
+      started_at: '', finished_at: '', cwd: root, repository: 'repo', commit_sha: null, output_path: output,
+      output_sha256: sha('assertion failed'), failure_fingerprint: null };
+    const run = executeHostClaimGate({ controlRoot: root, featureId: 'FEAT-1', gate: 'green', cwd: root,
+      argv: [process.execPath, '-e', script], deadlineMs: 5_000,
+      readRecord: () => existsSync(join(root, output)) ? record : undefined });
+    expect(run.exitCode).toBe(1);
+    expect(run.output).toContain(join(root, output));
+    if (process.platform === 'win32') {
+      const wslPath = join(root, output).replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_, drive: string) => `/mnt/${drive.toLowerCase()}`);
+      expect(run.output).toContain(wslPath);
+    }
+    const invalid = executeHostClaimGate({ controlRoot: root, featureId: 'FEAT-1', gate: 'green', cwd: root,
+      argv: [process.execPath, '-e', 'process.exit(1)'], deadlineMs: 5_000,
+      readRecord: () => ({ ...record, output_sha256: sha('tampered') }) });
+    expect(invalid.output).not.toContain(join(root, output));
+  });
+
   it('sets a hard deadline on the host child without accepting an absent receipt', () => {
     const root = makeTmpDir('host-gate-timeout-');
     const run = executeHostClaimGate({ controlRoot: root, featureId: 'FEAT-1', gate: 'green', cwd: root,

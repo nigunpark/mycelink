@@ -29,7 +29,26 @@ export function executeHostClaimGate(args: HostGateOptions): { exitCode: number;
   });
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.slice(0, 32 * 1024);
   if (run.error || run.status === null) return fail(run.error && 'code' in run.error && run.error.code === 'ETIMEDOUT' ? 'CHANNEL_GATE_TIMEOUT' : 'CHANNEL_GATE_EXEC_FAILED');
-  if (run.status !== 0) return { exitCode: run.status, output };
+  if (run.status !== 0) {
+    // A failed verifier still writes a controller-owned log. Its CLI prints a
+    // control-relative path, which a worker in a separate worktree cannot read
+    // from its cwd. Publish a resolved diagnostic location only for a fresh,
+    // intact receipt; the path never changes the gate's failure verdict.
+    const record = args.readRecord();
+    if (record && record.output_sha256 !== before && record.kind === args.gate && record.exit_code !== 0 &&
+        samePath(isAbsolute(record.cwd) ? record.cwd : resolve(args.controlRoot, record.cwd), args.cwd) &&
+        checkEvidenceOutput(args.controlRoot, args.featureId, record, { overlay: false }) === null) {
+      const observed = observeEvidenceOutput(args.controlRoot, args.featureId, record.output_path);
+      if (observed.kind === 'file' && observed.sha256 === record.output_sha256) {
+        const native = observed.path;
+        const wsl = process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(native)
+          ? native.replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_, drive: string) => `/mnt/${drive.toLowerCase()}`)
+          : null;
+        return { exitCode: run.status, output: `${output}\nController evidence log: ${native}${wsl ? `\nWSL evidence log: ${wsl}` : ''}` };
+      }
+    }
+    return { exitCode: run.status, output };
+  }
   const record = args.readRecord();
   // The tdd CLI exits zero on an accepted RED, but its evidence records the
   // verifier's nonzero exit; GREEN and regression record zero instead.
