@@ -73,7 +73,10 @@ describe('Codex init and doctor (planning only)', () => {
     expect(check(report.body, 'codex launcher')?.ok).toBe(false); // checkout has no cached self-contained launcher
     expect(check(report.body, 'codex launcher')?.detail).toMatch(/reinstall/i);
     expect(check(report.body, 'codex policy')?.level).toBe('warn');
+    expect(check(report.body, 'codex policy')?.detail).not.toMatch(/runtime remains denied/i);
+    expect(check(report.body, 'worker adapter (standalone)')?.detail).not.toMatch(/reviewer and delivery are disabled/i);
     expect(check(report.body, 'codex runtime')?.detail).toMatch(/denied|disabled/i);
+    expect(check(report.body, 'codex runtime')?.detail).toMatch(/explicit.*disposable.*opt-in/i);
     expect(existsSync(join(root, '.claude', 'settings.json'))).toBe(false);
   });
 

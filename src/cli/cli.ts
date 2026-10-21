@@ -654,7 +654,7 @@ function doctor(args: ParsedArgs, io: CliIo): number {
     ok: true,
     level: adapter.ok ? 'ok' : 'warn',
     detail: config.provider.provider === 'codex'
-      ? `Codex worker preflight ${adapter.ok ? 'ready (experimental disposable only)' : 'denied'}: ${adapter.detail}; reviewer and delivery are disabled.`
+      ? `Codex worker preflight ${adapter.ok ? 'ready (experimental disposable only)' : 'denied'}: ${adapter.detail}; review and bounded delivery require held authority and passing acceptance gates.`
       : adapter.ok
         ? `${adapter.detail}`
         : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,

@@ -45328,7 +45328,7 @@ function codexHealth(controlRoot, executable = "codex") {
   const installed = version.status === 0 && /^codex-cli \d+\.\d+\.\d+/.test(version.stdout.trim());
   checks.push({ name: "codex executable", ok: installed, detail: installed ? version.stdout.trim() : `Codex CLI unavailable at ${executable}; install Codex and retry` });
   const status = installed ? run(["login", "status"]) : null;
-  const loggedIn = status?.status === 0 && /^Logged in/.test(status.stdout.trim());
+  const loggedIn = status?.status === 0 && [status.stdout, "stderr" in status ? status.stderr : ""].some((stream) => typeof stream === "string" && /^Logged in(?:\s|$)/.test(stream.trim()));
   checks.push({ name: "codex login", ok: loggedIn, detail: loggedIn ? "logged in (credentials not displayed)" : "not logged in or login status unavailable; run codex login interactively" });
   let pluginInstalled = false;
   if (installed) {
@@ -45362,20 +45362,20 @@ function codexHealth(controlRoot, executable = "codex") {
   const bundle = root && join53(root, "dist", "mycelink.mjs");
   const launcherOk = !!launcher && existsSync42(launcher) && !!bundle && existsSync42(bundle);
   checks.push({ name: "codex launcher", ok: launcherOk, detail: launcherOk ? launcher : `${launcher ?? "Codex launcher"} or bundled runtime missing; reinstall Mycelink plugin` });
-  checks.push({ name: "hooks", ok: valid && hooksDisabled, level: "warn", detail: hooksDisabled ? "Codex plugin-owned hook map is empty: runtime hooks intentionally disabled pending security review; no project hooks installed" : "Codex plugin hook map missing or unexpectedly enabled; inspect the plugin manifest before use" });
+  checks.push({ name: "hooks", ok: valid && hooksDisabled, level: "warn", detail: hooksDisabled ? "Codex plugin-owned hook map is empty: this integration uses its installed launcher, not host hooks; no project hooks installed" : "Codex plugin hook map missing or unexpectedly enabled; inspect the plugin manifest before use" });
   const projectConfig = join53(controlRoot, ".codex", "config.toml");
   if (existsSync42(projectConfig)) {
     try {
       const config = parse3(readFileSync37(projectConfig, "utf8"));
       const unsafe = config["sandbox_mode"] === "danger-full-access" || config["approval_policy"] === "never";
-      checks.push({ name: "codex policy", ok: true, level: "warn", detail: unsafe ? `${projectConfig}: danger-full-access sandbox or never approval configured; Mycelink runtime remains denied` : `${projectConfig}: existing project settings left untouched; verify effective sandbox/approval policies (user config and overrides may apply)` });
+      checks.push({ name: "codex policy", ok: true, level: "warn", detail: unsafe ? `${projectConfig}: danger-full-access sandbox or never approval configured; unsupported for the experimental disposable-repository pilot` : `${projectConfig}: existing project settings left untouched; verify effective sandbox/approval policies (user config and overrides may apply)` });
     } catch {
       checks.push({ name: "codex policy", ok: false, detail: `${projectConfig}: invalid TOML; fix manually (Mycelink never rewrites it)` });
     }
   } else {
     checks.push({ name: "codex policy", ok: true, level: "warn", detail: "no project .codex/config.toml; effective sandbox/approval policies may come from user configuration or CLI overrides" });
   }
-  checks.push({ name: "codex runtime", ok: false, level: "warn", detail: "CODEX_RUNTIME_DENIED: worker, reviewer, settlement and delivery disabled pending whole-process/effect/result boundary review" });
+  checks.push({ name: "codex runtime", ok: false, level: "warn", detail: "CODEX_RUNTIME_DENIED by doctor alone: experimental worker, review and bounded delivery require an approved graph, held authority and explicit disposable-repository opt-in; standalone resume, verify and deliver remain disabled" });
   return checks;
 }
 
@@ -47283,7 +47283,7 @@ function doctor(args, io) {
     name: "worker adapter (standalone)",
     ok: true,
     level: adapter.ok ? "ok" : "warn",
-    detail: config.provider.provider === "codex" ? `Codex worker preflight ${adapter.ok ? "ready (experimental disposable only)" : "denied"}: ${adapter.detail}; reviewer and delivery are disabled.` : adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
+    detail: config.provider.provider === "codex" ? `Codex worker preflight ${adapter.ok ? "ready (experimental disposable only)" : "denied"}: ${adapter.detail}; review and bounded delivery require held authority and passing acceptance gates.` : adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
   if (existsSync47(paths.config)) {
     if (config.provider.provider === "codex") checks.push(...codexHealth(controlRoot, config.provider.executable ?? "codex"));
