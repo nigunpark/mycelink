@@ -33,6 +33,28 @@ describe('Codex controller continuation', () => {
     expect(result).toEqual({ stop_reason: 'REVIEW_PASS', nodes: ['api', 'web', 'api'], reviews: ['GAPS', 'PASS'] });
     expect(JSON.stringify(result)).not.toContain('secret');
   });
+  it('keeps one held authority through six bounded review and challenge sessions', async () => {
+    const opened = vi.fn(() => 'held-key');
+    let calls = 0;
+    let reviews = 0;
+    const result = await continueReviewedController({ maxNodes: 6, maxReviews: 6, open: opened,
+      run: async (key) => {
+        expect(key).toBe('held-key');
+        if (calls++ === 0) return { outcome: 'DONE', node_id: 'implementation' };
+        if (calls === 2) return { outcome: 'NO_PROGRESS' };
+        return { outcome: 'REVIEW_CHALLENGED', node_id: `challenge-${calls - 2}` };
+      },
+      review: async (key) => { expect(key).toBe('held-key'); return { outcome: ++reviews === 6 ? 'PASS' : 'GAPS' }; },
+    });
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(result.stop_reason).toBe('REVIEW_PASS');
+    expect(result.reviews).toHaveLength(6);
+    await expect(continueReviewedController({ maxNodes: 1, maxReviews: 7, open: opened,
+      run: async () => ({ outcome: 'DONE', node_id: 'x' }), review: async () => ({ outcome: 'PASS' }),
+    })).rejects.toThrow(/max-reviews/);
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
   it('never reports PASS when a gap has no remaining worker or reviewer budget', async () => {
     let reviewed = 0;
     let calls = 0;

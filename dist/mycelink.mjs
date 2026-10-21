@@ -46719,8 +46719,8 @@ async function continueController(options) {
   return { stop_reason: "BOUND_REACHED", nodes };
 }
 async function continueReviewedController(options) {
-  if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1 || options.maxNodes > 8 || !Number.isSafeInteger(options.maxReviews) || options.maxReviews < 1 || options.maxReviews > 3) {
-    throw new Error("CODEX_REVIEW_CONTINUATION_BOUND: max-nodes must be 1..8 and max-reviews must be 1..3.");
+  if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1 || options.maxNodes > 8 || !Number.isSafeInteger(options.maxReviews) || options.maxReviews < 1 || options.maxReviews > 6) {
+    throw new Error("CODEX_REVIEW_CONTINUATION_BOUND: max-nodes must be 1..8 and max-reviews must be 1..6.");
   }
   const authority = options.open();
   await options.prepare?.(authority);
@@ -47238,7 +47238,7 @@ async function codexGroup(args, io) {
     if (args.flags["review"] === true) {
       const rawReviews = args.flags["max-reviews"];
       const maxReviews = rawReviews === void 0 ? 2 : typeof rawReviews === "string" ? Number(rawReviews) : NaN;
-      if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 3) throw new Error("CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 3.");
+      if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 6) throw new Error("CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 6.");
       const reviewReports = [];
       const result2 = await continueReviewedController({ maxNodes, maxReviews, open, prepare, run, review: async () => {
         const report2 = await runReview(featureId2);

@@ -589,7 +589,7 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     if (args.flags['review'] === true) {
       const rawReviews = args.flags['max-reviews'];
       const maxReviews = rawReviews === undefined ? 2 : typeof rawReviews === 'string' ? Number(rawReviews) : NaN;
-      if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 3) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 3.');
+      if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 6) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 6.');
       const reviewReports: Awaited<ReturnType<typeof runReview>>[] = [];
       const result = await continueReviewedController({ maxNodes, maxReviews, open, prepare, run, review: async () => {
         const report = await runReview(featureId);

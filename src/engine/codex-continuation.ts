@@ -30,8 +30,8 @@ export async function continueReviewedController(options: {
   review: (authority: string) => Promise<{ outcome: string }>;
 }): Promise<{ stop_reason: string; nodes: string[]; reviews: string[] }> {
   if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1 || options.maxNodes > 8 ||
-      !Number.isSafeInteger(options.maxReviews) || options.maxReviews < 1 || options.maxReviews > 3) {
-    throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: max-nodes must be 1..8 and max-reviews must be 1..3.');
+      !Number.isSafeInteger(options.maxReviews) || options.maxReviews < 1 || options.maxReviews > 6) {
+    throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: max-nodes must be 1..8 and max-reviews must be 1..6.');
   }
   const authority = options.open();
   await options.prepare?.(authority);
