@@ -45,8 +45,12 @@ export async function continueReviewedController(options: {
       if (sinceReview.has(result.node_id)) return { stop_reason: 'NO_PROGRESS', nodes, reviews };
       nodes.push(result.node_id);
       sinceReview.add(result.node_id);
+      // A challenge restores its DONE generation and orders a separate
+      // refinement reviewer, not another worker or a candidate.
+      if (result.outcome === 'REVIEW_CHALLENGED') break;
       if (result.outcome !== 'DONE') return { stop_reason: 'NODE_NOT_DONE', nodes, reviews };
     }
+    if (reviews.length >= options.maxReviews) return { stop_reason: 'REVIEW_GAPS_UNRESOLVED', nodes, reviews };
     // The controller's dispatch validates readiness, not the worker's claim.
     const verdict = await options.review(authority);
     reviews.push(verdict.outcome);

@@ -43,6 +43,16 @@ describe('Codex controller continuation', () => {
     expect(result.stop_reason).toBe('REVIEW_GAPS_UNRESOLVED');
     expect(reviewed).toBe(1);
   });
+  it('routes a settled challenge directly to a separate refinement review under the held authority', async () => {
+    const calls: string[] = [];
+    const result = await continueReviewedController({ maxNodes: 1, maxReviews: 1,
+      open: () => 'held-key',
+      run: async (key) => { expect(key).toBe('held-key'); calls.push('worker'); return { node_id: 'read', outcome: 'REVIEW_CHALLENGED' }; },
+      review: async (key) => { expect(key).toBe('held-key'); calls.push('refinement'); return { outcome: 'GAPS' }; },
+    });
+    expect(calls).toEqual(['worker', 'refinement']);
+    expect(result).toEqual({ stop_reason: 'REVIEW_GAPS_UNRESOLVED', nodes: ['read'], reviews: ['GAPS'] });
+  });
   it('does not launch a reviewer after a failed worker or an unrotated duplicate', async () => {
     let reviewed = 0;
     const review = async () => { reviewed++; return { outcome: 'PASS' }; };

@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCodexReviewSession } from '../../src/engine/codex-review-session.js';
-import { codexReviewerPaths, codexReviewPrompt } from '../../src/engine/codex-review-session.js';
+import { codexReviewerPaths, codexRefinementPrompt, codexReviewPrompt } from '../../src/engine/codex-review-session.js';
 
 const roots: string[] = [];
 afterAll(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -37,6 +37,14 @@ describe('separate Codex reviewer process evidence (not acceptance settlement)',
     expect(prompt).toMatch(/omit test:<id>.*clause evidence/i);
     expect(prompt).toMatch(/trace.*not shown/i);
   });
+  it('renders refinement decisions from the controller brief without Claude write instructions', () => {
+    const brief = 'What happened: challenge passed.\n* WITHDRAW\n* REFINE\n* UPHOLD\nRules:\nWrite tool only.\n{\n  "schema": "mycelink-acceptance-refinement/1",\n  "decisions": []\n}\n<mycelink-review-criteria>\n{}\n<mycelink-review-refinement>\n{}';
+    const prompt = codexRefinementPrompt(brief, 'C:/control/packet.json');
+    expect(prompt).toMatch(/WITHDRAW.*REFINE.*UPHOLD/s);
+    expect(prompt).toContain('mycelink-acceptance-refinement/1');
+    expect(prompt).toContain('<mycelink-review-refinement>');
+    expect(prompt).not.toMatch(/Write tool|verdict file/i);
+  });
   it('records a hash-bound separate JSONL session with a per-criterion gap and no authority in its prompt', async () => {
     const { root, script } = fixture(verdict);
     const result = await runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root, prompt: 'Review these criteria', binding, evidenceDir: join(root, 'evidence'), timeoutMs: 5000 });
@@ -45,6 +53,18 @@ describe('separate Codex reviewer process evidence (not acceptance settlement)',
     expect(readFileSync(result.jsonlPath, 'utf8')).toContain('thread.started');
     expect(JSON.stringify(result.receipt)).not.toContain('Review these criteria');
     expect(existsSync(result.receiptPath)).toBe(true);
+  });
+  it('records a bound read-only refinement decision without pretending it is a fresh five-criterion verdict', async () => {
+    const decision = { schema: 'mycelink-acceptance-refinement/1', feature_id: binding.featureId,
+      review_id: binding.reviewId, dispatch_id: binding.dispatchId, inputs_sha256: binding.inputsSha256,
+      reviewer: { agent: 'mycelink:acceptance-reviewer', model: 'gpt-test' },
+      decisions: [{ challenge_id: 'ORD-101-R001-C1', criterion: 'AC-2', decision: 'REFINE' }], overall: 'GAPS' };
+    const { root, script } = fixture(decision);
+    const result = await runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root,
+      prompt: 'Decide this challenge', binding: { ...binding, refinement: { challenges: [{ challenge_id: 'ORD-101-R001-C1', criterion: 'AC-2' }] } }, evidenceDir: join(root, 'refinement'), timeoutMs: 5000 });
+    expect(result.verdict).toEqual(decision);
+    expect(result.receipt).toMatchObject({ overall: 'GAPS', refinement: true, decisions: [{ challenge_id: 'ORD-101-R001-C1', criterion: 'AC-2', decision: 'REFINE' }] });
+    expect(result.receipt.criteria).toEqual([]);
   });
   it('rejects an answer bound to another dispatch without persisting a verdict receipt', async () => {
     const { root, script } = fixture({ ...verdict, dispatch_id: 'old-dispatch' });

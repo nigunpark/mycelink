@@ -3,9 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createVer, verCli, verState, VER_FEATURE, ARP, ARP_RED, ARP_SRC, ARP_TESTS, ARP_ROLLBACK_TEST, ARP_JOURNAL_TEST, ARP_GAPPY_IMPL, CLI, CLI_FULL_WORK, CLI_RECOVERY_TEST, CLI_FAILURE_TEST, CLI_AC5, COMPAT } from '../helpers/version-fixture.js';
 import { fulfil } from '../helpers/shop-worker.js';
-import { reviewPacket, verdictFor } from '../helpers/review-agent.js';
+import { reviewPacket, verdictFor, refinementFor } from '../helpers/review-agent.js';
+import { AC1_REFINED, r6Reviewed, writeChallenge } from '../helpers/cset203-challenge.js';
 import { Orchestrator } from '../../src/engine/orchestrator.js';
-import { codexReviewPrompt } from '../../src/engine/codex-review-session.js';
+import { codexRefinementPrompt, codexReviewPrompt } from '../../src/engine/codex-review-session.js';
 import { buildReviewPacket } from '../../src/engine/review-packet.js';
 import { loadGraph, loadWorkspace } from '../../src/workspace/workspace.js';
 import { loadState } from '../../src/state/feature-state.js';
@@ -88,4 +89,24 @@ it('refuses a stale generation and missing criterion before launching any review
   await expect(engine.settleCodexReview({ ...t, dispatch_id: 'stale' }, { executable: process.execPath, prefixArgs: [script], timeoutMs: 5000 })).rejects.toThrow(/FOREIGN_TICKET/);
   await expect(engine.settleCodexReview({ ...t, criteria: t.criteria.slice(1) }, { executable: process.execPath, prefixArgs: [script], timeoutMs: 5000 })).rejects.toThrow(/PACKET_CHANGED/);
   expect(verState(s).acceptance_review.reviews).toHaveLength(0);
+});
+
+it('separate Codex refinement judges an archived challenge under the same review, never relabeling its old GAPS as PASS', async () => {
+  const s = await r6Reviewed();
+  const worker = JSON.parse((await verCli(s, ['dispatch', VER_FEATURE, '--json'])).out).ticket;
+  expect(worker.node_id).toBe(ARP);
+  writeChallenge(worker, s.control);
+  const challenged = JSON.parse((await verCli(s, ['settle', VER_FEATURE, ARP, '--capability', worker.capability, '--json'])).out);
+  expect(challenged.outcome).toBe('REVIEW_CHALLENGED');
+  const ticket = JSON.parse((await verCli(s, ['dispatch', VER_FEATURE, '--json'])).out).ticket;
+  expect(ticket.refinement).not.toBeNull();
+  const packet = reviewPacket(ticket);
+  const verdict = refinementFor(packet, { 'AC-1': { decision: 'REFINE', gap: AC1_REFINED, producer: { node_id: ARP } } });
+  const engine = new Orchestrator({ controlRoot: s.control, featureId: VER_FEATURE, adapter: {} as SessionAdapter });
+  const result = await engine.settleCodexReview({ ...ticket, prompt: codexRefinementPrompt(ticket.prompt, ticket.packet_path) },
+    { executable: process.execPath, prefixArgs: [fake(verdict)], timeoutMs: 5000 });
+  expect(result.outcome).toBe('GAPS');
+  expect(result.refinement?.decisions).toMatchObject([{ criterion: 'AC-1', decision: 'REFINE' }]);
+  expect(verState(s).acceptance_review.challenges[0]).toMatchObject({ status: 'refined' });
+  expect(verState(s).current_candidate).toBeNull();
 });

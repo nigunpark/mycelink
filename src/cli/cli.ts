@@ -40,7 +40,7 @@ import { Orchestrator, REVIEW_AWAIT_MAX_SECONDS, REVIEW_AWAIT_SECONDS } from '..
 import { ClaudeCliAdapter } from '../sessions/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../sessions/codex-cli-adapter.js';
 import { wslCodexPrefix } from '../sessions/codex-cli-adapter.js';
-import { codexReviewPrompt } from '../engine/codex-review-session.js';
+import { codexRefinementPrompt, codexReviewPrompt } from '../engine/codex-review-session.js';
 import { liveSessions, loadRegistry } from '../sessions/registry.js';
 import { defaultLoops, loadLoops, writeLoops } from '../loops/contracts.js';
 import { runSummary } from '../loops/runs.js';
@@ -467,10 +467,12 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     const dispatched = await orchestrator.dispatchNext();
     if (dispatched.ticket?.schema !== 'mycelink-review-ticket/1' || dispatched.status !== 'DISPATCHED') throw new Error(`CODEX_REVIEW_NOT_READY: ${dispatched.status}: ${dispatched.detail}`);
     const ticket = dispatched.ticket;
-    if (ticket.refinement !== null || ticket.correction !== null) throw new Error('CODEX_REVIEW_CORRECTION_UNSUPPORTED');
+    if (ticket.correction !== null) throw new Error('CODEX_REVIEW_CORRECTION_UNSUPPORTED');
     const config = loadConfig(controlRoot);
     const wsl = config.experimental_codex?.wsl;
-    return orchestrator.settleCodexReview({ ...ticket, prompt: codexReviewPrompt(ticket.prompt, ticket.packet_path) }, {
+    return orchestrator.settleCodexReview({ ...ticket, prompt: ticket.refinement !== null
+      ? codexRefinementPrompt(ticket.prompt, ticket.packet_path)
+      : codexReviewPrompt(ticket.prompt, ticket.packet_path) }, {
       executable: wsl ? 'wsl.exe' : config.provider.executable ?? 'codex',
       ...(wsl ? { prefixArgs: wslCodexPrefix(wsl), wsl: true } : {}),
       timeoutMs: 20 * 60_000,
