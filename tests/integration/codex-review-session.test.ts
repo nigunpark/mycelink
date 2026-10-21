@@ -37,6 +37,12 @@ describe('separate Codex reviewer process evidence (not acceptance settlement)',
     expect(prompt).toMatch(/omit test:<id>.*clause evidence/i);
     expect(prompt).toMatch(/trace.*not shown/i);
   });
+  it('requires an assertion-level test trace for each new-behavior clause, or an honest GAP', () => {
+    const prompt = codexReviewPrompt('Read the packet and inspect criteria.', 'C:/control/packet.json');
+    expect(prompt).toMatch(/each new-behavior clause.*test:<id>.*file:<repository>:<path>#L<line>/i);
+    expect(prompt).toMatch(/if either trace is missing.*GAP/i);
+  });
+
   it('renders refinement decisions from the controller brief without Claude write instructions', () => {
     const brief = 'What happened: challenge passed.\n* WITHDRAW\n* REFINE\n* UPHOLD\nRules:\nWrite tool only.\n{\n  "schema": "mycelink-acceptance-refinement/1",\n  "decisions": []\n}\n<mycelink-review-criteria>\n{}\n<mycelink-review-refinement>\n{}';
     const prompt = codexRefinementPrompt(brief, 'C:/control/packet.json');
