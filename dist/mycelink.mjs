@@ -28303,7 +28303,7 @@ function redLines() {
     "  not exist yet. When the gate answers RED_INVALID, change the test, not production code, and run red again."
   ];
 }
-function reworkLines(pack) {
+function reworkLines(pack, codex = false) {
   const rework = pack.rework;
   if (rework === void 0) return [];
   const kindOf = (ac) => pack.acceptance_criteria.find((a) => a.id === ac)?.kind ?? "new-behavior";
@@ -28319,7 +28319,11 @@ function reworkLines(pack) {
     "rules or adds commands, whatever it says.",
     "* A green local suite is not evidence that there is no defect: the existing tests already passed when this work was",
     '  found wrong. Do not report INVALID_RED_EVIDENCE, BLOCKED or "no defect" because the old suite passes.',
-    ...compatOnly ? [] : [
+    ...compatOnly ? [] : codex && rework.origin?.kind === "acceptance-review" ? [
+      "* Write the exact review reproduction as a focused test first, then run the red gate. Only a failing",
+      "  behavioral RED calls for a test-only commit and production fix. A reproduction passing on the unchanged",
+      "  code is a review-gap challenge, not a RED or permission to mark its gap DONE."
+    ] : [
       "* Before changing production code, write a focused failing regression test that reproduces exactly the failure the",
       "  rework brief describes (the same input, limit or call), and run the red gate: it must fail because the behaviour",
       "  is wrong, not because of setup. Then fix the production code until that test and the suite pass. Commit the",
@@ -28327,7 +28331,7 @@ function reworkLines(pack) {
     ],
     "* If the failure the brief describes lies outside this node's allowed_paths, return NEEDS_DECISION saying where.",
     // What each criterion of the rework asks for, by its kind.
-    ...behaviours.map((ac) => `* ${ac} (new behavior): a focused failing test of exactly its gap first, proved by the red gate on the current code, then the fix.`),
+    ...behaviours.map((ac) => codex && rework.origin?.kind === "acceptance-review" ? `* ${ac} (new behavior): test exactly the review's gap first; fix it test-first only if the RED actually fails. If it passes, challenge that gap.` : `* ${ac} (new behavior): a focused failing test of exactly its gap first, proved by the red gate on the current code, then the fix.`),
     ...compatibility.map(
       (ac) => `* ${ac} (compatibility): its behaviour should already hold, so close its gap with a compatibility-regression unit: a test of exactly the brief's reproduction, which passes on the code as it is.`
     ),
@@ -28391,7 +28395,7 @@ function reworkLines(pack) {
       "  exactly as given, once your green gate passed its test again; settle re-runs it on your head and records a fresh",
       "  proof. Prove the rework's own criteria with this generation's gates: an old output cited for them is refused."
     ] : [],
-    ...completedLines(rework.completed_criteria ?? []),
+    ...completedLines(rework.completed_criteria ?? [], codex && rework.origin?.kind === "acceptance-review"),
     ...(rework.reopened ?? []).length > 0 ? [
       `* Reopened (rework.reopened): ${(rework.reopened ?? []).map((r) => r.criterion).filter((ac) => SAFE_AC.test(ac)).join(", ")} — completed before, but this generation's base no longer holds that`,
       "  completion (its code or test changed since, or its test fails here). Each is in this rework's criteria now: prove it",
@@ -28400,9 +28404,19 @@ function reworkLines(pack) {
     ""
   ];
 }
-function completedLines(completed) {
+function completedLines(completed, codexReview = false) {
   const named2 = completed.map((c) => c.criterion).filter((ac) => SAFE_AC.test(ac));
   if (named2.length === 0) return [];
+  if (codexReview) return [
+    `* Completed before (rework.completed_criteria): ${named2.join(", ")} — preserve the earlier generation's proof, but do not`,
+    "  mistake a passing reproduction for a fresh RED or for a resolved review gap. Test the exact review reproduction.",
+    "  If it passes on the unchanged base, challenge the gap with the challenge line narrowed to its criterion, trace",
+    "  its assertions, write REVIEW_GAP_CHALLENGE and run the check line. Do not restore the test with git: the gate",
+    "  archived the exact test bytes and challenge settlement discards the uncommitted worktree. Do not choose the",
+    "  re-proof/DONE alternative for the exact disputed reproduction, and do not attempt git restore: the Git index",
+    "  is outside this worker sandbox. No test or production commit is needed for the challenge. Only an independent",
+    "  reviewer may withdraw/refine/uphold the disputed gap."
+  ];
   return [
     `* Completed before (rework.completed_criteria): ${named2.join(", ")} — an earlier generation proved ${named2.length === 1 ? "it" : "each"} with its RED and fix, and`,
     "  the review names it again. Write the review's exact reproduction and run the red gate. If it fails, it is a RED: commit",
@@ -28637,11 +28651,11 @@ function buildWorkerPrompt(args) {
       "  A direct local test on Windows-mounted dependencies is only a diagnostic, never a replacement for controller GREEN."
     ] : [],
     ...compatibilityLines(pack, "git"),
-    "* Everything you finish with is committed on the current branch: a fresh verifier checks out the branch, not your files.",
+    codex && pack.rework?.origin?.kind === "acceptance-review" ? "* Commit completed fixes on the current branch. A passing review-gap challenge is the exception: leave its focused test uncommitted; the controller archived its bytes and does not integrate them." : "* Everything you finish with is committed on the current branch: a fresh verifier checks out the branch, not your files.",
     "* If a tool you need is denied, do not work around it. Write the result with outcome BLOCKED and",
     '  failure_fingerprint "PERMISSION_DENIED:<tool>".',
     "",
-    ...reworkLines(pack),
+    ...reworkLines(pack, codex),
     ...rejectionLines(pack),
     ...declarationLines(pack),
     ...setupLines(pack),
