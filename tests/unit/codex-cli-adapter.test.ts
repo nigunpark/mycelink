@@ -2,10 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SpawnRequest } from '../../src/sessions/adapter.js';
+import { minimalPack, packCriterion } from '../helpers/context-pack.js';
 
 const request = { cwd: join(tmpdir(), 'isolated worker'), model: 'gpt-test', gateCommands: [{ gate: 'red', argv: ['node', '--test'] }] } as SpawnRequest;
 
 describe('Codex CLI adapter contract', () => {
+  it('gives a mediated worker the exact one-pass TDD order including compatibility evidence', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const adapter = new CodexCliAdapter({ executable: 'codex' });
+    const pack = minimalPack({ acceptance_criteria: [
+      packCriterion('AC-4', 'Invalid inputs print one validation error.'),
+      packCriterion('AC-5', 'Valid outputs stay identical.', 'compatibility'),
+    ] });
+    const mediated = { ...request, claimId: 'claim-1', claimChannel: {} as NonNullable<SpawnRequest['claimChannel']> } as SpawnRequest;
+    const prompt = (adapter as unknown as { workerPrompt: (pack: typeof pack, request: SpawnRequest) => string }).workerPrompt(pack, mediated);
+    expect(prompt).toMatch(/RED.*test-only commit.*GREEN once.*source-only commit.*regression once/i);
+    expect(prompt).toMatch(/compatibility tests before RED/i);
+    expect(prompt).toMatch(/never request a second GREEN/i);
+  });
+
   it('constructs explicit, safe non-interactive argv with stdin prompt, not shell arguments', async () => {
     const module = await import('../../src/sessions/codex-cli-adapter.js').catch(() => null);
     expect(module?.CodexCliAdapter).toBeTypeOf('function');

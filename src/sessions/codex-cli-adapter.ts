@@ -99,6 +99,11 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     return `Controller-mediated gates and commits (only these commands, from this worktree):\n` +
       `node ${path} gate red\nnode ${path} gate green\nnode ${path} gate regression\n` +
       `node ${path} commit <message> <owned-path> [more-owned-paths]\n` +
+      `Exact one-pass order: RED → test-only commit → edit source → GREEN once → source-only commit → regression once. ` +
+      `Write compatibility tests before RED alongside the failing new-behavior test, so GREEN runs them; commit both tests first. ` +
+      `Never request a second GREEN after the source commit or a second RED after an accepted RED. ` +
+      `An out-of-order channel request makes the next sequence invalid: stop with RETRYABLE and its factual fingerprint, ` +
+      `not a human decision about recovering the controller.\n` +
       (pack.rework?.origin?.kind === 'acceptance-review'
         ? `For a passing exact review reproduction, use these read-only controller-mediated commands (no capability or direct control access):\n` +
           `node ${path} challenge <AC-id>\nnode ${path} check\n` +
