@@ -86,6 +86,32 @@ describe('Codex controller continuation', () => {
     expect(duplicate.stop_reason).toBe('NO_PROGRESS');
     expect(reviewed).toBe(0);
   });
+  it('retries only an identified provider interruption under the same key and invocation bound', async () => {
+    const opened = vi.fn(() => 'held-key');
+    const review = vi.fn(async () => ({ outcome: 'PASS' }));
+    const run = vi.fn()
+      .mockResolvedValueOnce({ outcome: 'PROVIDER_INTERRUPTED', node_id: 'read' })
+      .mockResolvedValueOnce({ outcome: 'DONE', node_id: 'read' });
+    expect(await continueReviewedController({ maxNodes: 2, maxReviews: 1, open: opened, run, review }))
+      .toEqual({ stop_reason: 'REVIEW_PASS', nodes: ['read', 'read'], reviews: ['PASS'] });
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls).toEqual([['held-key'], ['held-key']]);
+    expect(review).toHaveBeenCalledTimes(1);
+
+    const exhausted = vi.fn(async () => ({ outcome: 'PROVIDER_INTERRUPTED', node_id: 'read' }));
+    expect(await continueReviewedController({ maxNodes: 3, maxReviews: 1, open: opened, run: exhausted, review }))
+      .toEqual({ stop_reason: 'NODE_NOT_DONE', nodes: ['read', 'read'], reviews: [] });
+    expect(exhausted).toHaveBeenCalledTimes(2);
+    expect(review).toHaveBeenCalledTimes(1);
+
+    const changed = vi.fn()
+      .mockResolvedValueOnce({ outcome: 'PROVIDER_INTERRUPTED', node_id: 'read' })
+      .mockResolvedValueOnce({ outcome: 'DONE', node_id: 'other' });
+    expect(await continueReviewedController({ maxNodes: 3, maxReviews: 1, open: opened, run: changed, review }))
+      .toEqual({ stop_reason: 'NO_PROGRESS', nodes: ['read'], reviews: [] });
+    expect(review).toHaveBeenCalledTimes(1);
+  });
   it('keeps authority in the host across distinct invocations and emits no key', async () => {
     const opened = vi.fn(() => 'secret-key');
     const observed: string[] = [];

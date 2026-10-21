@@ -38,12 +38,25 @@ export async function continueReviewedController(options: {
   const nodes: string[] = [];
   const reviews: string[] = [];
   let sinceReview = new Set<string>();
+  let interruptedNode: string | null = null;
+  let interruptedCount = 0;
   for (;;) {
     while (nodes.length < options.maxNodes) {
       const result = await options.run(authority);
       if (!result.node_id) break;
       if (sinceReview.has(result.node_id)) return { stop_reason: 'NO_PROGRESS', nodes, reviews };
+      if (interruptedNode !== null && result.node_id !== interruptedNode) return { stop_reason: 'NO_PROGRESS', nodes, reviews };
       nodes.push(result.node_id);
+      // Only a caller-authenticated provider interruption may retry the same
+      // scheduled node. Count each invocation; ordinary failed claims stop.
+      if (result.outcome === 'PROVIDER_INTERRUPTED') {
+        interruptedCount = interruptedNode === result.node_id ? interruptedCount + 1 : 1;
+        interruptedNode = result.node_id;
+        if (interruptedCount >= 2 || nodes.length >= options.maxNodes) return { stop_reason: 'NODE_NOT_DONE', nodes, reviews };
+        continue;
+      }
+      interruptedNode = null;
+      interruptedCount = 0;
       sinceReview.add(result.node_id);
       // A challenge restores its DONE generation and orders a separate
       // refinement reviewer, not another worker or a candidate.

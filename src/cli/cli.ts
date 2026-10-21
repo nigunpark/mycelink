@@ -574,7 +574,7 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
         const code = await orchestrateGroup({ ...args, positional: ['orchestrate', 'once', featureId], flags: { ...args.flags, authority, json: true } }, {
           out: (text) => output.push(text), err: (text) => { throw new Error(text); },
         });
-        const cycle = JSON.parse(output.join('\n')) as { reports: { node_id: string; outcome: string; state: string }[] };
+        const cycle = JSON.parse(output.join('\n')) as { reports: { node_id: string; outcome: string; state: string; detail: string }[] };
         if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error('CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.');
         const report = cycle.reports[0]!;
         // A challenge deliberately makes orchestrate once nonzero: the archived
@@ -582,7 +582,13 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
         const challenged = report.outcome === 'REVIEW_CHALLENGED' && report.state === 'DONE' &&
           orchestratorFor(controlRoot, featureId).state().acceptance_review?.challenges?.some((c) =>
             c.node_id === report.node_id && c.status === 'pending');
-        const outcome = code === 0 || challenged ? report.outcome : 'NODE_NOT_DONE';
+        // A model turn that failed before producing a result is not an accepted
+        // worker answer. Only this exact controller-recorded, READY retry gets
+        // a second invocation under the same held authority and node bound.
+        const providerInterrupted = code !== 0 && report.outcome === 'RETRY' && report.state === 'READY' &&
+          report.detail === 'PROVIDER_FAILED: turn.failed (unclassified)' &&
+          orchestratorFor(controlRoot, featureId).state().nodes[report.node_id]?.last_failure_fingerprint === report.detail;
+        const outcome = code === 0 || challenged ? report.outcome : providerInterrupted ? 'PROVIDER_INTERRUPTED' : 'NODE_NOT_DONE';
         detail.push({ node_id: report.node_id, outcome, state: report.state });
         return { node_id: report.node_id, outcome };
     };

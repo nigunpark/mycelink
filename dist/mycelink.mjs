@@ -46750,12 +46750,23 @@ async function continueReviewedController(options) {
   const nodes = [];
   const reviews = [];
   let sinceReview = /* @__PURE__ */ new Set();
+  let interruptedNode = null;
+  let interruptedCount = 0;
   for (; ; ) {
     while (nodes.length < options.maxNodes) {
       const result = await options.run(authority);
       if (!result.node_id) break;
       if (sinceReview.has(result.node_id)) return { stop_reason: "NO_PROGRESS", nodes, reviews };
+      if (interruptedNode !== null && result.node_id !== interruptedNode) return { stop_reason: "NO_PROGRESS", nodes, reviews };
       nodes.push(result.node_id);
+      if (result.outcome === "PROVIDER_INTERRUPTED") {
+        interruptedCount = interruptedNode === result.node_id ? interruptedCount + 1 : 1;
+        interruptedNode = result.node_id;
+        if (interruptedCount >= 2 || nodes.length >= options.maxNodes) return { stop_reason: "NODE_NOT_DONE", nodes, reviews };
+        continue;
+      }
+      interruptedNode = null;
+      interruptedCount = 0;
       sinceReview.add(result.node_id);
       if (result.outcome === "REVIEW_CHALLENGED") break;
       if (result.outcome !== "DONE") return { stop_reason: "NODE_NOT_DONE", nodes, reviews };
@@ -47254,7 +47265,8 @@ async function codexGroup(args, io) {
       if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error("CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.");
       const report2 = cycle.reports[0];
       const challenged = report2.outcome === "REVIEW_CHALLENGED" && report2.state === "DONE" && orchestratorFor(controlRoot, featureId2).state().acceptance_review?.challenges?.some((c) => c.node_id === report2.node_id && c.status === "pending");
-      const outcome = code === 0 || challenged ? report2.outcome : "NODE_NOT_DONE";
+      const providerInterrupted = code !== 0 && report2.outcome === "RETRY" && report2.state === "READY" && report2.detail === "PROVIDER_FAILED: turn.failed (unclassified)" && orchestratorFor(controlRoot, featureId2).state().nodes[report2.node_id]?.last_failure_fingerprint === report2.detail;
+      const outcome = code === 0 || challenged ? report2.outcome : providerInterrupted ? "PROVIDER_INTERRUPTED" : "NODE_NOT_DONE";
       detail.push({ node_id: report2.node_id, outcome, state: report2.state });
       return { node_id: report2.node_id, outcome };
     };
