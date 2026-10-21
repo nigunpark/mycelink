@@ -17,6 +17,7 @@ import { graphAcceptanceProblems, loadAcceptanceManifest, manifestProblems } fro
 import { completionStanding } from './criterion-coverage.js';
 import { ledgerProblems, latestCompletion } from './criterion-ledger.js';
 import { withFeatureLock } from './feature-lock.js';
+import { revisionChain } from './review-revision.js';
 import type { TddPolicy } from './tdd-history.js';
 
 export interface CompletionImportInput {
@@ -189,6 +190,30 @@ export interface DurableCompletionImportInput extends CompletionImportInput {
 const digest = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 const problem = (code: string, detail: string): Problem => ({ code, path: '/continuation_import', detail });
 
+/** A rework keeps its original revision even when the review's current
+ * receipt moves. Verify every immutable link before trusting that history. */
+function pinnedReworkReview(controlRoot: string, featureId: string, state: FeatureState_, reviewId: string, origin: { revision?: number; receipt_path?: string; receipt_sha256?: string }): boolean {
+  const review = state.acceptance_review?.reviews.find((r) => r.review_id === reviewId);
+  if (!review || review.overall !== 'GAPS' || !review.reworks_applied || !origin.receipt_path || !origin.receipt_sha256) return false;
+  const chain = revisionChain(review);
+  const current = chain.at(-1);
+  if (!current || review.revision !== undefined && review.revision !== current.revision ||
+    current.receipt_path !== review.receipt_path || current.receipt_sha256 !== review.receipt_sha256 ||
+    !chain.some((r) => r.revision === (origin.revision ?? 0) && r.receipt_path === origin.receipt_path && r.receipt_sha256 === origin.receipt_sha256)) return false;
+  return chain.every((ref, i) => {
+    if (checkEvidenceOutput(controlRoot, featureId, { output_path: ref.receipt_path, output_sha256: ref.receipt_sha256 }, { overlay: false }) !== null) return false;
+    if (i === 0) return true;
+    try {
+      const copy = observeEvidenceOutput(controlRoot, featureId, ref.receipt_path);
+      if (copy.kind !== 'file') return false;
+      const doc = JSON.parse(readFileSync(copy.path, 'utf8')) as { review_id?: string; revision?: number; parent?: { revision?: number; receipt_path?: string; receipt_sha256?: string } };
+      const previous = chain[i - 1]!;
+      return doc.review_id === reviewId && doc.revision === ref.revision && doc.parent?.revision === previous.revision &&
+        doc.parent.receipt_path === previous.receipt_path && doc.parent.receipt_sha256 === previous.receipt_sha256;
+    } catch { return false; }
+  });
+}
+
 /** Readback gate for imported DONE nodes; called before any subsequent claim. */
 export function completionImportProblems(controlRoot: string, state: FeatureState_): Problem[] {
   const problems: Problem[] = [];
@@ -238,10 +263,7 @@ export function completionImportProblems(controlRoot: string, state: FeatureStat
       const historical = state.reworks?.some((rework) => {
         const origin = rework.origin;
         if (origin?.kind !== 'acceptance-review' || !rework.reopened.includes(receipt.node_id)) return false;
-        const review = state.acceptance_review?.reviews.find((r) => r.review_id === origin.review_id);
-        if (!review || review.overall !== 'GAPS' || !review.reworks_applied || !review.reworks.includes(rework.node_id) ||
-          review.receipt_path !== origin.receipt_path || review.receipt_sha256 !== origin.receipt_sha256 ||
-          checkEvidenceOutput(controlRoot, state.feature_id, { output_path: origin.receipt_path, output_sha256: origin.receipt_sha256 }, { overlay: false }) !== null) return false;
+        if (!pinnedReworkReview(controlRoot, state.feature_id, state, origin.review_id, origin)) return false;
         const root = state.nodes[rework.node_id];
         const snapshots = root?.rework_history ?? [];
         return snapshots.some((entry) => {
@@ -255,7 +277,9 @@ export function completionImportProblems(controlRoot: string, state: FeatureStat
       }) ?? false;
       if (source.graph_hash !== receipt.source_graph_sha256 || original?.state !== 'DONE' || original.integrated_sha === null || (!active && !historical) ||
         !isAncestor(repositoryPath(loadWorkspace(controlRoot), receipt.repository), original.integrated_sha, receipt.integration_sha) ||
-        !(rt.criterion_ledger?.slice(0, original.criterion_ledger?.length).every((r, i) => JSON.stringify(r) === JSON.stringify(original.criterion_ledger?.[i])) ?? false)) {
+        !(Array.isArray(rt.criterion_ledger) && Array.isArray(original.criterion_ledger) &&
+          rt.criterion_ledger.length >= original.criterion_ledger.length &&
+          original.criterion_ledger.every((r, i) => JSON.stringify(r) === JSON.stringify(rt.criterion_ledger?.[i])))) {
         problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} does not match the pinned source completion at the imported integration head.`));
       }
     } catch {

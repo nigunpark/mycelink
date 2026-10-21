@@ -229,6 +229,31 @@ describe('durable continuation import', () => {
     expect(completionImportProblems(f.targetRoot, unauthenticated).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
     const wrongHistory = structuredClone(state); wrongHistory.nodes[producer]!.rework_history![0]!.restore!.integrated_sha = f.base;
     expect(completionImportProblems(f.targetRoot, wrongHistory).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    // A refinement withdraws the producer's gap and cancels its order: the
+    // review record now points at revision 1, but the immutable rework still
+    // names revision 0 and its saved imported DONE generation.
+    const refinedPath = `features/${feature}/reviews/R1.refined-1.json`;
+    const refined = JSON.stringify({ review_id: 'R1', revision: 1, parent: { revision: 0, receipt_path: receiptPath, receipt_sha256: receiptSha }, overall: 'GAPS', reworks: [] });
+    writeFileSync(join(f.targetRoot, ...refinedPath.split('/')), refined);
+    const review = state.acceptance_review!.reviews[0]!;
+    review.original = { dispatch_id: 'd1', receipt_path: receiptPath, receipt_sha256: receiptSha, overall: 'GAPS', inputs_sha256: review.inputs_sha256 };
+    review.refinements = [{ dispatch_id: 'd2', capability_sha256: review.capability_sha256, round: 1, challenges: [], decisions: [], receipt_path: refinedPath, receipt_sha256: sha(refined), at: 'now', revision: 1, orders: [{ node_id: producer, action: 'cancel' }] }];
+    review.revision = 1;
+    review.receipt_path = refinedPath; review.receipt_sha256 = sha(refined); review.reworks = [];
+    rt.state = 'DONE'; rt.integrated_sha = f.head;
+    expect(completionImportProblems(f.targetRoot, state)).toEqual([]);
+    const wrongParent = structuredClone(state);
+    wrongParent.acceptance_review!.reviews[0]!.original!.receipt_sha256 = '0'.repeat(64);
+    expect(completionImportProblems(f.targetRoot, wrongParent).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    const wrongSnapshot = structuredClone(state);
+    wrongSnapshot.nodes[producer]!.rework_history![0]!.restore!.integrated_sha = f.base;
+    expect(completionImportProblems(f.targetRoot, wrongSnapshot).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    const wrongLedger = structuredClone(state);
+    wrongLedger.nodes[producer]!.criterion_ledger = [];
+    expect(completionImportProblems(f.targetRoot, wrongLedger).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    writeFileSync(join(f.targetRoot, ...refinedPath.split('/')), refined.replace(receiptSha, '0'.repeat(64)));
+    expect(completionImportProblems(f.targetRoot, state).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    writeFileSync(join(f.targetRoot, ...refinedPath.split('/')), refined);
     writeFileSync(join(f.targetRoot, ...receiptPath.split('/')), 'altered review\n');
     expect(completionImportProblems(f.targetRoot, state).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
     writeFileSync(join(f.targetRoot, ...receiptPath.split('/')), 'settled review\n');

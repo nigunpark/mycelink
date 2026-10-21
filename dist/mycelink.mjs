@@ -29588,6 +29588,26 @@ function validateCompletionImport(input) {
 }
 var digest = (bytes2) => createHash29("sha256").update(bytes2).digest("hex");
 var problem = (code, detail) => ({ code, path: "/continuation_import", detail });
+function pinnedReworkReview(controlRoot, featureId, state, reviewId, origin) {
+  const review = state.acceptance_review?.reviews.find((r) => r.review_id === reviewId);
+  if (!review || review.overall !== "GAPS" || !review.reworks_applied || !origin.receipt_path || !origin.receipt_sha256) return false;
+  const chain = revisionChain(review);
+  const current = chain.at(-1);
+  if (!current || review.revision !== void 0 && review.revision !== current.revision || current.receipt_path !== review.receipt_path || current.receipt_sha256 !== review.receipt_sha256 || !chain.some((r) => r.revision === (origin.revision ?? 0) && r.receipt_path === origin.receipt_path && r.receipt_sha256 === origin.receipt_sha256)) return false;
+  return chain.every((ref, i) => {
+    if (checkEvidenceOutput(controlRoot, featureId, { output_path: ref.receipt_path, output_sha256: ref.receipt_sha256 }, { overlay: false }) !== null) return false;
+    if (i === 0) return true;
+    try {
+      const copy = observeEvidenceOutput(controlRoot, featureId, ref.receipt_path);
+      if (copy.kind !== "file") return false;
+      const doc = JSON.parse(readFileSync23(copy.path, "utf8"));
+      const previous = chain[i - 1];
+      return doc.review_id === reviewId && doc.revision === ref.revision && doc.parent?.revision === previous.revision && doc.parent.receipt_path === previous.receipt_path && doc.parent.receipt_sha256 === previous.receipt_sha256;
+    } catch {
+      return false;
+    }
+  });
+}
 function completionImportProblems(controlRoot, state) {
   const problems = [];
   const receipts = state.completion_imports ?? [];
@@ -29624,8 +29644,7 @@ function completionImportProblems(controlRoot, state) {
       const historical = state.reworks?.some((rework) => {
         const origin = rework.origin;
         if (origin?.kind !== "acceptance-review" || !rework.reopened.includes(receipt.node_id)) return false;
-        const review = state.acceptance_review?.reviews.find((r) => r.review_id === origin.review_id);
-        if (!review || review.overall !== "GAPS" || !review.reworks_applied || !review.reworks.includes(rework.node_id) || review.receipt_path !== origin.receipt_path || review.receipt_sha256 !== origin.receipt_sha256 || checkEvidenceOutput(controlRoot, state.feature_id, { output_path: origin.receipt_path, output_sha256: origin.receipt_sha256 }, { overlay: false }) !== null) return false;
+        if (!pinnedReworkReview(controlRoot, state.feature_id, state, origin.review_id, origin)) return false;
         const root = state.nodes[rework.node_id];
         const snapshots = root?.rework_history ?? [];
         return snapshots.some((entry) => {
@@ -29634,7 +29653,7 @@ function completionImportProblems(controlRoot, state) {
           return true;
         });
       }) ?? false;
-      if (source.graph_hash !== receipt.source_graph_sha256 || original2?.state !== "DONE" || original2.integrated_sha === null || !active2 && !historical || !isAncestor(repositoryPath(loadWorkspace(controlRoot), receipt.repository), original2.integrated_sha, receipt.integration_sha) || !(rt.criterion_ledger?.slice(0, original2.criterion_ledger?.length).every((r, i) => JSON.stringify(r) === JSON.stringify(original2.criterion_ledger?.[i])) ?? false)) {
+      if (source.graph_hash !== receipt.source_graph_sha256 || original2?.state !== "DONE" || original2.integrated_sha === null || !active2 && !historical || !isAncestor(repositoryPath(loadWorkspace(controlRoot), receipt.repository), original2.integrated_sha, receipt.integration_sha) || !(Array.isArray(rt.criterion_ledger) && Array.isArray(original2.criterion_ledger) && rt.criterion_ledger.length >= original2.criterion_ledger.length && original2.criterion_ledger.every((r, i) => JSON.stringify(r) === JSON.stringify(rt.criterion_ledger?.[i])))) {
         problems.push(problem("IMPORT_PROVENANCE_INVALID", `${receipt.node_id} does not match the pinned source completion at the imported integration head.`));
       }
     } catch {
