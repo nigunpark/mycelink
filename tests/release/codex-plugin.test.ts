@@ -101,6 +101,19 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(existsSync(join(source, 'codex-plugin/hooks/hooks.json'))).toBe(false);
   });
 
+  it('guides a fresh approved PRD through a held-authority reviewed delivery without leaking a planning key', () => {
+    const skill = (name: string) => readFileSync(join(source, `codex-plugin/skills/mycelink-${name}/SKILL.md`), 'utf8');
+    expect(skill('prd')).toMatch(/feature acceptance/);
+    expect(skill('prd')).not.toMatch(/--authority <key>/);
+    expect(skill('plan')).toMatch(/graph compile/);
+    expect(skill('plan')).not.toMatch(/--authority <key>/);
+    expect(skill('run')).toMatch(/codex continue.*--review.*--deliver/s);
+    expect(skill('run')).not.toMatch(/reviewer and delivery remain disabled/i);
+    expect(skill('deliver')).toMatch(/codex continue.*--review.*--deliver/s);
+    expect(skill('deliver')).toMatch(/standalone.*codex deliver.*denied/is);
+    expect(skill('init')).not.toMatch(/runtime is denied pending independent security review/i);
+  });
+
   it('initialises a Codex-only control and binds PRD criteria to a validated graph, but refuses execution', () => {
     const control = join(output, 'codex-control');
     const launcher = join(source, 'codex-plugin/bin/mycelink.mjs');
