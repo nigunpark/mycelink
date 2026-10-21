@@ -223,7 +223,7 @@ export const WORKER_RULES: readonly string[] = [
   'Commit the tests alone once the red gate accepts the RED and the production code alone once green passes; never both in one commit.',
   'Settle checks the history mechanically: no test-only commit after production. An extra test needs a new full RED cycle with its own production change; otherwise leave it out.',
   'The one exception: a regression test proving a compatibility criterion of the node (tdd.compatibility_criteria), passing on the code as it is, adding tests only, committed alone with the trailer "Mycelink-Compatibility: <AC>".',
-  'The red gate refuses to run while production files are changed, and binds the exact test files it ran: commit exactly those, or run red again after changing a test.',
+  'Once an accepted RED is recorded, commit its bound test files before any further edit. A second RED in this claim is out of order; do not edit the accepted test or retry RED. If the test needs revision, stop and request a fresh controller claim instead of bypassing the gate.',
   'After a setup or environment failure make no production edit or commit: keep a test-only commit only for a genuine RED, else restore and report BLOCKED.',
   'Run verification through mycelink so exit codes and evidence are recorded.',
   'Do not guess a product decision. Return outcome NEEDS_DECISION with a structured question instead.',

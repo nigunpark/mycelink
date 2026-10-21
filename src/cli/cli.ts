@@ -2117,7 +2117,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
       ? ''
       : [
           '',
-          'RED-bound test files: commit exactly these, then never change them after the production change begins. A compatibility test goes into a new test file; a later test in one of them goes in before its red gate, or after `mycelink tdd cycle` declares a new complete RED cycle.',
+          'RED accepted: commit these exact test files now without further edits. A second RED in this claim is out of order; if the accepted test needs revision, stop and request a fresh controller claim. After the test-only commit, edit production and run GREEN. A later test in a bound file requires a new complete RED cycle after the first one is finished.',
           ...redBound.map((t) => `  RED-bound ${t.path} ${t.blob}`),
         ].join('\n');
   emit(io, args, { ok: true, state: verified, evidence: record, ...testsJson, ...(redBound.length > 0 ? { red_bound: redBound } : {}), ...(resetUp !== null ? { worktree_setup_rerun: resetUp } : {}) }, () =>
