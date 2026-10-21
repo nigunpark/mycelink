@@ -97,7 +97,8 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(manifest.description).toMatch(/opt-in disposable.*review.*delivery/i);
     expect(manifest.description).not.toMatch(/disabled/i);
     const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-status/SKILL.md'), 'utf8');
-    expect(skill).toMatch(/experimental disposable worker preflight/i);
+    expect(skill).toMatch(/runtime preflight denotes eligibility/i);
+    expect(skill).toMatch(/not\*\* that implementation, review or delivery occurred/i);
     expect(existsSync(join(source, 'codex-plugin/hooks/hooks.json'))).toBe(false);
   });
 
@@ -145,6 +146,31 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     const replay = run(['codex', 'prepare', 'FEAT-101', '--source', 'features/FEAT-101/PRD.md', '--from', draft, '--control-root', control, '--json']);
     expect(replay.status).toBe(1);
     expect(replay.stderr).toContain('CODEX_PREPARE_AUTHORITY_EXISTS');
+  });
+
+  it('reports review and bounded delivery eligibility honestly after disposable opt-in', () => {
+    const control = join(output, 'codex-status-enabled');
+    const repo = join(output, 'codex-status-repo');
+    mkdirSync(repo, { recursive: true });
+    const git = spawnSync('git', ['init', '--initial-branch=main', repo], { encoding: 'utf8', windowsHide: true });
+    expect(git.status, git.stderr).toBe(0);
+    const launcher = join(source, 'codex-plugin/bin/mycelink.mjs');
+    const run = (args: string[]) => spawnSync(process.execPath, [launcher, ...args], { cwd: output, encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    expect(run(['codex', 'init', control, '--json']).status).toBe(0);
+    writeFileSync(join(control, 'repositories.yaml'), YAML.stringify({ schema_version: 1, repositories: [{
+      name: 'core', path: '../codex-status-repo', base_branch: 'main', role: 'producer',
+      commands: { test: ['node', '--test'] },
+    }] }));
+    const configPath = join(control, 'mycelink.config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    config['experimental_codex'] = { enabled: true, disposable_repositories: ['core'] };
+    writeFileSync(configPath, JSON.stringify(config));
+    const result = run(['codex', 'status', 'FEAT-101', '--control-root', control, '--json']);
+    expect(result.status, result.stderr).toBe(0);
+    const status = JSON.parse(result.stdout) as { runtime_enabled: boolean; runtime_reason: string };
+    expect(status.runtime_enabled).toBe(true);
+    expect(status.runtime_reason).toMatch(/review.*deliver/i);
+    expect(status.runtime_reason).not.toMatch(/review.*not enabled|delivery.*not enabled/i);
   });
 
   it('initialises a Codex-only control and binds PRD criteria to a validated graph, but refuses execution', () => {
@@ -252,7 +278,7 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(installedChecks.find((entry) => entry.name === 'codex login')?.ok).toBe(false);
     expect(installedChecks.find((entry) => entry.name === 'codex runtime')?.ok).toBe(false);
     expect(existsSync(join(output, 'installed-codex-control', '.claude', 'settings.json'))).toBe(false);
-    expect(readFileSync(cachedSkill, 'utf8')).toContain('experimental disposable worker preflight');
+    expect(readFileSync(cachedSkill, 'utf8')).toContain('runtime preflight denotes eligibility');
     const discovered = (await discoveredSkills(home, output)).filter((skill) => skill.pluginId === `mycelink@${MARKETPLACE}`);
     expect(discovered.map((s) => s.name).sort()).toEqual(['init', 'prd', 'plan', 'status', 'run', 'resume', 'verify', 'deliver'].map((n) => `mycelink:mycelink-${n}`).sort());
     for (const skill of discovered) expect(skill).toMatchObject({ enabled: true, pluginId: `mycelink@${MARKETPLACE}`, path: join(cache, 'skills', skill.name.split(':')[1]!, 'SKILL.md') });

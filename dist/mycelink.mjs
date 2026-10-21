@@ -47278,7 +47278,7 @@ async function codexGroup(args, io) {
     feature_state: state?.feature_state ?? null,
     nodes: state ? Object.fromEntries(Object.entries(state.nodes).map(([id2, runtime]) => [id2, runtime.state])) : {},
     runtime_enabled: gate.ok,
-    runtime_reason: gate.ok ? "Experimental disposable worker only; review, verification and delivery are not enabled." : gate.detail
+    runtime_reason: gate.ok ? "Experimental disposable workers eligible; separate review and bounded delivery require a fresh codex continue --review --deliver with held authority, an approved graph and passing gates." : gate.detail
   };
   emit2(io, args, report, () => `${featureId}: graph ${report.graph_valid ? "valid" : "not valid"}, state ${report.feature_state ?? "not initialised"}; ${report.runtime_reason}`);
   return 0;
