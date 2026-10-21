@@ -38,6 +38,8 @@ describe('Codex mediated test-harness guidance', () => {
     expect(text).toMatch(/RED is accepted[\s\S]*immutable/i);
     expect(text).toMatch(/TypeScript[\s\S]*normalized paths[\s\S]*source file/i);
     expect(text).toMatch(/RED[\s\S]*actual diagnostic[\s\S]*controller/i);
+    expect(text).toMatch(/baseline command[\s\S]*exits zero[\s\S]*before RED/i);
+    expect(text).toMatch(/notes[\s\S]*1024 characters/i);
   });
 
   it('warns Codex against reset-module class identity and directs it to controller GREEN diagnostics', () => {

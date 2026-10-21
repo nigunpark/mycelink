@@ -28598,7 +28598,8 @@ function resultKeysLines() {
     "outcome, commands, commit_sha, branch, changed_paths, evidence_paths, failure_fingerprint, decision_request, usage,",
     'notes, criterion_evidence, challenge, criteria, tdd. Do not add a top-level "reason" or any other invented key:',
     "put a short explanation in notes or failure_fingerprint; for NEEDS_DECISION put the actual question in",
-    "decision_request.question (and at least two options in decision_request.options). Invalid results are rejected, not repaired."
+    "decision_request.question (and at least two options in decision_request.options). Invalid results are rejected, not repaired.",
+    "If included, notes must be at most 1024 characters; otherwise omit notes. Keep failure_fingerprint concise."
   ];
 }
 function testsLines(line) {
@@ -28665,7 +28666,11 @@ function buildWorkerPrompt(args) {
         "* For TypeScript virtual-consumer tests, compare normalized paths consistently in the compiler host and assert the",
         "  source file was actually loaded. Check the type diagnostics against the unchanged working tree before RED: a",
         "  fixture-path failure is not a missing contract. After RED, inspect the actual diagnostic in the controller evidence",
-        "  log under the control root (not a relative path in this worktree) before committing bound tests or editing source."
+        "  log under the control root (not a relative path in this worktree) before committing bound tests or editing source.",
+        "* When comparing real CLI commands to a frozen baseline, prove the baseline command exits zero and produces the",
+        "  expected files on its own before RED. A broken baseline loader, missing build or fixture is a harness failure, not",
+        "  evidence of changed behavior; correct it before the gate binds the test. Never pass a compatibility unit by",
+        "  comparing two failures, and never treat the broken baseline as a RED for a production fix."
       ] : [],
       "* If GREEN fails, read the controller evidence log path returned by the gate (the WSL evidence log in WSL).",
       "  Inspect the actual failing assertion before changing code; do not change committed tests after the accepted RED.",
