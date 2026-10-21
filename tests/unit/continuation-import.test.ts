@@ -210,6 +210,31 @@ describe('durable continuation import', () => {
     expect(completionImportProblems(f.targetRoot, loadState(f.targetDir)!.data).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
     expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(false);
   });
+  it('keeps a pinned import verifiable after a settled review reopens its producer', () => {
+    const f = diskFixture();
+    expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(true);
+    const state = loadState(f.targetDir)!.data;
+    const original = structuredClone(state.nodes[producer]!);
+    const receiptPath = `features/${feature}/reviews/R1.json`;
+    mkdirSync(join(f.targetRoot, 'features', feature, 'reviews'), { recursive: true });
+    writeFileSync(join(f.targetRoot, ...receiptPath.split('/')), 'settled review\n');
+    const receiptSha = sha('settled review\n');
+    state.acceptance_review = { required: true, max_rounds: 2, open: null, blocked: null, usage: state.usage, reviews: [{ review_id: 'R1', dispatch_id: 'd1', capability_sha256: 'a'.repeat(64), review: 1, overall: 'GAPS', inputs_sha256: 'b'.repeat(64), receipt_path: receiptPath, receipt_sha256: receiptSha, at: 'now', reworks: [producer], reworks_applied: true, outcome: 'GAPS' }] };
+    state.reworks = [{ node_id: producer, reason: 'review gap', decision_id: null, at: 'now', reopened: [producer], invalidated_candidate: null, delivered: false, origin: { kind: 'acceptance-review', review_id: 'R1', review: 1, revision: 0, receipt_path: receiptPath, receipt_sha256: receiptSha } }];
+    const rt = state.nodes[producer]!;
+    rt.rework_history = [{ at: 'now', reason: 'review gap', decision_id: null, attempts: 0, failure_counts: {}, integrated_sha: f.head, branch_head: null, archived_ref: null, candidate_id: null, evidence: {}, generation: 0, restore: { state: 'DONE', attempts: 0, failure_counts: {}, last_failure_fingerprint: null, integrated_sha: f.head, branch_base_sha: original.branch_base_sha ?? null, evidence: original.evidence, criteria: original.criteria ?? [], tdd_history: original.tdd_history ?? null, tdd_red_bindings: [], last_settlement: null, carried_criterion_proofs: [], worktree_setup: null } }];
+    rt.state = 'READY'; rt.integrated_sha = null; rt.evidence = {}; rt.criteria = []; rt.tdd_history = null;
+    expect(completionImportProblems(f.targetRoot, state)).toEqual([]);
+    const unauthenticated = structuredClone(state); unauthenticated.acceptance_review!.reviews = [];
+    expect(completionImportProblems(f.targetRoot, unauthenticated).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    const wrongHistory = structuredClone(state); wrongHistory.nodes[producer]!.rework_history![0]!.restore!.integrated_sha = f.base;
+    expect(completionImportProblems(f.targetRoot, wrongHistory).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    writeFileSync(join(f.targetRoot, ...receiptPath.split('/')), 'altered review\n');
+    expect(completionImportProblems(f.targetRoot, state).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+    writeFileSync(join(f.targetRoot, ...receiptPath.split('/')), 'settled review\n');
+    writeFileSync(join(f.targetRoot, ...f.log.split('/')), 'tampered\n');
+    expect(completionImportProblems(f.targetRoot, state).map((p) => p.code)).toContain('IMPORT_PROVENANCE_INVALID');
+  });
   it('keeps imported proof eligible after a later integration, but refuses moved refs and missing or duplicate receipts', () => {
     const f = diskFixture();
     expect(importCompletions({ ...f.args, targetControlRoot: f.targetRoot }).ok).toBe(true);

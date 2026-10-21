@@ -213,7 +213,7 @@ export function completionImportProblems(controlRoot: string, state: FeatureStat
         resolveRef(repo, integrationBranchName(state.feature_id)) === current &&
         isAncestor(repo, receipt.integration_sha, current);
     } catch { /* A missing repository or ref is not eligible. */ }
-    if (rt?.state !== 'DONE' || rt.integrated_sha === null || !trusted ||
+    if (!rt || !trusted ||
       !receipt.files.some((f) => f.path === sourcePath && f.sha256 === receipt.source_state_sha256)) {
       problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} lacks its imported DONE head or pinned source document.`));
       continue;
@@ -226,12 +226,36 @@ export function completionImportProblems(controlRoot: string, state: FeatureStat
     try {
       const source = (JSON.parse(readFileSync(copy.path, 'utf8')) as { data: FeatureState_ }).data;
       const original = source.nodes[receipt.node_id];
-      if (source.graph_hash !== receipt.source_graph_sha256 || original?.integrated_sha !== rt.integrated_sha ||
+      const active = rt.state === 'DONE' && rt.attempts === 0 && rt.integrated_sha === original?.integrated_sha &&
+        JSON.stringify(original.criterion_ledger) === JSON.stringify(rt.criterion_ledger) &&
+        JSON.stringify(original.criteria) === JSON.stringify(rt.criteria) &&
+        JSON.stringify(original.tdd_history) === JSON.stringify(rt.tdd_history) &&
+        JSON.stringify(original.evidence) === JSON.stringify(rt.evidence);
+      // A settled review may reopen imported work and its dependents. The
+      // imported source remains immutable; the active generation is no longer
+      // its DONE snapshot. Require the review's intact receipt and the exact
+      // saved DONE generation instead of pretending the new state is imported.
+      const historical = state.reworks?.some((rework) => {
+        const origin = rework.origin;
+        if (origin?.kind !== 'acceptance-review' || !rework.reopened.includes(receipt.node_id)) return false;
+        const review = state.acceptance_review?.reviews.find((r) => r.review_id === origin.review_id);
+        if (!review || review.overall !== 'GAPS' || !review.reworks_applied || !review.reworks.includes(rework.node_id) ||
+          review.receipt_path !== origin.receipt_path || review.receipt_sha256 !== origin.receipt_sha256 ||
+          checkEvidenceOutput(controlRoot, state.feature_id, { output_path: origin.receipt_path, output_sha256: origin.receipt_sha256 }, { overlay: false }) !== null) return false;
+        const root = state.nodes[rework.node_id];
+        const snapshots = root?.rework_history ?? [];
+        return snapshots.some((entry) => {
+          const saved = rework.node_id === receipt.node_id ? entry.restore : entry.restore_dependents?.[receipt.node_id];
+          if (!saved || saved.integrated_sha !== original?.integrated_sha ||
+            JSON.stringify(saved.criteria) !== JSON.stringify(original.criteria) ||
+            !Object.entries(original.evidence).every(([kind, gate]) => gate && saved.evidence[kind as keyof typeof saved.evidence]?.output_sha256 === gate.output_sha256) ||
+            saved.tdd_history?.output_sha256 !== original.tdd_history?.output_sha256) return false;
+          return true;
+        });
+      }) ?? false;
+      if (source.graph_hash !== receipt.source_graph_sha256 || original?.state !== 'DONE' || original.integrated_sha === null || (!active && !historical) ||
         !isAncestor(repositoryPath(loadWorkspace(controlRoot), receipt.repository), original.integrated_sha, receipt.integration_sha) ||
-        JSON.stringify(original.criterion_ledger) !== JSON.stringify(rt.criterion_ledger) ||
-        JSON.stringify(original.criteria) !== JSON.stringify(rt.criteria) ||
-        JSON.stringify(original.tdd_history) !== JSON.stringify(rt.tdd_history) ||
-        JSON.stringify(original.evidence) !== JSON.stringify(rt.evidence)) {
+        !(rt.criterion_ledger?.slice(0, original.criterion_ledger?.length).every((r, i) => JSON.stringify(r) === JSON.stringify(original.criterion_ledger?.[i])) ?? false)) {
         problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} does not match the pinned source completion at the imported integration head.`));
       }
     } catch {
