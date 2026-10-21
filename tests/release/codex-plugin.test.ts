@@ -103,15 +103,48 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
 
   it('guides a fresh approved PRD through a held-authority reviewed delivery without leaking a planning key', () => {
     const skill = (name: string) => readFileSync(join(source, `codex-plugin/skills/mycelink-${name}/SKILL.md`), 'utf8');
-    expect(skill('prd')).toMatch(/feature acceptance/);
+    expect(skill('prd')).toMatch(/codex prepare/);
     expect(skill('prd')).not.toMatch(/--authority <key>/);
-    expect(skill('plan')).toMatch(/graph compile/);
+    expect(skill('plan')).toMatch(/codex prepare/);
     expect(skill('plan')).not.toMatch(/--authority <key>/);
     expect(skill('run')).toMatch(/codex continue.*--review.*--deliver/s);
     expect(skill('run')).not.toMatch(/reviewer and delivery remain disabled/i);
     expect(skill('deliver')).toMatch(/codex continue.*--review.*--deliver/s);
     expect(skill('deliver')).toMatch(/standalone.*codex deliver.*denied/is);
     expect(skill('init')).not.toMatch(/runtime is denied pending independent security review/i);
+  });
+
+  it('prepares a fresh Codex PRD and reviewed graph without minting an authority before continuation', () => {
+    const control = join(output, 'fresh-codex-prepare');
+    const launcher = join(source, 'codex-plugin/bin/mycelink.mjs');
+    const run = (args: string[]) => spawnSync(process.execPath, [launcher, ...args], { cwd: output, encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    expect(run(['codex', 'init', control, '--json']).status).toBe(0);
+    const feature = join(control, 'features/FEAT-101');
+    mkdirSync(feature, { recursive: true });
+    const requirement = '# Pilot\n\nStatus: approved\n\n**AC-1 — behavior.** Produce a safe value.\n\n**AC-2 — API.** Expose the safe value.\n';
+    writeFileSync(join(feature, 'PRD.md'), requirement);
+    writeFileSync(join(control, 'repositories.yaml'), YAML.stringify(VALID_REPOSITORIES));
+    const graph = structuredClone(VALID_GRAPH);
+    graph.acceptance_criteria = [
+      { id: 'AC-1', text: '**AC-1 — behavior.** Produce a safe value.', kind: 'new-behavior' },
+      { id: 'AC-2', text: '**AC-2 — API.** Expose the safe value.', kind: 'new-behavior' },
+    ];
+    const draft = join(feature, 'PORTFOLIO-GRAPH.draft.yaml');
+    writeFileSync(draft, YAML.stringify(graph));
+    const generic = run(['feature', 'acceptance', 'FEAT-101', '--source', 'features/FEAT-101/PRD.md', '--control-root', control, '--json']);
+    expect(generic.status).toBe(1);
+    expect(generic.stderr).toContain('CONTROLLER_AUTHORITY_REQUIRED');
+    const prepared = run(['codex', 'prepare', 'FEAT-101', '--source', 'features/FEAT-101/PRD.md', '--from', draft, '--control-root', control, '--json']);
+    expect(prepared.status, prepared.stderr).toBe(0);
+    expect(JSON.parse(prepared.stdout)).toMatchObject({ prepared: true, feature_id: 'FEAT-101', criteria: ['AC-1', 'AC-2'] });
+    expect(run(['graph', 'validate', 'FEAT-101', '--control-root', control, '--json']).status).toBe(0);
+    expect(existsSync(join(control, '.mycelink/controller-authority.json'))).toBe(false);
+    expect(existsSync(join(feature, 'STATE.json'))).toBe(false);
+    const opened = run(['controller', 'open', '--control-root', control, '--json']);
+    expect(opened.status, opened.stderr).toBe(0);
+    const replay = run(['codex', 'prepare', 'FEAT-101', '--source', 'features/FEAT-101/PRD.md', '--from', draft, '--control-root', control, '--json']);
+    expect(replay.status).toBe(1);
+    expect(replay.stderr).toContain('CODEX_PREPARE_AUTHORITY_EXISTS');
   });
 
   it('initialises a Codex-only control and binds PRD criteria to a validated graph, but refuses execution', () => {

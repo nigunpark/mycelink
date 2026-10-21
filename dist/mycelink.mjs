@@ -46798,7 +46798,9 @@ var USAGE = `mycelink <group> <command> [options]
   version | --version                        print the installed version
   doctor                                     environment and workspace health
   codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
-  codex status <feature>                     inspect local plan and runtime denial
+  codex prepare <feature> --source <PRD> --from <reviewed-draft> [--kind AC-n=compatibility,...]
+                                           fresh Codex control: bind approved criteria and graph without opening authority
+  codex status <feature>                     inspect local plan and runtime preflight
   codex run <feature>                      run one disposable worker with held authority
   codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations (--review --deliver: one-shot candidate/delivery)
     [--import-source-control <separate-control> --import-state-sha256 <pinned-sha256> --import-nodes <id,id>]
@@ -47090,12 +47092,47 @@ async function codexGroup(args, io) {
     emit2(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
-  if (!["status", "run", "continue", "review", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  if (!["status", "prepare", "run", "continue", "review", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
   if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync47(controlPaths(controlRoot).config)) {
     throw new Error("CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.");
   }
   const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === "prepare") {
+    assertControllerRole(args, "codex prepare");
+    if (args.flags["authority"] !== void 0 || args.flags["recover"] !== void 0 || args.flags["takeover"] !== void 0 || existsSync47(authorityFile(controlRoot))) {
+      throw new Error("CODEX_PREPARE_AUTHORITY_EXISTS: prepare requires a fresh control without controller authority; continue will open its own held authority.");
+    }
+    const featureDir = controlPaths(controlRoot).featuresDir;
+    if (existsSync47(featureDir) && readdirSync27(featureDir).some((name) => existsSync47(join58(featureDir, name, "STATE.json")))) {
+      throw new Error("CODEX_PREPARE_STATE_EXISTS: a feature has already been initialised; planning cannot rewrite its graph.");
+    }
+    const featureId2 = requirePositional(args, 2, "feature-id");
+    const source = flagString(args, "source");
+    const graphFile = resolve29(flagString(args, "from"));
+    if (relativeInside(controlRoot, resolve29(controlRoot, source)) === null || relativeInside(controlRoot, graphFile) === null) {
+      throw new Error("CODEX_PREPARE_PATH: approved PRD and reviewed draft graph must both be inside the control repository.");
+    }
+    const output = [];
+    const internal = { out: (text) => output.push(text), err: (text) => {
+      throw new Error(text);
+    } };
+    const accepted = featureAcceptance({ ...args, positional: ["feature", "acceptance", featureId2] }, internal, controlRoot, featureId2);
+    if (accepted !== 0) throw new Error("CODEX_PREPARE_ACCEPTANCE_FAILED");
+    const compiled = graphGroup({ ...args, positional: ["graph", "compile", featureId2] }, internal);
+    if (compiled !== 0) throw new Error("CODEX_PREPARE_GRAPH_FAILED");
+    const validated = validateFeatureGraph(controlRoot, featureId2);
+    if (!validated.ok) throw new Error(`CODEX_PREPARE_GRAPH_INVALID: ${validated.problems.map((p) => p.code).join(", ")}`);
+    const manifest = loadAcceptanceManifest(controlRoot, featureId2)?.manifest;
+    if (!manifest) throw new Error("CODEX_PREPARE_ACCEPTANCE_MISSING");
+    emit2(
+      io,
+      args,
+      { prepared: true, feature_id: featureId2, criteria: manifest.criteria.map((c) => c.id), graph_hash: validated.graphHash, authority_opened: false },
+      () => `${featureId2}: PRD and reviewed graph prepared without opening authority; run a fresh codex continue after explicit disposable-repository opt-in.`
+    );
+    return 0;
+  }
   const runReview = async (featureId2) => {
     const orchestrator = orchestratorFor(controlRoot, featureId2);
     const dispatched = await orchestrator.dispatchNext();

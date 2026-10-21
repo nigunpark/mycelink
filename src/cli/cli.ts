@@ -66,7 +66,7 @@ import { withLock } from '../state/process-lock.js';
 import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
-import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
+import { assertControllerAuthority, authorityFile, openControllerAuthority } from '../engine/authority.js';
 import { continueController, continueReviewedController } from '../engine/codex-continuation.js';
 import { importCompletions } from '../engine/continuation-import.js';
 import { finalizeCodexDelivery } from '../engine/codex-finalize.js';
@@ -117,7 +117,9 @@ const USAGE = `mycelink <group> <command> [options]
   version | --version                        print the installed version
   doctor                                     environment and workspace health
   codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
-  codex status <feature>                     inspect local plan and runtime denial
+  codex prepare <feature> --source <PRD> --from <reviewed-draft> [--kind AC-n=compatibility,...]
+                                           fresh Codex control: bind approved criteria and graph without opening authority
+  codex status <feature>                     inspect local plan and runtime preflight
   codex run <feature>                      run one disposable worker with held authority
   codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations (--review --deliver: one-shot candidate/delivery)
     [--import-source-control <separate-control> --import-state-sha256 <pinned-sha256> --import-nodes <id,id>]
@@ -456,12 +458,41 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     emit(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
-  if (!['status', 'run', 'continue', 'review', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  if (!['status', 'prepare', 'run', 'continue', 'review', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
   if (loadConfig(controlRoot).provider.provider !== 'codex' || !existsSync(controlPaths(controlRoot).config)) {
     throw new Error('CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.');
   }
   const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === 'prepare') {
+    assertControllerRole(args, 'codex prepare');
+    if (args.flags['authority'] !== undefined || args.flags['recover'] !== undefined || args.flags['takeover'] !== undefined || existsSync(authorityFile(controlRoot))) {
+      throw new Error('CODEX_PREPARE_AUTHORITY_EXISTS: prepare requires a fresh control without controller authority; continue will open its own held authority.');
+    }
+    const featureDir = controlPaths(controlRoot).featuresDir;
+    if (existsSync(featureDir) && readdirSync(featureDir).some((name) => existsSync(join(featureDir, name, 'STATE.json')))) {
+      throw new Error('CODEX_PREPARE_STATE_EXISTS: a feature has already been initialised; planning cannot rewrite its graph.');
+    }
+    const featureId = requirePositional(args, 2, 'feature-id');
+    const source = flagString(args, 'source');
+    const graphFile = resolve(flagString(args, 'from'));
+    if (relativeInside(controlRoot, resolve(controlRoot, source)) === null || relativeInside(controlRoot, graphFile) === null) {
+      throw new Error('CODEX_PREPARE_PATH: approved PRD and reviewed draft graph must both be inside the control repository.');
+    }
+    const output: string[] = [];
+    const internal: CliIo = { out: (text) => output.push(text), err: (text) => { throw new Error(text); } };
+    const accepted = featureAcceptance({ ...args, positional: ['feature', 'acceptance', featureId] }, internal, controlRoot, featureId);
+    if (accepted !== 0) throw new Error('CODEX_PREPARE_ACCEPTANCE_FAILED');
+    const compiled = graphGroup({ ...args, positional: ['graph', 'compile', featureId] }, internal);
+    if (compiled !== 0) throw new Error('CODEX_PREPARE_GRAPH_FAILED');
+    const validated = validateFeatureGraph(controlRoot, featureId);
+    if (!validated.ok) throw new Error(`CODEX_PREPARE_GRAPH_INVALID: ${validated.problems.map((p) => p.code).join(', ')}`);
+    const manifest = loadAcceptanceManifest(controlRoot, featureId)?.manifest;
+    if (!manifest) throw new Error('CODEX_PREPARE_ACCEPTANCE_MISSING');
+    emit(io, args, { prepared: true, feature_id: featureId, criteria: manifest.criteria.map((c) => c.id), graph_hash: validated.graphHash, authority_opened: false },
+      () => `${featureId}: PRD and reviewed graph prepared without opening authority; run a fresh codex continue after explicit disposable-repository opt-in.`);
+    return 0;
+  }
   const runReview = async (featureId: string) => {
     const orchestrator = orchestratorFor(controlRoot, featureId);
     const dispatched = await orchestrator.dispatchNext();
