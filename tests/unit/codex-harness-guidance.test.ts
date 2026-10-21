@@ -23,6 +23,21 @@ describe('Codex mediated test-harness guidance', () => {
     }
   });
 
+  it('makes review regression tests exercise the working tree before binding an immutable RED', () => {
+    const base = minimalPack();
+    const pack = minimalPack({ rework: {
+      generation: 1, limit: 2, reason: 'review gap', reason_sha256: 'a'.repeat(64),
+      acceptance_criteria: ['AC-1'], evidence: [],
+      replaced: { integrated_sha: null, candidate_id: null },
+      scope: { node_id: base.node_id, repository: base.repository },
+      origin: { kind: 'acceptance-review', review_id: 'FEAT-101-R001', review: 1 },
+    } });
+    const text = buildWorkerPrompt({ pack, gates: [], provider: 'codex', mediated: true }).split('<mycelink-context-pack>')[0]!;
+    expect(text).toMatch(/before.*RED.*working.tree.*production/i);
+    expect(text).toMatch(/baseline pinned[\s\S]*reviewed side[\s\S]*working.tree/i);
+    expect(text).toMatch(/RED is accepted[\s\S]*immutable/i);
+  });
+
   it('warns Codex against reset-module class identity and directs it to controller GREEN diagnostics', () => {
     const text = prompt('codex');
     expect(text).toMatch(/vi\.resetModules\(\)/);

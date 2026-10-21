@@ -782,6 +782,12 @@ export function buildWorkerPrompt(args: WorkerPromptArgs): string {
       '* In test harnesses, vi.resetModules() can create a second Error class identity: instanceof checks in production may',
       '  reject an error constructed from the earlier module instance. Mock and construct errors from the same module instance',
       '  as the code under test; assert observable behavior rather than an accidental module-cache mismatch.',
+      ...(pack.rework?.origin?.kind === 'acceptance-review' ? [
+        '* Before an acceptance-review RED, check that your test exercises working-tree production, so a subsequent source',
+        '  fix can change its outcome. A compatibility comparison may keep the baseline pinned, but the reviewed side must',
+        '  exercise working-tree source, not an immutable reviewed commit. Once the RED is accepted its bound test bytes are',
+        '  immutable in this claim; discover a defective harness before the gate, not after committing those bytes.',
+      ] : []),
       '* If GREEN fails, read the controller evidence log path returned by the gate (the WSL evidence log in WSL).',
       '  Inspect the actual failing assertion before changing code; do not change committed tests after the accepted RED.',
       '  A direct local test on Windows-mounted dependencies is only a diagnostic, never a replacement for controller GREEN.',
