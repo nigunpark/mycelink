@@ -2032,12 +2032,12 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
         : [
             `\nThe tests this RED declares all pass on the unchanged base (${challenge.head_sha.slice(0, 12)}): never change production code for them and never make a test fail on purpose.`,
             completedNow.length > 0
-              ? ` ${completedNow.join(', ')} ${completedNow.length === 1 ? 'was' : 'were'} completed by an earlier generation (rework.completed_criteria): a test here that is exactly the review's reproduction of ${completedNow.length === 1 ? 'it' : 'one'} is its re-proof — the completed behaviour holds on this code. Keep that test out of the branch (restore its file: this gate kept its copy) and answer the criterion DONE citing its completed proof exactly as rework.completed_criteria gives it and this test's test_id with gate "red" and this gate's sha256 (${record.output_sha256}).`
+              ? ` ${completedNow.join(', ')} ${completedNow.length === 1 ? 'was' : 'were'} completed by an earlier generation (rework.completed_criteria). If a passing test is exactly the review's reproduction, make a review-gap challenge first: run the challenge line with --criteria <AC>, fill its focused tests and assertion traces, write REVIEW_GAP_CHALLENGE and run the check line; no git restore is required for a challenge because the gate kept its copy and settlement abandons this worktree. Do not call the gap closed until a separate reviewer judges it. A distinct re-proof path may answer DONE only with both the completed proof from rework.completed_criteria and this test's test_id with gate "red" and this gate's sha256 (${record.output_sha256}); keep that test out of the branch without weakening an existing test.`
               : '',
             behaviours.filter((ac) => !completedNow.includes(ac)).length > 0
               ? ` If they are exactly the acceptance review's reproduction of ${behaviours.filter((ac) => !completedNow.includes(ac)).join(', ')}, its gap does not reproduce on this code: that is a review-gap challenge, not a RED to fake — run the challenge line (mycelink tdd challenge ${featureId} ${nodeId} --capability <your capability>, narrowed with --criteria), write outcome REVIEW_GAP_CHALLENGE for it, run the check line.`
               : completedNow.length > 0
-                ? ` If you hold the review's gap wrong instead, that is a review-gap challenge: the challenge line, narrowed with --criteria, outcome REVIEW_GAP_CHALLENGE for it.`
+                ? ''
                 : '',
             compat.length > 0 ? ` A test of ${compat.join(', ')} (compatibility) is its compatibility-regression unit: commit it alone with its trailer, then green and regression.` : '',
             ' If they are not yet exactly the reproduction, make them so and run red again.',
