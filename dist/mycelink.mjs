@@ -47172,8 +47172,10 @@ async function codexGroup(args, io) {
       const cycle = JSON.parse(output.join("\n"));
       if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error("CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.");
       const report2 = cycle.reports[0];
-      detail.push({ node_id: report2.node_id, outcome: report2.outcome, state: report2.state });
-      return { node_id: report2.node_id, outcome: code === 0 ? report2.outcome : "NODE_NOT_DONE" };
+      const challenged = report2.outcome === "REVIEW_CHALLENGED" && report2.state === "DONE" && orchestratorFor(controlRoot, featureId2).state().acceptance_review?.challenges?.some((c) => c.node_id === report2.node_id && c.status === "pending");
+      const outcome = code === 0 || challenged ? report2.outcome : "NODE_NOT_DONE";
+      detail.push({ node_id: report2.node_id, outcome, state: report2.state });
+      return { node_id: report2.node_id, outcome };
     };
     if (args.flags["review"] === true) {
       const rawReviews = args.flags["max-reviews"];

@@ -546,8 +546,14 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
         const cycle = JSON.parse(output.join('\n')) as { reports: { node_id: string; outcome: string; state: string }[] };
         if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error('CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.');
         const report = cycle.reports[0]!;
-        detail.push({ node_id: report.node_id, outcome: report.outcome, state: report.state });
-        return { node_id: report.node_id, outcome: code === 0 ? report.outcome : 'NODE_NOT_DONE' };
+        // A challenge deliberately makes orchestrate once nonzero: the archived
+        // challenge restores DONE and schedules a separate refinement reviewer.
+        const challenged = report.outcome === 'REVIEW_CHALLENGED' && report.state === 'DONE' &&
+          orchestratorFor(controlRoot, featureId).state().acceptance_review?.challenges?.some((c) =>
+            c.node_id === report.node_id && c.status === 'pending');
+        const outcome = code === 0 || challenged ? report.outcome : 'NODE_NOT_DONE';
+        detail.push({ node_id: report.node_id, outcome, state: report.state });
+        return { node_id: report.node_id, outcome };
     };
     if (args.flags['review'] === true) {
       const rawReviews = args.flags['max-reviews'];
