@@ -27926,6 +27926,7 @@ var WORKER_RULES = [
   "Settle checks the history mechanically: no test-only commit after production. An extra test needs a new full RED cycle with its own production change; otherwise leave it out.",
   'The one exception: a regression test proving a compatibility criterion of the node (tdd.compatibility_criteria), passing on the code as it is, adding tests only, committed alone with the trailer "Mycelink-Compatibility: <AC>".',
   "Once an accepted RED is recorded, commit its bound test files before any further edit. A second RED in this claim is out of order; do not edit the accepted test or retry RED. If the test needs revision, stop and request a fresh controller claim instead of bypassing the gate.",
+  "Keep output bounded (<64 KiB). No unscoped rg --files or node_modules search; use allowed paths and short excerpts. Oversized JSONL fails.",
   "After a setup or environment failure make no production edit or commit: keep a test-only commit only for a genuine RED, else restore and report BLOCKED.",
   "Run verification through mycelink so exit codes and evidence are recorded.",
   "Do not guess a product decision. Return outcome NEEDS_DECISION with a structured question instead.",
