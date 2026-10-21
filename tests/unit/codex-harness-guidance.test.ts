@@ -1,11 +1,27 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { minimalPack } from '../helpers/context-pack.js';
-import { buildWorkerPrompt } from '../../src/sessions/worker-protocol.js';
+import { buildHostWorkerPrompt, buildWorkerPrompt } from '../../src/sessions/worker-protocol.js';
 
 describe('Codex mediated test-harness guidance', () => {
   const prompt = (provider: 'codex' | 'claude') => buildWorkerPrompt({
     pack: minimalPack(), gates: [], provider, mediated: true,
   }).split('<mycelink-context-pack>')[0]!;
+
+  it('names the exact allowed top-level result keys and refuses explanatory extras', () => {
+    const pack = minimalPack();
+    const host = buildHostWorkerPrompt({ pack, worktree: '/w', resultSlot: '/w/.mycelink-worker/result.json', gates: [] });
+    for (const text of [prompt('codex'), host]) {
+      expect(text).toContain('Allowed top-level result keys (no others):');
+      expect(text).toMatch(/notes.*criterion_evidence.*challenge.*criteria.*tdd/s);
+      expect(text).toContain('Do not add a top-level "reason"');
+      expect(text).toContain('decision_request.question');
+      const names = text.match(/Allowed top-level result keys \(no others\): ([\s\S]*?)\. Do not add a top-level/)?.[1]
+        ?.replace(/\s+/g, ' ').split(', ').join(',').split(',');
+      const schema = JSON.parse(readFileSync('schemas/node-result.schema.json', 'utf8')) as { properties: Record<string, unknown> };
+      expect(names?.sort()).toEqual(Object.keys(schema.properties).sort());
+    }
+  });
 
   it('warns Codex against reset-module class identity and directs it to controller GREEN diagnostics', () => {
     const text = prompt('codex');

@@ -28592,6 +28592,15 @@ function resultHistoryLines(git) {
     "Settle checks both against the repository; a claim that does not match refuses the history."
   ];
 }
+function resultKeysLines() {
+  return [
+    "Allowed top-level result keys (no others): schema_version, node_id, claim_id, dispatch_id, orchestration_epoch,",
+    "outcome, commands, commit_sha, branch, changed_paths, evidence_paths, failure_fingerprint, decision_request, usage,",
+    'notes, criterion_evidence, challenge, criteria, tdd. Do not add a top-level "reason" or any other invented key:',
+    "put a short explanation in notes or failure_fingerprint; for NEEDS_DECISION put the actual question in",
+    "decision_request.question (and at least two options in decision_request.options). Invalid results are rejected, not repaired."
+  ];
+}
 function testsLines(line) {
   return line === void 0 ? [] : [`- tests (find a test's id by words): ${line} [--gate red|green|regression] --match "<words>"`];
 }
@@ -28671,6 +28680,7 @@ function buildWorkerPrompt(args) {
     "outcome SUBMITTED, RETRYABLE, BLOCKED, NEEDS_DECISION or BUDGET_EXHAUSTED; commands as",
     '[{"command": [...], "exit_code": n}]; commit_sha; changed_paths; evidence_paths; failure_fingerprint;',
     'decision_request ({"question", "options": [...]} for NEEDS_DECISION, otherwise null).',
+    ...resultKeysLines(),
     ...resultHistoryLines("git"),
     "Do not claim success in prose; the result file is the claim.",
     "",
@@ -28804,6 +28814,7 @@ function buildHostWorkerPrompt(args) {
     `NEEDS_DECISION or BUDGET_EXHAUSTED${pack.rework?.origin?.kind === "acceptance-review" ? " (or REVIEW_GAP_CHALLENGE, or CRITERIA with schema_version 2: below)" : ""}; commands as [{"command": [...], "exit_code": n}]; commit_sha;`,
     'changed_paths; evidence_paths; failure_fingerprint; decision_request ({"question", "options": [...]}',
     "for NEEDS_DECISION, otherwise null).",
+    ...resultKeysLines(),
     ...resultHistoryLines(`git -C "${worktree ?? "<worktree>"}"`),
     ...challengeResultLines(pack),
     "Then reply with only that JSON.",
@@ -28862,6 +28873,7 @@ function hostCorrectionPrompt(args, worktree, gateLines) {
     "Write it with the Write tool, then reply with only that JSON: schema_version 1; node_id, claim_id and dispatch_id exactly as",
     `above;${epochField(args.orchestrationEpoch)} outcome SUBMITTED (or RETRYABLE, see above); commit_sha ${cycle ? "the head of the branch when you finish" : `exactly ${pack.correction?.commit_sha ?? ""}`};`,
     "commands; changed_paths; evidence_paths; failure_fingerprint; decision_request null; criterion_evidence.",
+    ...resultKeysLines(),
     "A held per-criterion answer (schema_version 2, outcome CRITERIA) is resubmitted so: its criteria and challenge as held, its corrected criterion_evidence.",
     ...cycle ? resultHistoryLines(git) : [],
     "Never run mycelink settle, dispatch or any other controller command: the host does that.",
