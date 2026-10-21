@@ -1,7 +1,7 @@
 {
   "name": "mycelink-codex-marketplace",
   "interface": {
-    "displayName": "Mycelink (Codex planning only)"
+    "displayName": "Mycelink (Codex experimental workflows)"
   },
   "plugins": [
     {

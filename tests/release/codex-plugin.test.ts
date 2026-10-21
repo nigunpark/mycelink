@@ -91,7 +91,11 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
 
     const manifest = JSON.parse(readFileSync(join(source, 'codex-plugin/plugin.json'), 'utf8')) as { name: string; version: string; description: string };
     expect(manifest).toMatchObject({ name: 'mycelink', version: VERSION });
-    expect(manifest.description).toMatch(/planning.*opt-in disposable worker.*delivery disabled/i);
+    expect(manifest.description).toMatch(/planning.*opt-in disposable worker.*review.*delivery/i);
+    const listing = JSON.parse(readFileSync(join(source, '.agents/plugins/marketplace.json'), 'utf8')) as { interface: { displayName: string } };
+    expect(listing.interface.displayName).toMatch(/experimental/i);
+    expect(manifest.description).toMatch(/opt-in disposable.*review.*delivery/i);
+    expect(manifest.description).not.toMatch(/disabled/i);
     const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-status/SKILL.md'), 'utf8');
     expect(skill).toMatch(/experimental disposable worker preflight/i);
     expect(existsSync(join(source, 'codex-plugin/hooks/hooks.json'))).toBe(false);

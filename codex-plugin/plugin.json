@@ -2,14 +2,14 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "mycelink",
   "version": "0.3.0-beta.1",
-  "description": "Mycelink Codex planning and opt-in disposable worker cycle; review and delivery disabled.",
+  "description": "Mycelink Codex planning, opt-in disposable worker cycles, independent review and bounded delivery; general production readiness unverified.",
   "license": "Apache-2.0",
   "extensions": {
     "com.openai": {
       "hooks": {},
       "interface": {
-        "displayName": "Mycelink (Codex experimental worker)",
-        "shortDescription": "PRD and graph planning; opt-in disposable worker, no delivery.",
+        "displayName": "Mycelink (Codex experimental workflows)",
+        "shortDescription": "PRD planning; opt-in disposable worker, review and bounded delivery.",
         "developerName": "Mycelink Contributors",
         "category": "Development"
       }
