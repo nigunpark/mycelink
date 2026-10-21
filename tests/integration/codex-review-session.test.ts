@@ -31,6 +31,12 @@ describe('separate Codex reviewer process evidence (not acceptance settlement)',
     expect(prompt).toContain('/mnt/c/');
     expect(prompt).toMatch(/WSL, Windows drive-letter paths inside the packet/);
   });
+  it('makes compatibility gap traces judgeable without relaxing the review judge', () => {
+    const prompt = codexReviewPrompt('Read the packet and inspect criteria.', 'C:/control/packet.json');
+    expect(prompt).toMatch(/compatibility GAP.*material clause/i);
+    expect(prompt).toMatch(/omit test:<id>.*clause evidence/i);
+    expect(prompt).toMatch(/trace.*not shown/i);
+  });
   it('records a hash-bound separate JSONL session with a per-criterion gap and no authority in its prompt', async () => {
     const { root, script } = fixture(verdict);
     const result = await runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root, prompt: 'Review these criteria', binding, evidenceDir: join(root, 'evidence'), timeoutMs: 5000 });
