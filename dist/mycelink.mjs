@@ -27352,6 +27352,7 @@ import { existsSync as existsSync34, mkdirSync as mkdirSync22, readFileSync as r
 import { createHash as createHash36 } from "node:crypto";
 import { basename as basename15, dirname as dirname17, join as join47, resolve as resolve22 } from "node:path";
 import { randomBytes as randomBytes6, randomUUID as randomUUID4 } from "node:crypto";
+import { spawnSync as spawnSync8 } from "node:child_process";
 
 // src/engine/criterion-ledger.ts
 import { createHash as createHash23 } from "node:crypto";
@@ -30974,16 +30975,22 @@ function parse2(input) {
     if (!["red", "green", "regression"].includes(String(r["gate"])) || Object.keys(r).some((k) => ![...base, "gate"].includes(k))) return null;
   } else if (r["operation"] === "commit") {
     if (!Array.isArray(r["paths"]) || !r["paths"].every((p) => typeof p === "string") || typeof r["message"] !== "string" || Object.keys(r).some((k) => ![...base, "paths", "message"].includes(k))) return null;
+  } else if (r["operation"] === "challenge") {
+    if (typeof r["criterion"] !== "string" || !/^AC-[A-Za-z0-9_.-]{1,60}$/.test(r["criterion"]) || Object.keys(r).some((k) => ![...base, "criterion"].includes(k))) return null;
+  } else if (r["operation"] === "check") {
+    if (Object.keys(r).some((k) => !base.includes(k))) return null;
   } else return null;
   return r;
 }
 var ClaimChannel = class {
-  constructor(liveClaim, runGate) {
+  constructor(liveClaim, runGate, runReadOnly) {
     this.liveClaim = liveClaim;
     this.runGate = runGate;
+    this.runReadOnly = runReadOnly;
   }
   liveClaim;
   runGate;
+  runReadOnly;
   sequence = 0;
   acceptedRed = false;
   redHead = null;
@@ -31003,7 +31010,20 @@ var ClaimChannel = class {
     if (request.operation === "gate" && (scope.nextGate !== request.gate || !scope.gateCommands.some((g) => g.gate === request.gate))) {
       return fail("CHANNEL_GATE_OUT_OF_ORDER");
     }
+    if ((request.operation === "challenge" || request.operation === "check") && (!scope.challengeCriteria?.length || !this.runReadOnly)) return fail("CHANNEL_REVIEW_UNAVAILABLE");
+    if (request.operation === "challenge" && !scope.challengeCriteria?.includes(request.criterion)) return fail("CHANNEL_CRITERION_INVALID");
     this.sequence = sequence;
+    if (request.operation === "challenge" || request.operation === "check") {
+      try {
+        const result = this.runReadOnly(request.operation, request.operation === "challenge" ? request.criterion : null);
+        const now3 = this.liveClaim();
+        if (!now3 || now3.claimId !== scope.claimId || now3.featureId !== scope.featureId || now3.nodeId !== scope.nodeId || !samePath(now3.worktree, scope.worktree)) return fail("CHANNEL_CLAIM_STALE");
+        const output = result.output.slice(0, 32 * 1024);
+        return result.exitCode === 0 ? { ok: true, sequence, exitCode: 0, output } : { ok: false, sequence, code: "CHANNEL_REVIEW_REFUSED", exitCode: result.exitCode, output };
+      } catch {
+        return fail("CHANNEL_REVIEW_FAILED");
+      }
+    }
     if (request.operation === "gate") {
       if (request.gate === "green" && this.acceptedRed && scope.tddPolicy) {
         try {
@@ -34241,7 +34261,8 @@ var Orchestrator = class _Orchestrator {
       forbiddenPaths: [...node.forbidden_paths ?? []],
       tddPolicy: claim.tdd_policy ?? this.claimTddPolicy(node.repository),
       nextGate,
-      gateCommands: this.gateCommands(nodeId, capability)
+      gateCommands: this.gateCommands(nodeId, capability),
+      ...rt.rework_brief?.origin?.kind === "acceptance-review" ? { challengeCriteria: [...rt.rework_brief.acceptance_criteria] } : {}
     };
   }
   /** Write the node's context pack and return its path. */
@@ -34997,6 +35018,33 @@ var Orchestrator = class _Orchestrator {
             requireTests: gate !== "regression" && node.required_evidence.includes("red"),
             readRecord: () => this.state().nodes[nodeId]?.evidence[gate]
           });
+        }, (operation, criterion) => {
+          const current = scope();
+          if (!current?.challengeCriteria?.length || criterion !== null && !current.challengeCriteria.includes(criterion)) {
+            throw new Error("CHANNEL_REVIEW_UNAVAILABLE");
+          }
+          const argv = [
+            mycelinkCliPath(),
+            "tdd",
+            operation,
+            this.featureId,
+            nodeId,
+            "--control-root",
+            this.controlRoot,
+            "--capability",
+            capability,
+            ...criterion !== null ? ["--criteria", criterion] : [],
+            "--json"
+          ];
+          const ran = spawnSync8(process.execPath, argv, {
+            cwd: worktree,
+            encoding: "utf8",
+            timeout: 6e4,
+            maxBuffer: 128 * 1024,
+            windowsHide: true
+          });
+          if (ran.error || ran.signal) throw new Error("CHANNEL_REVIEW_EXECUTION_FAILED");
+          return { exitCode: ran.status ?? 1, output: (ran.stdout || ran.stderr || "").slice(0, 32 * 1024) };
         });
         request.claimChannel = { handle: (input) => channel.handle(input), redactEnv: { [CAPABILITY_ENV]: capability } };
       }
@@ -43071,6 +43119,8 @@ const identity = ${JSON.stringify(identity2)};
 let payload;
 if (operation === 'gate' && args.length === 1 && ['red', 'green', 'regression'].includes(args[0])) payload = { operation, gate: args[0] };
 else if (operation === 'commit' && args.length >= 2 && args.length <= 101) payload = { operation, message: args[0], paths: args.slice(1) };
+else if (operation === 'challenge' && args.length === 1 && /^AC-[A-Za-z0-9_.-]{1,60}$/.test(args[0])) payload = { operation, criterion: args[0] };
+else if (operation === 'check' && args.length === 0) payload = { operation };
 else throw new Error('CHANNEL_CLIENT_USAGE');
 const numbers = readdirSync(dir).map(x => /^request-([1-9][0-9]{0,2})\\.json$/.exec(x)).filter(Boolean).map(x => Number(x[1]));
 const sequence = Math.max(0, ...numbers) + 1;
@@ -43289,7 +43339,11 @@ node ${path} gate red
 node ${path} gate green
 node ${path} gate regression
 node ${path} commit <message> <owned-path> [more-owned-paths]
-Use the returned output_sha256 and test_ids for criterion_evidence; a completed model turn alone proves nothing.
+` + (pack.rework?.origin?.kind === "acceptance-review" ? `For a passing exact review reproduction, use these read-only controller-mediated commands (no capability or direct control access):
+node ${path} challenge <AC-id>
+node ${path} check
+The challenge response's output is JSON containing the challenge skeleton, criteria and passing test IDs. Fill the skeleton, write the result file, then check it.
+` : "") + `Use the returned output_sha256 and test_ids for criterion_evidence; a completed model turn alone proves nothing.
 ` + prompt;
   }
   startWorkerServices(request) {
@@ -44492,7 +44546,7 @@ function stopGuard(ctx, io, input) {
 }
 
 // src/workspace/codex-settings.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
+import { spawnSync as spawnSync9 } from "node:child_process";
 import { existsSync as existsSync42, readFileSync as readFileSync37 } from "node:fs";
 import { dirname as dirname21, join as join53 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
@@ -45199,7 +45253,7 @@ function codexHealth(controlRoot, executable = "codex") {
   const run = (args) => {
     try {
       const plan = planCommand([executable, ...args]);
-      return spawnSync8(plan.file, plan.args, {
+      return spawnSync9(plan.file, plan.args, {
         encoding: "utf8",
         timeout: 5e3,
         windowsHide: true,

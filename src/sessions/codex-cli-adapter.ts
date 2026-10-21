@@ -99,6 +99,11 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     return `Controller-mediated gates and commits (only these commands, from this worktree):\n` +
       `node ${path} gate red\nnode ${path} gate green\nnode ${path} gate regression\n` +
       `node ${path} commit <message> <owned-path> [more-owned-paths]\n` +
+      (pack.rework?.origin?.kind === 'acceptance-review'
+        ? `For a passing exact review reproduction, use these read-only controller-mediated commands (no capability or direct control access):\n` +
+          `node ${path} challenge <AC-id>\nnode ${path} check\n` +
+          `The challenge response's output is JSON containing the challenge skeleton, criteria and passing test IDs. Fill the skeleton, write the result file, then check it.\n`
+        : '') +
       `Use the returned output_sha256 and test_ids for criterion_evidence; a completed model turn alone proves nothing.\n` + prompt;
   }
   protected override startWorkerServices(request: SpawnRequest): (() => void) | undefined {

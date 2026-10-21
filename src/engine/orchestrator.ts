@@ -1844,6 +1844,8 @@ export class Orchestrator {
       allowedPaths: [...node.allowed_paths], forbiddenPaths: [...(node.forbidden_paths ?? [])],
       tddPolicy: claim.tdd_policy ?? this.claimTddPolicy(node.repository),
       nextGate, gateCommands: this.gateCommands(nodeId, capability),
+      ...(rt.rework_brief?.origin?.kind === 'acceptance-review'
+        ? { challengeCriteria: [...rt.rework_brief.acceptance_criteria] } : {}),
     };
   }
 
@@ -2688,6 +2690,19 @@ export class Orchestrator {
             requireTests: gate !== 'regression' && node.required_evidence.includes('red'),
             readRecord: () => this.state().nodes[nodeId]?.evidence[gate],
           });
+        }, (operation, criterion) => {
+          const current = scope();
+          if (!current?.challengeCriteria?.length || (criterion !== null && !current.challengeCriteria.includes(criterion))) {
+            throw new Error('CHANNEL_REVIEW_UNAVAILABLE');
+          }
+          const argv = [mycelinkCliPath(), 'tdd', operation, this.featureId, nodeId,
+            '--control-root', this.controlRoot, '--capability', capability,
+            ...(criterion !== null ? ['--criteria', criterion] : []), '--json'];
+          const ran = spawnSync(process.execPath, argv, {
+            cwd: worktree, encoding: 'utf8', timeout: 60_000, maxBuffer: 128 * 1024, windowsHide: true,
+          });
+          if (ran.error || ran.signal) throw new Error('CHANNEL_REVIEW_EXECUTION_FAILED');
+          return { exitCode: ran.status ?? 1, output: (ran.stdout || ran.stderr || '').slice(0, 32 * 1024) };
         });
         request.claimChannel = { handle: (input) => channel.handle(input), redactEnv: { [CAPABILITY_ENV]: capability } };
       }

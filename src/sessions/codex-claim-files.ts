@@ -23,6 +23,8 @@ const identity = ${JSON.stringify(identity)};
 let payload;
 if (operation === 'gate' && args.length === 1 && ['red', 'green', 'regression'].includes(args[0])) payload = { operation, gate: args[0] };
 else if (operation === 'commit' && args.length >= 2 && args.length <= 101) payload = { operation, message: args[0], paths: args.slice(1) };
+else if (operation === 'challenge' && args.length === 1 && /^AC-[A-Za-z0-9_.-]{1,60}$/.test(args[0])) payload = { operation, criterion: args[0] };
+else if (operation === 'check' && args.length === 0) payload = { operation };
 else throw new Error('CHANNEL_CLIENT_USAGE');
 const numbers = readdirSync(dir).map(x => /^request-([1-9][0-9]{0,2})\\.json$/.exec(x)).filter(Boolean).map(x => Number(x[1]));
 const sequence = Math.max(0, ...numbers) + 1;

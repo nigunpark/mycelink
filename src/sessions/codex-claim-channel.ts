@@ -18,6 +18,8 @@ export interface LiveClaim {
   /** Derived from the current graph and runtime state, never the request. */
   nextGate: 'red' | 'green' | 'regression' | null;
   gateCommands: { gate: 'red' | 'green' | 'regression'; argv: string[] }[];
+  /** Only the current acceptance-review rework may request these criteria. */
+  challengeCriteria?: string[];
 }
 
 export type ChannelResponse =
@@ -28,6 +30,8 @@ export type ChannelResponse =
 type Request = { claimId: string; featureId: string; nodeId: string; sequence: number } & (
   | { operation: 'gate'; gate: 'red' | 'green' | 'regression' }
   | { operation: 'commit'; paths: string[]; message: string }
+  | { operation: 'challenge'; criterion: string }
+  | { operation: 'check' }
 );
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value);
@@ -41,6 +45,10 @@ function parse(input: unknown): Request | null {
     if (!['red', 'green', 'regression'].includes(String(r['gate'])) || Object.keys(r).some((k) => ![...base, 'gate'].includes(k))) return null;
   } else if (r['operation'] === 'commit') {
     if (!Array.isArray(r['paths']) || !r['paths'].every((p) => typeof p === 'string') || typeof r['message'] !== 'string' || Object.keys(r).some((k) => ![...base, 'paths', 'message'].includes(k))) return null;
+  } else if (r['operation'] === 'challenge') {
+    if (typeof r['criterion'] !== 'string' || !/^AC-[A-Za-z0-9_.-]{1,60}$/.test(r['criterion']) || Object.keys(r).some((k) => ![...base, 'criterion'].includes(k))) return null;
+  } else if (r['operation'] === 'check') {
+    if (Object.keys(r).some((k) => !base.includes(k))) return null;
   } else return null;
   return r as Request;
 }
@@ -53,6 +61,7 @@ export class ClaimChannel {
   constructor(
     private readonly liveClaim: () => LiveClaim | null,
     private readonly runGate: (argv: readonly string[], cwd: string) => { exitCode: number; output: string; outputSha256?: string; testIds?: string[] },
+    private readonly runReadOnly?: (operation: 'challenge' | 'check', criterion: string | null) => { exitCode: number; output: string },
   ) {}
 
   handle(input: unknown): ChannelResponse {
@@ -67,7 +76,19 @@ export class ClaimChannel {
     if (request.operation === 'gate' && (scope.nextGate !== request.gate || !scope.gateCommands.some((g) => g.gate === request.gate))) {
       return fail('CHANNEL_GATE_OUT_OF_ORDER');
     }
+    if ((request.operation === 'challenge' || request.operation === 'check') && (!scope.challengeCriteria?.length || !this.runReadOnly)) return fail('CHANNEL_REVIEW_UNAVAILABLE');
+    if (request.operation === 'challenge' && !scope.challengeCriteria?.includes(request.criterion)) return fail('CHANNEL_CRITERION_INVALID');
     this.sequence = sequence;
+    if (request.operation === 'challenge' || request.operation === 'check') {
+      try {
+        const result = this.runReadOnly!(request.operation, request.operation === 'challenge' ? request.criterion : null);
+        const now = this.liveClaim();
+        if (!now || now.claimId !== scope.claimId || now.featureId !== scope.featureId || now.nodeId !== scope.nodeId || !samePath(now.worktree, scope.worktree)) return fail('CHANNEL_CLAIM_STALE');
+        const output = result.output.slice(0, 32 * 1024);
+        return result.exitCode === 0 ? { ok: true, sequence, exitCode: 0, output }
+          : { ok: false, sequence, code: 'CHANNEL_REVIEW_REFUSED', exitCode: result.exitCode, output };
+      } catch { return fail('CHANNEL_REVIEW_FAILED'); }
+    }
     if (request.operation === 'gate') {
       // A test-only commit changes HEAD but not production. Do not spend a
       // verifier run on that identical RED production snapshot. The real gate

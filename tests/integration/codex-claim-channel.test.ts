@@ -30,7 +30,7 @@ function fixture() {
   } : null;
   const channel = new ClaimChannel(live, (argv) => { executed.push(argv); return { exitCode: gateExit, output: 'gate output' }; });
   const identity = { claimId: 'claim-1', featureId: 'FEAT-101', nodeId: 'FEAT-101.api.impl' };
-  return { wt, channel, identity, executed, setCurrent: (v: boolean) => { current = v; }, setNext: (v: typeof nextGate) => { nextGate = v; }, setExit: (v: number) => { gateExit = v; } };
+  return { wt, channel, channelScope: live, identity, executed, setCurrent: (v: boolean) => { current = v; }, setNext: (v: typeof nextGate) => { nextGate = v; }, setExit: (v: number) => { gateExit = v; } };
 }
 
 describe('claim-scoped controller channel core', () => {
@@ -85,5 +85,21 @@ describe('claim-scoped controller channel core', () => {
     const f = fixture();
     const channel = new ClaimChannel(() => { throw new Error('STATE_READ_FAILED'); }, () => { throw new Error('should not run'); });
     expect(channel.handle({ ...f.identity, sequence: 1, operation: 'gate', gate: 'red' })).toMatchObject({ ok: false, code: 'CHANNEL_CLAIM_STALE' });
+  });
+
+  it('serves only a live review criterion challenge and read-only result check, without worker argv or capability', () => {
+    const f = fixture();
+    const seen: string[][] = [];
+    const channel = new ClaimChannel(() => ({ ...f.channelScope(), challengeCriteria: ['AC-2'] }),
+      () => { throw new Error('no gate'); },
+      (operation, criterion) => { seen.push([operation, criterion ?? '']); return { exitCode: 0, output: '{"challenge":{}}' }; });
+    const id = f.identity;
+    expect(channel.handle({ ...id, sequence: 1, operation: 'challenge', criterion: 'AC-3' })).toMatchObject({ ok: false, code: 'CHANNEL_CRITERION_INVALID' });
+    expect(channel.handle({ ...id, sequence: 1, operation: 'challenge', criterion: 'AC-2', argv: ['evil'] })).toMatchObject({ ok: false, code: 'CHANNEL_REQUEST_INVALID' });
+    expect(channel.handle({ ...id, sequence: 1, operation: 'challenge', criterion: 'AC-2' })).toMatchObject({ ok: true, output: '{"challenge":{}}' });
+    expect(channel.handle({ ...id, sequence: 2, operation: 'check' })).toMatchObject({ ok: true });
+    expect(seen).toEqual([['challenge', 'AC-2'], ['check', '']]);
+    f.setCurrent(false);
+    expect(channel.handle({ ...id, sequence: 3, operation: 'check' })).toMatchObject({ ok: false, code: 'CHANNEL_CLAIM_STALE' });
   });
 });
