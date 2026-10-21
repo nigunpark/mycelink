@@ -49,4 +49,13 @@ describe('separate Codex reviewer process evidence (not acceptance settlement)',
     const { root, script } = fixture(verdict, 'file-change');
     await expect(runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root, prompt: 'Review', binding, evidenceDir: join(root, 'evidence'), timeoutMs: 5000 })).rejects.toThrow(/FILE_CHANGE/);
   });
+  it('preserves a rejected stream for forensic diagnosis without creating a verdict receipt', async () => {
+    const { root, script } = fixture(verdict);
+    const source = readFileSync(script, 'utf8');
+    writeFileSync(script, source.replace(/emit\(\{type:'item.completed',item:\{id:'answer'.*?\}\}\);/, ''));
+    const evidenceDir = join(root, 'evidence');
+    await expect(runCodexReviewSession({ executable: process.execPath, prefixArgs: [script], cwd: root, prompt: 'Review', binding, evidenceDir, timeoutMs: 5000 })).rejects.toThrow(/CODEX_REVIEW_STREAM_INVALID/);
+    expect(readFileSync(join(evidenceDir, 'rejected-session.jsonl'), 'utf8')).toContain('turn.completed');
+    expect(existsSync(join(evidenceDir, 'receipt.json'))).toBe(false);
+  });
 });

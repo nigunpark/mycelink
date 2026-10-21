@@ -31813,7 +31813,11 @@ async function runCodexReviewSession(options) {
     }
   }
   const stream = reader.finish();
-  if (stream.terminal !== "completed" || !stream.thread_id || !stream.final || answer === null || sha(answer) !== stream.final.sha256) throw new Error("CODEX_REVIEW_STREAM_INVALID");
+  if (stream.terminal !== "completed" || !stream.thread_id || !stream.final || answer === null || sha(answer) !== stream.final.sha256) {
+    mkdirSync20(options.evidenceDir, { recursive: true });
+    writeFileSync9(join42(options.evidenceDir, "rejected-session.jsonl"), jsonl, { flag: "wx" });
+    throw new Error("CODEX_REVIEW_STREAM_INVALID");
+  }
   const extracted = extractReviewerResult(answer);
   if (!extracted.ok) throw new Error(`CODEX_REVIEW_VERDICT_INVALID: ${extracted.reason}`);
   const verdict = extracted.value;

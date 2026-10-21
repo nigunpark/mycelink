@@ -86,7 +86,13 @@ export async function runCodexReviewSession(options: {
     } catch (err) { if ((err as Error).message === 'CODEX_REVIEW_FILE_CHANGE') throw err; }
   }
   const stream = reader.finish();
-  if (stream.terminal !== 'completed' || !stream.thread_id || !stream.final || answer === null || sha(answer) !== stream.final.sha256) throw new Error('CODEX_REVIEW_STREAM_INVALID');
+  if (stream.terminal !== 'completed' || !stream.thread_id || !stream.final || answer === null || sha(answer) !== stream.final.sha256) {
+    // Retain the failed process transcript for read-only diagnosis, not as a
+    // verdict receipt. A new review generation must use a distinct directory.
+    mkdirSync(options.evidenceDir, { recursive: true });
+    writeFileSync(join(options.evidenceDir, 'rejected-session.jsonl'), jsonl, { flag: 'wx' });
+    throw new Error('CODEX_REVIEW_STREAM_INVALID');
+  }
   const extracted = extractReviewerResult(answer);
   if (!extracted.ok) throw new Error(`CODEX_REVIEW_VERDICT_INVALID: ${extracted.reason}`);
   const verdict = extracted.value;
