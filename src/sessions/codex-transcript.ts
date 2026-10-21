@@ -24,6 +24,12 @@ export interface CodexTranscriptEvidence {
 
 /** One reader per process. Never stores raw prompts, tool output, or final response. */
 export class CodexTranscriptReader {
+  private readonly maxLineBytes: number;
+  constructor(options: { maxLineBytes?: number } = {}) {
+    const limit = options.maxLineBytes ?? MAX_LINE_BYTES;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 512 * 1024) throw new Error('CODEX_TRANSCRIPT_LINE_LIMIT_INVALID');
+    this.maxLineBytes = limit;
+  }
   private thread: string | null = null;
   private active = false;
   private terminal: CodexTranscriptEvidence['terminal'] = 'incomplete';
@@ -37,8 +43,8 @@ export class CodexTranscriptReader {
     const bytes = Buffer.byteLength(line, 'utf8');
     this.bytes += bytes;
     this.events++;
-    if (bytes > MAX_LINE_BYTES || this.bytes > MAX_STREAM_BYTES || this.events > MAX_EVENTS || this.terminal === 'failed') return this.invalidate();
-    const parsed = parseStrictJson(line, { maxBytes: MAX_LINE_BYTES, maxDepth: 24 });
+    if (bytes > this.maxLineBytes || this.bytes > MAX_STREAM_BYTES || this.events > MAX_EVENTS || this.terminal === 'failed') return this.invalidate();
+    const parsed = parseStrictJson(line, { maxBytes: this.maxLineBytes, maxDepth: 24 });
     if (!parsed.ok || !object(parsed.value)) return this.invalidate();
     const event = parsed.value;
     // Top-level role labels supplied by the process are never authority.

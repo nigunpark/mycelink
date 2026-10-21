@@ -31661,6 +31661,12 @@ var ID4 = /^[A-Za-z0-9_-]{1,128}$/;
 var THREAD = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 var CodexTranscriptReader = class {
+  maxLineBytes;
+  constructor(options = {}) {
+    const limit = options.maxLineBytes ?? MAX_LINE_BYTES;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 512 * 1024) throw new Error("CODEX_TRANSCRIPT_LINE_LIMIT_INVALID");
+    this.maxLineBytes = limit;
+  }
   thread = null;
   active = false;
   terminal = "incomplete";
@@ -31673,8 +31679,8 @@ var CodexTranscriptReader = class {
     const bytes2 = Buffer.byteLength(line, "utf8");
     this.bytes += bytes2;
     this.events++;
-    if (bytes2 > MAX_LINE_BYTES || this.bytes > MAX_STREAM_BYTES || this.events > MAX_EVENTS || this.terminal === "failed") return this.invalidate();
-    const parsed = parseStrictJson(line, { maxBytes: MAX_LINE_BYTES, maxDepth: 24 });
+    if (bytes2 > this.maxLineBytes || this.bytes > MAX_STREAM_BYTES || this.events > MAX_EVENTS || this.terminal === "failed") return this.invalidate();
+    const parsed = parseStrictJson(line, { maxBytes: this.maxLineBytes, maxDepth: 24 });
     if (!parsed.ok || !object(parsed.value)) return this.invalidate();
     const event = parsed.value;
     if ("agent_id" in event || "agent_type" in event || "role" in event) return this.invalidate();
@@ -31800,7 +31806,7 @@ async function runCodexReviewSession(options) {
   });
   clearTimeout(timer);
   if (timedOut || overflow || outcome.error || outcome.code !== 0) throw new Error(`CODEX_REVIEW_PROCESS_FAILED: ${timedOut ? "timeout" : overflow ? "oversized JSONL" : outcome.error ? "spawn failed" : `exit ${outcome.code}`}`);
-  const reader = new CodexTranscriptReader();
+  const reader = new CodexTranscriptReader({ maxLineBytes: 512 * 1024 });
   let answer = null;
   for (const line of jsonl.trimEnd().split("\n")) {
     reader.consume(line);

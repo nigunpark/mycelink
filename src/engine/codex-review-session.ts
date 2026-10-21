@@ -74,7 +74,9 @@ export async function runCodexReviewSession(options: {
   });
   clearTimeout(timer);
   if (timedOut || overflow || outcome.error || outcome.code !== 0) throw new Error(`CODEX_REVIEW_PROCESS_FAILED: ${timedOut ? 'timeout' : overflow ? 'oversized JSONL' : outcome.error ? 'spawn failed' : `exit ${outcome.code}`}`);
-  const reader = new CodexTranscriptReader();
+  // Read-only reviewers can legitimately print a large packet/code excerpt in
+  // one command event; worker transcripts retain their stricter 64 KiB cap.
+  const reader = new CodexTranscriptReader({ maxLineBytes: 512 * 1024 });
   let answer: string | null = null;
   for (const line of jsonl.trimEnd().split('\n')) {
     reader.consume(line);

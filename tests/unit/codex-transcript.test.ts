@@ -22,6 +22,14 @@ describe('bounded Codex exec JSONL evidence, never role attestation', () => {
     expect(JSON.stringify(evidence)).not.toContain('"ok"');
   });
 
+  it('permits a bounded large command output only for the separate reviewer, not workers', () => {
+    const command = line({ type: 'item.completed', item: { id: 'cmd', type: 'command_execution', aggregated_output: 'x'.repeat(328_000) } });
+    expect(read([started, turn, command, final, complete]).terminal).toBe('invalid');
+    const reviewer = new CodexTranscriptReader({ maxLineBytes: 512 * 1024 });
+    for (const entry of [started, turn, command, final, complete]) reviewer.consume(entry);
+    expect(reviewer.finish()).toMatchObject({ terminal: 'completed', final: { sha256: hash('{"ok":true}') } });
+  });
+
   it.each([
     ['missing thread', [turn, final, complete]],
     ['conflicting thread', [started, turn, line({ type: 'thread.started', thread_id: 'another' }), final, complete]],
