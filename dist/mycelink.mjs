@@ -28661,7 +28661,11 @@ function buildWorkerPrompt(args) {
         "* Before an acceptance-review RED, check that your test exercises working-tree production, so a subsequent source",
         "  fix can change its outcome. A compatibility comparison may keep the baseline pinned, but the reviewed side must",
         "  exercise working-tree source, not an immutable reviewed commit. Once the RED is accepted its bound test bytes are",
-        "  immutable in this claim; discover a defective harness before the gate, not after committing those bytes."
+        "  immutable in this claim; discover a defective harness before the gate, not after committing those bytes.",
+        "* For TypeScript virtual-consumer tests, compare normalized paths consistently in the compiler host and assert the",
+        "  source file was actually loaded. Check the type diagnostics against the unchanged working tree before RED: a",
+        "  fixture-path failure is not a missing contract. After RED, inspect the actual diagnostic in the controller evidence",
+        "  log under the control root (not a relative path in this worktree) before committing bound tests or editing source."
       ] : [],
       "* If GREEN fails, read the controller evidence log path returned by the gate (the WSL evidence log in WSL).",
       "  Inspect the actual failing assertion before changing code; do not change committed tests after the accepted RED.",
