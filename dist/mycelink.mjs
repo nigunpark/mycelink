@@ -31042,6 +31042,21 @@ function commitClaimPaths(scope, request) {
 
 // src/sessions/codex-claim-channel.ts
 var id = (value) => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(value);
+function testTree(worktree, policy, head) {
+  const tests = /* @__PURE__ */ new Map();
+  const entries = runGit(worktree, ["ls-tree", "-r", "-z", head]).stdout.split("\0");
+  for (const entry of entries) {
+    if (!entry) continue;
+    const tab = entry.indexOf("	");
+    if (tab < 0) throw new Error("invalid tree entry");
+    const [, type, blob] = entry.slice(0, tab).split(" ");
+    const path = entry.slice(tab + 1);
+    if (!isTestPath(policy, path)) continue;
+    if (type !== "blob" || !blob) throw new Error("test path is not a blob");
+    tests.set(path, blob);
+  }
+  return tests;
+}
 function parse2(input) {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
   const r = input;
@@ -31070,6 +31085,7 @@ var ClaimChannel = class {
   sequence = 0;
   acceptedRed = false;
   redHead = null;
+  redTests = null;
   handle(input) {
     const request = parse2(input);
     if (!request) return { ok: false, sequence: null, code: "CHANNEL_REQUEST_INVALID" };
@@ -31101,7 +31117,30 @@ var ClaimChannel = class {
       }
     }
     if (request.operation === "gate") {
+      let redSnapshot = null;
+      if (request.gate === "red" && scope.tddPolicy) {
+        try {
+          const { binding } = redBinding(scope.worktree, scope.tddPolicy, null);
+          const tests = testTree(scope.worktree, scope.tddPolicy, binding.head_sha);
+          for (const test of binding.tests) {
+            if (test.blob === null) tests.delete(test.path);
+            else tests.set(test.path, test.blob);
+          }
+          redSnapshot = { head: binding.head_sha, tests };
+        } catch {
+          return fail("CHANNEL_CLAIM_STALE");
+        }
+      }
       if (request.gate === "green" && this.acceptedRed && scope.tddPolicy) {
+        try {
+          const { binding } = redBinding(scope.worktree, scope.tddPolicy, null);
+          const tests = testTree(scope.worktree, scope.tddPolicy, binding.head_sha);
+          if (binding.tests.length !== 0 || this.redTests === null || tests.size !== this.redTests.size || [...tests].some(([path, blob]) => this.redTests.get(path) !== blob)) {
+            return fail("CHANNEL_GREEN_TESTS_NOT_BOUND");
+          }
+        } catch {
+          return fail("CHANNEL_GREEN_TESTS_NOT_BOUND");
+        }
         try {
           const working = redBinding(scope.worktree, scope.tddPolicy, null).production;
           const committed = this.redHead === null ? [] : runGit(scope.worktree, ["diff", "--name-only", "-z", this.redHead, "HEAD"]).stdout.split("\0").filter((p) => p && !isTestPath(scope.tddPolicy, p));
@@ -31118,7 +31157,8 @@ var ClaimChannel = class {
         if (!now3 || now3.claimId !== scope.claimId || now3.featureId !== scope.featureId || now3.nodeId !== scope.nodeId || !samePath(now3.worktree, scope.worktree)) return fail("CHANNEL_CLAIM_STALE");
         if (request.gate === "red" && result.exitCode === 0) {
           this.acceptedRed = true;
-          this.redHead = scope.tddPolicy ? resolveRef(scope.worktree, "HEAD") : null;
+          this.redHead = redSnapshot?.head ?? null;
+          this.redTests = redSnapshot?.tests ?? null;
         }
         if (request.gate === "green" && result.exitCode === 0) this.acceptedRed = false;
         const output = result.output.slice(0, 64 * 1024);

@@ -2,7 +2,7 @@
 import { commitClaimPaths } from './codex-controller-git.js';
 import { samePath } from '../security/paths.js';
 import { isTestPath, redBinding, type TddPolicy } from '../engine/tdd-history.js';
-import { resolveRef, runGit } from '../git/git.js';
+import { runGit } from '../git/git.js';
 
 export interface LiveClaim {
   claimId: string;
@@ -36,6 +36,23 @@ type Request = { claimId: string; featureId: string; nodeId: string; sequence: n
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value);
 
+/** Full test-side tree: declarations alone cannot bind support files or exact bytes. */
+function testTree(worktree: string, policy: TddPolicy, head: string): Map<string, string> {
+  const tests = new Map<string, string>();
+  const entries = runGit(worktree, ['ls-tree', '-r', '-z', head]).stdout.split('\0');
+  for (const entry of entries) {
+    if (!entry) continue;
+    const tab = entry.indexOf('\t');
+    if (tab < 0) throw new Error('invalid tree entry');
+    const [, type, blob] = entry.slice(0, tab).split(' ');
+    const path = entry.slice(tab + 1);
+    if (!isTestPath(policy, path)) continue;
+    if (type !== 'blob' || !blob) throw new Error('test path is not a blob');
+    tests.set(path, blob);
+  }
+  return tests;
+}
+
 function parse(input: unknown): Request | null {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return null;
   const r = input as Record<string, unknown>;
@@ -58,6 +75,7 @@ export class ClaimChannel {
   private sequence = 0;
   private acceptedRed = false;
   private redHead: string | null = null;
+  private redTests: Map<string, string> | null = null;
   constructor(
     private readonly liveClaim: () => LiveClaim | null,
     private readonly runGate: (argv: readonly string[], cwd: string) => { exitCode: number; output: string; outputSha256?: string; testIds?: string[] },
@@ -90,10 +108,33 @@ export class ClaimChannel {
       } catch { return fail('CHANNEL_REVIEW_FAILED'); }
     }
     if (request.operation === 'gate') {
+      // Capture before executing RED, including tests already in HEAD. The
+      // delta binding alone misses those (and declaration discovery is not a
+      // byte binding). GREEN requires this exact tree to have been committed.
+      let redSnapshot: { head: string; tests: Map<string, string> } | null = null;
+      if (request.gate === 'red' && scope.tddPolicy) {
+        try {
+          const { binding } = redBinding(scope.worktree, scope.tddPolicy, null);
+          const tests = testTree(scope.worktree, scope.tddPolicy, binding.head_sha);
+          for (const test of binding.tests) {
+            if (test.blob === null) tests.delete(test.path);
+            else tests.set(test.path, test.blob);
+          }
+          redSnapshot = { head: binding.head_sha, tests };
+        } catch { return fail('CHANNEL_CLAIM_STALE'); }
+      }
       // A test-only commit changes HEAD but not production. Do not spend a
       // verifier run on that identical RED production snapshot. The real gate
       // still decides whether an edited implementation actually passes.
       if (request.gate === 'green' && this.acceptedRed && scope.tddPolicy) {
+        try {
+          const { binding } = redBinding(scope.worktree, scope.tddPolicy, null);
+          const tests = testTree(scope.worktree, scope.tddPolicy, binding.head_sha);
+          if (binding.tests.length !== 0 || this.redTests === null || tests.size !== this.redTests.size
+            || [...tests].some(([path, blob]) => this.redTests!.get(path) !== blob)) {
+            return fail('CHANNEL_GREEN_TESTS_NOT_BOUND');
+          }
+        } catch { return fail('CHANNEL_GREEN_TESTS_NOT_BOUND'); }
         try {
           const working = redBinding(scope.worktree, scope.tddPolicy, null).production;
           const committed = this.redHead === null ? [] : runGit(scope.worktree, ['diff', '--name-only', '-z', this.redHead, 'HEAD']).stdout.split('\0').filter((p) => p && !isTestPath(scope.tddPolicy!, p));
@@ -109,7 +150,8 @@ export class ClaimChannel {
         if (!now || now.claimId !== scope.claimId || now.featureId !== scope.featureId || now.nodeId !== scope.nodeId || !samePath(now.worktree, scope.worktree)) return fail('CHANNEL_CLAIM_STALE');
         if (request.gate === 'red' && result.exitCode === 0) {
           this.acceptedRed = true;
-          this.redHead = scope.tddPolicy ? resolveRef(scope.worktree, 'HEAD') : null;
+          this.redHead = redSnapshot?.head ?? null;
+          this.redTests = redSnapshot?.tests ?? null;
         }
         if (request.gate === 'green' && result.exitCode === 0) this.acceptedRed = false;
         const output = result.output.slice(0, 64 * 1024);

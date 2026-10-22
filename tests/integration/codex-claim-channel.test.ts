@@ -47,6 +47,47 @@ describe('claim-scoped controller channel core', () => {
     expect(f.executed).toHaveLength(2);
   });
 
+  it.each(['untracked', 'committed', 'changed', 'uncommitted-red'] as const)(
+    'refuses %s test bytes before GREEN executes', (change) => {
+      const f = fixture();
+      writeFileSync(join(f.wt, 'tests/a.test.js'), 'accepted failing assertion\n');
+      expect(f.channel.handle({ ...f.identity, sequence: 1, operation: 'gate', gate: 'red' })).toMatchObject({ ok: true });
+      let sequence = 2;
+      if (change !== 'uncommitted-red') {
+        expect(f.channel.handle({ ...f.identity, sequence: sequence++, operation: 'commit', paths: ['tests/a.test.js'], message: 'test: red' })).toMatchObject({ ok: true });
+      }
+      writeFileSync(join(f.wt, 'src/a.js'), 'implementation\n');
+      if (change === 'changed') writeFileSync(join(f.wt, 'tests/a.test.js'), 'weakened assertion\n');
+      if (change === 'untracked' || change === 'committed') {
+        writeFileSync(join(f.wt, 'tests/compatibility.test.js'), 'compatibility assertion\n');
+        if (change === 'committed') {
+          expect(f.channel.handle({ ...f.identity, sequence: sequence++, operation: 'commit', paths: ['tests/compatibility.test.js'], message: 'test: compatibility' })).toMatchObject({ ok: true });
+        }
+      }
+      f.setNext('green');
+      const request = { ...f.identity, sequence: sequence++, operation: 'gate', gate: 'green' };
+      expect(f.channel.handle(request)).toEqual({ ok: false, sequence: request.sequence, code: 'CHANNEL_GREEN_TESTS_NOT_BOUND' });
+      expect(f.executed).toEqual([['node', 'controller', 'tdd', 'red']]);
+      expect(f.channel.handle(request)).toMatchObject({ ok: false, code: 'CHANNEL_SEQUENCE_INVALID' });
+    },
+  );
+
+  it.each(['before', 'after'] as const)('allows unchanged compatibility tests present at RED and committed %s RED', (when) => {
+    const f = fixture();
+    let sequence = 1;
+    writeFileSync(join(f.wt, 'tests/compatibility.test.js'), 'compatibility assertion\n');
+    const commitCompatibility = () => expect(f.channel.handle({ ...f.identity, sequence: sequence++, operation: 'commit', paths: ['tests/compatibility.test.js'], message: 'test: compatibility' })).toMatchObject({ ok: true });
+    if (when === 'before') commitCompatibility();
+    writeFileSync(join(f.wt, 'tests/a.test.js'), 'accepted failing assertion\n');
+    expect(f.channel.handle({ ...f.identity, sequence: sequence++, operation: 'gate', gate: 'red' })).toMatchObject({ ok: true });
+    expect(f.channel.handle({ ...f.identity, sequence: sequence++, operation: 'commit', paths: ['tests/a.test.js'], message: 'test: red' })).toMatchObject({ ok: true });
+    if (when === 'after') commitCompatibility();
+    writeFileSync(join(f.wt, 'src/a.js'), 'implementation\n');
+    f.setNext('green');
+    expect(f.channel.handle({ ...f.identity, sequence, operation: 'gate', gate: 'green' })).toMatchObject({ ok: true });
+    expect(f.executed).toEqual([['node', 'controller', 'tdd', 'red'], ['node', 'controller', 'tdd', 'green']]);
+  });
+
   it('executes only live declared gate argv and commits only owned explicit paths', () => {
     const f = fixture();
     const gate = f.channel.handle({ ...f.identity, sequence: 1, operation: 'gate', gate: 'red' });
