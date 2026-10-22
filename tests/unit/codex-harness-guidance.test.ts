@@ -42,6 +42,30 @@ describe('Codex mediated test-harness guidance', () => {
     expect(text).toMatch(/notes[\s\S]*1024 characters/i);
   });
 
+  it('distinguishes a Node git wrapper anomaly from a real sandbox denial only for mediated Codex acceptance review', () => {
+    const base = minimalPack();
+    const pack = minimalPack({ rework: {
+      generation: 1, limit: 2, reason: 'review gap', reason_sha256: 'a'.repeat(64),
+      acceptance_criteria: ['AC-1'], evidence: [],
+      replaced: { integrated_sha: null, candidate_id: null },
+      scope: { node_id: base.node_id, repository: base.repository },
+      origin: { kind: 'acceptance-review', review_id: 'FEAT-101-R001', review: 1 },
+    } });
+    const render = (provider: 'codex' | 'claude', mediated: boolean) =>
+      buildWorkerPrompt({ pack, gates: [], provider, mediated }).split('<mycelink-context-pack>')[0]!;
+    const text = render('codex', true);
+    expect(text).toMatch(/spawnSync[\s\S]*status 0[\s\S]*empty stderr[\s\S]*stdout[\s\S]*error\.code[\s\S]*EPERM/);
+    expect(text).toMatch(/EPERM alone is not proof of a permission denial/);
+    expect(text).toMatch(/direct shell git show or Python subprocess[\s\S]*same sandbox/);
+    expect(text).toMatch(/exit code is zero[\s\S]*pinned baseline SHA[\s\S]*output bytes[\s\S]*complete/);
+    expect(text).toMatch(/Never ignore a nonzero exit[\s\S]*missing or truncated baseline/);
+    expect(text).toMatch(/Never bypass sandbox or authority[\s\S]*true denial[\s\S]*PERMISSION_DENIED/);
+    for (const other of [render('claude', true), render('codex', false), prompt('codex')]) {
+      expect(other).not.toContain('EPERM alone');
+      expect(other).not.toContain('direct shell git show or Python subprocess');
+    }
+  });
+
   it('warns Codex against reset-module class identity and directs it to controller GREEN diagnostics', () => {
     const text = prompt('codex');
     expect(text).toMatch(/vi\.resetModules\(\)/);
