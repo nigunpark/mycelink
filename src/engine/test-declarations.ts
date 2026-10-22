@@ -4,8 +4,8 @@
  *
  * The controller reads a node's test changes from the repository, never
  * from running them, to tell a test-first cycle from a test added after
- * production. A test counts as changed when its declaration block (from its
- * declaration to the next one) changed. The JavaScript and Java readers
+ * production. A test counts as changed when its declaration block changed
+ * (a balanced call for JS/TS; up to the next declaration otherwise). The JavaScript and Java readers
  * follow the independent benchmark verifier's (evals-public-projects
  * lib/testids.mjs) so the two agree on what a declared test is:
  *
@@ -26,7 +26,7 @@
 
 export interface DeclaredTest {
   name: string;
-  /** The declaration and everything up to the next one, trailing space trimmed. */
+  /** The JS/TS call, or the declaration up to the next one, trailing space trimmed. */
   block: string;
 }
 
@@ -148,9 +148,54 @@ function scanJs(src: string): { masked: string; literals: Map<number, { value: s
   return { masked: masked.join(''), literals };
 }
 
-function declaredJsTests(src: string): { name: string; start: number }[] {
+/** End of a balanced JS call. Unsupported slash syntax stays opaque rather than guessing about regex literals. */
+function jsCallEnd(src: string, open: number): number | undefined {
+  let at = open;
+  const quoted = (quote: string): boolean => {
+    at++;
+    while (at < src.length) {
+      const c = src[at++];
+      if (c === '\\') { at++; continue; }
+      if (c === quote) return true;
+      if (quote !== '`' && (c === '\n' || c === '\r')) return false;
+      if (quote === '`' && c === '$' && src[at] === '{') {
+        if (!balanced()) return false;
+      }
+    }
+    return false;
+  };
+  const balanced = (): boolean => {
+    const closer = ({ '(': ')', '[': ']', '{': '}' } as Record<string, string>)[src[at++]!];
+    while (at < src.length) {
+      const c = src[at]!;
+      if (c === closer) { at++; return true; }
+      if (c === ')' || c === ']' || c === '}') return false;
+      if (c === '(' || c === '[' || c === '{') {
+        if (!balanced()) return false;
+      } else if (c === "'" || c === '"' || c === '`') {
+        if (!quoted(c)) return false;
+      } else if (src.startsWith('//', at)) {
+        const end = src.indexOf('\n', at + 2);
+        at = end < 0 ? src.length : end;
+      } else if (src.startsWith('/*', at)) {
+        const end = src.indexOf('*/', at + 2);
+        if (end < 0) return false;
+        at = end + 2;
+      } else if (c === '/') return false;
+      else at++;
+    }
+    return false;
+  };
+  if (!balanced()) return undefined;
+  // Include an optional semicolon without taking whitespace from the next declaration.
+  const end = at;
+  while (at < src.length && /\s/.test(src[at]!)) at++;
+  return src[at] === ';' ? at + 1 : end;
+}
+
+function declaredJsTests(src: string): { name: string; start: number; end?: number }[] {
   const { masked, literals } = scanJs(src);
-  const found: { name: string; start: number }[] = [];
+  const found: { name: string; start: number; end?: number }[] = [];
   const re = /(?<![\w$.])(?:it|test)((?:\s*\.\s*[A-Za-z]+)*)\s*\(/g;
   for (let m = re.exec(masked); m; m = re.exec(masked)) {
     const modifiers = (m[1] ?? '').replace(/\s/g, '').split('.').filter(Boolean);
@@ -160,7 +205,7 @@ function declaredJsTests(src: string): { name: string; start: number }[] {
     while (at < src.length && /\s/.test(src[at] as string)) at++;
     const literal = literals.get(at);
     if (!literal || !literal.static) continue;
-    found.push({ name: literal.value, start: m.index });
+    found.push({ name: literal.value, start: m.index, end: jsCallEnd(src, m.index + m[0].length - 1) });
   }
   return found;
 }
@@ -289,7 +334,7 @@ const PYTHON_TEST = /^[ \t]*(?:async[ \t]+)?def[ \t]+(test\w*)[ \t]*\(/gm;
 
 /** Tests declared in one source file: `[{ name, block }]` in source order. */
 export function declaredTests(path: string, source: string): DeclaredTest[] {
-  let found: { name: string; start: number }[];
+  let found: { name: string; start: number; end?: number }[];
   switch (testLanguage(path)) {
     case 'js':
       found = declaredJsTests(source);
@@ -312,7 +357,7 @@ export function declaredTests(path: string, source: string): DeclaredTest[] {
     default:
       found = [];
   }
-  return found.map((t, i) => ({ name: t.name, block: source.slice(t.start, found[i + 1]?.start ?? source.length).trimEnd() }));
+  return found.map((t, i) => ({ name: t.name, block: source.slice(t.start, t.end ?? found[i + 1]?.start ?? source.length).trimEnd() }));
 }
 
 /** Structural closers and whitespace a block ends with: what a test appended after it moves out of its block. */
@@ -326,6 +371,9 @@ const CLOSERS = /[\s)}\];,]+$/;
  * character more, `1` to `10` — does not survive.
  */
 export function bodyPreserved(before: string, after: string): boolean {
+  // JS call blocks have exact boundaries; dropping a closer is an edit. This
+  // also protects callers that pass the older, next-declaration slices.
+  if (/^(?:it|test)(?:\s*\.\s*[A-Za-z]+)*\s*\(/.test(before)) return before === after;
   const core = before.replace(CLOSERS, '');
   if (!after.startsWith(core)) return false;
   const next = after.charAt(core.length);
@@ -383,13 +431,17 @@ export interface DeclaredTemplate {
 
 /**
  * Every test declaration of one source file, static and template-titled, in source order: a static one by its name,
- * a template-titled one by its template; each block bounded by the next declaration of either kind.
+ * a template-titled one by its template; JS/TS blocks end at the balanced call when readable.
  */
 export function declarationBlocks(path: string, source: string): { kind: 'static' | 'template'; key: string; block: string }[] {
   const statics = declaredTests(path, source).map((t) => ({ kind: 'static' as const, key: t.name, start: source.indexOf(t.block) }));
   const templates = declaredTestTemplates(path, source).map((t) => ({ kind: 'template' as const, key: t.template, start: source.indexOf(t.block) }));
   const all = [...statics, ...templates].filter((d) => d.start >= 0).sort((a, b) => a.start - b.start);
-  return all.map((d, i) => ({ kind: d.kind, key: d.key, block: source.slice(d.start, all[i + 1]?.start ?? source.length).trimEnd() }));
+  return all.map((d, i) => {
+    const call = testLanguage(path) === 'js' ? /^(?:it|test)(?:\s*\.\s*[A-Za-z]+)*\s*\(/.exec(source.slice(d.start)) : null;
+    const end = call ? jsCallEnd(source, d.start + call[0].length - 1) : undefined;
+    return { kind: d.kind, key: d.key, block: source.slice(d.start, end ?? all[i + 1]?.start ?? source.length).trimEnd() };
+  });
 }
 
 /** The template-titled tests of one JS/TS source file, in source order, each with its block up to the next declaration of any kind. */

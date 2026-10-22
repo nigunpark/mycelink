@@ -18336,6 +18336,54 @@ function scanJs(src) {
   }
   return { masked: masked.join(""), literals };
 }
+function jsCallEnd(src, open) {
+  let at = open;
+  const quoted = (quote) => {
+    at++;
+    while (at < src.length) {
+      const c = src[at++];
+      if (c === "\\") {
+        at++;
+        continue;
+      }
+      if (c === quote) return true;
+      if (quote !== "`" && (c === "\n" || c === "\r")) return false;
+      if (quote === "`" && c === "$" && src[at] === "{") {
+        if (!balanced()) return false;
+      }
+    }
+    return false;
+  };
+  const balanced = () => {
+    const closer = { "(": ")", "[": "]", "{": "}" }[src[at++]];
+    while (at < src.length) {
+      const c = src[at];
+      if (c === closer) {
+        at++;
+        return true;
+      }
+      if (c === ")" || c === "]" || c === "}") return false;
+      if (c === "(" || c === "[" || c === "{") {
+        if (!balanced()) return false;
+      } else if (c === "'" || c === '"' || c === "`") {
+        if (!quoted(c)) return false;
+      } else if (src.startsWith("//", at)) {
+        const end2 = src.indexOf("\n", at + 2);
+        at = end2 < 0 ? src.length : end2;
+      } else if (src.startsWith("/*", at)) {
+        const end2 = src.indexOf("*/", at + 2);
+        if (end2 < 0) return false;
+        at = end2 + 2;
+      } else if (c === "/") return false;
+      else at++;
+    }
+    return false;
+  };
+  if (!balanced()) return void 0;
+  const end = at;
+  while (at < src.length && /\s/.test(src[at])) at++;
+  return src[at] === ";" ? at + 1 : end;
+}
 function declaredJsTests(src) {
   const { masked, literals } = scanJs(src);
   const found = [];
@@ -18347,7 +18395,7 @@ function declaredJsTests(src) {
     while (at < src.length && /\s/.test(src[at])) at++;
     const literal = literals.get(at);
     if (!literal || !literal.static) continue;
-    found.push({ name: literal.value, start: m.index });
+    found.push({ name: literal.value, start: m.index, end: jsCallEnd(src, m.index + m[0].length - 1) });
   }
   return found;
 }
@@ -18474,10 +18522,11 @@ function declaredTests(path, source) {
     default:
       found = [];
   }
-  return found.map((t, i) => ({ name: t.name, block: source.slice(t.start, found[i + 1]?.start ?? source.length).trimEnd() }));
+  return found.map((t, i) => ({ name: t.name, block: source.slice(t.start, t.end ?? found[i + 1]?.start ?? source.length).trimEnd() }));
 }
 var CLOSERS = /[\s)}\];,]+$/;
 function bodyPreserved(before, after) {
+  if (/^(?:it|test)(?:\s*\.\s*[A-Za-z]+)*\s*\(/.test(before)) return before === after;
   const core = before.replace(CLOSERS, "");
   if (!after.startsWith(core)) return false;
   const next = after.charAt(core.length);
@@ -18514,7 +18563,11 @@ function declarationBlocks(path, source) {
   const statics = declaredTests(path, source).map((t) => ({ kind: "static", key: t.name, start: source.indexOf(t.block) }));
   const templates = declaredTestTemplates(path, source).map((t) => ({ kind: "template", key: t.template, start: source.indexOf(t.block) }));
   const all = [...statics, ...templates].filter((d) => d.start >= 0).sort((a, b) => a.start - b.start);
-  return all.map((d, i) => ({ kind: d.kind, key: d.key, block: source.slice(d.start, all[i + 1]?.start ?? source.length).trimEnd() }));
+  return all.map((d, i) => {
+    const call = testLanguage(path) === "js" ? /^(?:it|test)(?:\s*\.\s*[A-Za-z]+)*\s*\(/.exec(source.slice(d.start)) : null;
+    const end = call ? jsCallEnd(source, d.start + call[0].length - 1) : void 0;
+    return { kind: d.kind, key: d.key, block: source.slice(d.start, end ?? all[i + 1]?.start ?? source.length).trimEnd() };
+  });
 }
 function declaredTestTemplates(path, source) {
   if (testLanguage(path) !== "js") return [];
