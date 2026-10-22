@@ -94,7 +94,8 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+\\.[A-Za-z0-9_.-]+$" },
+        "readonly_fixture": { "type": "object", "required": ["manifest", "baseline", "sha256"], "additionalProperties": false, "properties": { "manifest": { "type": "string" }, "baseline": { "type": "string" }, "sha256": { "type": "string" } } },
+    "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+\\.[A-Za-z0-9_.-]+$" },
         "level": { "const": "executable-node" },
         "repository": { "type": ["string", "null"] },
         "capability": { "type": ["string", "null"] },

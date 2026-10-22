@@ -93,6 +93,8 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     });
   }
   protected override workerPrompt(pack: ContextPack, request: SpawnRequest): string {
+    if (pack.readonly_fixture && this.options.disposableRepositories !== true) throw new Error('FIXTURE_SCOPE_DENIED: read-only fixtures require disposable Codex repositories');
+    if (this.options.wsl && pack.readonly_fixture) pack = { ...pack, readonly_fixture: { ...pack.readonly_fixture, manifest: windowsToWslPath(pack.readonly_fixture.manifest), baseline: windowsToWslPath(pack.readonly_fixture.baseline) } };
     const prompt = buildWorkerPrompt({ pack, gates: request.claimChannel ? [] : this.gateLines(request), provider: 'codex', mediated: !!request.claimChannel });
     if (!request.claimChannel) return prompt;
     const path = `.mycelink-worker/channel-${request.claimId}/client.mjs`;

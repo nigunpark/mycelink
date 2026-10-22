@@ -21,6 +21,7 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "readonly_fixture": { "type": "object", "required": ["manifest", "baseline", "sha256"], "additionalProperties": false, "properties": { "manifest": { "type": "string" }, "baseline": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
     "schema_version": { "const": 1 },
     "feature_id": { "type": "string" },
     "node_id": { "type": "string" },

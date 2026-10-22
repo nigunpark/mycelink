@@ -131,7 +131,7 @@ import { completionImportProblems } from './continuation-import.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
 import { quarantineStash, type StashQuarantine } from '../git/stash.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
-import { buildContextPack, type ContextCapsule, type ContextPack, type MemoryRef } from '../sessions/context-pack.js';
+import { verifyReadonlyFixture, buildContextPack, type ContextCapsule, type ContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
 import { moduleInvocation, runVerification, verifierInvocation } from '../evidence/runner.js';
 import { claimVerificationFor, ModuleDriftError } from './modules.js';
@@ -1378,6 +1378,11 @@ export class Orchestrator {
     const graph = this.graph();
     const node = this.node(nodeId);
     const mode = options.mode ?? 'adapter';
+    if (node.readonly_fixture && (mode !== 'adapter' || node.node_type !== 'implementation'
+      || this.adapter.name !== 'codex-cli' || this.workspace.config.experimental_codex?.enabled !== true
+      || node.repository === null || !this.workspace.config.experimental_codex.disposable_repositories.includes(node.repository))) {
+      throw new Error('FIXTURE_SCOPE_DENIED: read-only fixtures require an enabled disposable Codex implementation worker');
+    }
     // A verification node writes nothing and has no worker: only the controller's own run claims it, with no worktree.
     const verifying = node.node_type === 'verification';
     if (verifying && mode !== 'controller') throw new NotWorkerNodeError(nodeId, node.node_type);
@@ -1856,6 +1861,7 @@ export class Orchestrator {
     const node = this.node(nodeId);
     const runtime = state.nodes[nodeId];
     const pack = buildContextPack({
+      controlRoot: this.controlRoot,
       graph,
       state,
       nodeId,
@@ -1904,6 +1910,10 @@ export class Orchestrator {
   ): { ok: boolean; evidence: EvidenceRecord[]; detail: string; sha?: string; setupFailed?: boolean } {
     const labelPrefix = options.labelPrefix ?? 'fresh';
     const node = this.node(nodeId);
+    if (node.readonly_fixture) {
+      try { verifyReadonlyFixture(this.controlRoot, node.readonly_fixture); }
+      catch (e) { return { ok: false, evidence: [], detail: (e as Error).message }; }
+    }
     const evidence: EvidenceRecord[] = [];
     if (node.repository === null) {
       return { ok: true, evidence, detail: 'no repository to verify' };
@@ -2683,6 +2693,7 @@ export class Orchestrator {
           const gate = argv[3];
           if (gate !== 'red' && gate !== 'green' && gate !== 'regression') throw new Error('CHANNEL_GATE_INVALID');
           return executeHostClaimGate({
+            readonlyFixture: node.readonly_fixture,
             controlRoot: this.controlRoot, featureId: this.featureId, gate, cwd, argv,
             deadlineMs: Math.min(600_000, request.maxWallClockMs),
             // RED/GREEN need canonical test identities. A declared full-suite
@@ -2707,6 +2718,7 @@ export class Orchestrator {
         request.claimChannel = { handle: (input) => channel.handle(input), redactEnv: { [CAPABILITY_ENV]: capability } };
       }
 
+      if (node.readonly_fixture) verifyReadonlyFixture(this.controlRoot, node.readonly_fixture);
       const handle = this.adapter.spawn(request);
       sessionId = handle.session_id;
       recordSpawn(this.paths.sessionsRegistry, handle, {

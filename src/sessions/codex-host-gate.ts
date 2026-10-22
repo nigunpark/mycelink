@@ -1,3 +1,5 @@
+import { verifyReadonlyFixture } from './context-pack.js';
+import type { ReadonlyFixture } from '../model/types.js';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
@@ -8,6 +10,7 @@ import { canonicalTestId } from '../evidence/test-ids.js';
 import type { EvidenceRecord } from '../model/types.js';
 
 export interface HostGateOptions {
+  readonlyFixture?: ReadonlyFixture;
   controlRoot: string;
   featureId: string;
   gate: 'red' | 'green' | 'regression';
@@ -23,6 +26,7 @@ export interface HostGateOptions {
 export function executeHostClaimGate(args: HostGateOptions): { exitCode: number; output: string; outputSha256?: string; testIds?: string[] } {
   const fail = (code: string) => ({ exitCode: 2, output: code });
   if (!args.argv.length || !Number.isSafeInteger(args.deadlineMs) || args.deadlineMs < 1 || args.deadlineMs > 600_000) return fail('CHANNEL_GATE_INVALID');
+  try { if (args.readonlyFixture) verifyReadonlyFixture(args.controlRoot, args.readonlyFixture); } catch (e) { return fail((e as Error).message); }
   const before = args.readRecord()?.output_sha256;
   const run = spawnSync(args.argv[0] === 'node' ? process.execPath : args.argv[0]!, args.argv.slice(1), {
     cwd: args.cwd, shell: false, windowsHide: true, timeout: args.deadlineMs, maxBuffer: 64 * 1024, encoding: 'utf8',

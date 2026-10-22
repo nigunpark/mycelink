@@ -1,3 +1,9 @@
+import { validFixtureSibling } from '../security/fixture-paths.js';
+import { execFileSync } from 'node:child_process';
+import { lstatSync, realpathSync, opendirSync } from 'node:fs';
+import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { readRegular, resolveInside, samePath, classifyLocationPath } from '../security/paths.js';
+import type { ReadonlyFixture } from '../model/types.js';
 /**
  * Bounded worker context pack.
  *
@@ -34,6 +40,7 @@ export interface MemoryRef {
 }
 
 export interface ContextPack {
+  readonly_fixture?: ReadonlyFixture;
   schema_version: 1;
   feature_id: string;
   node_id: string;
@@ -193,6 +200,7 @@ export interface ContextCapsule {
 }
 
 export interface BuildContextPackArgs {
+  controlRoot?: string;
   /** The claim's reproduction capsules (Orchestrator.capsuleViews). */
   capsules?: ContextCapsule[];
   graph: PortfolioGraph;
@@ -346,6 +354,7 @@ export function buildContextPack(args: BuildContextPackArgs): ContextPack {
 
   // A pack is handed to a model and written to disk: redact before sizing.
   const base: ContextPack = redactValue({
+    ...(node.readonly_fixture ? { readonly_fixture: verifyReadonlyFixture(args.controlRoot, node.readonly_fixture) } : {}),
     schema_version: 1,
     feature_id: args.graph.feature_id,
     node_id: node.id,
@@ -496,4 +505,90 @@ export function buildContextPack(args: BuildContextPackArgs): ContextPack {
   }
 
   throw new ContextPackTooLargeError(packBytes(base), args.maxBytes);
+}
+
+/** Recheck controller-declared fixture bytes and repository identity; no environment authority. */
+export function verifyReadonlyFixture(controlRoot: string | undefined, declaration: ReadonlyFixture): ReadonlyFixture {
+  try {
+    if (!controlRoot || !validFixtureSibling(declaration.manifest, true) || !validFixtureSibling(declaration.baseline, false) || !/^[0-9a-f]{64}$/.test(declaration.sha256)) throw new Error('invalid declaration');
+    const control = realpathSync.native(controlRoot);
+    const parent = dirname(control);
+    const manifest = resolve(control, declaration.manifest);
+    const baseline = resolve(control, declaration.baseline);
+    if (lstatSync(manifest).isSymbolicLink() || lstatSync(baseline).isSymbolicLink() || !lstatSync(baseline).isDirectory() || !samePath(dirname(realpathSync.native(baseline)), parent)) throw new Error('fixture path escape');
+    const bytes = readRegular(manifest, 4 * 1024 * 1024)?.bytes;
+    const hash = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+    if (!bytes || hash(bytes) !== declaration.sha256) throw new Error('manifest hash mismatch');
+    const m = JSON.parse(bytes.toString('utf8'));
+    const hex = (v: unknown, n: number) => typeof v === 'string' && new RegExp(`^[0-9a-f]{${n}}$`).test(v);
+    if (m.schema !== 'mycelink-frozen-git-build/1' || !hex(m.frozen_sha, 40) || !hex(m.tree, 40) || !hex(m.lock_git_blob, 40) || typeof m.baseline_windows_root !== 'string' || typeof m.baseline_wsl_root !== 'string') throw new Error('invalid manifest identity');
+    if (classifyLocationPath(m.baseline_windows_root) || classifyLocationPath(m.baseline_wsl_root) || !isAbsolute(process.platform === 'win32' ? m.baseline_windows_root : m.baseline_wsl_root)) throw new Error('invalid baseline roots');
+    const mapped = m.baseline_windows_root.replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}`);
+    if (m.baseline_wsl_root !== mapped || !samePath(process.platform === 'win32' ? m.baseline_windows_root : m.baseline_wsl_root, baseline)) throw new Error('baseline root mismatch');
+    // Git environment overrides must not redirect identity checks to another repository.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
+    const git = (...argv: string[]) => execFileSync('git', ['-C', baseline, ...argv], { env, encoding: 'utf8', windowsHide: true, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 }).trim();
+    if (!samePath(git('rev-parse', '--show-toplevel'), baseline) || git('rev-parse', 'HEAD') !== m.frozen_sha || git('rev-parse', 'HEAD^{tree}') !== m.tree || git('rev-parse', 'HEAD:pnpm-lock.yaml') !== m.lock_git_blob || git('status', '--porcelain', '--untracked-files=no') !== '') throw new Error('baseline Git identity or tracked content changed');
+    if (!m.files_sha256 || typeof m.files_sha256 !== 'object' || Array.isArray(m.files_sha256) || !Object.keys(m.files_sha256).length || !m.dependency_audit || typeof m.dependency_audit !== 'object' || Array.isArray(m.dependency_audit) || m.dependency_audit.root_confined !== true || !m.build_receipts_sha256 || typeof m.build_receipts_sha256 !== 'object' || Array.isArray(m.build_receipts_sha256) || !Object.keys(m.build_receipts_sha256).length || !Object.values(m.build_receipts_sha256).every(v => hex(v, 64))) throw new Error('invalid manifest records');
+    for (const [path, expected] of Object.entries(m.files_sha256)) {
+      const file = resolveInside(baseline, path, 'fixture file');
+      const content = readRegular(file)?.bytes;
+      if (!hex(expected, 64) || !content || hash(content) !== expected) throw new Error('fixture file mismatch');
+    }
+    verifyDependencyConfinement(baseline);
+    return { manifest, baseline, sha256: declaration.sha256 };
+  } catch (error) {
+    throw new Error(`FIXTURE_INVALID: ${error instanceof Error ? error.message : 'verification failed'}`);
+  }
+}
+
+/** Follow internal links once; reject external or broken links and fail closed on budget exhaustion. */
+function verifyDependencyConfinement(baseline: string): void {
+  const started = performance.now();
+  let entries = 0;
+  const visited = new Set<string>();
+  const budget = () => {
+    if (++entries > 200_000 || performance.now() - started > 5_000) throw new Error('dependency audit budget exceeded');
+  };
+  const confined = (path: string) => {
+    budget();
+    const real = realpathSync.native(path);
+    const rel = relative(baseline, real);
+    if (isAbsolute(rel) || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) throw new Error('dependency path escape');
+    return real;
+  };
+  const children = (path: string, visit: (path: string) => void) => {
+    const dir = opendirSync(path);
+    try {
+      for (let entry = dir.readSync(); entry; entry = dir.readSync()) {
+        budget(); visit(resolve(path, entry.name));
+      }
+    } finally { dir.closeSync(); }
+  };
+  const walk = (path: string) => {
+    const real = confined(path);
+    const key = process.platform === 'win32' ? real.toLowerCase() : real;
+    if (visited.has(key)) return;
+    visited.add(key);
+    const stat = lstatSync(real);
+    if (stat.isDirectory()) children(real, walk);
+    else if (!stat.isFile()) throw new Error('unsupported dependency entry');
+  };
+  const optional = (path: string, visit: (path: string) => void) => {
+    try { lstatSync(path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    visit(path);
+  };
+  optional(resolve(baseline, 'node_modules'), walk);
+  optional(resolve(baseline, 'packages'), path => {
+    const packages = confined(path);
+    if (!lstatSync(packages).isDirectory()) throw new Error('invalid packages directory');
+    children(packages, child => {
+      const real = confined(child);
+      if (lstatSync(real).isDirectory()) optional(resolve(real, 'node_modules'), walk);
+    });
+  });
+  budget();
 }

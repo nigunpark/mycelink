@@ -1,3 +1,4 @@
+import { validFixtureSibling } from '../security/fixture-paths.js';
 /**
  * Portfolio graph validation.
  *
@@ -394,6 +395,18 @@ export function validateGraph(
     }
     nodeIds.add(node.id);
 
+    if (node.readonly_fixture !== undefined) {
+      if (node.node_type !== 'implementation') {
+        problems.push({ code: 'FIXTURE_SCOPE_DENIED', path: at('/readonly_fixture'), detail: 'Read-only fixture exceptions require an implementation node.' });
+      }
+      const f = node.readonly_fixture;
+      if (!validFixtureSibling(f.manifest, true) || !validFixtureSibling(f.baseline, false)) {
+        problems.push({ code: 'FIXTURE_PATH_INVALID', path: at('/readonly_fixture'), detail: 'Fixture paths must name a single safe sibling JSON manifest and baseline directory.' });
+      }
+      if (!/^[0-9a-f]{64}$/.test(f.sha256)) {
+        problems.push({ code: 'FIXTURE_HASH_INVALID', path: at('/readonly_fixture/sha256'), detail: 'Fixture SHA-256 must be lowercase hex.' });
+      }
+    }
     const idProblem = nodeIdProblem(node.id);
     if (idProblem !== null) {
       problems.push({

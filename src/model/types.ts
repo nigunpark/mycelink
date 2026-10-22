@@ -109,7 +109,14 @@ export interface WorkerBudget {
   nested_delegation: boolean;
 }
 
+export interface ReadonlyFixture {
+  manifest: string;
+  baseline: string;
+  sha256: string;
+}
+
 export interface GraphNode {
+  readonly_fixture?: ReadonlyFixture;
   id: string;
   level: 'executable-node';
   repository: string | null;
