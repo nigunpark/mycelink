@@ -17941,6 +17941,23 @@ function parseJUnit(xml, { root = "", moduleDir = null, attribute = null } = {})
   }
   return results;
 }
+var testBodyTypeErrors = /* @__PURE__ */ new WeakSet();
+function typeErrorStartsInTest(details, testFile) {
+  if (exceptionClass({ details }) !== "TypeError") return false;
+  const pathKey = (path) => {
+    const normalized = path.replaceAll("\\", "/").replace(/^file:\/\//, "").replace(/^\/([A-Za-z]:\/)/, "$1");
+    return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  };
+  for (const line of details.split(/\r?\n/)) {
+    const frame = /^\s*at\s+(.+?):\d+:\d+\)?\s*$/.exec(line);
+    if (!frame) continue;
+    const location = frame[1];
+    const path = pathKey(location.slice(location.lastIndexOf("(") + 1));
+    if (path.startsWith("node:") || /(?:^|\/)node_modules\//.test(path)) continue;
+    return path === pathKey(testFile);
+  }
+  return false;
+}
 function parseVitestJson(report, { root = "" } = {}) {
   const data = typeof report === "string" ? JSON.parse(report) : report;
   const results = [];
@@ -17966,7 +17983,11 @@ function parseVitestJson(report, { root = "" } = {}) {
         r.status = "skipped";
         r.category = "skipped";
       }
-      results.push(finish(r));
+      const result = finish(r);
+      if ((a.failureMessages ?? []).some((message) => classifyFailure({ details: message }) === "exception" && typeErrorStartsInTest(message, file.name))) {
+        testBodyTypeErrors.add(result);
+      }
+      results.push(result);
     }
   }
   return results;
@@ -18102,7 +18123,7 @@ function matches(result, expected) {
 function summarizeDeclared(results, declared) {
   return declared.map((e) => {
     const matching2 = results.filter((r2) => matches(r2, e));
-    const r = matching2.find((x) => x.status === "failed") ?? matching2.find((x) => x.status === "passed") ?? matching2[0];
+    const r = matching2.find((x) => x.status === "failed" && INVALID_RED_CATEGORIES.has(x.category)) ?? matching2.find((x) => x.status === "failed") ?? matching2.find((x) => x.status === "passed") ?? matching2[0];
     return r ? { file: e.file, name: e.name, status: r.status, category: r.category, type: r.type, fingerprint: r.fingerprint } : { file: e.file, name: e.name, status: "not-run", category: "not-run", type: null, fingerprint: null };
   });
 }
@@ -18119,7 +18140,8 @@ function judgeRed(args) {
     return judgement(false, "no-test", "the RED declares no new or changed test: write the failing test first", "no-test");
   }
   if (args.results !== null && args.declared !== null) {
-    const tests = summarizeDeclared(args.results, args.declared);
+    const admissionResults = args.results.map((r) => testBodyTypeErrors.has(r) ? { ...r, category: "setup", fingerprint: testFailureFingerprint({ ...r, category: "setup" }) } : r);
+    const tests = summarizeDeclared(admissionResults, args.declared);
     const invalid = tests.filter((t) => t.status === "not-run" || t.status === "failed" && INVALID_RED_CATEGORIES.has(t.category));
     if (invalid.length > 0) {
       const worst = [...invalid].sort((a, b) => PRIORITY.indexOf(a.category) - PRIORITY.indexOf(b.category))[0];
