@@ -1914,7 +1914,7 @@
       ],
       "anchor": {
         "file": "src/evidence/store.ts",
-        "contains": "export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array): StoredArtifact {"
+        "contains": "export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array, mode = 0o644): StoredArtifact {"
       }
     },
     {
