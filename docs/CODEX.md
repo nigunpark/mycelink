@@ -52,6 +52,8 @@ The ZIP-based planning test binds approved PRD criteria to a validated graph and
 
 The experiments above do not establish a hardened hostile-worker OS boundary and are not a prerequisite to the functional disposable-repository pilot. One installed ORD-101 delivery was independently checked end to end; that is not general release readiness or proof of crash recovery and the remaining scale cases. The source-only `docs/CODEX_FUNCTIONAL_ACCEPTANCE.md` records pilot results; see also [Permission model](PERMISSION_MODEL.md) and [Adapters](ADAPTERS.md).
 
+The experimental `readonly_fixture` contract supplies `MYCELINK_READONLY_FIXTURE_MANIFEST` only to registered verifier children, including probe, formal gate and fresh verification runs. The controller verifies the graph declaration, resolves the sibling manifest to an absolute path and checks its pinned SHA-256 before injection. The reserved environment value is scrubbed case-insensitively from inherited and explicit child environments when undeclared; a declaration replaces it only with the verified path. The fixture is rechecked after each child before evidence is written. This child-only data binding grants neither worker permissions nor a global environment value.
+
 ## Migration, update and removal
 
 Do **not** repoint or overwrite an existing Claude control by changing `provider` to `codex`; `codex init` refuses that migration. Preserve the Claude control and create a separate new Codex planning control; manually re-review PRD/graph contents and repository registrations. There is no supported automatic state, claim, result, hook or feature migration. Claude's update/re-init procedure remains separate. The removed Windows-to-WSL/DPAPI experiment is not an alternative runtime.

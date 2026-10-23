@@ -1906,7 +1906,7 @@ export class Orchestrator {
       };
       return runClaimProbe({ scope, bound, setup: this.checkoutSetup(nodeId, node.repository!), controlRoot: this.controlRoot,
         deadline: Math.min(budget.deadline, Date.now() + options.deadlineMs), current,
-        fixture: () => node.readonly_fixture ? verifyReadonlyFixture(this.controlRoot, node.readonly_fixture).manifest : undefined });
+        readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined });
     } catch (e) { return fail(redactText((e as Error).message).slice(0, 32 * 1024)); }
   }
 
@@ -2068,7 +2068,7 @@ export class Orchestrator {
       const bindSetup = (record: EvidenceRecord): EvidenceRecord => (setupReceipt === null ? record : { ...record, worktree_setup_sha256: setupReceipt });
       for (const [i, verifier] of node.verification_commands.entries()) {
         const moduleRun = bound !== undefined && i === 0 && verifier.module === bound.module;
-        const record = bindSetup(runVerification({
+        const record = bindSetup(runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
           kind: 'green',
           nodeId,
           repository: node.repository,
@@ -2097,7 +2097,7 @@ export class Orchestrator {
         // The full suite: the one the claim bound, else the repository's.
         const command = bound?.regression.command ?? repoDecl?.commands.regression ?? repoDecl?.commands.test;
         if (command) {
-          const record = bindSetup(runVerification({
+          const record = bindSetup(runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
             kind: 'regression',
             nodeId,
             repository: node.repository,
@@ -2455,7 +2455,7 @@ export class Orchestrator {
       }
       const declared = node.verification_commands[0];
       const plan = bound !== undefined ? moduleInvocation(bound) : verifierInvocation({ command: binding?.command ?? declared?.command ?? [] });
-      const record = runVerification({
+      const record = runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
         kind: 'red',
         nodeId,
         repository,
@@ -4931,7 +4931,7 @@ export class Orchestrator {
     if (retest.length > 0 && claim.verification !== undefined && claim.worktree !== null) {
       try {
         const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-        const ran = runVerification({ kind: 'green', label: 'revalidation', nodeId, repository: node.repository, ...moduleInvocation(claim.verification), cwd: claim.worktree, evidenceDir: nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), baselineFailures: repoDecl?.baseline_failures ?? [], allowShell: this.workspace.config.allow_shell_commands, pathBase: this.controlRoot });
+        const ran = runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined, kind: 'green', label: 'revalidation', nodeId, repository: node.repository, ...moduleInvocation(claim.verification), cwd: claim.worktree, evidenceDir: nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), baselineFailures: repoDecl?.baseline_failures ?? [], allowShell: this.workspace.config.allow_shell_commands, pathBase: this.controlRoot });
         run = { output_path: ran.output_path, output_sha256: ran.output_sha256, exit_code: ran.exit_code, results_sha256: ran.results?.sha256 ?? null };
         const tests = readGateTests(this.controlRoot, ran);
         if (tests !== null) {
@@ -6570,7 +6570,7 @@ export class Orchestrator {
         setup = { config_sha256: worktreeSetupSha256(config), receipt_path: run.receipt_path, receipt_sha256: run.receipt_sha256 };
       }
       for (const step of steps) {
-        const ran = runVerification({
+        const ran = runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
           kind: 'regression',
           nodeId,
           repository,

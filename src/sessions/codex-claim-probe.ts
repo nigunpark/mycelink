@@ -9,7 +9,7 @@ import { classifyRelativePath, samePath } from '../security/paths.js';
 import { redactText } from '../security/redact.js';
 import { isTestPath } from '../engine/tdd-history.js';
 import { runWorktreeSetup, setupEnvironment, setupInputs, type WorktreeSetupConfig } from '../engine/worktree-setup.js';
-import { moduleInvocation, runVerification } from '../evidence/runner.js';
+import { moduleInvocation, runVerification, verifiedVerificationFixture, type VerificationFixture } from '../evidence/runner.js';
 import { writeImmutable } from '../evidence/store.js';
 import type { RawReportSnapshot } from '../evidence/runner.js';
 import { canonicalTestId } from '../evidence/test-ids.js';
@@ -241,7 +241,7 @@ function rawSummary(snapshot: RawReportSnapshot) {
 }
 
 export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification; setup: WorktreeSetupConfig | null;
-  controlRoot: string; deadline: number; current: () => boolean; fixture: () => string | void }): ProbeResult {
+  controlRoot: string; deadline: number; current: () => boolean; readonlyFixture?: VerificationFixture }): ProbeResult {
   const fail = (output: string): ProbeResult => ({ exitCode: 2, output: boundChannelResponse({
     ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: 2, output: redactText(output),
   }).output ?? '' });
@@ -249,11 +249,12 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
   let original: string | undefined;
   let executed = false;
   let fixtureChecked = false;
+  const checkFixture = () => verifiedVerificationFixture(args.readonlyFixture);
   const remaining = () => { const ms = args.deadline - Date.now(); if (ms <= 0) throw new Error('CHANNEL_PROBE_TIMEOUT'); return ms; };
   try {
     const { scope } = args;
     const git = (argv: string[]) => runGit(scope.worktree, argv, { timeoutMs: remaining() }).stdout;
-    args.fixture();
+    checkFixture();
     if (!args.current()) throw new Error('CHANNEL_CLAIM_STALE');
     const changed = new Set<string>();
     // Use NUL-delimited paths, including both sides of renames (no rename detection).
@@ -297,16 +298,15 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
     const config = args.setup ?? { commands: [], timeout_seconds: 1, env: {}, required_paths: [] };
     const env = setupEnvironment({ config, worktree: clone, tmp: root });
     // Only controller-verified fixture data may enter the scrubbed child environment.
-    const fixturePath = args.fixture();
-    if (fixturePath) env.MYCELINK_AC5_FIXTURE = fixturePath;
+    checkFixture();
     executed = true;
     let summary: ReturnType<typeof rawSummary> | undefined;
-    const record = runVerification({ kind: 'red', nodeId: scope.nodeId, repository: null, ...moduleInvocation(args.bound),
+    const record = runVerification({ readonlyFixture: args.readonlyFixture, kind: 'red', nodeId: scope.nodeId, repository: null, ...moduleInvocation(args.bound),
       timeoutMs: Math.min(args.bound.plan.timeout_seconds * 1000, remaining()), cwd: clone, evidenceDir: evidence, label: 'probe', env, cleanEnv: true, reportScratchRoot: root,
       onRawReport: value => { if (summary) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW'); summary = rawSummary(value); } });
     let output = redactText(readFileSync(record.output_path, 'utf8')).slice(0, 32 * 1024);
     fixtureChecked = true;
-    args.fixture();
+    checkFixture();
     if (!args.current() || snapshot(scope.worktree, args.deadline + 2_000) !== before) throw new Error('CHANNEL_CLAIM_STALE');
     const delta = cloneDelta(cloneBefore, snapshot(clone, args.deadline + 2_000), scope, args.bound.path);
     if (delta.refused) return fail('CHANNEL_PROBE_CLONE_MUTATED\n' + delta.diagnostic + '\n' + output);
@@ -345,7 +345,7 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return fail('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
       }
       remaining();
-      args.fixture();
+      checkFixture();
       if (!args.current() || snapshot(scope.worktree, args.deadline + 2_000) !== before) throw new Error('CHANNEL_CLAIM_STALE');
       if (!args.current()) throw new Error('CHANNEL_CLAIM_STALE');
       let kept;
@@ -374,7 +374,7 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
   finally {
     let refusal: string | undefined;
     try {
-      if (executed && !fixtureChecked) args.fixture();
+      if (executed && !fixtureChecked) checkFixture();
       if (original !== undefined && (!args.current() || snapshot(args.scope.worktree, args.deadline + 2_000) !== original)) refusal = 'CHANNEL_CLAIM_STALE';
     } catch (e) { refusal = Date.now() >= args.deadline ? 'CHANNEL_PROBE_TIMEOUT' : (e as Error).message; }
     try { if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); }

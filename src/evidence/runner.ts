@@ -6,6 +6,8 @@
  * a path and a hash, never the body), derives a stable failure fingerprint,
  * and classifies whether a RED failed for the right reason.
  */
+import { verifyReadonlyFixture } from '../sessions/context-pack.js';
+import type { ReadonlyFixture } from '../model/types.js';
 import { createHash } from 'node:crypto';
 import { runCommandSync, runShellScriptSync, shellScriptOf } from '../security/exec.js';
 import { redactText } from '../security/redact.js';
@@ -82,6 +84,8 @@ interface VerificationOptions {
   /** Test identifiers known to fail before this feature started. */
   baselineFailures?: string[];
   env?: Record<string, string>;
+  /** Controller graph declaration only; never a worker-supplied path or environment value. */
+  readonlyFixture?: VerificationFixture;
   /** Controller diagnostic runs may inherit only the isolated setup environment. */
   cleanEnv?: boolean;
   /** Private diagnostic scratch, removed with its disposable checkout on every exit. */
@@ -108,6 +112,26 @@ interface VerificationOptions {
   report?: ModuleReport | null;
   /** The module whose command this is, recorded with the evidence. */
   module?: { id: string; sha256: string; path: string; plan_sha256: string } | null;
+}
+
+/**
+ * Graph-bound readonly fixture contract. runVerification obtains the absolute
+ * MYCELINK_READONLY_FIXTURE_MANIFEST value only through verifyReadonlyFixture.
+ * The reserved name is scrubbed (case-insensitively) from inherited and explicit
+ * environments even without a declaration. Other ambient values survive unless
+ * cleanEnv is requested. Argv, shell, setup and build share this boundary.
+ * Validation surrounds each child; a changed fixture throws before any evidence
+ * is written. Fixture paths are removed from durable output and returned records.
+ */
+export interface VerificationFixture {
+  controlRoot: string;
+  declaration: ReadonlyFixture;
+}
+
+export function verifiedVerificationFixture(binding: VerificationFixture | undefined): ReadonlyFixture | undefined {
+  if (binding === undefined) return undefined;
+  try { return verifyReadonlyFixture(binding.controlRoot, binding.declaration); }
+  catch { throw new Error('FIXTURE_INVALID: readonly fixture verification failed'); }
 }
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -197,6 +221,26 @@ export function stripBaselineFailures(
 
 /** Run one verification command and return its evidence record. */
 export function runVerification(args: RunVerificationArgs): EvidenceRecord {
+  const fixture = args.readonlyFixture;
+  const verifyFixture = () => verifiedVerificationFixture(fixture);
+  const verified = verifyFixture();
+  const manifest = verified?.manifest;
+  const hideFixture = (text: string): string => {
+    for (const path of verified === undefined ? [] : [verified.manifest, verified.baseline]) {
+      for (const spelling of [path, path.replaceAll('\\', '/'), JSON.stringify(path).slice(1, -1)]) {
+        text = text.split(spelling).join('<readonly-fixture>');
+      }
+    }
+    return text;
+  };
+  const hideFixtureStrings = <T>(value: T): T => verified === undefined ? value : JSON.parse(JSON.stringify(value, (_key, item: unknown) => typeof item === 'string' ? hideFixture(item) : item)) as T;
+  // Materialize the complete child environment, removing all case variants of
+  // the reserved binding before overlaying the controller-verified value.
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries({ ...(args.cleanEnv ? {} : process.env), ...args.env })) {
+    if (value !== undefined && key.toUpperCase() !== 'MYCELINK_READONLY_FIXTURE_MANIFEST') env[key] = value;
+  }
+  if (manifest !== undefined) env.MYCELINK_READONLY_FIXTURE_MANIFEST = manifest;
   const cwd = resolve(args.cwd);
   const evidenceDir = resolve(args.evidenceDir);
   mkdirSync(evidenceDir, { recursive: true });
@@ -215,7 +259,9 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   for (const step of args.steps ?? []) {
     const t0 = Date.now();
     output += `$ ${step.join(' ')}\n(cwd: ${cwd})\n\n`;
-    const r = runCommandSync(step, { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv });
+    verifyFixture();
+    const r = runCommandSync(step, { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env, cleanEnv: true });
+    verifyFixture();
     output += r.stdout + r.stderr;
     if (r.timedOut) output += `\n[mycelink] step timed out after ${timeoutMs} ms\n`;
     if (r.spawnError !== null) output += `\n[mycelink] failed to start: ${r.spawnError}\n`;
@@ -253,11 +299,13 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
     if (failedStep === null) {
       // Throws CommandPolicyError before anything runs if the command is unsafe
       // or asks for a shell the control repository has not allowed.
-      const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
+      verifyFixture();
+      const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env, cleanEnv: true };
       const proc =
         args.shellScript !== undefined
           ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false })
           : runCommandSync(argv, runOptions);
+      verifyFixture();
       if (args.onRawReport) {
         const bytes = Buffer.from(redactText(proc.stdout + proc.stderr));
         let start = Math.max(0, bytes.length - 65536);
@@ -277,9 +325,11 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
     }
     finishedAt = new Date();
     // Evidence is durable and may be committed: never let a secret reach it.
-    output = redactText(output);
+    output = redactText(hideFixture(output));
 
     results = report === null ? null : failedStep !== null ? [] : readReport(report, reportFile, reportDir, cwd, args.module?.path ?? null);
+    if (manifest !== undefined && results !== null) results = hideFixtureStrings(results);
+    if (testCommandOutput !== null) testCommandOutput = hideFixture(testCommandOutput);
     if (args.onRawReport) {
       try {
         const bytes = reportFile === null || failedStep !== null ? null : readRegular(reportFile, MAX_REPORT_BYTES)?.bytes ?? null;
@@ -383,7 +433,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   if (args.candidateId !== undefined) record.candidate_id = args.candidateId;
   if (args.scenarioId !== undefined) record.scenario_id = args.scenarioId;
 
-  return record;
+  return hideFixtureStrings(record);
 }
 
 /** Empty a report directory inside `cwd` before a run, so a stale report is never read; a link is unlinked, never followed. */

@@ -1746,6 +1746,7 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     const record = runVerification({
+      readonlyFixture: node?.readonly_fixture ? { controlRoot, declaration: node.readonly_fixture } : undefined,
       kind,
       nodeId,
       repository: node?.repository ?? null,
@@ -1940,6 +1941,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
       ? redDeclaredTests(worktree, policy, runtime.claim?.base_sha ?? runtime.branch_base_sha ?? null)
       : null;
   const ran = runVerification({
+    readonlyFixture: node.readonly_fixture ? { controlRoot, declaration: node.readonly_fixture } : undefined,
     kind,
     nodeId,
     repository: node.repository,

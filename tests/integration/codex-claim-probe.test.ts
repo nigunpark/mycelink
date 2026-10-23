@@ -5,7 +5,7 @@ import * as gitCommands from '../../src/git/git.js';
 import YAML from 'yaml';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
 import { git, makeGitRepo } from '../helpers/git-fixture.js';
-import { BASE_FILES, createShop, ERRORS, ERRORS_RED, ERRORS_RED_STATIC_IMPORT, initialisedWithGraph, moduleVerifier, SHOP_FEATURE, shopGraph, shopState } from '../helpers/shop-fixture.js';
+import { BASE_FILES, createShop, ERRORS, ERRORS_IMPL, ERRORS_RED, ERRORS_RED_STATIC_IMPORT, initialisedWithGraph, moduleVerifier, SHOP_FEATURE, shopCli, shopGraph, shopState } from '../helpers/shop-fixture.js';
 import { Orchestrator } from '../../src/engine/orchestrator.js';
 import { modulesOf, verifierFor } from '../../src/engine/modules.js';
 import * as contextPack from '../../src/sessions/context-pack.js';
@@ -130,7 +130,7 @@ async function fixture(options: Parameters<typeof createShop>[0] = {}, command?:
 describe('controller-owned probe with a real registered module and native host verifier', () => {
   // Real disposable Git baseline and manifest: no sealed pilot fixture and no
   // validator/runner mocks. The registered verifier consumes the path as data.
-  async function boundFixture(mutateAfter = false) {
+  async function boundFixture(mutateAfter = false, generic: boolean | 'migration' = false) {
     let manifest = '';
     let bytes = '';
     let declaration: { manifest: string; baseline: string; sha256: string };
@@ -148,20 +148,50 @@ describe('controller-owned probe with a real registered module and native host v
         dependency_audit: { root_confined: true }, build_receipts_sha256: { build: 'a'.repeat(64) } });
       writeFileSync(manifest, bytes);
       declaration = { manifest: '../probe-fixture.json', baseline: '../probe-baseline', sha256: hash(bytes) };
+      if (generic) return ['node', '-e', `
+        const fs = require('node:fs');
+        const assert = require('node:assert/strict');
+        const hash = b => require('node:crypto').createHash('sha256').update(b).digest('hex');
+        // Preflight occurs BEFORE node:test starts or writes a JUnit report.
+        // Boolean assertions keep absolute paths and inherited values out of logs.
+        fs.writeFileSync(${JSON.stringify(join(dirname(s.control), markerName + '.launch'))}, 'launched');
+        const binding = process.env.MYCELINK_READONLY_FIXTURE_MANIFEST${generic === 'migration' ? ' ?? process.env.MYCELINK_AC5_FIXTURE' : ''};
+        assert.ok(typeof binding === 'string', 'READONLY_FIXTURE_ENV_UNBOUND');
+        assert.ok(require('node:path').isAbsolute(binding) && hash(binding) === ${JSON.stringify(hash(manifest))}, 'READONLY_FIXTURE_ENV_UNTRUSTED');
+        assert.ok(hash(fs.readFileSync(binding)) === ${JSON.stringify(hash(bytes))}, 'READONLY_FIXTURE_BYTES_CHANGED');
+        // The diagnostic probe intentionally uses cleanEnv; formal gates inherit ambient.
+        if (process.env.MYCELINK_FIXTURE_TEST_AMBIENT === 'preserved') console.log('UNRELATED_AMBIENT_ENV_PRESERVED');
+        fs.appendFileSync(${JSON.stringify(join(dirname(s.control), markerName))}, 'verified\\n');
+        console.log('READONLY_FIXTURE_CHILD_VERIFIED');
+        ${mutateAfter ? "fs.appendFileSync(binding, ' ');" : ''}
+        const result = require('node:child_process').spawnSync(process.execPath,
+          ['--test', '--test-reporter=junit',
+           ...(process.argv[1] ? ['--test-reporter-destination=' + process.argv[1], 'packages/errors/test/errors.test.mjs']
+             : ${JSON.stringify(Object.keys(BASE_FILES).filter(p => p.endsWith('.test.mjs')))} )],
+          { stdio: 'inherit', env: process.env });
+        process.exit(result.status ?? 2);
+      `, '${REPORT}'];
       return ['node', '-e', `
         const fs = require('node:fs');
         const assert = require('node:assert/strict');
         const hash = b => require('node:crypto').createHash('sha256').update(b).digest('hex');
         fs.writeFileSync(${JSON.stringify(join(dirname(s.control), markerName))}, 'started');
-        assert.equal(process.env.MYCELINK_AC5_FIXTURE, ${JSON.stringify(manifest)}, 'AC5_FIXTURE_ENV_UNBOUND');
-        assert.equal(hash(fs.readFileSync(process.env.MYCELINK_AC5_FIXTURE)), ${JSON.stringify(hash(bytes))});
-        assert.deepEqual(Object.keys(process.env).filter(k => k.toUpperCase().startsWith('MYCELINK_')), ['MYCELINK_AC5_FIXTURE']);
+        assert.equal(process.env.MYCELINK_READONLY_FIXTURE_MANIFEST, ${JSON.stringify(manifest)}, 'READONLY_FIXTURE_ENV_UNBOUND');
+        assert.equal(hash(fs.readFileSync(process.env.MYCELINK_READONLY_FIXTURE_MANIFEST)), ${JSON.stringify(hash(bytes))});
+        assert.deepEqual(Object.keys(process.env).filter(k => k.toUpperCase().startsWith('MYCELINK_')), ['MYCELINK_READONLY_FIXTURE_MANIFEST']);
         for (const key of ['SECRET_TOKEN', 'OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY']) assert.equal(process.env[key], undefined);
         console.log('FIXTURE_CHILD_VERIFIED');
-        ${mutateAfter ? `fs.appendFileSync(process.env.MYCELINK_AC5_FIXTURE, ' ');` : ''}
+        ${mutateAfter ? `fs.appendFileSync(process.env.MYCELINK_READONLY_FIXTURE_MANIFEST, ' ');` : ''}
         fs.writeFileSync(process.argv[1], '<testsuites><testsuite tests="1"><testcase name="fixture data binding" file="packages/errors/test/errors.test.mjs"/></testsuite></testsuites>');
       `, '${REPORT}'];
     }, {}, s => {
+      if (generic) {
+        const path = join(s.control, 'repositories.yaml');
+        const registry = YAML.parse(readFileSync(path, 'utf8'));
+        // Regression uses the repository's registered full-suite command.
+        registry.repositories[0].commands.regression = registry.repositories[0].module_defaults.test.slice(0, -1);
+        writeFileSync(path, YAML.stringify(registry));
+      }
       const configPath = join(s.control, 'mycelink.config.json');
       const config = JSON.parse(readFileSync(configPath, 'utf8'));
       config.experimental_codex = { enabled: true, disposable_repositories: ['shop'] };
@@ -173,6 +203,160 @@ describe('controller-owned probe with a real registered module and native host v
     });
     return { ...f, manifest, bytes, marker: join(dirname(f.s.control), markerName), declaration: declaration! };
   }
+
+  describe('generic readonly fixture binding contract', () => {
+    const reserved = 'MYCELINK_READONLY_FIXTURE_MANIFEST';
+    const formal = (f: Awaited<ReturnType<typeof boundFixture>>, phase: string, capability = f.claim.capability) =>
+      shopCli(f.s, ['tdd', phase, SHOP_FEATURE, ERRORS, '--capability', capability]);
+    const output = (f: Pick<Awaited<ReturnType<typeof fixture>>, 's'>, phase: string): string => {
+      const record = shopState(f.s).nodes[ERRORS].evidence[phase];
+      return record ? readFileSync(resolve(f.s.control, record.output_path), 'utf8') : '';
+    };
+
+    it.each(['absent', 'hostile'] as const)('binds identical verified bytes for probe and formal RED/GREEN/regression with %s parent binding', async parent => {
+      const f = await boundFixture(false, true);
+      vi.stubEnv(reserved, parent === 'absent' ? undefined : join(f.s.root, 'untrusted.json'));
+      vi.stubEnv('MYCELINK_FIXTURE_TEST_AMBIENT', 'preserved');
+      try {
+        writeFileSync(f.test, ERRORS_RED);
+        // Soft so the same test exposes formal RED even while probe still has
+        // the legacy binding. Neither assertion accepts a launch error as RED.
+        const probe = f.probe();
+        expect.soft(probe.exitCode, 'probe must reach the behavioral test').toBe(1);
+        expect.soft(probe.output.includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect.soft(probe.diagnostic?.tests.some(t => t.status === 'failed')).toBe(true);
+        const red = await formal(f, 'red');
+        expect.soft(/^(?:AssertionError \[ERR_ASSERTION\]|Error): READONLY_FIXTURE_ENV_UNBOUND\r?$/m.test(output(f, 'red')),
+          'semantic RED: formal verifier must receive the generic binding before node:test starts').toBe(false);
+        expect.soft(output(f, 'red').includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect(output(f, 'red').includes('UNRELATED_AMBIENT_ENV_PRESERVED')).toBe(true);
+        expect(red.code, 'formal RED must accept a behavioral failure with structured results').toBe(0);
+        expect(shopState(f.s).nodes[ERRORS].state).toBe('RED_VERIFIED');
+        // Only the disposable worker repository receives this implementation.
+        writeFileSync(join(f.worktree, 'packages/errors/src/index.mjs'), ERRORS_IMPL);
+        expect((await formal(f, 'green')).code).toBe(0);
+        expect(output(f, 'green').includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect(output(f, 'green').includes('UNRELATED_AMBIENT_ENV_PRESERVED')).toBe(true);
+        expect((await formal(f, 'regression')).code).toBe(0);
+        expect(output(f, 'regression').includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect(output(f, 'regression').includes('UNRELATED_AMBIENT_ENV_PRESERVED')).toBe(true);
+        expect(readFileSync(f.marker, 'utf8')).toBe('verified\n'.repeat(4));
+        expect(readFileSync(f.manifest, 'utf8') === f.bytes).toBe(true);
+        const evidence = JSON.stringify(shopState(f.s).nodes[ERRORS].evidence);
+        expect(evidence.includes(f.manifest)).toBe(false);
+      } finally { vi.unstubAllEnvs(); }
+    });
+
+    it('migration diagnostic succeeds while formal RED must bind the generic variable before test execution', async () => {
+      // Narrow compatibility witness only: legacy AC5 can launch the existing
+      // probe, but an absent parent binding cannot rescue the formal verifier.
+      const f = await boundFixture(false, 'migration');
+      writeFileSync(f.test, ERRORS_RED);
+      vi.stubEnv(reserved, undefined);
+      vi.stubEnv('MYCELINK_AC5_FIXTURE', undefined);
+      vi.stubEnv('MYCELINK_FIXTURE_TEST_AMBIENT', 'preserved');
+      try {
+        // This diagnostic proves the registered command and actual behavioral
+        // test are runnable; it grants no evidence or gate transition.
+        // Ambient preservation is asserted separately in strict generic cases.
+        const before = f.state();
+        const diagnostic = f.probe();
+        expect(diagnostic.exitCode).toBe(1);
+        expect(diagnostic.output.includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect(diagnostic.diagnostic?.tests.some(t => t.status === 'failed')).toBe(true);
+        expectPrivateText(f.state(), before);
+        unlinkSync(f.marker + '.launch');
+        const result = await formal(f, 'red');
+        expect(existsSync(f.marker + '.launch')).toBe(true);
+        expect(/^(?:AssertionError \[ERR_ASSERTION\]|Error): READONLY_FIXTURE_ENV_UNBOUND\r?$/m.test(output(f, 'red')),
+          'formal RED launch defect: generic fixture binding missing before node:test').toBe(false);
+        expect(result.code).toBe(0);
+        expect(shopState(f.s).nodes[ERRORS].evidence.red.results).toBeDefined();
+      } finally { vi.unstubAllEnvs(); }
+    });
+
+    it.each(['missing', 'tampered', 'symlink', 'outside'] as const)('rejects %s fixtures before probe AND formal child execution', async kind => {
+      const f = await boundFixture(false, true);
+      writeFileSync(f.test, ERRORS_RED);
+      if (kind === 'missing') unlinkSync(f.manifest);
+      if (kind === 'tampered') writeFileSync(f.manifest, f.bytes + ' ');
+      if (kind === 'symlink') {
+        const target = join(dirname(f.manifest), 'linked-fixture.json');
+        writeFileSync(target, f.bytes);
+        unlinkSync(f.manifest);
+        symlinkSync(target, f.manifest, 'file');
+      }
+      if (kind === 'outside') {
+        const path = join(f.s.featureDir, 'PORTFOLIO-GRAPH.yaml');
+        const graph = YAML.parse(readFileSync(path, 'utf8'));
+        graph.nodes.find((n: { id: string }) => n.id === ERRORS).readonly_fixture.manifest = '../../outside.json';
+        writeFileSync(path, YAML.stringify(graph));
+      }
+      vi.stubEnv(reserved, f.manifest);
+      vi.stubEnv('MYCELINK_FIXTURE_TEST_AMBIENT', 'preserved');
+      try {
+        expect(f.probe().exitCode).toBe(2);
+        const result = await formal(f, 'red');
+        expect(result.code).not.toBe(0);
+        expect(existsSync(f.marker)).toBe(false);
+        expect(existsSync(f.marker + '.launch'), 'fixture must be rejected BEFORE the registered command starts').toBe(false);
+        expect(shopState(f.s).nodes[ERRORS].evidence.red).toBeUndefined();
+        expect(shopState(f.s).nodes[ERRORS].state).not.toBe('RED_VERIFIED');
+      } finally { vi.unstubAllEnvs(); }
+    });
+
+    it('invalidates formal evidence when the child changes the pinned manifest', async () => {
+      const f = await boundFixture(true, true);
+      writeFileSync(f.test, ERRORS_RED);
+      vi.stubEnv(reserved, f.manifest); // ensure current formal runner reaches mutation
+      vi.stubEnv('MYCELINK_FIXTURE_TEST_AMBIENT', 'preserved');
+      try {
+        const result = await formal(f, 'red');
+        expect(readFileSync(f.marker, 'utf8')).toBe('verified\n');
+        expect(readFileSync(f.manifest, 'utf8') === f.bytes + ' ').toBe(true);
+        expect(result.code, 'a behavioral RED cannot authorize changed fixture bytes').not.toBe(0);
+        expect(shopState(f.s).nodes[ERRORS].state).not.toBe('RED_VERIFIED');
+      } finally { vi.unstubAllEnvs(); }
+    });
+
+    it('refuses a stale capability before launching the fixture verifier', async () => {
+      const f = await boundFixture(false, true);
+      writeFileSync(f.test, ERRORS_RED);
+      f.controller.releaseForInfrastructure(ERRORS, f.claim.claimId, 'disposable stale claim test');
+      const replacement = f.controller.claim(ERRORS, { mode: 'adapter' });
+      expect(replacement.claimId === f.claim.claimId).toBe(false);
+      const before = f.state();
+      expect(f.probe().exitCode).toBe(2);
+      expect((await formal(f, 'red')).code).not.toBe(0);
+      expectPrivateText(f.state(), before);
+      expect(existsSync(f.marker + '.launch')).toBe(false);
+      expect(existsSync(f.marker)).toBe(false);
+      expect(shopState(f.s).nodes[ERRORS].evidence.red).toBeUndefined();
+    });
+
+    it.each(['absent', 'hostile'] as const)('does not grant a fixture without a declaration (%s inherited binding)', async parent => {
+      const f = await fixture({}, ['node', '-e', `
+        const assert = require('node:assert/strict');
+        assert.ok(process.env.MYCELINK_READONLY_FIXTURE_MANIFEST === undefined, 'UNDECLARED_FIXTURE_GRANTED');
+        if (process.env.MYCELINK_FIXTURE_TEST_AMBIENT === 'preserved') console.log('UNRELATED_AMBIENT_ENV_PRESERVED');
+        console.log('UNDECLARED_CHILD_VERIFIED');
+        const result = require('node:child_process').spawnSync(process.execPath,
+          ['--test', '--test-reporter=junit', '--test-reporter-destination=' + process.argv[1],
+           'packages/errors/test/errors.test.mjs'], { stdio: 'inherit', env: process.env });
+        process.exit(result.status ?? 2);
+      `, '${REPORT}']);
+      writeFileSync(f.test, ERRORS_RED);
+      vi.stubEnv(reserved, parent === 'absent' ? undefined : join(f.s.root, 'untrusted.json'));
+      vi.stubEnv('MYCELINK_FIXTURE_TEST_AMBIENT', 'preserved');
+      try {
+        const probe = f.probe();
+        expect.soft(probe.output.includes('UNDECLARED_CHILD_VERIFIED')).toBe(true);
+        const red = await shopCli(f.s, ['tdd', 'red', SHOP_FEATURE, ERRORS, '--capability', f.claim.capability]);
+        expect(red.code, 'undeclared parent binding must be removed before formal verification').toBe(0);
+        expect(output(f, 'red').includes('UNRELATED_AMBIENT_ENV_PRESERVED')).toBe(true);
+      } finally { vi.unstubAllEnvs(); }
+    });
+  });
 
   it('passes only the verified graph-bound absolute fixture path to the real registered verifier child', async () => {
     const f = await boundFixture();
@@ -190,11 +374,12 @@ describe('controller-owned probe with a real registered module and native host v
       expect(f.probe()).toMatchObject({ exitCode: 0, output: expect.stringContaining('FIXTURE_CHILD_VERIFIED'),
         diagnostic: { role: 'diagnostic-only', tests: [expect.objectContaining({ status: 'passed' })] } });
       expect(readFileSync(f.marker, 'utf8')).toBe('started');
-      expect(verify).toHaveBeenCalledTimes(3);
+      // Probe entry + pre-verification, runner entry + before/after child, probe post-verification.
+      expect(verify).toHaveBeenCalledTimes(6);
       expect(run).toHaveBeenCalledTimes(1);
       expect(verify.mock.invocationCallOrder[0]).toBeLessThan(verify.mock.invocationCallOrder[1]!);
       expect(verify.mock.invocationCallOrder[1]).toBeLessThan(run.mock.invocationCallOrder[0]!);
-      expect(verify.mock.invocationCallOrder[2]).toBeGreaterThan(run.mock.invocationCallOrder[0]!);
+      expect(verify.mock.invocationCallOrder.at(-1)).toBeGreaterThan(run.mock.invocationCallOrder[0]!);
       for (const call of verify.mock.calls) expect(call).toEqual([f.s.control, f.declaration]);
       expect(readFileSync(f.manifest, 'utf8')).toBe(f.bytes);
       expect(f.state()).toBe(before);
