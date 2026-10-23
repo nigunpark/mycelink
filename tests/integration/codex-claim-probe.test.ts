@@ -1430,7 +1430,7 @@ describe('missing-report isolated test-command classification', () => {
     const nonempty = (redactedOutput ?? '').split(/\r?\n/).filter(line => line.trim() !== '');
     const bounded = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
     const lines = nonempty.slice(-12).map(line => ({ sha256: hash(line), bytes: Buffer.byteLength(line) }));
-    const { sanitized_excerpt: _excerpt, ...fingerprints } = doc.test_command;
+    const { sanitized_excerpt: _excerpt, sanitized_tail: _tail, ...fingerprints } = doc.test_command;
     expectPrivateText(JSON.stringify(fingerprints), JSON.stringify({ code,
       last_error: { sha256: hash(bounded), bytes: bounded.byteLength }, lines }));
     expect(Array.isArray(doc.test_command?.lines)).toBe(true);
@@ -1575,12 +1575,261 @@ describe('missing-report isolated test-command classification', () => {
     expect(response.exitCode === 2 && doc.raw.status === 'valid').toBe(true);
     expect(Object.hasOwn(doc, 'test_command')).toBe(false);
     expect(bytes.toString('utf8').includes('sanitized_excerpt')).toBe(false);
+    expect(Object.hasOwn(doc, 'sanitized_tail')).toBe(false);
+    expect(Object.hasOwn(doc.test_command ?? {}, 'sanitized_tail')).toBe(false);
     for (const canary of excerptCanaries) {
       expect(bytes.toString('utf8').includes(canary)).toBe(false);
       expect(JSON.stringify(response).includes(canary)).toBe(false);
     }
     expectPrivateText(f.state(), before);
     expect(f.evidence()).toEqual(ledger);
+  });
+
+  // Targeted common-pattern protection, not a claim of perfect secrecy.
+  // Entire permitted tail grammar: fixed category, finite English diagnostic
+  // words in this exact message, and optional fixed redaction placeholders.
+  // Unknown Node codes are deliberately NOT a vocabulary of accepted codes.
+  const tailCategory = 'NODE_FATAL_ERROR';
+  const tailMessage = 'Cannot resolve package exports in runtime';
+  const tailWords = new Set(['NODE_FATAL_ERROR', 'Cannot', 'resolve', 'package', 'exports', 'in', 'runtime']);
+  const tailCanaries = [
+    'unregistered-canary-secret', 'sk-proj-' + 'Q7mX9pR2'.repeat(6),
+    'amber orbit velvet', 'amber', 'orbit', 'velvet',
+    'quoted private payload', 'backtick private payload',
+    'C:\\private\\secret.ts', '/mnt/c/private/secret.ts', '/private/secret.env',
+    'file:///private/secret.env', 'person@private.invalid',
+    'PRIVATE_SYNTHETIC_ENV_KEY', 'arbitrary multiline message', 'private synthetic test name',
+    'opaque' + 'Z9q'.repeat(100),
+  ];
+  const tailPayload = 'token=' + tailCanaries[0] + ' API_KEY=' + tailCanaries[1] +
+    ' PASSWORD=' + tailCanaries[0] + ' ' + tailCanaries[2] +
+    ' "' + tailCanaries[6] + '" `' + tailCanaries[7] + '` ' +
+    tailCanaries.slice(8).join('\n') + '\nPRIVATE_SYNTHETIC_ENV_KEY=amber orbit velvet\n';
+
+  function checkTail(tail: unknown) {
+    expect(typeof tail === 'string').toBe(true);
+    if (typeof tail !== 'string') return;
+    expect(tail.includes(tailCategory)).toBe(true);
+    expect(tail.includes(tailMessage)).toBe(true);
+    expect(Buffer.byteLength(tail, 'utf8') <= 2048).toBe(true);
+    expect(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(tail)).toBe(false);
+    // Both lexical and structural checks: no unexpected words, numbers,
+    // punctuation, Unicode prose, dynamic code, or untrusted placeholders.
+    const withoutPlaceholders = tail.replace(/<redacted>/g, '');
+    expect(/^[A-Za-z_ :\n]*$/.test(withoutPlaceholders)).toBe(true);
+    expect(withoutPlaceholders.split(/[ :\n]+/).filter(Boolean).every(word => tailWords.has(word))).toBe(true);
+    expect(/^(?:NODE_FATAL_ERROR[: ]*\n?Cannot resolve package exports in runtime)(?:[ \n]*<redacted>)*$/.test(tail)).toBe(true);
+    expectPrivateText(tail, redactText(tail));
+  }
+
+  it.each(['ERR_UNSUPPORTED_DIR_IMPORT', 'ERR_SYNTHETIC_FUTURE_FAILURE', 'ERR_PRIVATE_FUTURE_PAYLOAD'] as const)(
+    'retains a finite meaningful private tail for previously unallowlisted Node fatal code %s', async code => {
+      const text = '\x1b[31mError [' + code + ']: ' + tailMessage + ' ' + tailPayload +
+        '\x1b[0m\x07\x00\n' + tailPayload + '\nNode.js v24.14.1\n';
+      const f = await launch(text);
+      const before = f.state();
+      const ledger = f.evidence();
+      let observed: ProbeRawSnapshot | undefined;
+      let clone = '';
+      const realRun = verificationRunner.runVerification;
+      const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+        clone = args.cwd;
+        const hook = (args as ProbeRunnerArgs).onRawReport;
+        return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+          observed = value;
+          hook?.(value);
+        } } as ProbeRunnerArgs);
+      });
+      let response: ReturnType<typeof f.probe>;
+      try { response = f.probe(); } finally { runner.mockRestore(); }
+      expectPrivateText(observed?.test_command_output, redactText(text));
+      expect(response.exitCode === 2).toBe(true);
+      expect(f.files().length === 1).toBe(true);
+      const target = join(f.dir, f.files()[0]!);
+      const bytes = readFileSync(target);
+      const doc = JSON.parse(bytes.toString('utf8'));
+      expect(doc.stage === 'IDENTITY:EMPTY' && doc.raw.status === 'missing' &&
+        doc.runner.exit_code === 1 && doc.runner.normalized_count === 0).toBe(true);
+      checkTail(doc.test_command?.sanitized_tail);
+      // Existing classifier, hashes and optional static excerpt stay unchanged.
+      expect(doc.test_command.code === 'NODE_FATAL_UNKNOWN').toBe(true);
+      expect(doc.test_command.sanitized_excerpt === undefined).toBe(true);
+      const nonempty = redactText(text).split(/\r?\n/).filter(line => line.trim() !== '');
+      const last = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
+      expectPrivateText(JSON.stringify(doc.test_command.last_error), JSON.stringify({ sha256: hash(last), bytes: last.length }));
+      expectPrivateText(JSON.stringify(doc.test_command.lines), JSON.stringify(nonempty.slice(-12).map(line =>
+        ({ sha256: hash(line), bytes: Buffer.byteLength(line) }))));
+      expect(bytes.length <= 8192).toBe(true);
+      expect(response.output === `CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=${hash(bytes)}`).toBe(true);
+      expect(lstatSync(target).isFile() && !lstatSync(target).isSymbolicLink()).toBe(true);
+      expect(relative(f.s.control, target).replace(/\\/g, '/').startsWith('.mycelink/probe-diagnostics/')).toBe(true);
+      expect(git(f.s.control, ['check-ignore', target]).length > 0).toBe(true);
+      // POSIX mode is meaningful on native POSIX filesystems. Windows ACLs
+      // require independent host inspection; chmod/mode is not ACL evidence.
+      if (process.platform !== 'win32' && !target.startsWith('/mnt/')) {
+        expect((lstatSync(target).mode & 0o777) === 0o600).toBe(true);
+      }
+      for (const secret of [...tailCanaries, code, f.worktree, clone, 'setup-only', 'build-only']) {
+        expect(bytes.toString('utf8').includes(secret)).toBe(false);
+        expect(JSON.stringify(response).includes(secret)).toBe(false);
+      }
+      expect(JSON.stringify(response).includes(tailMessage)).toBe(false);
+      expect(f.probe().exitCode === 2).toBe(true);
+      expectPrivateText(readFileSync(target, 'utf8'), bytes.toString('utf8'));
+      for (const name of f.files()) expect(/^diagnostic\.[a-f0-9]{16}(?:-[1-9][0-9]*)?\.json$/.test(name)).toBe(true);
+      expect(existsSync(dirname(clone))).toBe(false);
+      expectPrivateText(f.state(), before);
+      expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
+      for (const key of ['sanitized_tail', 'test_command', 'diagnostic', 'criterion_evidence', 'results', 'output_path', 'accepted']) {
+        expect(Object.hasOwn(response, key)).toBe(false);
+      }
+    });
+
+  it.each([
+    'amber orbit velvet',
+    'Error [ERR_SYNTHETIC_FUTURE_FAILURE]: amber orbit velvet',
+    'test name Error [ERR_SYNTHETIC_FUTURE_FAILURE]: Cannot resolve package exports in runtime',
+    '"Error [ERR_SYNTHETIC_FUTURE_FAILURE]: Cannot resolve package exports in runtime"',
+    '`Error [ERR_SYNTHETIC_FUTURE_FAILURE]: Cannot resolve package exports in runtime`',
+  ])('omits the private tail for unsafe unclassified shape %#', async text => {
+    const f = await launch(text + '\n' + tailPayload + '\nNode.js v24.14.1\n');
+    const before = f.state();
+    const ledger = f.evidence();
+    const response = f.probe();
+    expect(response.exitCode === 2 && f.files().length === 1).toBe(true);
+    const bytes = readFileSync(join(f.dir, f.files()[0]!));
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(Object.hasOwn(doc.test_command ?? {}, 'sanitized_tail')).toBe(false);
+    for (const secret of tailCanaries) expect(bytes.toString('utf8').includes(secret)).toBe(false);
+    expectPrivateText(f.state(), before);
+    expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
+  });
+
+  it('retains a safe meaningful tail for a registered native Node throw before any report', async () => {
+    const script = `const error = new Error(${JSON.stringify(tailMessage + ' ' + tailPayload)});` +
+      `error.name='Error [ERR_UNSUPPORTED_DIR_IMPORT]';throw error;`;
+    const f = await fixture({}, [process.execPath, '-e', script, '${REPORT}'], { report: { format: 'vitest-json' } });
+    const before = f.state();
+    const ledger = f.evidence();
+    const response = f.probe();
+    const dir = join(f.s.control, '.mycelink', 'probe-diagnostics', SHOP_FEATURE, ERRORS, f.claim.claimId);
+    const names = existsSync(dir) ? readdirSync(dir) : [];
+    expect(response.exitCode === 2 && names.length === 1).toBe(true);
+    const bytes = readFileSync(join(dir, names[0]!));
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(doc.stage === 'IDENTITY:EMPTY' && doc.raw.status === 'missing' &&
+      doc.runner.exit_code === 1 && doc.runner.normalized_count === 0).toBe(true);
+    checkTail(doc.test_command?.sanitized_tail);
+    expect(bytes.length <= 8192).toBe(true);
+    expect(response.output.endsWith('DIAGNOSTIC_ID=' + hash(bytes))).toBe(true);
+    for (const secret of [...tailCanaries, script, f.worktree, 'ERR_UNSUPPORTED_DIR_IMPORT']) {
+      expect(bytes.toString('utf8').includes(secret)).toBe(false);
+      expect(JSON.stringify(response).includes(secret)).toBe(false);
+    }
+    expectPrivateText(f.state(), before);
+    expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
+  });
+
+  it.each(['malformed raw', 'valid raw', 'normalized identities', 'runner success', 'runner refusal'] as const)(
+    'omits the meaningful private tail outside its boundary for %s', async kind => {
+      const f = await launch('Error [ERR_UNSUPPORTED_DIR_IMPORT]: ' + tailMessage + '\nNode.js v24.14.1\n');
+      const before = f.state();
+      const ledger = f.evidence();
+      const realRun = verificationRunner.runVerification;
+      const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+        const hook = (args as ProbeRunnerArgs).onRawReport;
+        return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+          const bytes = kind === 'malformed raw' ? Buffer.from('invalid report') : kind === 'valid raw'
+            ? Buffer.from(JSON.stringify({ testResults: [], numTotalTests: 0 })) : null;
+          hook?.({ ...value, bytes, sha256: bytes === null ? null : hash(bytes),
+            normalized_count: kind === 'normalized identities' ? 1 : 0,
+            exit_code: kind === 'runner success' ? 0 : kind === 'runner refusal' ? 2 : 1 });
+        } } as ProbeRunnerArgs);
+      });
+      let response: ReturnType<typeof f.probe>;
+      try { response = f.probe(); } finally { runner.mockRestore(); }
+      expect(response.exitCode === 2).toBe(true);
+      for (const name of f.files()) {
+        const doc = JSON.parse(readFileSync(join(f.dir, name), 'utf8'));
+        expect(Object.hasOwn(doc.test_command ?? {}, 'sanitized_tail')).toBe(false);
+        expect(Object.hasOwn(doc, 'sanitized_tail')).toBe(false);
+      }
+      expectPrivateText(f.state(), before);
+      expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
+    });
+
+  it.each(['cancelled', 'generation'] as const)('writes no meaningful tail sidecar after %s changes', async kind => {
+    const f = await launch('Error [ERR_UNSUPPORTED_DIR_IMPORT]: ' + tailMessage + '\n' + tailPayload + '\nNode.js v24.14.1\n');
+    const before = f.state();
+    const ledger = f.evidence();
+    const scope = f.controller.codexClaimScope.bind(f.controller);
+    let changed = false;
+    const current = vi.spyOn(f.controller, 'codexClaimScope').mockImplementation((...args) => {
+      const live = scope(...args);
+      return !changed || !live ? live : kind === 'cancelled' ? null : { ...live, generation: (live.generation ?? 0) + 1 };
+    });
+    const realRun = verificationRunner.runVerification;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      const result = realRun(args);
+      changed = true;
+      return result;
+    });
+    try {
+      const response = f.probe();
+      expect(response.exitCode === 2 && response.output === 'CHANNEL_CLAIM_STALE').toBe(true);
+      expect(f.files().length === 0).toBe(true);
+      expectPrivateText(f.state(), before);
+      expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
+    } finally { runner.mockRestore(); current.mockRestore(); }
+  });
+
+  it('bounds repeated meaningful UTF8 fatal output to the finite private tail grammar', async () => {
+    const line = 'Error [ERR_UNSUPPORTED_DIR_IMPORT]: ' + tailMessage;
+    const text = Array.from({ length: 100 }, () => line + ' amber orbit velvet \u79d8\u5bc6\ud83d\udd12').join('\n') + '\nNode.js v24.14.1\n';
+    const f = await launch(text);
+    const before = f.state();
+    const ledger = f.evidence();
+    const response = f.probe();
+    expect(response.exitCode === 2 && f.files().length === 1).toBe(true);
+    const bytes = readFileSync(join(f.dir, f.files()[0]!));
+    const doc = JSON.parse(bytes.toString('utf8'));
+    checkTail(doc.test_command?.sanitized_tail);
+    expect(bytes.length <= 8192).toBe(true);
+    expect(bytes.toString('utf8').includes('amber')).toBe(false);
+    expect(bytes.toString('utf8').includes('\u79d8\u5bc6')).toBe(false);
+    expect(bytes.toString('utf8').includes('\ud83d\udd12')).toBe(false);
+    expectPrivateText(f.state(), before);
+    expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
+  });
+
+  it('does not select a meaningful tail from setup build headers or aggregate callback output', async () => {
+    const decoy = 'Error [ERR_UNSUPPORTED_DIR_IMPORT]: ' + tailMessage;
+    const f = await fixture({}, [process.execPath, '-e', 'process.exitCode=1', '${REPORT}'], {
+      report: { format: 'vitest-json' },
+      setup: [[process.execPath, '-e', `console.error(${JSON.stringify(decoy)})`]],
+      build: [[process.execPath, '-e', `console.error(${JSON.stringify(decoy)})`]],
+    });
+    const before = f.state();
+    const ledger = f.evidence();
+    const realRun = verificationRunner.runVerification;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      const hook = (args as ProbeRunnerArgs).onRawReport;
+      return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+        expect(value.test_command_output === '').toBe(true);
+        hook?.({ ...value, output: value.output + '\n$ ' + decoy + '\n(cwd: ' + decoy + ')\n' });
+      } } as ProbeRunnerArgs);
+    });
+    let response: ReturnType<typeof f.probe>;
+    try { response = f.probe(); } finally { runner.mockRestore(); }
+    const dir = join(f.s.control, '.mycelink', 'probe-diagnostics', SHOP_FEATURE, ERRORS, f.claim.claimId);
+    const names = existsSync(dir) ? readdirSync(dir) : [];
+    expect(response.exitCode === 2 && names.length === 1).toBe(true);
+    const bytes = readFileSync(join(dir, names[0]!));
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(Object.hasOwn(doc.test_command ?? {}, 'sanitized_tail')).toBe(false);
+    expect(bytes.toString('utf8').includes(tailMessage)).toBe(false);
+    expectPrivateText(f.state(), before);
+    expectPrivateText(JSON.stringify(f.evidence()), JSON.stringify(ledger));
   });
 
   it.each(['object', 'oversize', 'missing'] as const)('fails closed on %s test-command callback data', async kind => {

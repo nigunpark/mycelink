@@ -198,10 +198,10 @@ function isSameFile(path: string, made: BigIntStats | null): boolean {
  * link included, is already there); where hard links are not supported, an
  * O_EXCL create. Never a replace.
  */
-export function createExclusive(file: string, content: string | Uint8Array): 'created' | 'exists' {
+export function createExclusive(file: string, content: string | Uint8Array, mode = 0o644): 'created' | 'exists' {
   const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
   const tmp = join(dirname(file), `.${basename(file)}.${randomBytes(8).toString('hex')}.tmp`);
-  const fd = openSync(tmp, 'wx', 0o644);
+  const fd = openSync(tmp, 'wx', mode);
   try {
     writeAll(fd, bytes);
     fsyncSync(fd);
@@ -217,7 +217,7 @@ export function createExclusive(file: string, content: string | Uint8Array): 'cr
     }
     let out: number;
     try {
-      out = openSync(file, 'wx', 0o644);
+      out = openSync(file, 'wx', mode);
     } catch (again) {
       if ((again as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
       throw again;

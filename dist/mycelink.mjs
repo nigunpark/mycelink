@@ -19799,10 +19799,10 @@ function isSameFile(path, made) {
   const sameDev = now3.dev === made?.dev || now3.dev === 0n || made?.dev === 0n;
   return made !== null && now3.isFile() && sameDev && now3.ino === made.ino && now3.size === made.size;
 }
-function createExclusive(file, content) {
+function createExclusive(file, content, mode = 420) {
   const bytes2 = typeof content === "string" ? Buffer.from(content, "utf8") : content;
   const tmp = join13(dirname5(file), `.${basename2(file)}.${randomBytes3(8).toString("hex")}.tmp`);
-  const fd = openSync6(tmp, "wx", 420);
+  const fd = openSync6(tmp, "wx", mode);
   try {
     writeAll(fd, bytes2);
     fsyncSync(fd);
@@ -19818,7 +19818,7 @@ function createExclusive(file, content) {
     }
     let out;
     try {
-      out = openSync6(file, "wx", 420);
+      out = openSync6(file, "wx", mode);
     } catch (again) {
       if (again.code === "EEXIST") return "exists";
       throw again;
@@ -26565,7 +26565,7 @@ function settledAt(file, sha2) {
   }
   return at === "linked" ? "other" : at;
 }
-function writeImmutable(dir, stem2, ext, content) {
+function writeImmutable(dir, stem2, ext, content, mode = 420) {
   const bytes2 = typeof content === "string" ? Buffer.from(content, "utf8") : content;
   const sha2 = sha25612(bytes2);
   mkdirSync9(dir, { recursive: true });
@@ -26575,7 +26575,7 @@ function writeImmutable(dir, stem2, ext, content) {
       const at = settledAt(file, sha2);
       if (at === "same") return { file, sha256: sha2, created: false };
       if (at === "other") break;
-      if (createExclusive(file, bytes2) === "created") return { file, sha256: sha2, created: true };
+      if (createExclusive(file, bytes2, mode) === "created") return { file, sha256: sha2, created: true };
     }
   }
   throw new EvidenceStoreError(`every name for ${stem2} ${sha2.slice(0, 16)} in ${dir} is taken by something else; nothing was written`);
@@ -30773,6 +30773,73 @@ function testCommandExcerpt(output) {
   if (redacted !== excerpt || Buffer.byteLength(redacted) > 1024 || redacted.split("\n").length > 6 || !redacted.split("\n").every((line) => vocabulary.has(line))) return void 0;
   return redacted;
 }
+var diagnosticWords = /* @__PURE__ */ new Set([
+  "Cannot",
+  "Could",
+  "not",
+  "cannot",
+  "find",
+  "resolve",
+  "load",
+  "import",
+  "require",
+  "package",
+  "module",
+  "exports",
+  "in",
+  "runtime",
+  "from",
+  "for",
+  "the",
+  "a",
+  "an",
+  "is",
+  "not",
+  "supported",
+  "unsupported",
+  "directory",
+  "invalid",
+  "Invalid",
+  "missing",
+  "Missing",
+  "Unknown",
+  "unknown",
+  "extension",
+  "file",
+  "specifier",
+  "Failed",
+  "failed",
+  "to",
+  "dependency",
+  "binding",
+  "configuration",
+  "expected"
+]);
+var diagnosticConnectors = /* @__PURE__ */ new Set(["in", "from", "for", "the", "a", "an", "is", "not", "to"]);
+function testCommandTail(output) {
+  const text = redactText(output ?? "");
+  for (const raw of text.split(/\r\n|[\r\n]/)) {
+    const line = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+    const match = /^Error \[ERR_[A-Z0-9_]+\]:[ \t]*(.*)$/.exec(line);
+    if (!match) continue;
+    const message = match[1].replace(/file:\/\/\S*|[A-Za-z]:[\\/]\S*|\\\\\S*|\/\S*/gi, "<redacted>").replace(/(["'`])[^"'`]*["'`]?/g, "<redacted>").replace(/\S*@\S*|\b[A-Za-z0-9_]*(?:token|key|password|secret)[A-Za-z0-9_]*\s*[:=].*/gi, "<redacted>");
+    const words = [];
+    let suppressed = false;
+    for (const token of message.trim().split(/\s+/).filter(Boolean)) {
+      if (words.length === 24 || !diagnosticWords.has(token)) {
+        suppressed = true;
+        break;
+      }
+      words.push(token);
+    }
+    if (words.filter((word) => !diagnosticConnectors.has(word)).length < 2) continue;
+    const shaped = "NODE_FATAL_ERROR: " + words.join(" ") + (suppressed ? " <redacted>" : "");
+    const redacted = redactText(shaped);
+    if (redacted !== shaped || Buffer.byteLength(redacted, "utf8") > 2048 || !/^NODE_FATAL_ERROR: [A-Za-z]+(?: [A-Za-z]+)*(?: <redacted>)?$/.test(redacted) || !redacted.slice("NODE_FATAL_ERROR: ".length).replace(/ <redacted>$/, "").split(" ").every((word) => diagnosticWords.has(word))) return void 0;
+    return redacted;
+  }
+  return void 0;
+}
 function testCommandSummary(output) {
   const text = redactText(output ?? "");
   const prefixes = [
@@ -30794,10 +30861,12 @@ function testCommandSummary(output) {
   const code = prefixes.find(([, pattern]) => classified.some((line) => pattern.test(line)))?.[0] ?? classified.map((line) => standalone.exec(line)?.[1]).find((value) => value !== void 0) ?? (/^Node\.js v[0-9]+\.[0-9]+\.[0-9]+$/.test(classified.at(-1) ?? "") ? "NODE_FATAL_UNKNOWN" : "UNKNOWN");
   const last = Buffer.from(nonempty.at(-1) ?? "").subarray(-1024);
   const sanitizedExcerpt = testCommandExcerpt(output);
+  const sanitizedTail = testCommandTail(output);
   return {
     code,
     last_error: { sha256: hash(last), bytes: last.length },
     ...sanitizedExcerpt !== void 0 ? { sanitized_excerpt: sanitizedExcerpt } : {},
+    ...sanitizedTail !== void 0 ? { sanitized_tail: sanitizedTail } : {},
     lines: nonempty.slice(-12).map((line) => {
       const bytes2 = Buffer.from(line);
       return { sha256: hash(bytes2), bytes: bytes2.length };
@@ -30995,7 +31064,8 @@ function runClaimProbe(args) {
       if (!args.current()) throw new Error("CHANNEL_CLAIM_STALE");
       let kept;
       try {
-        kept = writeImmutable(dir, "diagnostic", ".json", body);
+        mkdirSync18(dir, { recursive: true, mode: 448 });
+        kept = writeImmutable(dir, "diagnostic", ".json", body, 384);
       } catch {
         return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
       }

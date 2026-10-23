@@ -111,6 +111,51 @@ function testCommandExcerpt(output: string | null): string | undefined {
   return redacted;
 }
 
+// Finite diagnostic words, never an arbitrary prose or error-code passthrough.
+const diagnosticWords = new Set([
+  'Cannot', 'Could', 'not', 'cannot', 'find', 'resolve', 'load', 'import', 'require',
+  'package', 'module', 'exports', 'in', 'runtime', 'from', 'for', 'the', 'a', 'an',
+  'is', 'not', 'supported', 'unsupported', 'directory', 'invalid', 'Invalid',
+  'missing', 'Missing', 'Unknown', 'unknown', 'extension', 'file', 'specifier',
+  'Failed', 'failed', 'to', 'dependency', 'binding', 'configuration', 'expected',
+]);
+const diagnosticConnectors = new Set(['in', 'from', 'for', 'the', 'a', 'an', 'is', 'not', 'to']);
+
+/** A short safe prefix of an anchored Node error, with all remaining text suppressed.
+ * This limits disclosure; it cannot establish perfect privacy for allowlisted words.
+ */
+function testCommandTail(output: string | null): string | undefined {
+  const text = redactText(output ?? '');
+  for (const raw of text.split(/\r\n|[\r\n]/)) {
+    const line = raw
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+    const match = /^Error \[ERR_[A-Z0-9_]+\]:[ \t]*(.*)$/.exec(line);
+    if (!match) continue;
+    // Mask sensitive shapes before token selection. Any mask or unknown token
+    // terminates the prefix, so subsequent safe-looking words cannot reappear.
+    const message = match[1]!
+      .replace(/file:\/\/\S*|[A-Za-z]:[\\/]\S*|\\\\\S*|\/\S*/gi, '<redacted>')
+      .replace(/(["'`])[^"'`]*["'`]?/g, '<redacted>')
+      .replace(/\S*@\S*|\b[A-Za-z0-9_]*(?:token|key|password|secret)[A-Za-z0-9_]*\s*[:=].*/gi, '<redacted>');
+    const words: string[] = [];
+    let suppressed = false;
+    for (const token of message.trim().split(/\s+/).filter(Boolean)) {
+      if (words.length === 24 || !diagnosticWords.has(token)) { suppressed = true; break; }
+      words.push(token);
+    }
+    if (words.filter(word => !diagnosticConnectors.has(word)).length < 2) continue;
+    const shaped = 'NODE_FATAL_ERROR: ' + words.join(' ') + (suppressed ? ' <redacted>' : '');
+    const redacted = redactText(shaped);
+    if (redacted !== shaped || Buffer.byteLength(redacted, 'utf8') > 2048 ||
+        !/^NODE_FATAL_ERROR: [A-Za-z]+(?: [A-Za-z]+)*(?: <redacted>)?$/.test(redacted) ||
+        !redacted.slice('NODE_FATAL_ERROR: '.length).replace(/ <redacted>$/, '').split(' ').every(word => diagnosticWords.has(word))) return undefined;
+    return redacted;
+  }
+  return undefined;
+}
+
 /** Only hashes of redacted text and a fixed vocabulary may survive the clone. */
 function testCommandSummary(output: string | null) {
   const text = redactText(output ?? '');
@@ -137,8 +182,10 @@ function testCommandSummary(output: string | null) {
     (/^Node\.js v[0-9]+\.[0-9]+\.[0-9]+$/.test(classified.at(-1) ?? '') ? 'NODE_FATAL_UNKNOWN' : 'UNKNOWN');
   const last = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
   const sanitizedExcerpt = testCommandExcerpt(output);
+  const sanitizedTail = testCommandTail(output);
   return { code, last_error: { sha256: hash(last), bytes: last.length },
     ...(sanitizedExcerpt !== undefined ? { sanitized_excerpt: sanitizedExcerpt } : {}),
+    ...(sanitizedTail !== undefined ? { sanitized_tail: sanitizedTail } : {}),
     lines: nonempty.slice(-12).map(line => {
       const bytes = Buffer.from(line);
       return { sha256: hash(bytes), bytes: bytes.length };
@@ -302,7 +349,11 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
       if (!args.current() || snapshot(scope.worktree, args.deadline + 2_000) !== before) throw new Error('CHANNEL_CLAIM_STALE');
       if (!args.current()) throw new Error('CHANNEL_CLAIM_STALE');
       let kept;
-      try { kept = writeImmutable(dir, 'diagnostic', '.json', body); }
+      try {
+        // Creation modes apply only to new entries; Windows inherits ACLs.
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        kept = writeImmutable(dir, 'diagnostic', '.json', body, 0o600);
+      }
       catch { return fail('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
       let current = false;
       try { current = args.current(); }
