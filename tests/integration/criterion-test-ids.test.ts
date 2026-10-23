@@ -130,11 +130,11 @@ describe('every gate publishes the canonical ids of the tests it ran', () => {
     writeFiles(t.worktree, WORK.tests);
     const red = runGate(t, 'red', s.control);
     expect(red.code, red.out).toBe(0);
-    // The RED's declared tests: the new one failing, and the existing one whose block it changed, still passing.
+    // The RED shows only the newly declared failing test; the results file retains both executed tests.
     expect(red.tests).toEqual([
-      { id: EXISTING_ID, status: 'passed', path: TEST_FILE, full_name: 'a git error carries its exit code' },
       { id: RED_ID, status: 'failed', path: TEST_FILE, full_name: FULL },
     ]);
+    expect(red.out).toContain('1 of 2 shown');
     expect(red.out).toMatch(/every test with its test_id: features\/SHOP-202\/evidence\/.*\/red\.results\.[0-9a-f]{16}\.json/);
     const ev = shopState(s).nodes[ERRORS].evidence.red;
     const results = JSON.parse(readFileSync(join(s.control, ev.results.path), 'utf8')).results as { test_id: string; full_name: string; status: string }[];
