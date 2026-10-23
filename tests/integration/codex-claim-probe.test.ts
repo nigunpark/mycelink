@@ -425,7 +425,12 @@ test(${JSON.stringify(name)}, () => {
     const f = await fixture({}, command);
     const before = f.state();
     const files = f.evidence();
-    expect(f.probe()).toMatchObject({ exitCode: 2 });
+    const result = f.probe();
+    expect(result).toMatchObject({ exitCode: 2 });
+    expect(result).not.toHaveProperty('diagnostic');
+    for (const key of ['output_sha256', 'outputSha256', 'test_ids', 'testIds', 'results', 'output_path', 'criterion_evidence']) {
+      expect(result).not.toHaveProperty(key);
+    }
     expect(f.state()).toBe(before);
     expect(f.evidence()).toEqual(files);
   });
@@ -499,9 +504,12 @@ test(${JSON.stringify(name)}, () => {
     ['hash', 'HASH'], ['json', 'FORMAT'], ['schema', 'FORMAT'], ['format', 'FORMAT'],
     ['null document', 'FORMAT'], ['results', 'FORMAT'], ['missing entry', 'ENTRY'], ['missing file', 'ENTRY'],
     ['missing name', 'ENTRY'], ['huge file', 'ENTRY'], ['huge name', 'ENTRY'],
-    ['traversal', 'IDENTITY'], ['absolute path', 'IDENTITY'], ['id', 'IDENTITY'], ['status', 'IDENTITY'],
-    ['empty', 'IDENTITY'], ['count', 'IDENTITY'], ['aggregate', 'SIZE'],
-  ] as const)('refuses normalized report %s with bounded stage %s', async (kind, stage) => {
+    ['traversal', 'IDENTITY:PATH'], ['absolute path', 'IDENTITY:PATH'],
+    ['Windows absolute path', 'IDENTITY:PATH'], ['unsafe path', 'IDENTITY:PATH'],
+    ['unsafe Vitest suite', 'IDENTITY:PATH'], ['legitimate Vitest suite', null],
+    ['id', 'IDENTITY:ID'], ['todo status', 'IDENTITY:STATUS'], ['unknown status', 'IDENTITY:STATUS'],
+    ['empty', 'IDENTITY:EMPTY'], ['count', 'IDENTITY:COUNT'], ['aggregate', 'SIZE'],
+  ] as const)('checks normalized report %s with bounded refusal stage %s', async (kind, stage) => {
     const testPath = 'packages/errors/test/errors.test.mjs';
     const f = await fixture({}, [process.execPath, '--test', '--test-reporter=junit',
       '--test-reporter-destination=${REPORT}', testPath]);
@@ -544,8 +552,25 @@ test(${JSON.stringify(name)}, () => {
         entry.file = '/outside.test.mjs';
         entry.test_id = canonicalTestId('junit-xml', entry.file, entry.full_name);
       }
+      if (kind === 'Windows absolute path' || kind === 'unsafe path') {
+        entry.file = kind === 'Windows absolute path' ? 'C:/private/report-secret.test.mjs'
+          : 'packages/errors/test/NUL.test.mjs';
+        entry.test_id = canonicalTestId('junit-xml', entry.file, entry.full_name);
+      }
+      if (kind === 'unsafe Vitest suite' || kind === 'legitimate Vitest suite') {
+        // Model the normalized entry for a Vitest suite that failed before collecting tests.
+        // A safe <suite> identity remains diagnostic-only; unsafe files must still be refused.
+        record.results!.format = doc.format = 'vitest-json';
+        entry.file = kind === 'unsafe Vitest suite' ? 'packages/errors/test/../suite-secret.test.mjs' : testPath;
+        entry.full_name = '<suite>';
+        entry.status = 'failed';
+        entry.message = 'private suite load failure report content';
+        entry.test_id = canonicalTestId('vitest-json', entry.file, entry.full_name);
+        record.exit_code = 1;
+      }
       if (kind === 'id') entry.test_id = '0'.repeat(16);
-      if (kind === 'status') entry.status = 'unknown';
+      if (kind === 'todo status') entry.status = 'todo';
+      if (kind === 'unknown status') entry.status = 'unknown';
       if (kind === 'empty') doc.results = [];
       if (kind === 'count') doc.results = Array.from({ length: 10001 }, () => ({ ...entry }));
       if (kind === 'aggregate') doc.results = Array.from({ length: 8 }, (_, i) => {
@@ -558,8 +583,10 @@ test(${JSON.stringify(name)}, () => {
       return record;
     });
     let result: ReturnType<typeof f.probe>;
-    try { result = f.probe(); }
-    finally { runner.mockRestore(); }
+    try {
+      result = f.probe();
+      expect(runner).toHaveBeenCalledTimes(1);
+    } finally { runner.mockRestore(); }
     expect(report).not.toBe(''); // A refusal before the mutation is a harness failure.
     expect(existsSync(report)).toBe(false);
     expect(existsSync(clone)).toBe(false);
@@ -567,8 +594,21 @@ test(${JSON.stringify(name)}, () => {
     expect(snapshot(f.s.repo)).toEqual(repositoryBefore);
     expect(f.state()).toBe(state);
     expect(f.evidence()).toEqual(evidence);
-    expect(result!).toEqual({ exitCode: 2, output: `CHANNEL_PROBE_REPORT_INVALID:${stage}` });
-    expect(Buffer.byteLength(JSON.stringify(result!))).toBeLessThan(128);
+    if (kind === 'legitimate Vitest suite') {
+      expect(result!).toMatchObject({ exitCode: 1, diagnostic: { role: 'diagnostic-only', tests: [{
+        id: canonicalTestId('vitest-json', testPath, '<suite>'), path: testPath,
+        full_name: '<suite>', status: 'failed',
+      }] } });
+    } else {
+      // Exact constant output excludes file/test names, report content and child diagnostics.
+      expect(result!).toEqual({ exitCode: 2, output: `CHANNEL_PROBE_REPORT_INVALID:${stage}` });
+      expect(result!).not.toHaveProperty('diagnostic');
+      expect(Buffer.byteLength(JSON.stringify(result!))).toBeLessThan(128);
+    }
+    for (const key of ['output_sha256', 'outputSha256', 'test_ids', 'testIds', 'results', 'output_path',
+      'criterion_evidence', 'accepted', 'acceptance', 'evidence']) {
+      expect(result!).not.toHaveProperty(key);
+    }
   });
 
   // A deterministic pnpm-shaped install: Git ignores node_modules, but

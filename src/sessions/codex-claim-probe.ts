@@ -162,8 +162,11 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
       typeof (t as Record<string, unknown>).file !== 'string' || typeof (t as Record<string, unknown>).full_name !== 'string' ||
       Buffer.byteLength((t as { file: string }).file) > 1024 || Buffer.byteLength((t as { full_name: string }).full_name) > 4096)) return fail('CHANNEL_PROBE_REPORT_INVALID:ENTRY');
     const tests = (doc.results ?? []).map((t: { test_id: string; file: string; full_name: string; status: string }) => ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
-    if (!tests.length || tests.length > 10_000 || tests.some((t: { id: string; path: string; full_name: string; status: string }) =>
-      classifyRelativePath(t.path) || t.path.split('/').includes('..') || t.id !== canonicalTestId(record.results!.format, t.path, t.full_name) || !['passed', 'failed', 'skipped', 'not-run'].includes(t.status))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY');
+    if (!tests.length) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY');
+    if (tests.length > 10_000) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:COUNT');
+    if (tests.some((t: { path: string }) => classifyRelativePath(t.path) || t.path.split('/').includes('..'))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:PATH');
+    if (tests.some((t: { id: string; path: string; full_name: string }) => t.id !== canonicalTestId(record.results!.format, t.path, t.full_name))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:ID');
+    if (tests.some((t: { status: string }) => !['passed', 'failed', 'skipped', 'not-run'].includes(t.status))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:STATUS');
     const diagnostic: NonNullable<ProbeResult['diagnostic']> = { role: 'diagnostic-only', tests: tests.slice(0, 256) };
     if (!validProbeDiagnostic(diagnostic)) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });

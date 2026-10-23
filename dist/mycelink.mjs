@@ -30824,7 +30824,11 @@ function runClaimProbe(args) {
     if (doc === null || typeof doc !== "object" || doc.schema !== "mycelink-test-results/1" || doc.format !== record.results.format || !Array.isArray(doc.results)) return fail("CHANNEL_PROBE_REPORT_INVALID:FORMAT");
     if (doc.results.some((t) => !t || typeof t !== "object" || typeof t.file !== "string" || typeof t.full_name !== "string" || Buffer.byteLength(t.file) > 1024 || Buffer.byteLength(t.full_name) > 4096)) return fail("CHANNEL_PROBE_REPORT_INVALID:ENTRY");
     const tests = (doc.results ?? []).map((t) => ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
-    if (!tests.length || tests.length > 1e4 || tests.some((t) => classifyRelativePath(t.path) || t.path.split("/").includes("..") || t.id !== canonicalTestId(record.results.format, t.path, t.full_name) || !["passed", "failed", "skipped", "not-run"].includes(t.status))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY");
+    if (!tests.length) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY");
+    if (tests.length > 1e4) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:COUNT");
+    if (tests.some((t) => classifyRelativePath(t.path) || t.path.split("/").includes(".."))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:PATH");
+    if (tests.some((t) => t.id !== canonicalTestId(record.results.format, t.path, t.full_name))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:ID");
+    if (tests.some((t) => !["passed", "failed", "skipped", "not-run"].includes(t.status))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:STATUS");
     const diagnostic = { role: "diagnostic-only", tests: tests.slice(0, 256) };
     if (!validProbeDiagnostic(diagnostic)) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });
