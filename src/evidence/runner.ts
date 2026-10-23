@@ -72,6 +72,10 @@ interface VerificationOptions {
   /** Test identifiers known to fail before this feature started. */
   baselineFailures?: string[];
   env?: Record<string, string>;
+  /** Controller diagnostic runs may inherit only the isolated setup environment. */
+  cleanEnv?: boolean;
+  /** Private diagnostic scratch, removed with its disposable checkout on every exit. */
+  reportScratchRoot?: string;
   /** Overrides the derived output file name (used for repeated attempts). */
   label?: string;
   candidateId?: string | null;
@@ -199,7 +203,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   for (const step of args.steps ?? []) {
     const t0 = Date.now();
     output += `$ ${step.join(' ')}\n(cwd: ${cwd})\n\n`;
-    const r = runCommandSync(step, { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {} });
+    const r = runCommandSync(step, { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv });
     output += r.stdout + r.stderr;
     if (r.timedOut) output += `\n[mycelink] step timed out after ${timeoutMs} ms\n`;
     if (r.spawnError !== null) output += `\n[mycelink] failed to start: ${r.spawnError}\n`;
@@ -222,7 +226,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
     /^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(args.command[3] ?? '') &&
     !args.command[3]?.split('/').includes('..');
   const report = args.report ?? (nodeJUnit ? { format: 'junit-xml' as const } : null);
-  const scratch = report !== null && report.dir === undefined ? mkdtempSync(join(tmpdir(), 'mycelink-report-')) : null;
+  const scratch = report !== null && report.dir === undefined ? mkdtempSync(join(args.reportScratchRoot ?? tmpdir(), 'mycelink-report-')) : null;
   const reportFile = scratch === null ? null : join(scratch, (report as ModuleReport).format === 'vitest-json' ? 'report.json' : 'report.xml');
   const reportDir = report?.dir !== undefined ? resolve(cwd, report.dir) : null;
   if (reportDir !== null) clearReportDir(cwd, reportDir);
@@ -232,7 +236,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   if (failedStep === null) {
     // Throws CommandPolicyError before anything runs if the command is unsafe
     // or asks for a shell the control repository has not allowed.
-    const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {} };
+    const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
     const proc =
       args.shellScript !== undefined
         ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false })

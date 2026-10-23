@@ -133,6 +133,9 @@ import { quarantineStash, type StashQuarantine } from '../git/stash.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
 import { verifyReadonlyFixture, buildContextPack, type ContextCapsule, type ContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
+import { redactText } from '../security/redact.js';
+import { runClaimProbe } from '../sessions/codex-claim-probe.js';
+import type { ProbeResult } from '../sessions/codex-claim-channel.js';
 import { moduleInvocation, runVerification, verifierInvocation } from '../evidence/runner.js';
 import { claimVerificationFor, ModuleDriftError } from './modules.js';
 import { regressionDeferral } from './regression-deferral.js';
@@ -465,6 +468,10 @@ export interface FeatureRunReport {
   /** The adapter preflight, when one ran. */
   adapter?: PreflightResult;
 }
+
+/** In-memory diagnostics only: shared across controller/channel objects in this host. */
+const claimProbeBudgets = new Map<string, { attempts: number; deadline: number }>();
+const closedProbeClaims = new Set<string>();
 
 /** Node types the controller runs itself; never a rework target. */
 const CONTROLLER_NODE_TYPES: ReadonlySet<string> = new Set(['candidate-build', 'e2e-scenario', 'verification']);
@@ -1843,7 +1850,7 @@ export class Orchestrator {
       : rt.state === 'RED_VERIFIED' || rt.state === 'GREEN_PENDING' ? 'green'
         : rt.state === 'GREEN_VERIFIED' ? 'regression' : null;
     return {
-      claimId, featureId: this.featureId, nodeId,
+      claimId, generation: claim.generation, dispatchId: claim.dispatch_id, featureId: this.featureId, nodeId,
       repoPath: repositoryPath(this.workspace, node.repository), worktree: claim.worktree,
       expectedHead: resolveRef(claim.worktree, 'HEAD'),
       allowedPaths: [...node.allowed_paths], forbiddenPaths: [...(node.forbidden_paths ?? [])],
@@ -1852,6 +1859,55 @@ export class Orchestrator {
       ...(rt.rework_brief?.origin?.kind === 'acceptance-review'
         ? { challengeCriteria: [...rt.rework_brief.acceptance_criteria] } : {}),
     };
+  }
+
+  /** Diagnostic budget belongs to the host claim, never a mailbox/channel instance. */
+  codexProbeClaim(nodeId: string, claimId: string, capability: string, worktree: string, options: { deadlineMs: number }): ProbeResult {
+    const fail = (output: string): ProbeResult => ({ exitCode: 2, output });
+    try {
+      const scope = this.codexClaimScope(nodeId, claimId, capability, worktree);
+      if (!scope) return fail('CHANNEL_CLAIM_STALE');
+      if (scope.nextGate !== 'red' || this.state().nodes[nodeId]?.evidence.red) return fail('CHANNEL_PROBE_UNAVAILABLE');
+      if (!Number.isSafeInteger(options.deadlineMs) || options.deadlineMs < 1 || options.deadlineMs > 600_000) return fail('CHANNEL_PROBE_DEADLINE_INVALID');
+      const claim = this.state().nodes[nodeId]!.claim!;
+      const generation = claim.generation;
+      const dispatchId = claim.dispatch_id;
+      if (!claim.base_sha || scope.expectedHead !== claim.base_sha) return fail('CHANNEL_PROBE_HEAD_DRIFT');
+      const key = `${this.controlRoot}:${this.featureId}:${nodeId}:${claimId}`;
+      if (closedProbeClaims.has(key)) return fail('CHANNEL_PROBE_UNAVAILABLE');
+      if (!claim.branch || runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim() !== claim.branch || resolveRef(scope.repoPath, `refs/heads/${claim.branch}`) !== scope.expectedHead) return fail('CHANNEL_PROBE_HEAD_DRIFT');
+      let budget = claimProbeBudgets.get(key);
+      if (!budget) {
+        budget = { attempts: 0, deadline: Math.min(Date.now() + options.deadlineMs, claim.expires_at ? Date.parse(claim.expires_at) : Infinity) };
+        claimProbeBudgets.set(key, budget);
+      }
+      if (budget.attempts >= 3) return fail('CHANNEL_PROBE_LIMIT');
+      if (Date.now() >= budget.deadline) return fail('CHANNEL_PROBE_TIMEOUT');
+      budget.attempts++;
+      const node = this.node(nodeId);
+      const fresh = loadWorkspace(this.controlRoot);
+      const repo = fresh.repositories.repositories.find(r => r.name === node.repository);
+      const bound = repo ? claimVerificationFor(nodeId, node.verification_commands[0], repo) : null;
+      if (!bound || !claim.verification || bound.module_sha256 !== claim.verification.module_sha256 || bound.plan_sha256 !== claim.verification.plan_sha256) return fail('CHANNEL_PROBE_MODULE_DRIFT');
+      if (claim.worktree_setup?.inputs_sha256 && setupInputs(worktree, claim.worktree_setup.config)?.sha256 !== claim.worktree_setup.inputs_sha256) return fail('CHANNEL_PROBE_SETUP_INPUT_DRIFT');
+      if (claim.worktree_setup && worktreeSetupSha256(claim.worktree_setup.config) !== claim.worktree_setup.config_sha256) return fail('CHANNEL_PROBE_SETUP_DRIFT');
+      const current = () => {
+        const now = this.codexClaimScope(nodeId, claimId, capability, worktree);
+        const state = this.state();
+        const live = state.nodes[nodeId]?.claim;
+        const lease = leaseOf(state, h => capabilityMatches(capability, h));
+        return !!now && now.nextGate === 'red' && now.expectedHead === scope.expectedHead &&
+          now.generation === generation && now.dispatchId === dispatchId &&
+          !!live && (!live.expires_at || Date.parse(live.expires_at) > Date.now()) &&
+          lease?.status === 'active' && lease.claim_id === claimId && lease.generation === generation &&
+          lease.lineage === lineageOf(state, nodeId) &&
+          runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim() === claim.branch &&
+          resolveRef(scope.repoPath, `refs/heads/${claim.branch}`) === scope.expectedHead;
+      };
+      return runClaimProbe({ scope, bound, setup: this.checkoutSetup(nodeId, node.repository!), controlRoot: this.controlRoot,
+        deadline: Math.min(budget.deadline, Date.now() + options.deadlineMs), current,
+        fixture: () => node.readonly_fixture ? verifyReadonlyFixture(this.controlRoot, node.readonly_fixture).manifest : undefined });
+    } catch (e) { return fail(redactText((e as Error).message).slice(0, 32 * 1024)); }
   }
 
   /** Write the node's context pack and return its path. */
@@ -2689,9 +2745,15 @@ export class Orchestrator {
 
       if (this.adapter.name === 'codex-cli' && worktree !== null) {
         const scope = () => this.codexClaimScope(nodeId, claimId, capability, worktree);
+        const probeEnabled = !!this.state().nodes[nodeId]?.claim?.verification && scope()?.nextGate === 'red';
         const channel = new ClaimChannel(scope, (argv, cwd) => {
           const gate = argv[3];
           if (gate !== 'red' && gate !== 'green' && gate !== 'regression') throw new Error('CHANNEL_GATE_INVALID');
+          if (gate === 'red' && probeEnabled) {
+            const key = `${this.controlRoot}:${this.featureId}:${nodeId}:${claimId}`;
+            if (closedProbeClaims.has(key)) return { exitCode: 2, output: 'CHANNEL_RED_ALREADY_RUN' };
+            closedProbeClaims.add(key);
+          }
           return executeHostClaimGate({
             readonlyFixture: node.readonly_fixture,
             controlRoot: this.controlRoot, featureId: this.featureId, gate, cwd, argv,
@@ -2714,8 +2776,8 @@ export class Orchestrator {
           });
           if (ran.error || ran.signal) throw new Error('CHANNEL_REVIEW_EXECUTION_FAILED');
           return { exitCode: ran.status ?? 1, output: (ran.stdout || ran.stderr || '').slice(0, 32 * 1024) };
-        });
-        request.claimChannel = { handle: (input) => channel.handle(input), redactEnv: { [CAPABILITY_ENV]: capability } };
+        }, probeEnabled ? () => this.codexProbeClaim(nodeId, claimId, capability, worktree, { deadlineMs: Math.min(600_000, request.maxWallClockMs) }) : undefined);
+        request.claimChannel = { handle: (input) => channel.handle(input), probeEnabled, redactEnv: { [CAPABILITY_ENV]: capability } };
       }
 
       if (node.readonly_fixture) verifyReadonlyFixture(this.controlRoot, node.readonly_fixture);

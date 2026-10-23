@@ -7,6 +7,25 @@ import { minimalPack, packCriterion } from '../helpers/context-pack.js';
 const request = { cwd: join(tmpdir(), 'isolated worker'), model: 'gpt-test', gateCommands: [{ gate: 'red', argv: ['node', '--test'] }] } as SpawnRequest;
 
 describe('Codex CLI adapter contract', () => {
+  it('documents the exact PRE-RED probe command, budget, and lack of acceptance authority', async () => {
+    const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
+    const adapter = new CodexCliAdapter({ executable: 'codex' });
+    const pack = minimalPack();
+    const claimChannel: NonNullable<SpawnRequest['claimChannel']> = {
+      handle: () => ({ ok: false, sequence: null, code: 'CHANNEL_PROBE_UNAVAILABLE' }), probeEnabled: true,
+    };
+    const mediated = { ...request, claimId: 'claim-1', claimChannel } as SpawnRequest;
+    const prompt = (adapter as unknown as { workerPrompt: (pack: typeof pack, request: SpawnRequest) => string }).workerPrompt(pack, mediated);
+    expect(prompt).toContain('node .mycelink-worker/channel-claim-1/client.mjs probe');
+    expect(prompt).toMatch(/(?:3|three) probe/i);
+    expect(prompt).toMatch(/probe[^\n]*(?:before|pre-)[^\n]*RED/i);
+    expect(prompt).toMatch(/probe[^\n]*diagnostic/i);
+    expect(prompt).toMatch(/probe[^\n]*(?:not|never|no)[^\n]*criterion_evidence/i);
+    expect(prompt).toMatch(/probe[^\n]*(?:not|never|no)[^\n]*(?:production|source)[^\n]*(?:edit|permission)/i);
+    expect(prompt).toMatch(/probe[^\n]*(?:not|never|no)[^\n]*test[^\n]*commit/i);
+    expect(prompt).toMatch(/(?:exactly one|once|one)[^\n]*(?:real|gate)[^\n]*RED/i);
+  });
+
   it('gives a mediated worker the exact one-pass TDD order including compatibility evidence', async () => {
     const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
     const adapter = new CodexCliAdapter({ executable: 'codex' });

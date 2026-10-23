@@ -99,6 +99,9 @@ export class CodexCliAdapter extends ProcessSessionAdapter {
     if (!request.claimChannel) return prompt;
     const path = `.mycelink-worker/channel-${request.claimId}/client.mjs`;
     return `Controller-mediated gates and commits (only these commands, from this worktree):\n` +
+      (request.claimChannel.probeEnabled ? `node ${path} probe\n` +
+      `Up to 3 probes before RED share a bounded host deadline. A probe is diagnostic only; never use probe results for criterion_evidence.\n` +
+      `A probe grants no production source edit permission and no test commit permission. Run exactly one real gate RED after repairing the harness.\n` : '') +
       `node ${path} gate red\nnode ${path} gate green\nnode ${path} gate regression\n` +
       `node ${path} commit <message> <owned-path> [more-owned-paths]\n` +
       `Exact one-pass order: RED → test-only commit → edit source → GREEN once → source-only commit → regression once. ` +

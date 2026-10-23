@@ -167,7 +167,7 @@ export interface SpawnRequest {
    */
   gateCommands?: { gate: 'red' | 'green' | 'regression'; argv: string[] }[];
   /** Controller-only, per-attempt handler; never serialized into the worker pack. */
-  claimChannel?: { handle: (request: unknown) => ChannelResponse; redactEnv?: Record<string, string> };
+  claimChannel?: { handle: (request: unknown) => ChannelResponse; probeEnabled?: boolean; redactEnv?: Record<string, string> };
   env?: Record<string, string>;
   /** Links a replacement session to the one it took over from. */
   replacesSessionId?: string | null;

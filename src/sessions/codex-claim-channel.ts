@@ -6,6 +6,8 @@ import { runGit } from '../git/git.js';
 
 export interface LiveClaim {
   claimId: string;
+  generation?: number;
+  dispatchId?: string;
   featureId: string;
   nodeId: string;
   repoPath: string;
@@ -22,8 +24,43 @@ export interface LiveClaim {
   challengeCriteria?: string[];
 }
 
+export interface ProbeResult { exitCode: number; output: string; diagnostic?: { role: 'diagnostic-only'; tests: Pick<import('../evidence/test-ids.js').CanonicalTest, 'id' | 'path' | 'full_name' | 'status'>[] } }
+
+// Leave room for the response envelope and output; identities are never truncated.
+export function validProbeDiagnostic(value: unknown): value is NonNullable<ProbeResult['diagnostic']> {
+  if (!value || typeof value !== 'object') return false;
+  const d = value as NonNullable<ProbeResult['diagnostic']>;
+  return d.role === 'diagnostic-only' && Array.isArray(d.tests) && d.tests.length <= 256 &&
+    d.tests.every(t => t && typeof t.id === 'string' && /^[0-9a-f]{16}$/.test(t.id) &&
+      typeof t.path === 'string' && Buffer.byteLength(t.path) <= 1024 &&
+      typeof t.full_name === 'string' && Buffer.byteLength(t.full_name) <= 4096 &&
+      ['passed', 'failed', 'skipped', 'not-run'].includes(t.status)) &&
+    Buffer.byteLength(JSON.stringify(d)) <= 16 * 1024;
+}
+
+/** Bound the complete JSON wire representation, including the mailbox newline. */
+export function boundChannelResponse(response: ChannelResponse): ChannelResponse {
+  const invalid = (): ChannelResponse => ({ ok: true, sequence: response.sequence ?? 0,
+    exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' });
+  if ('diagnostic' in response && response.diagnostic !== undefined && !validProbeDiagnostic(response.diagnostic)) return invalid();
+  const size = () => Buffer.byteLength(JSON.stringify(response)) + 1;
+  if (size() <= 32 * 1024) return response;
+  if (typeof response.output !== 'string') return invalid();
+  const output = response.output;
+  response = { ...response, output: '' };
+  if (size() > 32 * 1024) return invalid();
+  let low = 0, high = Math.min(output.length, 32 * 1024);
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    response.output = output.slice(0, mid);
+    if (size() <= 32 * 1024) low = mid; else high = mid - 1;
+  }
+  response.output = output.slice(0, low);
+  return response;
+}
+
 export type ChannelResponse =
-  | { ok: true; sequence: number; exitCode: number; output: string; output_sha256?: string; test_ids?: string[]; commitSha?: never }
+  | { ok: true; sequence: number; exitCode: number; output: string; output_sha256?: string; test_ids?: string[]; diagnostic?: ProbeResult['diagnostic']; commitSha?: never }
   | { ok: true; sequence: number; commitSha: string; exitCode?: never; output?: never }
   | { ok: false; sequence: number | null; code: string; exitCode?: number; output?: string };
 
@@ -32,6 +69,7 @@ type Request = { claimId: string; featureId: string; nodeId: string; sequence: n
   | { operation: 'commit'; paths: string[]; message: string }
   | { operation: 'challenge'; criterion: string }
   | { operation: 'check' }
+  | { operation: 'probe' }
 );
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value);
@@ -64,7 +102,7 @@ function parse(input: unknown): Request | null {
     if (!Array.isArray(r['paths']) || !r['paths'].every((p) => typeof p === 'string') || typeof r['message'] !== 'string' || Object.keys(r).some((k) => ![...base, 'paths', 'message'].includes(k))) return null;
   } else if (r['operation'] === 'challenge') {
     if (typeof r['criterion'] !== 'string' || !/^AC-[A-Za-z0-9_.-]{1,60}$/.test(r['criterion']) || Object.keys(r).some((k) => ![...base, 'criterion'].includes(k))) return null;
-  } else if (r['operation'] === 'check') {
+  } else if (r['operation'] === 'check' || r['operation'] === 'probe') {
     if (Object.keys(r).some((k) => !base.includes(k))) return null;
   } else return null;
   return r as Request;
@@ -74,12 +112,14 @@ function parse(input: unknown): Request | null {
 export class ClaimChannel {
   private sequence = 0;
   private acceptedRed = false;
+  private redStarted = false;
   private redHead: string | null = null;
   private redTests: Map<string, string> | null = null;
   constructor(
     private readonly liveClaim: () => LiveClaim | null,
     private readonly runGate: (argv: readonly string[], cwd: string) => { exitCode: number; output: string; outputSha256?: string; testIds?: string[] },
     private readonly runReadOnly?: (operation: 'challenge' | 'check', criterion: string | null) => { exitCode: number; output: string },
+    private readonly runProbe?: () => ProbeResult,
   ) {}
 
   handle(input: unknown): ChannelResponse {
@@ -91,6 +131,7 @@ export class ClaimChannel {
     let scope: LiveClaim | null;
     try { scope = this.liveClaim(); } catch { return fail('CHANNEL_CLAIM_STALE'); }
     if (!scope || scope.claimId !== request.claimId || scope.featureId !== request.featureId || scope.nodeId !== request.nodeId) return fail('CHANNEL_CLAIM_STALE');
+    if (request.operation === 'gate' && request.gate === 'red' && this.runProbe && this.redStarted) return fail('CHANNEL_GATE_OUT_OF_ORDER');
     if (request.operation === 'gate' && (scope.nextGate !== request.gate || !scope.gateCommands.some((g) => g.gate === request.gate))) {
       return fail('CHANNEL_GATE_OUT_OF_ORDER');
     }
@@ -107,7 +148,27 @@ export class ClaimChannel {
           : { ok: false, sequence, code: 'CHANNEL_REVIEW_REFUSED', exitCode: result.exitCode, output };
       } catch { return fail('CHANNEL_REVIEW_FAILED'); }
     }
+    if (request.operation === 'probe') {
+      if (!this.runProbe || this.redStarted || scope.nextGate !== 'red') return fail('CHANNEL_PROBE_UNAVAILABLE');
+      try {
+        const result = this.runProbe();
+        const now = this.liveClaim();
+        if (!now || now.claimId !== scope.claimId || now.featureId !== scope.featureId || now.nodeId !== scope.nodeId ||
+            now.generation !== scope.generation || now.dispatchId !== scope.dispatchId || now.expectedHead !== scope.expectedHead || !samePath(now.worktree, scope.worktree) || now.nextGate !== 'red') return fail('CHANNEL_CLAIM_STALE');
+        if (!Number.isInteger(result.exitCode) || typeof result.output !== 'string') return fail('CHANNEL_PROBE_FAILED');
+        if (result.diagnostic !== undefined && !validProbeDiagnostic(result.diagnostic)) {
+          return { ok: true, sequence, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' };
+        }
+        const diagnostic: ProbeResult['diagnostic'] = result.diagnostic ? {
+          role: 'diagnostic-only',
+          tests: result.diagnostic.tests.slice(0, 256).map(t => ({ id: t.id, path: t.path, full_name: t.full_name, status: t.status })),
+        } : undefined;
+        return boundChannelResponse({ ok: true, sequence, exitCode: result.exitCode, output: result.output,
+          ...(diagnostic ? { diagnostic } : {}) });
+      } catch { return fail('CHANNEL_PROBE_FAILED'); }
+    }
     if (request.operation === 'gate') {
+      if (request.gate === 'red') this.redStarted = true;
       // Capture before executing RED, including tests already in HEAD. The
       // delta binding alone misses those (and declaration discovery is not a
       // byte binding). GREEN requires this exact tree to have been committed.
@@ -163,6 +224,7 @@ export class ClaimChannel {
         return fail('CHANNEL_GATE_FAILED');
       }
     }
+    if (this.runProbe && scope.nextGate === 'red') return fail('CHANNEL_COMMIT_BEFORE_RED');
     try {
       const commitSha = commitClaimPaths({
         repoPath: scope.repoPath, worktree: scope.worktree, featureId: scope.featureId, nodeId: scope.nodeId,

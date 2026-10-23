@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
 import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
 import { ClaimFileTransport } from '../../src/sessions/codex-claim-files.js';
 import { ClaimChannel } from '../../src/sessions/codex-claim-channel.js';
@@ -22,6 +23,50 @@ function fixture(handler: (value: unknown) => ChannelResponse = (r) => ({ ok: tr
 }
 
 describe('bounded claim file transport', () => {
+  it.each(['diagnostic', 'escaped output'] as const)('bounds serialized bytes for bypassed %s', (kind) => {
+    const f = fixture(() => ({ ok: true, sequence: 1, exitCode: 1,
+      output: '\u0000😀'.repeat(32768),
+      diagnostic: { role: 'diagnostic-only', tests: kind === 'diagnostic' ? [{
+        id: 'a'.repeat(16), path: 'tests/a.mjs', full_name: 'n'.repeat(32769), status: 'failed',
+      }] : [] } }));
+    try {
+      f.put(1, { sequence: 1 });
+      f.transport.tick();
+      expect(readFileSync(join(f.dir, 'response-1.json')).length).toBeLessThanOrEqual(32 * 1024);
+      if (kind === 'diagnostic') {
+        expect(f.response(1)).toEqual({ ok: true, sequence: 1, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' });
+      } else expect(f.response(1)).toMatchObject({ ok: true, exitCode: 1, diagnostic: { tests: [] } });
+    } finally { f.transport.stop(); }
+  });
+
+  it('accepts the exact argument-free probe client command and redacts its diagnostic', async () => {
+    const seen: unknown[] = [];
+    const f = fixture((r) => {
+      seen.push(r);
+      return { ok: true, sequence: (r as { sequence: number }).sequence, exitCode: 1,
+        output: 'sensitive-value-123' + 'x'.repeat(100_000), diagnostic: { role: 'diagnostic-only', tests: [] } };
+    });
+    try {
+      const client = join(f.dir, 'client.mjs');
+      for (const args of [['probe', '--filter', 'x'], ['probe', 'tests/a.mjs']]) {
+        expect(spawnSync(process.execPath, [client, ...args], { encoding: 'utf8', timeout: 5_000 }).status).not.toBe(0);
+      }
+      expect(seen).toEqual([]);
+      const child = spawn(process.execPath, [client, 'probe'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
+      let output = '';
+      child.stdout.on('data', (chunk) => { output += String(chunk); });
+      const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+      expect(code).toBe(0); // a diagnostic failure is a successful probe request
+      expect(seen).toEqual([{ claimId: 'claim-1', featureId: '', nodeId: '', sequence: 1, operation: 'probe' }]);
+      const answer = JSON.parse(output);
+      expect(answer).toMatchObject({ ok: true, exitCode: 1, diagnostic: { role: 'diagnostic-only' } });
+      expect(answer.output).not.toContain('sensitive-value-123');
+      expect(answer.output.length).toBeLessThanOrEqual(32 * 1024);
+      expect(answer).not.toHaveProperty('output_sha256');
+      expect(answer).not.toHaveProperty('test_ids');
+    } finally { f.transport.stop(); }
+  });
+
   it('delivers a numbered request once, redacts and bounds its response, then closes', () => {
     const f = fixture((r) => ({ ok: true, sequence: (r as { sequence: number }).sequence, exitCode: 0, output: 'sensitive-value-123' + 'x'.repeat(100_000) }));
     f.put(1, { claimId: 'claim-1', featureId: 'F', nodeId: 'F.n', sequence: 1, operation: 'gate', gate: 'red' });
