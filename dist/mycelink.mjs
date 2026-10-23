@@ -30753,8 +30753,10 @@ function testCommandSummary(output) {
   const text = redactText(output ?? "");
   const prefixes = [
     ["MODULE_NOT_FOUND", /^Error: Cannot find module(?:\s|$)/],
+    ["ERR_MODULE_NOT_FOUND", /^Error: Cannot find package(?:\s|$)/],
     ["ERR_MODULE_NOT_FOUND", /^Error \[ERR_MODULE_NOT_FOUND\]:/],
     ["ENOENT", /^Error: ENOENT:/],
+    ["EACCES", /^Error: EACCES:/],
     ["EPERM", /^Error: EPERM:/],
     ["ERR_DLOPEN_FAILED", /^Error \[ERR_DLOPEN_FAILED\]:/],
     ["NATIVE_BINDING", /^Error: Could not locate the bindings file\. Tried:/],
@@ -30762,9 +30764,19 @@ function testCommandSummary(output) {
     ["NO_TEST_FILES", /^No test files found, exiting with code 1(?:\s|$)/]
   ];
   const lines = text.split(/\r?\n/);
-  const code = prefixes.find(([, pattern]) => lines.some((line) => pattern.test(line)))?.[0] ?? "UNKNOWN";
-  const last = Buffer.from(lines.filter((line) => line.trim() !== "").at(-1) ?? "").subarray(-1024);
-  return { code, last_error: { sha256: hash(last), bytes: last.length } };
+  const nonempty = lines.filter((line) => line.trim() !== "");
+  const classified = nonempty.map((line) => line.replace(/^(?:\x1b\[[0-9;]*m)+|(?:\x1b\[[0-9;]*m)+$/g, ""));
+  const standalone = /^[ \t]*code: '(MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ENOENT|EACCES|EPERM|ERR_DLOPEN_FAILED)',?[ \t]*$/;
+  const code = prefixes.find(([, pattern]) => classified.some((line) => pattern.test(line)))?.[0] ?? classified.map((line) => standalone.exec(line)?.[1]).find((value) => value !== void 0) ?? (/^Node\.js v[0-9]+\.[0-9]+\.[0-9]+$/.test(classified.at(-1) ?? "") ? "NODE_FATAL_UNKNOWN" : "UNKNOWN");
+  const last = Buffer.from(nonempty.at(-1) ?? "").subarray(-1024);
+  return {
+    code,
+    last_error: { sha256: hash(last), bytes: last.length },
+    lines: nonempty.slice(-12).map((line) => {
+      const bytes2 = Buffer.from(line);
+      return { sha256: hash(bytes2), bytes: bytes2.length };
+    })
+  };
 }
 function rawSummary(snapshot4) {
   if (!snapshot4 || snapshot4.bytes !== null && (!Buffer.isBuffer(snapshot4.bytes) || snapshot4.bytes.length > 64 * 1024 * 1024) || (snapshot4.bytes === null ? snapshot4.sha256 !== null : hash(snapshot4.bytes) !== snapshot4.sha256) || typeof snapshot4.output !== "string" || !Number.isSafeInteger(snapshot4.exit_code) || snapshot4.test_command_output !== null && (typeof snapshot4.test_command_output !== "string" || Buffer.byteLength(snapshot4.test_command_output) > 65536) || !Number.isSafeInteger(snapshot4.normalized_count) || snapshot4.normalized_count < 0 || !Array.isArray(snapshot4.steps) || snapshot4.steps.some((s) => !Number.isSafeInteger(s.exit_code) || typeof s.timed_out !== "boolean")) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");

@@ -85,11 +85,13 @@ function cloneDelta(before: string, after: string, scope: LiveClaim, nodePath: s
 /** Only hashes of redacted text and a fixed vocabulary may survive the clone. */
 function testCommandSummary(output: string | null) {
   const text = redactText(output ?? '');
-  // Match actual error prefixes only; arbitrary code fields and mentions are not signals.
+  // Match anchored error prefixes or strict allowlisted standalone code fields only.
   const prefixes = [
     ['MODULE_NOT_FOUND', /^Error: Cannot find module(?:\s|$)/],
+    ['ERR_MODULE_NOT_FOUND', /^Error: Cannot find package(?:\s|$)/],
     ['ERR_MODULE_NOT_FOUND', /^Error \[ERR_MODULE_NOT_FOUND\]:/],
     ['ENOENT', /^Error: ENOENT:/],
+    ['EACCES', /^Error: EACCES:/],
     ['EPERM', /^Error: EPERM:/],
     ['ERR_DLOPEN_FAILED', /^Error \[ERR_DLOPEN_FAILED\]:/],
     ['NATIVE_BINDING', /^Error: Could not locate the bindings file\. Tried:/],
@@ -97,9 +99,19 @@ function testCommandSummary(output: string | null) {
     ['NO_TEST_FILES', /^No test files found, exiting with code 1(?:\s|$)/],
   ] as const;
   const lines = text.split(/\r?\n/);
-  const code = prefixes.find(([, pattern]) => lines.some(line => pattern.test(line)))?.[0] ?? 'UNKNOWN';
-  const last = Buffer.from(lines.filter(line => line.trim() !== '').at(-1) ?? '').subarray(-1024);
-  return { code, last_error: { sha256: hash(last), bytes: last.length } };
+  const nonempty = lines.filter(line => line.trim() !== '');
+  // Strip boundary SGR sequences in memory only; fingerprints retain the redacted bytes.
+  const classified = nonempty.map(line => line.replace(/^(?:\x1b\[[0-9;]*m)+|(?:\x1b\[[0-9;]*m)+$/g, ''));
+  const standalone = /^[ \t]*code: '(MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ENOENT|EACCES|EPERM|ERR_DLOPEN_FAILED)',?[ \t]*$/;
+  const code = prefixes.find(([, pattern]) => classified.some(line => pattern.test(line)))?.[0] ??
+    classified.map(line => standalone.exec(line)?.[1]).find(value => value !== undefined) ??
+    (/^Node\.js v[0-9]+\.[0-9]+\.[0-9]+$/.test(classified.at(-1) ?? '') ? 'NODE_FATAL_UNKNOWN' : 'UNKNOWN');
+  const last = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
+  return { code, last_error: { sha256: hash(last), bytes: last.length },
+    lines: nonempty.slice(-12).map(line => {
+      const bytes = Buffer.from(line);
+      return { sha256: hash(bytes), bytes: bytes.length };
+    }) };
 }
 
 function rawSummary(snapshot: RawReportSnapshot) {

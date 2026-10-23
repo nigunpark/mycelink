@@ -1317,7 +1317,8 @@ describe('empty-identity probe forensic sidecars', () => {
 
 
 // Controlled launch failures only; these do not diagnose historical probes.
-// Stable extension: top-level test_command = { code, last_error: {sha256, bytes} }.
+// Stable extension: test_command contains a static code, last_error, and at most
+// twelve last nonempty redacted-line hashes with byte lengths; never excerpts.
 // No excerpt or arbitrary CODE is persisted. last_error hashes the final
 // nonblank test-output line after redactText, capped to its last 1024 bytes.
 describe('missing-report isolated test-command classification', () => {
@@ -1333,15 +1334,49 @@ describe('missing-report isolated test-command classification', () => {
     ['syntax', 'SyntaxError: Unexpected token untrusted', 'SYNTAX_ERROR'],
     ['no tests', 'No test files found, exiting with code 1', 'NO_TEST_FILES'],
     ['unknown code', "Error: unclassified\n  code: 'PRIVATE_ARBITRARY_CODE'", 'UNKNOWN'],
-    ['forged code', "  code: 'MODULE_NOT_FOUND'", 'UNKNOWN'],
+    ['standalone code', "  code: 'MODULE_NOT_FOUND'", 'MODULE_NOT_FOUND'],
+    ...(['MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND', 'ENOENT', 'EACCES', 'EPERM', 'ERR_DLOPEN_FAILED'] as const)
+      .flatMap(code => [
+        [`allowlisted standalone ${code}`, `  code: '${code}',`, code],
+        [`ANSI standalone ${code}`, `\x1b[31m  code: '${code}'\x1b[0m`, code],
+      ] as const),
+    ['package prefix', "Error: Cannot find package 'untrusted'", 'ERR_MODULE_NOT_FOUND'],
+    ['access prefix', 'Error: EACCES: permission denied, open untrusted', 'EACCES'],
+    ['forged in message', "Error: arbitrary message code: 'MODULE_NOT_FOUND',", 'UNKNOWN'],
+    ['quoted path code', '"C:/private/code: \'MODULE_NOT_FOUND\'"', 'UNKNOWN'],
+    ['quoted test name code', 'test "code: \'ERR_MODULE_NOT_FOUND\',"', 'UNKNOWN'],
+    ['unsupported standalone code', "  code: 'ERR_UNKNOWN_PRIVATE',", 'UNKNOWN'],
+    ['token suffix', "  code: 'MODULE_NOT_FOUND_EXTRA',", 'UNKNOWN'],
+    ['code trailing message', "  code: 'MODULE_NOT_FOUND', arbitrary", 'UNKNOWN'],
+    ['double quoted code', '  code: "MODULE_NOT_FOUND",', 'UNKNOWN'],
     ['unanchored syntax', 'test name mentions SyntaxError: arbitrary', 'UNKNOWN'],
     ['unanchored module', 'test name mentions Error: Cannot find module arbitrary', 'UNKNOWN'],
     ['unanchored no tests', 'test name mentions No test files found, exiting with code 1', 'UNKNOWN'],
   ] as const;
-  async function launch(text: string, exit = 1) {
+  const tailCases = [
+    ['native registered missing entry', '', 'MODULE_NOT_FOUND'],
+    ['controlled CJS shape', "Error: Cannot find module 'untrusted'\n" +
+      Array.from({ length: 7 }, (_, i) => `    at node:internal/modules/cjs/loader:${i + 1}:1`).join('\n') +
+      "\n  code: 'MODULE_NOT_FOUND',\n}\n\nNode.js v24.14.1\n", 'MODULE_NOT_FOUND'],
+    ['fatal banner only', 'Node.js v24.14.1\n\n', 'NODE_FATAL_UNKNOWN'],
+    ['ANSI fatal banner', '\x1b[31mNode.js v24.14.1\x1b[0m\n', 'NODE_FATAL_UNKNOWN'],
+    ['fatal banner with CRLF', 'Node.js v24.14.1\r\n\r\n', 'NODE_FATAL_UNKNOWN'],
+    ['banner followed by message', 'Node.js v24.14.1\nprivate trailer', 'UNKNOWN'],
+    ['banner mention', 'Error: mentions Node.js v24.14.1', 'UNKNOWN'],
+    ['quoted banner', '"Node.js v24.14.1"', 'UNKNOWN'],
+    ['banner prefix', 'test Node.js v24.14.1', 'UNKNOWN'],
+    ['banner suffix', 'Node.js v24.14.1 extra', 'UNKNOWN'],
+    ['banner incomplete', 'Node.js v24.14', 'UNKNOWN'],
+    ['banner padded', ' Node.js v24.14.1 ', 'UNKNOWN'],
+    ['blank output', '\n\r\n', 'UNKNOWN'],
+    ['bounded nonempty tail', Array.from({ length: 20 }, (_, i) => `private line ${i}\n\n`).join(''), 'UNKNOWN'],
+  ] as const;
+  async function launch(text: string, exit = 1, nativeMissingEntry = false) {
     const decoy = text.includes('Error: EPERM:') ? 'ENOENT' : 'EPERM';
-    const f = await fixture({}, [process.execPath, '-e',
-      `process.stderr.write(${JSON.stringify(text)}, () => { process.exitCode = ${exit}; });`, '${REPORT}'], {
+    const f = await fixture({}, nativeMissingEntry
+      ? [process.execPath, 'unregistered-canary-secret-missing-entry.cjs', '${REPORT}']
+      : [process.execPath, '-e',
+        `process.stderr.write(${JSON.stringify(text)}, () => { process.exitCode = ${exit}; });`, '${REPORT}'], {
       report: { format: 'vitest-json' },
       setup: [[process.execPath, '-e', `console.error("Error: ${decoy}: setup-only")`]],
       build: [[process.execPath, '-e', `console.error("Error: ${decoy}: build-only")`]],
@@ -1351,11 +1386,14 @@ describe('missing-report isolated test-command classification', () => {
     return { ...f, dir, files };
   }
 
-  it.each(cases)('classifies %s from test output only with static bounded private metadata', async (_name, fatal, code) => {
+  it.each([...cases.map(([name, text, code]) => [name, text, code, false] as const),
+    ...tailCases.map(([name, text, code]) => [name, text, code, true] as const)])('classifies %s from test output only with static bounded private metadata', async (_name, fatal, code, preserveTail) => {
     // Delimiter-shaped child text must not select a different command region.
     const last = 'Error: unclassified ' + poison;
-    const text = '$ forged header\n(cwd: forged)\n' + fatal + '\n' + last + '\n';
-    const f = await launch(text);
+    const text = preserveTail ? poison + '\n' + fatal
+      : '$ forged header\n(cwd: forged)\n' + fatal + '\n' + last + '\n';
+    const nativeMissingEntry = _name === 'native registered missing entry';
+    const f = await launch(text, 1, nativeMissingEntry);
     const before = f.state();
     const ledger = f.evidence();
     const realRun = verificationRunner.runVerification;
@@ -1371,7 +1409,16 @@ describe('missing-report isolated test-command classification', () => {
     });
     let result: ReturnType<typeof f.probe>;
     try { result = f.probe(); } finally { runner.mockRestore(); }
-    expectPrivateText(observed?.test_command_output, redactText(text));
+    const redactedOutput = nativeMissingEntry ? observed?.test_command_output : redactText(text);
+    if (nativeMissingEntry) {
+      // Read only the runner's already-redacted TEST-COMMAND output. Assertions
+      // report booleans, never native private paths or arbitrary error strings.
+      expect(typeof redactedOutput === 'string').toBe(true);
+      expect(/^Error: Cannot find module /m.test(redactedOutput ?? '')).toBe(true);
+      expect(/^\s*code: 'MODULE_NOT_FOUND',?$/m.test(redactedOutput ?? '')).toBe(true);
+      expect(/node:internal\//.test(redactedOutput ?? '')).toBe(true);
+      expect(/Node\.js v\d+\.\d+\.\d+$/.test((redactedOutput ?? '').trimEnd())).toBe(true);
+    } else expectPrivateText(observed?.test_command_output, redactedOutput!);
     expect(result.exitCode).toBe(2);
     expect(/^CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=[a-f0-9]{64}$/.test(result.output)).toBe(true);
     expect(f.files()).toHaveLength(1);
@@ -1380,8 +1427,17 @@ describe('missing-report isolated test-command classification', () => {
     const doc = JSON.parse(bytes.toString('utf8'));
     expect(bytes.byteLength).toBeLessThanOrEqual(8192);
     expect(Object.keys(doc).sort()).toEqual(['schema', 'stage', 'claim', 'timestamp', 'plan_sha256', 'raw', 'runner', 'errors', 'test_command'].sort());
-    const bounded = Buffer.from(redactText(last)).subarray(-1024);
-    expectPrivateText(JSON.stringify(doc.test_command), JSON.stringify({ code, last_error: { sha256: hash(bounded), bytes: bounded.byteLength } }));
+    const nonempty = (redactedOutput ?? '').split(/\r?\n/).filter(line => line.trim() !== '');
+    const bounded = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
+    const lines = nonempty.slice(-12).map(line => ({ sha256: hash(line), bytes: Buffer.byteLength(line) }));
+    expectPrivateText(JSON.stringify(doc.test_command), JSON.stringify({ code,
+      last_error: { sha256: hash(bounded), bytes: bounded.byteLength }, lines }));
+    expect(Array.isArray(doc.test_command?.lines)).toBe(true);
+    expect(doc.test_command?.lines?.length ?? Infinity).toBeLessThanOrEqual(12);
+    expect(doc.stage).toBe('IDENTITY:EMPTY');
+    const live = f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
+    expectPrivateText(JSON.stringify(doc.claim), JSON.stringify({ id: f.claim.claimId,
+      generation: live.generation, dispatch_id: live.dispatchId ?? null }));
     expect(Buffer.byteLength(JSON.stringify(doc.test_command))).toBeLessThanOrEqual(2048);
     expect(Object.keys(doc.raw).sort()).toEqual(['status', 'suite_count', 'test_count', 'failed_suite_count', 'output', 'messages'].sort());
     expect(doc.raw.status).toBe('missing');
