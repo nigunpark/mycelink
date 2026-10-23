@@ -212,6 +212,127 @@ describe('controller-owned probe with a real registered module and native host v
     expect(f.state()).toBe(before);
   });
 
+  it('accepts literal bracketed tracked paths in independent probe clone', async () => {
+    const bracketed = {
+      'site/packages/[pkg].md': '# Literal package page\n',
+      'site/packages/[pkg].paths.ts': 'export default { paths: [] };\n',
+    };
+    const testPath = 'packages/errors/test/errors.test.mjs';
+    const name = 'literal bracketed baseline reaches native verifier';
+    // baseFiles are committed by createShop before the controller claims the node.
+    // Bind the native host executable and exact test through the registered module graph.
+    const f = await fixture({ baseFiles: bracketed }, [process.execPath, '--test',
+      '--test-reporter=junit', '--test-reporter-destination=${REPORT}', testPath]);
+    const live = f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
+    expect(live.nextGate).toBe('red');
+    expect(live.allowedPaths).toContain('packages/errors/**');
+    for (const [path, bytes] of Object.entries(bracketed)) {
+      expect(git(f.worktree, ['ls-files', '-z']).split('\0')).toContain(path);
+      expect(git(f.worktree, ['show', `HEAD:${path}`])).toBe(bytes.trim());
+      expect(readFileSync(join(f.worktree, path), 'utf8')).toBe(bytes);
+    }
+    const workerTest = `import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, lstatSync } from 'node:fs';
+import { GitError } from '../src/index.mjs';
+test(${JSON.stringify(name)}, () => {
+  assert.equal(lstatSync('.git').isDirectory(), true);
+  for (const [path, bytes] of Object.entries(${JSON.stringify(bracketed)})) {
+    assert.equal(readFileSync(path, 'utf8'), bytes);
+  }
+  assert.equal(new GitError(7, 'probe').code, 8, 'intentional verifier assertion');
+});
+`;
+    writeFileSync(f.test, workerTest); // Legal, uncommitted test-only worker edit.
+    expect(git(f.worktree, ['diff', '--name-only'])).toBe(testPath);
+    const snapshot = (root: string) => {
+      const observe = (argv: string[]) => git(root, ['--no-optional-locks', ...argv]);
+      return {
+        head: observe(['rev-parse', 'HEAD']), refs: observe(['show-ref']),
+        index: observe(['ls-files', '--stage', '-z']),
+        status: observe(['status', '--porcelain=v1', '-z', '--untracked-files=all']),
+        tracked: observe(['ls-files', '-z']).split('\0').filter(Boolean)
+          .map(path => [path, readFileSync(join(root, path)).toString('base64')]),
+      };
+    };
+    const before = snapshot(f.worktree);
+    const repositoryBefore = snapshot(f.s.repo);
+    const state = f.state();
+    const evidence = f.evidence();
+    const originalCommon = realpathSync(resolve(f.worktree, git(f.worktree, ['rev-parse', '--git-common-dir'])));
+    let clone = '';
+    let report = '';
+    let runnerCalls = 0;
+    const realGit = gitCommands.runGit;
+    const commands = vi.spyOn(gitCommands, 'runGit').mockImplementation((cwd, argv, options) => {
+      const result = realGit(cwd, argv, options);
+      if (argv[0] === 'clone') clone = argv.at(-1)!;
+      return result;
+    });
+    const realRun = verificationRunner.runVerification;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      expect(realpathSync(args.cwd)).toBe(realpathSync(clone));
+      expect(realpathSync(args.cwd).toLowerCase()).not.toBe(realpathSync(f.worktree).toLowerCase());
+      expect(lstatSync(join(args.cwd, '.git')).isDirectory()).toBe(true);
+      const common = realpathSync(resolve(args.cwd, git(args.cwd, ['rev-parse', '--git-common-dir'])));
+      expect(common.toLowerCase()).not.toBe(originalCommon.toLowerCase());
+      expect(snapshot(args.cwd).head).toBe(before.head);
+      expect(snapshot(args.cwd).tracked).toEqual(before.tracked);
+      expect(snapshot(f.worktree)).toEqual(before);
+      expect(snapshot(f.s.repo)).toEqual(repositoryBefore);
+      const record = realRun(args); // Real child and report parser; no verifier substitution.
+      expect(record.results).toMatchObject({ format: 'junit-xml', total: 1, passed: 0, failed: 1 });
+      report = record.results!.path;
+      expect(existsSync(report)).toBe(true);
+      return record;
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); }
+    finally { runnerCalls = runner.mock.calls.length; runner.mockRestore(); commands.mockRestore(); }
+    // Verify preservation even when the current bug refuses the baseline before cloning.
+    expect(snapshot(f.worktree)).toEqual(before);
+    expect(snapshot(f.s.repo)).toEqual(repositoryBefore);
+    expect(f.state()).toBe(state);
+    expect(f.evidence()).toEqual(evidence);
+    if (clone) expect(existsSync(dirname(clone))).toBe(false);
+    if (report) expect(existsSync(report)).toBe(false);
+    expect(result, JSON.stringify(result)).toMatchObject({ exitCode: 1, diagnostic: {
+      role: 'diagnostic-only', tests: [{ id: canonicalTestId('junit-xml', testPath, name),
+        path: testPath, full_name: name, status: 'failed' }],
+    } });
+    expect(runnerCalls).toBe(1);
+    expect(clone).not.toBe('');
+    expect(report).not.toBe('');
+    for (const key of ['output_sha256', 'outputSha256', 'test_ids', 'testIds', 'results', 'output_path', 'criterion_evidence']) {
+      expect(result).not.toHaveProperty(key);
+    }
+  });
+
+  it.each(['../outside.test.mjs', '/outside.test.mjs', 'C:/outside.test.mjs',
+    'packages/errors/test/../outside.test.mjs', 'site/packages/a\u0001.md', 'site/packages/a\u007f.md'])(
+    'refuses unsafe enumerated tracked path %s before clone or verifier', async path => {
+      const f = await fixture();
+      writeFileSync(f.test, ERRORS_RED);
+      const state = f.state();
+      const evidence = f.evidence();
+      const realGit = gitCommands.runGit;
+      // Git cannot create traversal/absolute index entries normally. Inject only
+      // the NUL-delimited enumeration to exercise the host's path boundary.
+      const commands = vi.spyOn(gitCommands, 'runGit').mockImplementation((cwd, argv, options) => {
+        const result = realGit(cwd, argv, options);
+        return argv[0] === 'ls-files' && argv.includes('--cached')
+          ? { ...result, stdout: result.stdout + path + '\0' } : result;
+      });
+      const runner = vi.spyOn(verificationRunner, 'runVerification');
+      try {
+        expect(f.probe()).toMatchObject({ exitCode: 2, output: 'CHANNEL_PROBE_PATH_INVALID' });
+        expect(commands.mock.calls.some(([, argv]) => argv[0] === 'clone')).toBe(false);
+        expect(runner).not.toHaveBeenCalled();
+        expect(f.state()).toBe(state);
+        expect(f.evidence()).toEqual(evidence);
+      } finally { runner.mockRestore(); commands.mockRestore(); }
+    });
+
   it('diagnoses failure, permits test repair and success, then runs exactly one real RED with fresh acceptance evidence', async () => {
     const f = await fixture();
     const before = f.state();

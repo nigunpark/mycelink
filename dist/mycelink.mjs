@@ -30656,7 +30656,7 @@ var ClaimChannel = class {
 // src/sessions/codex-claim-probe.ts
 var hash = (bytes2) => createHash31("sha256").update(bytes2).digest("hex");
 function safeFile(root, path) {
-  if (classifyRelativePath(path) || path.split("/").some((p) => !p || p === "." || p === "..") || /[\\*?\[\]{}]/.test(path)) throw new Error("CHANNEL_PROBE_PATH_INVALID");
+  if (classifyRelativePath(path) || path.split("/").some((p) => !p || p === "." || p === "..") || /[\x00-\x1f\x7f\\*?{}]/.test(path)) throw new Error("CHANNEL_PROBE_PATH_INVALID");
   let current = root;
   for (const part of path.split("/")) {
     current = join40(current, part);

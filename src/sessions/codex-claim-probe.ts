@@ -16,7 +16,8 @@ import { boundChannelResponse, validProbeDiagnostic, type LiveClaim, type ProbeR
 
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 function safeFile(root: string, path: string): Buffer | null {
-  if (classifyRelativePath(path) || path.split('/').some(p => !p || p === '.' || p === '..') || /[\\*?\[\]{}]/.test(path)) throw new Error('CHANNEL_PROBE_PATH_INVALID');
+  // Paths come from NUL-delimited Git enumeration/snapshots; brackets are literal filename characters.
+  if (classifyRelativePath(path) || path.split('/').some(p => !p || p === '.' || p === '..') || /[\x00-\x1f\x7f\\*?{}]/.test(path)) throw new Error('CHANNEL_PROBE_PATH_INVALID');
   let current = root;
   for (const part of path.split('/')) {
     current = join(current, part);
