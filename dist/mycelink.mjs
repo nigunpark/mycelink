@@ -31113,7 +31113,25 @@ function runClaimProbe(args) {
     if (tests.some((t) => classifyRelativePath(t.path) || t.path.split("/").includes(".."))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:PATH");
     if (tests.some((t) => t.id !== canonicalTestId(record.results.format, t.path, t.full_name))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:ID");
     if (tests.some((t) => !["passed", "failed", "skipped", "not-run"].includes(t.status))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:STATUS");
-    const diagnostic = { role: "diagnostic-only", tests: tests.slice(0, 256) };
+    let diagnostic = { role: "diagnostic-only", tests };
+    if (!validProbeDiagnostic(diagnostic)) {
+      if (!scope.tddPolicy) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
+      const declarations = redDeclaredTests(scope.worktree, scope.tddPolicy, scope.expectedHead);
+      remaining();
+      if (!args.current() || snapshot3(scope.worktree, args.deadline + 2e3) !== before) throw new Error("CHANNEL_CLAIM_STALE");
+      if (declarations.opaque.length || !declarations.declared.length) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
+      const matches2 = (index, declared) => {
+        const t = tests[index];
+        const name = doc.results[index].name;
+        return typeof name === "string" && (t.full_name === name || t.full_name.endsWith(" > " + name) || t.full_name.endsWith("#" + name)) && namesDeclared({ path: t.path, name }, declared);
+      };
+      const selected = tests.filter((_, index) => declarations.declared.some((d) => matches2(index, d)));
+      if (!selected.length) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
+      if (declarations.declared.some((d) => !tests.some((_, index) => matches2(index, d)))) {
+        return fail("CHANNEL_PROBE_REPORT_INVALID:DECLARATION:NOT_RUN");
+      }
+      diagnostic = { role: "diagnostic-only", tests: selected };
+    }
     if (!validProbeDiagnostic(diagnostic)) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });
     return {

@@ -7,7 +7,8 @@ import { runGit } from '../git/git.js';
 import { matchGlob } from '../git/worktree.js';
 import { classifyRelativePath, samePath } from '../security/paths.js';
 import { redactText } from '../security/redact.js';
-import { isTestPath } from '../engine/tdd-history.js';
+import { isTestPath, redDeclaredTests } from '../engine/tdd-history.js';
+import { namesDeclared } from '../evidence/gate-tests.js';
 import { runWorktreeSetup, setupEnvironment, setupInputs, type WorktreeSetupConfig } from '../engine/worktree-setup.js';
 import { moduleInvocation, runVerification, verifiedVerificationFixture, type VerificationFixture } from '../evidence/runner.js';
 import { writeImmutable } from '../evidence/store.js';
@@ -365,7 +366,31 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
     if (tests.some((t: { path: string }) => classifyRelativePath(t.path) || t.path.split('/').includes('..'))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:PATH');
     if (tests.some((t: { id: string; path: string; full_name: string }) => t.id !== canonicalTestId(record.results!.format, t.path, t.full_name))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:ID');
     if (tests.some((t: { status: string }) => !['passed', 'failed', 'skipped', 'not-run'].includes(t.status))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:STATUS');
-    const diagnostic: NonNullable<ProbeResult['diagnostic']> = { role: 'diagnostic-only', tests: tests.slice(0, 256) };
+    let diagnostic: NonNullable<ProbeResult['diagnostic']> = { role: 'diagnostic-only', tests };
+    if (!validProbeDiagnostic(diagnostic)) {
+      // Project only after every normalized result has passed the checks above.
+      // Bind declarations to the unchanged claim worktree, never to child output.
+      if (!scope.tddPolicy) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
+      const declarations = redDeclaredTests(scope.worktree, scope.tddPolicy, scope.expectedHead);
+      remaining();
+      if (!args.current() || snapshot(scope.worktree, args.deadline + 2_000) !== before) throw new Error('CHANNEL_CLAIM_STALE');
+      if (declarations.opaque.length || !declarations.declared.length) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
+      const matches = (index: number, declared: { file: string; name: string }) => {
+        const t = tests[index];
+        const name: unknown = doc.results[index].name;
+        // The leaf title must belong to the validated canonical full name.
+        return typeof name === 'string' &&
+          (t.full_name === name || t.full_name.endsWith(' > ' + name) || t.full_name.endsWith('#' + name)) &&
+          namesDeclared({ path: t.path, name }, declared);
+      };
+      const selected = tests.filter((_: unknown, index: number) => declarations.declared.some(d => matches(index, d)));
+      // Never manufacture a passing result for a declaration the runner omitted.
+      if (!selected.length) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
+      if (declarations.declared.some(d => !tests.some((_: unknown, index: number) => matches(index, d)))) {
+        return fail('CHANNEL_PROBE_REPORT_INVALID:DECLARATION:NOT_RUN');
+      }
+      diagnostic = { role: 'diagnostic-only', tests: selected };
+    }
     if (!validProbeDiagnostic(diagnostic)) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });
     return { exitCode: bounded.exitCode ?? 2, output: bounded.output ?? '',

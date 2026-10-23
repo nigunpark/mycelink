@@ -15,6 +15,7 @@ import * as hostGate from '../../src/sessions/codex-host-gate.js';
 import type { ChannelResponse } from '../../src/sessions/codex-claim-channel.js';
 import { executeHostClaimGate } from '../../src/sessions/codex-host-gate.js';
 import { redactText } from '../../src/security/redact.js';
+import { redDeclaredTests } from '../../src/engine/tdd-history.js';
 import { canonicalTestId } from '../../src/evidence/test-ids.js';
 import { createHash } from 'node:crypto';
 import { CodexCliAdapter, windowsToWslPath } from '../../src/sessions/codex-cli-adapter.js';
@@ -695,6 +696,246 @@ test(${JSON.stringify(name)}, () => {
         expect(f.evidence()).toEqual(evidence);
       } finally { transport.stop(); }
     });
+
+  // Native child + real normalization: only the post-run corruption cases below
+  // alter receipts. Baseline files are committed by createShop before claiming.
+  async function largeProjectionFixture(count: number, oversized = false) {
+    const baseFiles: Record<string, string> = {};
+    const paths = Array.from({ length: 10 }, (_, i) => `packages/errors/test/a-baseline-${i}.test.mjs`);
+    for (const [i, path] of paths.entries()) {
+      baseFiles[path] = "import test from 'node:test';\n" +
+        Array.from({ length: count }, (_, n) => n).filter(n => n % paths.length === i)
+          .map(n => `test('baseline compatibility case ${n} preserves registered behavior', () => {});`).join('\n');
+    }
+    const changedPath = 'packages/errors/test/z-projection.test.mjs';
+    const f = await fixture({ baseFiles }, [process.execPath, '--test', '--test-concurrency=1', '--test-reporter=junit',
+      '--test-reporter-destination=${REPORT}', ...paths, changedPath], { report: { format: 'junit-xml' } });
+    const names = oversized ? Array.from({ length: 8 }, (_, i) => `declared ${i} ` + 'n'.repeat(3000))
+      : ['compatibility control still passes', 'new behavior sorts issues'];
+    writeFileSync(join(f.worktree, changedPath), "import test from 'node:test';\nimport assert from 'node:assert/strict';\n" +
+      names.map((name, i) => `test(${JSON.stringify(name)}, () => { assert.equal(${i === 1 ? '1, 2' : '1, 1'}); });`).join('\n'));
+    const live = () => f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
+    const claimScope = live();
+    expect(redDeclaredTests(f.worktree, claimScope.tddPolicy!, claimScope.expectedHead).declared)
+      .toEqual(names.map(name => ({ file: changedPath, name })));
+    const expected = names.map((full_name, i) => ({ id: canonicalTestId('junit-xml', changedPath, full_name),
+      path: changedPath, full_name, status: i === 1 ? 'failed' : 'passed' }));
+    return { ...f, live, expected, count };
+  }
+
+  it.each([250, 270])('projects all changed declarations from a native %i-test baseline within diagnostic and wire budgets', async count => {
+    const f = await largeProjectionFixture(count);
+    const before = f.state();
+    const ledger = f.evidence();
+    const realRun = verificationRunner.runVerification;
+    let normalizedCount = 0;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      const record = realRun(args);
+      expect(record.exit_code).toBe(1); // Actual assertion failure, never a launch failure.
+      const doc = JSON.parse(readFileSync(record.results!.path, 'utf8'));
+      normalizedCount = doc.results.length;
+      const unfiltered = doc.results.map((t: { test_id: string; file: string; full_name: string; status: string }) =>
+        ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
+      expect(Buffer.byteLength(JSON.stringify({ role: 'diagnostic-only', tests: unfiltered }))).toBeGreaterThan(16384);
+      expect(unfiltered.slice(count)).toEqual(f.expected);
+      return record;
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); } finally { runner.mockRestore(); }
+    expect(normalizedCount).toBe(count + 2);
+    // Current HEAD returns CHANNEL_PROBE_REPORT_INVALID:SIZE here. Keep the
+    // desired semantic assertion RED; accepting SIZE would hide the regression.
+    expect.soft(result.exitCode, 'large baseline must not prevent the behavioral diagnostic').toBe(1);
+    expect.soft(result.diagnostic?.tests).toEqual(expect.arrayContaining(f.expected));
+    expect.soft(Buffer.byteLength(JSON.stringify(result.diagnostic ?? {}))).toBeLessThanOrEqual(16384);
+    const channel = new ClaimChannel(f.live, vi.fn(), undefined, () => result);
+    mkdirSync(join(f.worktree, '.mycelink-worker'), { recursive: true });
+    const transport = new ClaimFileTransport(f.worktree, f.claim.claimId, input => channel.handle(input), {},
+      { featureId: SHOP_FEATURE, nodeId: ERRORS });
+    transport.start();
+    try {
+      writeFileSync(join(transport.dir, 'request-1.json'), JSON.stringify({ claimId: f.claim.claimId,
+        featureId: SHOP_FEATURE, nodeId: ERRORS, sequence: 1, operation: 'probe' }));
+      transport.tick();
+      const bytes = readFileSync(join(transport.dir, 'response-1.json'));
+      const response = JSON.parse(bytes.toString('utf8'));
+      expect(bytes.length).toBeLessThanOrEqual(32768);
+      expect.soft(response).toMatchObject({ ok: true, exitCode: 1,
+        diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(f.expected) } });
+      for (const value of [result, response]) {
+        for (const key of ['results', 'output_path', 'output_sha256', 'outputSha256', 'test_ids', 'testIds',
+          'criterion_evidence', 'accepted', 'acceptance', 'evidence']) expect(value).not.toHaveProperty(key);
+      }
+    } finally { transport.stop(); }
+    expectPrivateText(f.state(), before);
+    expect(f.evidence()).toEqual(ledger);
+  });
+
+  it('projects Vitest JSON changed leaves after 250 baseline tests across 17 paths', async () => {
+    const paths = Array.from({ length: 17 }, (_, i) => `packages/errors/test/a-baseline-${String(i).padStart(2, '0')}.test.mjs`);
+    const baseFiles: Record<string, string> = {};
+    for (const [i, path] of paths.entries()) {
+      baseFiles[path] = "import assert from 'node:assert/strict';\n" +
+        Array.from({ length: 250 }, (_, n) => n).filter(n => n % paths.length === i)
+          .map(n => `it('baseline compatibility case ${n} preserves registered behavior', () => assert.equal(1, 1));`).join('\n');
+    }
+    const changedPath = 'packages/errors/test/z-projection.test.mjs';
+    // Execute real leaf callbacks in the registered native child; serialize the
+    // reporter shape Vitest uses, including absolute Windows testResults names.
+    const command = [process.execPath, '-e', `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const { pathToFileURL } = require('node:url');
+      (async () => {
+        const testResults = [];
+        for (const file of ${JSON.stringify([...paths, changedPath])}) {
+          const assertionResults = [];
+          globalThis.it = (title, fn) => {
+            let failureMessages = [];
+            try { fn(); } catch (error) { failureMessages = [error.stack]; }
+            assertionResults.push({ ancestorTitles: [], title, fullName: title,
+              status: failureMessages.length ? 'failed' : 'passed', failureMessages, duration: 1 });
+          };
+          await import(pathToFileURL(path.resolve(file)).href);
+          testResults.push({ name: path.resolve(file), assertionResults,
+            status: assertionResults.some(a => a.status === 'failed') ? 'failed' : 'passed',
+            message: '', startTime: Date.now(), endTime: Date.now() });
+        }
+        const assertions = testResults.flatMap(t => t.assertionResults);
+        const numFailedTests = assertions.filter(a => a.status === 'failed').length;
+        fs.writeFileSync(process.argv[1], JSON.stringify({ success: !numFailedTests,
+          numTotalTests: assertions.length, numPassedTests: assertions.length - numFailedTests,
+          numFailedTests, numPendingTests: 0, testResults }));
+        process.exitCode = numFailedTests ? 1 : 0;
+      })().catch(error => { console.error(error); process.exitCode = 2; });
+    `, '${REPORT}'];
+    const f = await fixture({ baseFiles }, command, { report: { format: 'vitest-json' } });
+    const names = ['compatibility control still passes', 'new behavior sorts issues'];
+    writeFileSync(join(f.worktree, changedPath), "import assert from 'node:assert/strict';\n" +
+      names.map((name, i) => `it(${JSON.stringify(name)}, () => assert.equal(1, ${i + 1}));`).join('\n'));
+    const live = () => f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
+    const claimScope = live();
+    expect(redDeclaredTests(f.worktree, claimScope.tddPolicy!, claimScope.expectedHead).declared)
+      .toEqual(names.map(name => ({ file: changedPath, name })));
+    const expected = names.map((full_name, i) => ({ id: canonicalTestId('vitest-json', changedPath, full_name),
+      path: changedPath, full_name, status: i === 1 ? 'failed' : 'passed' }));
+    const before = f.state();
+    const ledger = f.evidence();
+    const realRun = verificationRunner.runVerification;
+    // Observation only: preserve the controller's raw-report observer and return
+    // the real runner's untouched record. No report or projection is fabricated.
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      const record = realRun({ ...args, onRawReport: raw => {
+        args.onRawReport?.(raw);
+        expect(raw.exit_code).toBe(1);
+        expect(raw.normalized_count).toBe(252);
+        expect(raw.bytes).not.toBeNull();
+        expect(raw.sha256).toBe(createHash('sha256').update(raw.bytes!).digest('hex'));
+        const report = JSON.parse(raw.bytes!.toString('utf8'));
+        expect(report).toMatchObject({ numTotalTests: 252, numPassedTests: 251, numFailedTests: 1 });
+        expect(report.testResults).toHaveLength(18);
+        expect(report.testResults.slice(0, 17).flatMap((t: { assertionResults: unknown[] }) => t.assertionResults)).toHaveLength(250);
+        for (const entry of report.testResults) {
+          if (process.platform === 'win32') expect(entry.name).toMatch(/^[A-Za-z]:[\\/]/);
+          else expect(isAbsolute(entry.name)).toBe(true);
+        }
+        expect(report.testResults[17].assertionResults[1].failureMessages.join('\n')).toContain('AssertionError');
+      } });
+      expect(record.exit_code).toBe(1);
+      expect(record.results).toMatchObject({ format: 'vitest-json', total: 252, passed: 251, failed: 1 });
+      const bytes = readFileSync(record.results!.path);
+      expect(record.results!.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+      const doc = JSON.parse(bytes.toString('utf8'));
+      const unfiltered = doc.results.map((t: { test_id: string; file: string; full_name: string; status: string }) =>
+        ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
+      expect(new Set(unfiltered.slice(0, 250).map((t: { path: string }) => t.path)).size).toBe(17);
+      expect(new Set(unfiltered.map((t: { id: string }) => t.id)).size).toBe(252);
+      expect(unfiltered.slice(250)).toEqual(expected);
+      expect(Buffer.byteLength(JSON.stringify({ role: 'diagnostic-only', tests: unfiltered }))).toBeGreaterThan(16384);
+      return record;
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); expect(runner).toHaveBeenCalledTimes(1); } finally { runner.mockRestore(); }
+    expect(result, JSON.stringify(result)).toMatchObject({ exitCode: 1,
+      diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(expected) } });
+    expect(Buffer.byteLength(JSON.stringify(result.diagnostic))).toBeLessThanOrEqual(16384);
+    const channel = new ClaimChannel(live, vi.fn(), undefined, () => result);
+    mkdirSync(join(f.worktree, '.mycelink-worker'), { recursive: true });
+    const transport = new ClaimFileTransport(f.worktree, f.claim.claimId, input => channel.handle(input), {},
+      { featureId: SHOP_FEATURE, nodeId: ERRORS });
+    transport.start();
+    try {
+      writeFileSync(join(transport.dir, 'request-1.json'), JSON.stringify({ claimId: f.claim.claimId,
+        featureId: SHOP_FEATURE, nodeId: ERRORS, sequence: 1, operation: 'probe' }));
+      transport.tick();
+      const bytes = readFileSync(join(transport.dir, 'response-1.json'));
+      const response = JSON.parse(bytes.toString('utf8'));
+      expect(bytes.length).toBeLessThanOrEqual(32768);
+      expect(response).toMatchObject({ ok: true, exitCode: 1,
+        diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(expected) } });
+      for (const value of [result, response]) {
+        for (const key of ['results', 'output_path', 'output_sha256', 'outputSha256', 'test_ids', 'testIds',
+          'criterion_evidence', 'accepted', 'acceptance', 'evidence']) expect(value).not.toHaveProperty(key);
+      }
+    } finally { transport.stop(); }
+    expectPrivateText(f.state(), before);
+    expect(f.evidence()).toEqual(ledger);
+  });
+
+  it.each([['id', 'IDENTITY:ID'], ['status', 'IDENTITY:STATUS'], ['path', 'IDENTITY:PATH'], ['hash', 'HASH']] as const)(
+    'validates omitted baseline %s before projecting changed declarations', async (kind, stage) => {
+      const f = await largeProjectionFixture(270);
+      const before = f.state();
+      const ledger = f.evidence();
+      const realRun = verificationRunner.runVerification;
+      const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+        const record = realRun(args);
+        const doc = JSON.parse(readFileSync(record.results!.path, 'utf8'));
+        const omitted = doc.results[260]; // Beyond naive slice AND outside declared subset.
+        expect(omitted.file.includes('a-baseline-')).toBe(true);
+        if (kind === 'id') omitted.test_id = '0'.repeat(16);
+        if (kind === 'status') omitted.status = 'invented';
+        if (kind === 'path') {
+          omitted.file = '../outside.test.mjs';
+          omitted.test_id = canonicalTestId('junit-xml', omitted.file, omitted.full_name);
+        }
+        const bytes = JSON.stringify(doc) + (kind === 'hash' ? ' ' : '');
+        writeFileSync(record.results!.path, bytes);
+        if (kind !== 'hash') record.results!.sha256 = createHash('sha256').update(bytes).digest('hex');
+        return record;
+      });
+      try { expect(f.probe()).toEqual({ exitCode: 2, output: `CHANNEL_PROBE_REPORT_INVALID:${stage}` }); }
+      finally { runner.mockRestore(); }
+      expectPrivateText(f.state(), before);
+      expect(f.evidence()).toEqual(ledger);
+    });
+
+  it('never reports passed when a changed declaration is absent from the normalized large suite', async () => {
+    const f = await largeProjectionFixture(270);
+    const realRun = verificationRunner.runVerification;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      const record = realRun(args);
+      const doc = JSON.parse(readFileSync(record.results!.path, 'utf8'));
+      doc.results = doc.results.filter((t: { test_id: string }) => t.test_id !== f.expected[1]!.id);
+      const bytes = JSON.stringify(doc);
+      writeFileSync(record.results!.path, bytes);
+      record.results!.sha256 = createHash('sha256').update(bytes).digest('hex');
+      record.exit_code = 0; // A misleading aggregate success cannot invent execution.
+      return record;
+    });
+    try {
+      const result = f.probe();
+      if (result.exitCode === 2) expect(result).not.toHaveProperty('diagnostic');
+      else expect(result.diagnostic?.tests).toContainEqual({ ...f.expected[1], status: 'not-run' });
+      expect(result.diagnostic?.tests.some(t => t.id === f.expected[1]!.id && t.status === 'passed') ?? false).toBe(false);
+    } finally { runner.mockRestore(); }
+  });
+
+  it('refuses SIZE without truncation when the declared subset itself exceeds the diagnostic budget', async () => {
+    const f = await largeProjectionFixture(270, true);
+    expect(Buffer.byteLength(JSON.stringify(f.expected))).toBeGreaterThan(16384);
+    expect(f.probe()).toEqual({ exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:SIZE' });
+  });
 
   it.each([
     ['hash', 'HASH'], ['json', 'FORMAT'], ['schema', 'FORMAT'], ['format', 'FORMAT'],
