@@ -40,15 +40,15 @@ export function validProbeDiagnostic(value: unknown): value is NonNullable<Probe
 
 /** Bound the complete JSON wire representation, including the mailbox newline. */
 export function boundChannelResponse(response: ChannelResponse): ChannelResponse {
-  const invalid = (): ChannelResponse => ({ ok: true, sequence: response.sequence ?? 0,
-    exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' });
-  if ('diagnostic' in response && response.diagnostic !== undefined && !validProbeDiagnostic(response.diagnostic)) return invalid();
+  const invalid = (stage: 'SIZE' | 'WIRE'): ChannelResponse => ({ ok: true, sequence: response.sequence ?? 0,
+    exitCode: 2, output: `CHANNEL_PROBE_REPORT_INVALID:${stage}` });
+  if ('diagnostic' in response && response.diagnostic !== undefined && !validProbeDiagnostic(response.diagnostic)) return invalid('SIZE');
   const size = () => Buffer.byteLength(JSON.stringify(response)) + 1;
   if (size() <= 32 * 1024) return response;
-  if (typeof response.output !== 'string') return invalid();
+  if (typeof response.output !== 'string') return invalid('WIRE');
   const output = response.output;
   response = { ...response, output: '' };
-  if (size() > 32 * 1024) return invalid();
+  if (size() > 32 * 1024) return invalid('WIRE');
   let low = 0, high = Math.min(output.length, 32 * 1024);
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
@@ -157,7 +157,7 @@ export class ClaimChannel {
             now.generation !== scope.generation || now.dispatchId !== scope.dispatchId || now.expectedHead !== scope.expectedHead || !samePath(now.worktree, scope.worktree) || now.nextGate !== 'red') return fail('CHANNEL_CLAIM_STALE');
         if (!Number.isInteger(result.exitCode) || typeof result.output !== 'string') return fail('CHANNEL_PROBE_FAILED');
         if (result.diagnostic !== undefined && !validProbeDiagnostic(result.diagnostic)) {
-          return { ok: true, sequence, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' };
+          return { ok: true, sequence, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:SIZE' };
         }
         const diagnostic: ProbeResult['diagnostic'] = result.diagnostic ? {
           role: 'diagnostic-only',

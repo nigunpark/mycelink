@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
 import { ClaimFileTransport } from '../../src/sessions/codex-claim-files.js';
-import { ClaimChannel } from '../../src/sessions/codex-claim-channel.js';
+import { canonicalTestId } from '../../src/evidence/test-ids.js';
+import { redactValue } from '../../src/security/redact.js';
+import { boundChannelResponse, validProbeDiagnostic, ClaimChannel } from '../../src/sessions/codex-claim-channel.js';
 import type { ChannelResponse } from '../../src/sessions/codex-claim-channel.js';
 
 afterAll(() => cleanupTmpRoots());
@@ -34,8 +36,64 @@ describe('bounded claim file transport', () => {
       f.transport.tick();
       expect(readFileSync(join(f.dir, 'response-1.json')).length).toBeLessThanOrEqual(32 * 1024);
       if (kind === 'diagnostic') {
-        expect(f.response(1)).toEqual({ ok: true, sequence: 1, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' });
+        expect(f.response(1)).toEqual({ ok: true, sequence: 1, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:SIZE' });
       } else expect(f.response(1)).toMatchObject({ ok: true, exitCode: 1, diagnostic: { tests: [] } });
+    } finally { f.transport.stop(); }
+  });
+
+  it('refuses an envelope that exceeds the wire bound even with empty output', () => {
+    // A bypassed handler can supply a receipt too large to fit without output.
+    const response: ChannelResponse = { ok: true, sequence: 1, exitCode: 1, output: '',
+      test_ids: ['receipt-' + 'x'.repeat(32768)],
+      diagnostic: { role: 'diagnostic-only', tests: [] } };
+    expect(validProbeDiagnostic(response.diagnostic)).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeGreaterThan(32 * 1024);
+    expect(boundChannelResponse(response)).toEqual({ ok: true, sequence: 1, exitCode: 2,
+      output: 'CHANNEL_PROBE_REPORT_INVALID:WIRE' });
+  });
+
+  it.each(['callback', 'wire', 'redaction', 'redaction-identity'] as const)('fails closed at file transport stage %s without identity or receipt leakage', kind => {
+    const full_name = kind === 'redaction' ? 'sensitive-value-123'.repeat(210)
+      : kind === 'redaction-identity' ? 'assertion sensitive-value-123' : 'ordinary assertion';
+    const diagnostic = { role: 'diagnostic-only' as const, tests: [{
+      id: canonicalTestId('junit-xml', 'tests/a.mjs', full_name), path: 'tests/a.mjs',
+      full_name, status: 'failed' as const,
+    }] };
+    expect(validProbeDiagnostic(diagnostic)).toBe(true);
+    if (kind === 'redaction-identity') {
+      const redacted = redactValue(diagnostic, { TOKEN_SECRET: 'sensitive-value-123' });
+      const test = redacted.tests[0]!;
+      // Shape validation still passes, but the original canonical ID is now stale.
+      // Assert booleans so a failed precondition cannot print the fixture secret.
+      expect(test.full_name !== full_name).toBe(true);
+      expect(Buffer.byteLength(test.full_name)).toBeLessThan(4096);
+      expect(validProbeDiagnostic(redacted)).toBe(true);
+      expect(test.id === diagnostic.tests[0]!.id).toBe(true);
+      expect(test.id !== canonicalTestId('junit-xml', test.path, test.full_name)).toBe(true);
+    }
+    // Redaction expands a valid name beyond the 4096-byte identity bound.
+    if (kind === 'callback') diagnostic.tests[0]!.full_name = 'n'.repeat(32769);
+    const claim = { claimId: 'claim-1', featureId: 'F', nodeId: 'F.n', repoPath: 'unused', worktree: 'unused',
+      expectedHead: '0'.repeat(40), allowedPaths: [], forbiddenPaths: [], nextGate: 'red' as const,
+      gateCommands: [{ gate: 'red' as const, argv: ['node', 'declared-verifier'] }] };
+    const channel = new ClaimChannel(() => claim, () => { throw new Error('gate must not run'); }, undefined,
+      () => ({ exitCode: 1, output: 'sensitive-value-123', diagnostic }));
+    const f = fixture(input => kind === 'wire'
+      ? { ok: true, sequence: 1, exitCode: 1, output: '', diagnostic, test_ids: ['receipt-' + 'x'.repeat(32768)] }
+      : channel.handle(input));
+    try {
+      f.put(1, { claimId: 'claim-1', featureId: 'F', nodeId: 'F.n', sequence: 1, operation: 'probe' });
+      f.transport.tick();
+      const bytes = readFileSync(join(f.dir, 'response-1.json'));
+      if (kind === 'redaction-identity') {
+        expect(bytes.toString('utf8').includes(diagnostic.tests[0]!.id)).toBe(false);
+      }
+      expect(bytes.length).toBeLessThan(128);
+      expect(f.response(1)).toEqual({ ok: true, sequence: 1, exitCode: 2,
+        output: `CHANNEL_PROBE_REPORT_INVALID:${kind === 'callback' ? 'SIZE' : kind === 'wire' ? 'WIRE' : 'REDACTION'}` });
+      for (const text of ['sensitive-value-123', 'tests/a.mjs', 'receipt-', 'criterion_evidence', 'diagnostic']) {
+        expect(bytes.toString('utf8')).not.toContain(text);
+      }
     } finally { f.transport.stop(); }
   });
 

@@ -30447,19 +30447,19 @@ function validProbeDiagnostic(value) {
   return d.role === "diagnostic-only" && Array.isArray(d.tests) && d.tests.length <= 256 && d.tests.every((t) => t && typeof t.id === "string" && /^[0-9a-f]{16}$/.test(t.id) && typeof t.path === "string" && Buffer.byteLength(t.path) <= 1024 && typeof t.full_name === "string" && Buffer.byteLength(t.full_name) <= 4096 && ["passed", "failed", "skipped", "not-run"].includes(t.status)) && Buffer.byteLength(JSON.stringify(d)) <= 16 * 1024;
 }
 function boundChannelResponse(response) {
-  const invalid = () => ({
+  const invalid = (stage) => ({
     ok: true,
     sequence: response.sequence ?? 0,
     exitCode: 2,
-    output: "CHANNEL_PROBE_REPORT_INVALID"
+    output: `CHANNEL_PROBE_REPORT_INVALID:${stage}`
   });
-  if ("diagnostic" in response && response.diagnostic !== void 0 && !validProbeDiagnostic(response.diagnostic)) return invalid();
+  if ("diagnostic" in response && response.diagnostic !== void 0 && !validProbeDiagnostic(response.diagnostic)) return invalid("SIZE");
   const size = () => Buffer.byteLength(JSON.stringify(response)) + 1;
   if (size() <= 32 * 1024) return response;
-  if (typeof response.output !== "string") return invalid();
+  if (typeof response.output !== "string") return invalid("WIRE");
   const output = response.output;
   response = { ...response, output: "" };
-  if (size() > 32 * 1024) return invalid();
+  if (size() > 32 * 1024) return invalid("WIRE");
   let low = 0, high = Math.min(output.length, 32 * 1024);
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
@@ -30557,7 +30557,7 @@ var ClaimChannel = class {
         if (!now3 || now3.claimId !== scope.claimId || now3.featureId !== scope.featureId || now3.nodeId !== scope.nodeId || now3.generation !== scope.generation || now3.dispatchId !== scope.dispatchId || now3.expectedHead !== scope.expectedHead || !samePath(now3.worktree, scope.worktree) || now3.nextGate !== "red") return fail("CHANNEL_CLAIM_STALE");
         if (!Number.isInteger(result.exitCode) || typeof result.output !== "string") return fail("CHANNEL_PROBE_FAILED");
         if (result.diagnostic !== void 0 && !validProbeDiagnostic(result.diagnostic)) {
-          return { ok: true, sequence, exitCode: 2, output: "CHANNEL_PROBE_REPORT_INVALID" };
+          return { ok: true, sequence, exitCode: 2, output: "CHANNEL_PROBE_REPORT_INVALID:SIZE" };
         }
         const diagnostic = result.diagnostic ? {
           role: "diagnostic-only",
@@ -30814,21 +30814,25 @@ function runClaimProbe(args) {
     if (Date.now() >= args.deadline || record.exit_code === 124) return fail("CHANNEL_PROBE_TIMEOUT");
     if (!record.results || record.steps?.some((s) => s.exit_code !== 0 || s.timed_out)) return fail("CHANNEL_PROBE_REPORT_UNAVAILABLE");
     const bytes2 = readFileSync27(record.results.path);
-    if (hash(bytes2) !== record.results.sha256) return fail("CHANNEL_PROBE_REPORT_INVALID");
+    if (hash(bytes2) !== record.results.sha256) return fail("CHANNEL_PROBE_REPORT_INVALID:HASH");
     let doc;
     try {
       doc = JSON.parse(bytes2.toString("utf8"));
     } catch {
-      return fail("CHANNEL_PROBE_REPORT_INVALID");
+      return fail("CHANNEL_PROBE_REPORT_INVALID:FORMAT");
     }
-    if (doc === null || typeof doc !== "object" || doc.schema !== "mycelink-test-results/1" || doc.format !== record.results.format || !Array.isArray(doc.results)) return fail("CHANNEL_PROBE_REPORT_INVALID");
-    if (doc.results.some((t) => !t || typeof t !== "object" || typeof t.file !== "string" || typeof t.full_name !== "string" || Buffer.byteLength(t.file) > 1024 || Buffer.byteLength(t.full_name) > 4096)) return fail("CHANNEL_PROBE_REPORT_INVALID");
+    if (doc === null || typeof doc !== "object" || doc.schema !== "mycelink-test-results/1" || doc.format !== record.results.format || !Array.isArray(doc.results)) return fail("CHANNEL_PROBE_REPORT_INVALID:FORMAT");
+    if (doc.results.some((t) => !t || typeof t !== "object" || typeof t.file !== "string" || typeof t.full_name !== "string" || Buffer.byteLength(t.file) > 1024 || Buffer.byteLength(t.full_name) > 4096)) return fail("CHANNEL_PROBE_REPORT_INVALID:ENTRY");
     const tests = (doc.results ?? []).map((t) => ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
-    if (!tests.length || tests.length > 1e4 || tests.some((t) => classifyRelativePath(t.path) || t.path.split("/").includes("..") || t.id !== canonicalTestId(record.results.format, t.path, t.full_name) || !["passed", "failed", "skipped", "not-run"].includes(t.status))) return fail("CHANNEL_PROBE_REPORT_INVALID");
+    if (!tests.length || tests.length > 1e4 || tests.some((t) => classifyRelativePath(t.path) || t.path.split("/").includes("..") || t.id !== canonicalTestId(record.results.format, t.path, t.full_name) || !["passed", "failed", "skipped", "not-run"].includes(t.status))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY");
     const diagnostic = { role: "diagnostic-only", tests: tests.slice(0, 256) };
-    if (!validProbeDiagnostic(diagnostic)) return fail("CHANNEL_PROBE_REPORT_INVALID");
+    if (!validProbeDiagnostic(diagnostic)) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });
-    return { exitCode: record.exit_code, output: bounded.output ?? "", diagnostic };
+    return {
+      exitCode: bounded.exitCode ?? 2,
+      output: bounded.output ?? "",
+      ..."diagnostic" in bounded && bounded.diagnostic ? { diagnostic: bounded.diagnostic } : {}
+    };
   } catch (e) {
     return fail(Date.now() >= args.deadline ? "CHANNEL_PROBE_TIMEOUT" : e.message);
   } finally {
@@ -43907,7 +43911,13 @@ var ClaimFileTransport = class {
         }
         this.expected++;
       }
-      const safe3 = boundChannelResponse(redactValue(response, this.env));
+      let safe3;
+      if ("diagnostic" in response && response.diagnostic !== void 0 && !validProbeDiagnostic(response.diagnostic)) {
+        safe3 = boundChannelResponse(response);
+      } else {
+        const redacted = redactValue(response, this.env);
+        safe3 = "diagnostic" in response && "diagnostic" in redacted && JSON.stringify(redacted.diagnostic) !== JSON.stringify(response.diagnostic) ? { ok: true, sequence: n, exitCode: 2, output: "CHANNEL_PROBE_REPORT_INVALID:REDACTION" } : boundChannelResponse(redacted);
+      }
       const target = join49(this.dir, `response-${n}.json`);
       const tmp = join49(this.dir, `.response-${randomUUID6()}.tmp`);
       try {

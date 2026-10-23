@@ -80,7 +80,7 @@ describe('PRE-RED probe protocol', () => {
     result.diagnostic.tests[0]!.full_name = 'n'.repeat(32769);
     const channel = new ClaimChannel(scope, vi.fn(), undefined, () => result);
     expect(channel.handle(request(1))).toEqual({ ok: true, sequence: 1,
-      exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' });
+      exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:SIZE' });
   });
 
   it('never forwards runner receipts as criterion_evidence handles', () => {
@@ -495,26 +495,80 @@ test(${JSON.stringify(name)}, () => {
       } finally { transport.stop(); }
     });
 
-  it.each(['schema', 'format'])('refuses normalized report %s drift even with a matching receipt hash', async (field) => {
-    const f = await fixture();
-    const before = f.state();
+  it.each([
+    ['hash', 'HASH'], ['json', 'FORMAT'], ['schema', 'FORMAT'], ['format', 'FORMAT'],
+    ['null document', 'FORMAT'], ['results', 'FORMAT'], ['missing entry', 'ENTRY'], ['missing file', 'ENTRY'],
+    ['missing name', 'ENTRY'], ['huge file', 'ENTRY'], ['huge name', 'ENTRY'],
+    ['traversal', 'IDENTITY'], ['absolute path', 'IDENTITY'], ['id', 'IDENTITY'], ['status', 'IDENTITY'],
+    ['empty', 'IDENTITY'], ['count', 'IDENTITY'], ['aggregate', 'SIZE'],
+  ] as const)('refuses normalized report %s with bounded stage %s', async (kind, stage) => {
+    const testPath = 'packages/errors/test/errors.test.mjs';
+    const f = await fixture({}, [process.execPath, '--test', '--test-reporter=junit',
+      '--test-reporter-destination=${REPORT}', testPath]);
+    const snapshot = (root: string) => ({
+      head: git(root, ['--no-optional-locks', 'rev-parse', 'HEAD']),
+      refs: git(root, ['--no-optional-locks', 'show-ref']),
+      index: git(root, ['--no-optional-locks', 'ls-files', '--stage', '-z']),
+      status: git(root, ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all']),
+      files: git(root, ['--no-optional-locks', 'ls-files', '-z']).split('\0').filter(Boolean)
+        .map(path => [path, readFileSync(join(root, path)).toString('base64')]),
+    });
+    const before = snapshot(f.worktree);
+    const repositoryBefore = snapshot(f.s.repo);
+    const state = f.state();
     const evidence = f.evidence();
-    const run = verificationRunner.runVerification;
+    const realRun = verificationRunner.runVerification;
+    let report = '';
+    let clone = '';
     const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
-      const record = run(args);
-      if (!record.results) throw new Error('expected structured report');
-      const doc = JSON.parse(readFileSync(record.results.path, 'utf8'));
-      doc[field] = 'unexpected';
-      const bytes = JSON.stringify(doc);
-      writeFileSync(record.results.path, bytes);
-      record.results.sha256 = createHash('sha256').update(bytes).digest('hex');
+      const record = realRun(args); // Real native child and normalization precede mutation.
+      expect(record.results).toMatchObject({ format: 'junit-xml', total: 1 });
+      clone = args.cwd;
+      report = record.results!.path;
+      expect(realpathSync(clone)).not.toBe(realpathSync(f.worktree));
+      const doc = JSON.parse(readFileSync(report, 'utf8'));
+      const entry = doc.results[0];
+      expect(entry).toMatchObject({ file: testPath, test_id: expect.any(String) });
+      if (kind === 'schema' || kind === 'format') doc[kind] = 'unexpected';
+      if (kind === 'results') doc.results = {};
+      if (kind === 'missing entry') doc.results = [null];
+      if (kind === 'missing file') delete entry.file;
+      if (kind === 'missing name') delete entry.full_name;
+      if (kind === 'huge file') entry.file = 'p'.repeat(1025);
+      if (kind === 'huge name') entry.full_name = 'n'.repeat(4097);
+      if (kind === 'traversal') {
+        entry.file = 'packages/errors/test/../outside.test.mjs';
+        entry.test_id = canonicalTestId('junit-xml', entry.file, entry.full_name);
+      }
+      if (kind === 'absolute path') {
+        entry.file = '/outside.test.mjs';
+        entry.test_id = canonicalTestId('junit-xml', entry.file, entry.full_name);
+      }
+      if (kind === 'id') entry.test_id = '0'.repeat(16);
+      if (kind === 'status') entry.status = 'unknown';
+      if (kind === 'empty') doc.results = [];
+      if (kind === 'count') doc.results = Array.from({ length: 10001 }, () => ({ ...entry }));
+      if (kind === 'aggregate') doc.results = Array.from({ length: 8 }, (_, i) => {
+        const full_name = String(i) + 'n'.repeat(3000);
+        return { ...entry, full_name, test_id: canonicalTestId('junit-xml', entry.file, full_name) };
+      });
+      const bytes = kind === 'json' ? '{invalid-json' : kind === 'null document' ? 'null' : JSON.stringify(doc) + (kind === 'hash' ? ' ' : '');
+      writeFileSync(report, bytes);
+      if (kind !== 'hash') record.results!.sha256 = createHash('sha256').update(bytes).digest('hex');
       return record;
     });
-    try {
-      expect(f.probe()).toMatchObject({ exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID' });
-      expect(f.state()).toBe(before);
-      expect(f.evidence()).toEqual(evidence);
-    } finally { runner.mockRestore(); }
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); }
+    finally { runner.mockRestore(); }
+    expect(report).not.toBe(''); // A refusal before the mutation is a harness failure.
+    expect(existsSync(report)).toBe(false);
+    expect(existsSync(clone)).toBe(false);
+    expect(snapshot(f.worktree)).toEqual(before);
+    expect(snapshot(f.s.repo)).toEqual(repositoryBefore);
+    expect(f.state()).toBe(state);
+    expect(f.evidence()).toEqual(evidence);
+    expect(result!).toEqual({ exitCode: 2, output: `CHANNEL_PROBE_REPORT_INVALID:${stage}` });
+    expect(Buffer.byteLength(JSON.stringify(result!))).toBeLessThan(128);
   });
 
   // A deterministic pnpm-shaped install: Git ignores node_modules, but

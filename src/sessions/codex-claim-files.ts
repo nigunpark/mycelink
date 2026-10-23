@@ -2,7 +2,7 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { boundChannelResponse, type ChannelResponse } from './codex-claim-channel.js';
+import { boundChannelResponse, validProbeDiagnostic, type ChannelResponse } from './codex-claim-channel.js';
 import { redactValue, type Env } from '../security/redact.js';
 import { isInsideReal } from '../security/paths.js';
 
@@ -125,7 +125,18 @@ export class ClaimFileTransport {
         this.expected++;
       }
       // Redact before truncating, including any diagnostic from a gate executor.
-      const safe = boundChannelResponse(redactValue(response, this.env));
+      let safe: ChannelResponse;
+      if ('diagnostic' in response && response.diagnostic !== undefined && !validProbeDiagnostic(response.diagnostic)) {
+        safe = boundChannelResponse(response);
+      } else {
+        const redacted = redactValue(response, this.env);
+        // Redacted identities no longer bind the original canonical test IDs.
+        // Refuse even when the changed diagnostic still passes shape validation.
+        safe = 'diagnostic' in response && 'diagnostic' in redacted &&
+          JSON.stringify(redacted.diagnostic) !== JSON.stringify(response.diagnostic)
+          ? { ok: true, sequence: n, exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:REDACTION' }
+          : boundChannelResponse(redacted);
+      }
       const target = join(this.dir, `response-${n}.json`);
       const tmp = join(this.dir, `.response-${randomUUID()}.tmp`);
       try {
