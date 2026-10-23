@@ -68,7 +68,13 @@
               "required": ["item_id", "sha256", "bytes"],
               "properties": { "item_id": { "type": "string" }, "sha256": { "type": "string" }, "bytes": { "type": "integer", "minimum": 0 } } },
             "failure": { "type": ["object", "null"], "additionalProperties": false,
-              "required": ["class", "transient"], "properties": { "class": { "const": "unclassified" }, "transient": { "const": false } } }
+              "required": ["class", "transient"],
+              "properties": { "class": { "enum": ["unclassified", "capacity-admission"] }, "transient": { "type": "boolean" } },
+              "oneOf": [
+                { "type": "null" },
+                { "type": "object", "properties": { "class": { "const": "unclassified" }, "transient": { "const": false } } },
+                { "type": "object", "properties": { "class": { "const": "capacity-admission" }, "transient": { "const": true } } }
+              ] }
           }
         },
         "codex_provenance": {

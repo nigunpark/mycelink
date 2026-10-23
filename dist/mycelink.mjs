@@ -32526,6 +32526,7 @@ var MAX_STREAM_BYTES = 8 * 1024 * 1024;
 var MAX_EVENTS = 4096;
 var ID4 = /^[A-Za-z0-9_-]{1,128}$/;
 var THREAD = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var CAPACITY_MESSAGE = "Selected model is at capacity. Please try a different model.";
 var object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 var CodexTranscriptReader = class {
   maxLineBytes;
@@ -32541,6 +32542,7 @@ var CodexTranscriptReader = class {
   final = null;
   bytes = 0;
   events = 0;
+  capacitySequence = true;
   consume(line) {
     if (this.terminal === "invalid") return;
     const bytes2 = Buffer.byteLength(line, "utf8");
@@ -32550,6 +32552,8 @@ var CodexTranscriptReader = class {
     const parsed = parseStrictJson(line, { maxBytes: this.maxLineBytes, maxDepth: 24 });
     if (!parsed.ok || !object(parsed.value)) return this.invalidate();
     const event = parsed.value;
+    const keys = Object.keys(event).sort().join(",");
+    this.capacitySequence &&= this.events === 1 ? keys === "thread_id,type" && event["type"] === "thread.started" && typeof event["thread_id"] === "string" && THREAD.test(event["thread_id"]) : this.events === 2 ? keys === "type" && event["type"] === "turn.started" : this.events === 3 ? keys === "message,type" && event["type"] === "error" && event["message"] === CAPACITY_MESSAGE : this.events === 4 ? keys === "error,type" && event["type"] === "turn.failed" && object(event["error"]) && Object.keys(event["error"]).join(",") === "message" && event["error"]["message"] === CAPACITY_MESSAGE : false;
     if ("agent_id" in event || "agent_type" in event || "role" in event) return this.invalidate();
     switch (event["type"]) {
       case "thread.started":
@@ -32605,7 +32609,7 @@ var CodexTranscriptReader = class {
       terminal,
       turns: this.turns,
       final: terminal === "completed" ? this.final : null,
-      failure: terminal === "failed" ? { class: "unclassified", transient: false } : null,
+      failure: terminal === "failed" ? this.capacitySequence && this.events === 4 && this.turns === 0 ? { class: "capacity-admission", transient: true } : { class: "unclassified", transient: false } : null,
       role_attested: false
     };
   }
@@ -35968,6 +35972,18 @@ var Orchestrator = class _Orchestrator {
         request.claimChannel = { handle: (input) => channel.handle(input), probeEnabled, redactEnv: { [CAPABILITY_ENV]: capability } };
       }
       if (node.readonly_fixture) verifyReadonlyFixture(this.controlRoot, node.readonly_fixture);
+      const beforeSpawn = this.state();
+      const spawnRuntime = beforeSpawn.nodes[nodeId];
+      const spawnClaim = spawnRuntime?.claim;
+      const admissionSnapshot = this.adapter.name === "codex-cli" && worktree !== null && branch !== null && spawnClaim?.claim_id === claimId && spawnClaim.mode === "adapter" ? {
+        epoch: currentEpoch(beforeSpawn),
+        lineage: lineageOf(beforeSpawn, nodeId),
+        generation: spawnClaim.generation,
+        dispatch: spawnClaim.dispatch_id,
+        head: resolveRef(worktree, "HEAD"),
+        branch: runGit(worktree, ["symbolic-ref", "--short", "HEAD"]).stdout.trim(),
+        clean: isWorktreeClean(worktree)
+      } : null;
       const handle = this.adapter.spawn(request);
       sessionId = handle.session_id;
       recordSpawn(this.paths.sessionsRegistry, handle, {
@@ -35984,6 +36000,18 @@ var Orchestrator = class _Orchestrator {
       if (isInfrastructureFailure(observation.failure_reason)) {
         this.releaseForInfrastructure(nodeId, claimId, observation.failure_reason ?? "SPAWN_FAILED");
         return this.report(nodeId, "INFRASTRUCTURE_FAILURE", sessionId, observation.failure_reason ?? "SPAWN_FAILED", evidence);
+      }
+      const admission = observation.codex_evidence;
+      if (this.adapter.name === "codex-cli" && observation.status === "failed" && observation.exit_code === 1 && observation.timed_out === false && observation.result === null && observation.turns === 0 && admission?.process_session_id === handle.session_id && admission.provider === "codex" && admission.source === "exec-jsonl" && admission.terminal === "failed" && admission.turns === 0 && admission.final === null && admission.failure?.class === "capacity-admission" && admission.failure.transient === true && admissionSnapshot !== null && admissionSnapshot.clean && admissionSnapshot.branch === branch && worktree !== null) {
+        const current = this.state();
+        const rt = current.nodes[nodeId];
+        const c = rt?.claim;
+        if (rt && c?.claim_id === claimId && c.mode === "adapter" && c.generation === admissionSnapshot.generation && c.dispatch_id === admissionSnapshot.dispatch && currentEpoch(current) === admissionSnapshot.epoch && lineageOf(current, nodeId) === admissionSnapshot.lineage && c.worktree === worktree && c.branch === branch && rt.state === spawnRuntime?.state && Object.keys(rt.evidence).length === 0 && (rt.criteria ?? []).length === 0 && (rt.criterion_ledger ?? []).length === 0 && rt.integrated_sha === null && (rt.tdd_red_bindings ?? []).length === 0 && rt.tdd_history == null && c.result_captured_sha256 === void 0 && c.capture_pending == null && c.seal == null && resolveRef(worktree, "HEAD") === admissionSnapshot.head && runGit(worktree, ["symbolic-ref", "--short", "HEAD"]).stdout.trim() === admissionSnapshot.branch && isWorktreeClean(worktree)) {
+          const reason = "CODEX_CAPACITY_ADMISSION: provider refused admission before model work";
+          if (this.releaseForInfrastructure(nodeId, claimId, reason)) {
+            return this.report(nodeId, "INFRASTRUCTURE_FAILURE", sessionId, reason, evidence);
+          }
+        }
       }
       mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, observation.usage));
       appendRun(this.paths.runs, {

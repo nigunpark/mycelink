@@ -2781,6 +2781,18 @@ export class Orchestrator {
       }
 
       if (node.readonly_fixture) verifyReadonlyFixture(this.controlRoot, node.readonly_fixture);
+      const beforeSpawn = this.state();
+      const spawnRuntime = beforeSpawn.nodes[nodeId];
+      const spawnClaim = spawnRuntime?.claim;
+      const admissionSnapshot = this.adapter.name === 'codex-cli' && worktree !== null && branch !== null
+        && spawnClaim?.claim_id === claimId && spawnClaim.mode === 'adapter'
+        ? {
+          epoch: currentEpoch(beforeSpawn), lineage: lineageOf(beforeSpawn, nodeId),
+          generation: spawnClaim.generation, dispatch: spawnClaim.dispatch_id,
+          head: resolveRef(worktree, 'HEAD'),
+          branch: runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim(),
+          clean: isWorktreeClean(worktree),
+        } : null;
       const handle = this.adapter.spawn(request);
       sessionId = handle.session_id;
       recordSpawn(this.paths.sessionsRegistry, handle, {
@@ -2792,7 +2804,6 @@ export class Orchestrator {
         replacesSessionId: previous?.session_id ?? null,
       });
       if (previous) markTerminal(this.paths.sessionsRegistry, previous.session_id, 'stopped');
-
       const observation = await this.adapter.wait(handle);
       recordObservation(this.paths.sessionsRegistry, handle.session_id, observation);
 
@@ -2801,6 +2812,39 @@ export class Orchestrator {
         // than charging the node and blocking it after two identical tries.
         this.releaseForInfrastructure(nodeId, claimId, observation.failure_reason ?? 'SPAWN_FAILED');
         return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, observation.failure_reason ?? 'SPAWN_FAILED', evidence);
+      }
+
+      const admission = observation.codex_evidence;
+      if (this.adapter.name === 'codex-cli' && observation.status === 'failed'
+        && observation.exit_code === 1 && observation.timed_out === false
+        && observation.result === null && observation.turns === 0
+        && admission?.process_session_id === handle.session_id
+        && admission.provider === 'codex' && admission.source === 'exec-jsonl'
+        && admission.terminal === 'failed' && admission.turns === 0 && admission.final === null
+        && admission.failure?.class === 'capacity-admission' && admission.failure.transient === true
+        && admissionSnapshot !== null && admissionSnapshot.clean && admissionSnapshot.branch === branch
+        && worktree !== null) {
+        const current = this.state();
+        const rt = current.nodes[nodeId];
+        const c = rt?.claim;
+        // A changed claim, generation, checkout or accepted gate is product work,
+        // not an unspent admission. Git failures propagate to the charged path.
+        if (rt && c?.claim_id === claimId && c.mode === 'adapter'
+          && c.generation === admissionSnapshot.generation && c.dispatch_id === admissionSnapshot.dispatch
+          && currentEpoch(current) === admissionSnapshot.epoch && lineageOf(current, nodeId) === admissionSnapshot.lineage
+          && c.worktree === worktree && c.branch === branch && rt.state === spawnRuntime?.state
+          && Object.keys(rt.evidence).length === 0 && (rt.criteria ?? []).length === 0
+          && (rt.criterion_ledger ?? []).length === 0 && rt.integrated_sha === null
+          && (rt.tdd_red_bindings ?? []).length === 0 && rt.tdd_history == null
+          && c.result_captured_sha256 === undefined && c.capture_pending == null && c.seal == null
+          && resolveRef(worktree, 'HEAD') === admissionSnapshot.head
+          && runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim() === admissionSnapshot.branch
+          && isWorktreeClean(worktree)) {
+          const reason = 'CODEX_CAPACITY_ADMISSION: provider refused admission before model work';
+          if (this.releaseForInfrastructure(nodeId, claimId, reason)) {
+            return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, reason, evidence);
+          }
+        }
       }
 
       mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, observation.usage));

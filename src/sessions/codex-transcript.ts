@@ -7,6 +7,7 @@ const MAX_STREAM_BYTES = 8 * 1024 * 1024;
 const MAX_EVENTS = 4096;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const THREAD = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CAPACITY_MESSAGE = 'Selected model is at capacity. Please try a different model.';
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 export interface CodexTranscriptEvidence {
@@ -17,8 +18,8 @@ export interface CodexTranscriptEvidence {
   terminal: 'completed' | 'failed' | 'incomplete' | 'invalid';
   turns: number;
   final: { item_id: string; sha256: string; bytes: number } | null;
-  /** No error prose or tool output can be used as a retry classification. */
-  failure: { class: 'unclassified'; transient: false } | null;
+  /** Bounded classification only; never retains error prose or tool output. */
+  failure: { class: 'unclassified'; transient: false } | { class: 'capacity-admission'; transient: true } | null;
   role_attested: false;
 }
 
@@ -37,6 +38,7 @@ export class CodexTranscriptReader {
   private final: CodexTranscriptEvidence['final'] = null;
   private bytes = 0;
   private events = 0;
+  private capacitySequence = true;
 
   consume(line: string): void {
     if (this.terminal === 'invalid') return;
@@ -47,6 +49,18 @@ export class CodexTranscriptReader {
     const parsed = parseStrictJson(line, { maxBytes: this.maxLineBytes, maxDepth: 24 });
     if (!parsed.ok || !object(parsed.value)) return this.invalidate();
     const event = parsed.value;
+    // Only this complete, output-free sequence proves an admission refusal.
+    // Keep a boolean, never the provider's error prose.
+    const keys = Object.keys(event).sort().join(',');
+    this.capacitySequence &&= this.events === 1
+      ? keys === 'thread_id,type' && event['type'] === 'thread.started' && typeof event['thread_id'] === 'string' && THREAD.test(event['thread_id'])
+      : this.events === 2
+        ? keys === 'type' && event['type'] === 'turn.started'
+        : this.events === 3
+          ? keys === 'message,type' && event['type'] === 'error' && event['message'] === CAPACITY_MESSAGE
+          : this.events === 4
+            ? keys === 'error,type' && event['type'] === 'turn.failed' && object(event['error']) && Object.keys(event['error']).join(',') === 'message' && event['error']['message'] === CAPACITY_MESSAGE
+            : false;
     // Top-level role labels supplied by the process are never authority.
     if ('agent_id' in event || 'agent_type' in event || 'role' in event) return this.invalidate();
     switch (event['type']) {
@@ -100,7 +114,11 @@ export class CodexTranscriptReader {
     return {
       provider: 'codex', source: 'exec-jsonl', thread_id: this.thread, terminal,
       turns: this.turns, final: terminal === 'completed' ? this.final : null,
-      failure: terminal === 'failed' ? { class: 'unclassified', transient: false } : null,
+      failure: terminal === 'failed'
+        ? this.capacitySequence && this.events === 4 && this.turns === 0
+          ? { class: 'capacity-admission', transient: true }
+          : { class: 'unclassified', transient: false }
+        : null,
       role_attested: false,
     };
   }
