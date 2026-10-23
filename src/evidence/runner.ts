@@ -60,6 +60,15 @@ export function verifierInvocation(verifier: { command: string[]; shell?: boolea
 
 export type RunVerificationArgs = VerificationInvocation & VerificationOptions;
 
+export interface RawReportSnapshot {
+  readonly bytes: Buffer | null;
+  readonly sha256: string | null;
+  readonly output: string;
+  readonly exit_code: number;
+  readonly steps: { exit_code: number; timed_out: boolean }[];
+  readonly normalized_count: number;
+}
+
 interface VerificationOptions {
   kind: EvidenceKind;
   nodeId: string;
@@ -76,6 +85,8 @@ interface VerificationOptions {
   cleanEnv?: boolean;
   /** Private diagnostic scratch, removed with its disposable checkout on every exit. */
   reportScratchRoot?: string;
+  /** Transient diagnostic observation; never added to evidence. */
+  onRawReport?: (snapshot: RawReportSnapshot) => void;
   /** Overrides the derived output file name (used for repeated attempts). */
   label?: string;
   candidateId?: string | null;
@@ -227,36 +238,51 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
     !args.command[3]?.split('/').includes('..');
   const report = args.report ?? (nodeJUnit ? { format: 'junit-xml' as const } : null);
   const scratch = report !== null && report.dir === undefined ? mkdtempSync(join(args.reportScratchRoot ?? tmpdir(), 'mycelink-report-')) : null;
-  const reportFile = scratch === null ? null : join(scratch, (report as ModuleReport).format === 'vitest-json' ? 'report.json' : 'report.xml');
-  const reportDir = report?.dir !== undefined ? resolve(cwd, report.dir) : null;
-  if (reportDir !== null) clearReportDir(cwd, reportDir);
-  const argv = args.shellScript !== undefined || reportFile === null ? command : command.map((part) => part.split('${REPORT}').join(reportFile));
-
+  let results: TestResult[] | null;
   let exitCode: number;
-  if (failedStep === null) {
-    // Throws CommandPolicyError before anything runs if the command is unsafe
-    // or asks for a shell the control repository has not allowed.
-    const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
-    const proc =
-      args.shellScript !== undefined
-        ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false })
-        : runCommandSync(argv, runOptions);
-    output += `$ ${command.join(' ')}\n(cwd: ${cwd})\n\n`;
-    output += proc.stdout;
-    output += proc.stderr;
-    if (proc.timedOut) output += `\n[mycelink] command timed out after ${timeoutMs} ms\n`;
-    if (proc.spawnError !== null) output += `\n[mycelink] failed to start: ${proc.spawnError}\n`;
-    exitCode = proc.exitCode;
-    timedOut = proc.timedOut;
-  } else {
-    exitCode = failedStep.exit_code === 0 ? 1 : failedStep.exit_code;
-  }
-  const finishedAt = new Date();
-  // Evidence is durable and may be committed: never let a secret reach it.
-  output = redactText(output);
+  let finishedAt: Date;
+  let observerFailed = false;
+  try {
+    const reportFile = scratch === null ? null : join(scratch, (report as ModuleReport).format === 'vitest-json' ? 'report.json' : 'report.xml');
+    const reportDir = report?.dir !== undefined ? resolve(cwd, report.dir) : null;
+    if (reportDir !== null) clearReportDir(cwd, reportDir);
+    const argv = args.shellScript !== undefined || reportFile === null ? command : command.map((part) => part.split('${REPORT}').join(reportFile));
 
-  const results = report === null ? null : failedStep !== null ? [] : readReport(report, reportFile, reportDir, cwd, args.module?.path ?? null);
-  if (scratch !== null) rmSync(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    if (failedStep === null) {
+      // Throws CommandPolicyError before anything runs if the command is unsafe
+      // or asks for a shell the control repository has not allowed.
+      const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
+      const proc =
+        args.shellScript !== undefined
+          ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false })
+          : runCommandSync(argv, runOptions);
+      output += `$ ${command.join(' ')}\n(cwd: ${cwd})\n\n`;
+      output += proc.stdout;
+      output += proc.stderr;
+      if (proc.timedOut) output += `\n[mycelink] command timed out after ${timeoutMs} ms\n`;
+      if (proc.spawnError !== null) output += `\n[mycelink] failed to start: ${proc.spawnError}\n`;
+      exitCode = proc.exitCode;
+      timedOut = proc.timedOut;
+    } else {
+      exitCode = failedStep.exit_code === 0 ? 1 : failedStep.exit_code;
+    }
+    finishedAt = new Date();
+    // Evidence is durable and may be committed: never let a secret reach it.
+    output = redactText(output);
+
+    results = report === null ? null : failedStep !== null ? [] : readReport(report, reportFile, reportDir, cwd, args.module?.path ?? null);
+    if (args.onRawReport) {
+      try {
+        const bytes = reportFile === null || failedStep !== null ? null : readRegular(reportFile, MAX_REPORT_BYTES)?.bytes ?? null;
+        args.onRawReport(Object.freeze({ bytes, sha256: bytes === null ? null : createHash('sha256').update(bytes).digest('hex'),
+          output, exit_code: exitCode, steps: steps.map(s => Object.freeze({ exit_code: s.exit_code, timed_out: s.timed_out })),
+          normalized_count: results?.length ?? 0 }));
+      } catch { observerFailed = true; throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
+    }
+  } finally {
+    try { if (scratch !== null) rmSync(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); }
+    catch (e) { if (observerFailed) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW'); throw e; }
+  }
   const expectExit = args.expectExit ?? 0;
 
   const label = args.label ?? args.kind;

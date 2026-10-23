@@ -10,6 +10,8 @@ import { redactText } from '../security/redact.js';
 import { isTestPath } from '../engine/tdd-history.js';
 import { runWorktreeSetup, setupEnvironment, setupInputs, type WorktreeSetupConfig } from '../engine/worktree-setup.js';
 import { moduleInvocation, runVerification } from '../evidence/runner.js';
+import { writeImmutable } from '../evidence/store.js';
+import type { RawReportSnapshot } from '../evidence/runner.js';
 import { canonicalTestId } from '../evidence/test-ids.js';
 import type { ClaimVerification } from '../model/types.js';
 import { boundChannelResponse, validProbeDiagnostic, type LiveClaim, type ProbeResult } from './codex-claim-channel.js';
@@ -80,6 +82,51 @@ function cloneDelta(before: string, after: string, scope: LiveClaim, nodePath: s
   return { refused, diagnostic: 'CLONE_DELTA=' + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map(p => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some(p => p.path.length > 256) }) };
 }
 
+/** Only hashes of redacted text and a fixed vocabulary may survive the clone. */
+function rawSummary(snapshot: RawReportSnapshot) {
+  if (!snapshot || (snapshot.bytes !== null && (!Buffer.isBuffer(snapshot.bytes) || snapshot.bytes.length > 64 * 1024 * 1024)) ||
+      (snapshot.bytes === null ? snapshot.sha256 !== null : hash(snapshot.bytes) !== snapshot.sha256) ||
+      typeof snapshot.output !== 'string' || !Number.isSafeInteger(snapshot.exit_code) ||
+      !Number.isSafeInteger(snapshot.normalized_count) || snapshot.normalized_count < 0 ||
+      !Array.isArray(snapshot.steps) ||
+      snapshot.steps.some(s => !Number.isSafeInteger(s.exit_code) || typeof s.timed_out !== 'boolean')) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW');
+  const fingerprint = (text: string) => {
+    const bytes = Buffer.from(redactText(text));
+    return { sha256: hash(bytes), bytes: bytes.length };
+  };
+  let doc: Record<string, unknown> | null = null;
+  if (snapshot.bytes !== null) {
+    try {
+      const value: unknown = JSON.parse(snapshot.bytes.toString('utf8'));
+      if (value && typeof value === 'object' && !Array.isArray(value) && Array.isArray((value as Record<string, unknown>).testResults)) doc = value as Record<string, unknown>;
+    } catch { /* Malformed bytes contribute no report metadata. */ }
+  }
+  const count = (key: string) => typeof doc?.[key] === 'number' && Number.isSafeInteger(doc[key]) && (doc[key] as number) >= 0 ? doc[key] as number : 0;
+  const errors: { type?: 'SyntaxError'; code?: 'ERR_MODULE_NOT_FOUND' | 'NO_TEST_FILES' }[] = [];
+  const messages: { sha256: string; bytes: number }[] = [];
+  if (Array.isArray(doc?.errors)) for (const value of doc.errors.slice(0, 16)) {
+    if (!value || typeof value !== 'object') continue;
+    const error = value as Record<string, unknown>;
+    const allowed: typeof errors[number] = {};
+    if (error.type === 'SyntaxError') allowed.type = 'SyntaxError';
+    if (error.code === 'ERR_MODULE_NOT_FOUND') allowed.code = 'ERR_MODULE_NOT_FOUND';
+    if (Object.keys(allowed).length) errors.push(allowed);
+    if (typeof error.message === 'string' && error.message.startsWith('No test files found ') &&
+        !errors.some(error => error.code === 'NO_TEST_FILES')) errors.push({ code: 'NO_TEST_FILES' });
+    if (typeof error.message === 'string') messages.push(fingerprint(error.message));
+  }
+  if (doc?.error && typeof doc.error === 'object' && !Array.isArray(doc.error)) {
+    const error = doc.error as Record<string, unknown>;
+    if (typeof error.message === 'string' && error.message.startsWith('No test files found ') &&
+        !errors.some(error => error.code === 'NO_TEST_FILES')) errors.push({ code: 'NO_TEST_FILES' });
+  }
+  return { runner: { exit_code: snapshot.exit_code, step_exit_codes: snapshot.steps.map(s => s.exit_code), normalized_count: snapshot.normalized_count },
+    raw: { status: snapshot.bytes === null ? 'missing' : doc === null ? 'malformed' : 'valid',
+      suite_count: count('numTotalTestSuites'), test_count: count('numTotalTests'), failed_suite_count: count('numFailedTestSuites'),
+      ...(doc !== null && snapshot.bytes !== null ? { report: fingerprint(snapshot.bytes.toString('utf8')) } : {}),
+      output: fingerprint(snapshot.output), messages }, errors };
+}
+
 export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification; setup: WorktreeSetupConfig | null;
   controlRoot: string; deadline: number; current: () => boolean; fixture: () => string | void }): ProbeResult {
   const fail = (output: string): ProbeResult => ({ exitCode: 2, output: boundChannelResponse({
@@ -140,8 +187,10 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
     const fixturePath = args.fixture();
     if (fixturePath) env.MYCELINK_AC5_FIXTURE = fixturePath;
     executed = true;
+    let summary: ReturnType<typeof rawSummary> | undefined;
     const record = runVerification({ kind: 'red', nodeId: scope.nodeId, repository: null, ...moduleInvocation(args.bound),
-      timeoutMs: Math.min(args.bound.plan.timeout_seconds * 1000, remaining()), cwd: clone, evidenceDir: evidence, label: 'probe', env, cleanEnv: true, reportScratchRoot: root });
+      timeoutMs: Math.min(args.bound.plan.timeout_seconds * 1000, remaining()), cwd: clone, evidenceDir: evidence, label: 'probe', env, cleanEnv: true, reportScratchRoot: root,
+      onRawReport: value => { if (summary) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW'); summary = rawSummary(value); } });
     let output = redactText(readFileSync(record.output_path, 'utf8')).slice(0, 32 * 1024);
     fixtureChecked = true;
     args.fixture();
@@ -162,7 +211,39 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
       typeof (t as Record<string, unknown>).file !== 'string' || typeof (t as Record<string, unknown>).full_name !== 'string' ||
       Buffer.byteLength((t as { file: string }).file) > 1024 || Buffer.byteLength((t as { full_name: string }).full_name) > 4096)) return fail('CHANNEL_PROBE_REPORT_INVALID:ENTRY');
     const tests = (doc.results ?? []).map((t: { test_id: string; file: string; full_name: string; status: string }) => ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
-    if (!tests.length) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY');
+    if (!tests.length) {
+      if (!summary) return fail('CHANNEL_PROBE_REPORT_INVALID:RAW');
+      // Preserve the existing refusal when normalized identities were altered after the run.
+      if (summary.runner.normalized_count !== 0) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY');
+      const segments = [scope.featureId, scope.nodeId, scope.claimId];
+      // An adapter claim may precede dispatch; preserve that absence explicitly in the private summary.
+      if (segments.some(s => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(s) || classifyRelativePath(s)) ||
+          !/^[a-f0-9]{64}$/.test(args.bound.plan_sha256) || !Number.isSafeInteger(scope.generation) ||
+          (scope.dispatchId !== undefined && (typeof scope.dispatchId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(scope.dispatchId)))) return fail('CHANNEL_PROBE_REPORT_INVALID:RAW');
+      const body = JSON.stringify({ schema: 'mycelink-probe-diagnostic/1', stage: 'IDENTITY:EMPTY',
+        claim: { id: scope.claimId, generation: scope.generation, dispatch_id: scope.dispatchId ?? null },
+        plan_sha256: args.bound.plan_sha256, timestamp: new Date().toISOString(), ...summary }) + '\n';
+      if (Buffer.byteLength(body) > 8192) return fail('CHANNEL_PROBE_REPORT_INVALID:RAW');
+      // Refuse links at every private directory component, including existing parents.
+      let dir = resolve(args.controlRoot);
+      for (const part of ['.mycelink', 'probe-diagnostics', ...segments]) {
+        dir = join(dir, part);
+        try { const st = lstatSync(dir); if (st.isSymbolicLink() || !st.isDirectory()) return fail('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return fail('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
+      }
+      remaining();
+      args.fixture();
+      if (!args.current() || snapshot(scope.worktree, args.deadline + 2_000) !== before) throw new Error('CHANNEL_CLAIM_STALE');
+      if (!args.current()) throw new Error('CHANNEL_CLAIM_STALE');
+      let kept;
+      try { kept = writeImmutable(dir, 'diagnostic', '.json', body); }
+      catch { return fail('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
+      let current = false;
+      try { current = args.current(); }
+      finally { if (!current && kept.created) rmSync(kept.file, { force: true }); }
+      if (!current) throw new Error('CHANNEL_CLAIM_STALE');
+      return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=' + kept.sha256);
+    }
     if (tests.length > 10_000) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:COUNT');
     if (tests.some((t: { path: string }) => classifyRelativePath(t.path) || t.path.split('/').includes('..'))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:PATH');
     if (tests.some((t: { id: string; path: string; full_name: string }) => t.id !== canonicalTestId(record.results!.format, t.path, t.full_name))) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:ID');

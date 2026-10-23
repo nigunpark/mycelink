@@ -14,6 +14,7 @@ import { ClaimChannel, type LiveClaim } from '../../src/sessions/codex-claim-cha
 import * as hostGate from '../../src/sessions/codex-host-gate.js';
 import type { ChannelResponse } from '../../src/sessions/codex-claim-channel.js';
 import { executeHostClaimGate } from '../../src/sessions/codex-host-gate.js';
+import { redactText } from '../../src/security/redact.js';
 import { canonicalTestId } from '../../src/evidence/test-ids.js';
 import { createHash } from 'node:crypto';
 import { CodexCliAdapter, windowsToWslPath } from '../../src/sessions/codex-cli-adapter.js';
@@ -1097,5 +1098,206 @@ describe('orchestrated Codex claims without a bound module verifier', () => {
         ? { ok: true, exitCode: 0, output: result.output }
         : { ok: false, code: 'CHANNEL_GATE_FAILED', exitCode: result.exitCode, output: result.output });
     } finally { intercepted.mockRestore(); host.mockRestore(); }
+  });
+});
+
+
+// Proposed transient runner seam. No caller-selected persistence path; bytes
+// exist only during the callback, before the runner removes its raw scratch.
+// These are new forensic contracts, not an explanation of historical c69.
+interface ProbeRawSnapshot {
+  bytes: Buffer | null;
+  sha256: string | null;
+  output: string;
+  exit_code: number;
+  steps: { exit_code: number; timed_out: boolean }[];
+  normalized_count: number;
+}
+type ProbeRunnerArgs = verificationRunner.RunVerificationArgs & {
+  onRawReport?: (snapshot: ProbeRawSnapshot) => void;
+};
+
+describe('empty-identity probe forensic sidecars', () => {
+  const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+  const privateMessage = 'token=probe-private-token C:/private/customer/project.test.ts /private/customer.env';
+  const rawFor = (kind: string) => JSON.stringify({ testResults: [], numTotalTestSuites: kind === 'no-tests' ? 0 : 3,
+    numTotalTests: 0, numFailedTestSuites: kind === 'no-tests' ? 0 : 2,
+    errors: [{ type: kind === 'syntax' ? 'SyntaxError' : 'Error',
+      code: kind === 'module' ? 'ERR_MODULE_NOT_FOUND' : 'PRIVATE_CODE',
+      message: (kind === 'no-tests' ? 'No test files found ' : '') + privateMessage }],
+    private_field: 'raw-only-private-value', name: 'private-test-name' });
+  async function emptyFixture(kind = 'syntax') {
+    const raw = kind === 'malformed' ? '{' + privateMessage : rawFor(kind);
+    const f = await fixture({}, [process.execPath, '-e', `
+      const fs = require('node:fs');
+      ${kind === 'missing' ? '' : `fs.writeFileSync(process.argv[1], ${JSON.stringify(raw)});`}
+      console.error(${JSON.stringify(privateMessage)});
+      process.exit(1);
+    `, '${REPORT}'], { report: { format: 'vitest-json' },
+      setup: [[process.execPath, '-e', 'process.exit(0)']], build: [] });
+    const dir = join(f.s.control, '.mycelink', 'probe-diagnostics', SHOP_FEATURE, ERRORS, f.claim.claimId);
+    const files = () => existsSync(dir) ? readdirSync(dir).sort() : [];
+    return { ...f, raw, dir, files };
+  }
+  function noHandles(result: unknown) {
+    for (const key of ['diagnostic', 'criterion_evidence', 'results', 'output_path', 'output_sha256',
+      'outputSha256', 'test_ids', 'testIds', 'accepted', 'acceptance', 'evidence']) expect(result).not.toHaveProperty(key);
+  }
+  it.each(['syntax', 'module', 'no-tests'])('persists only bounded immutable metadata for top-level %s with no identities', async kind => {
+    const f = await emptyFixture(kind);
+    const state = f.state();
+    const ledger = f.evidence();
+    const live = f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
+    const realRun = verificationRunner.runVerification;
+    let clone = '';
+    let snapshot: ProbeRawSnapshot | undefined;
+    let calls = 0;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      clone = args.cwd;
+      const hook = (args as ProbeRunnerArgs).onRawReport;
+      return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+        calls++;
+        snapshot = value;
+        hook?.(value);
+      } } as ProbeRunnerArgs);
+    });
+    let first: ReturnType<typeof f.probe>;
+    let second: ReturnType<typeof f.probe>;
+    let kept: Buffer | undefined;
+    let firstName = '';
+    try {
+      first = f.probe();
+      expect.soft(calls).toBe(1);
+      expect.soft(first.output).toMatch(/^CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=[a-f0-9]{64}$/);
+      const names = f.files();
+      expect(names).toHaveLength(1); // Native RED now: no sidecar exists.
+      firstName = names[0]!;
+      const target = join(f.dir, firstName);
+      kept = readFileSync(target);
+      expect(lstatSync(target).isFile()).toBe(true);
+      expect(lstatSync(target).isSymbolicLink()).toBe(false);
+      expect(kept.byteLength).toBeLessThanOrEqual(8192);
+      const id = digest(kept);
+      expect(first.output).toContain(`DIAGNOSTIC_ID=${id}`);
+      const doc = JSON.parse(kept.toString('utf8'));
+      expect(Object.keys(doc).sort()).toEqual(['claim', 'errors', 'plan_sha256', 'raw', 'runner', 'schema', 'stage', 'timestamp'].sort());
+      expect(live.dispatchId).toBeUndefined(); // fixture claims in adapter mode without dispatching
+      expect(doc).toMatchObject({ schema: 'mycelink-probe-diagnostic/1', stage: 'IDENTITY:EMPTY',
+        claim: { id: f.claim.claimId, generation: live.generation, dispatch_id: null },
+        runner: { exit_code: 1, step_exit_codes: [0], normalized_count: 0 },
+        raw: { status: 'valid', suite_count: kind === 'no-tests' ? 0 : 3, test_count: 0, failed_suite_count: kind === 'no-tests' ? 0 : 2,
+          report: { sha256: digest(redactText(f.raw)), bytes: Buffer.byteLength(redactText(f.raw)) },
+          output: { sha256: digest(snapshot!.output), bytes: Buffer.byteLength(snapshot!.output) },
+          messages: [{ sha256: digest(redactText((kind === 'no-tests' ? 'No test files found ' : '') + privateMessage)),
+            bytes: Buffer.byteLength(redactText((kind === 'no-tests' ? 'No test files found ' : '') + privateMessage)) }] },
+        errors: kind === 'syntax' ? [{ type: 'SyntaxError' }] : kind === 'module' ? [{ code: 'ERR_MODULE_NOT_FOUND' }] : [{ code: 'NO_TEST_FILES' }],
+      });
+      if (kind === 'no-tests') expect(doc.errors).toEqual([{ code: 'NO_TEST_FILES' }]);
+      expect(Object.keys(doc.claim).sort()).toEqual(['id', 'generation', 'dispatch_id'].sort());
+      expect(Object.keys(doc.runner).sort()).toEqual(['exit_code', 'step_exit_codes', 'normalized_count'].sort());
+      expect(doc.plan_sha256).toBe(shopState(f.s).nodes[ERRORS].claim!.verification!.plan_sha256);
+      expect(Number.isFinite(Date.parse(doc.timestamp))).toBe(true);
+      expect(Object.keys(doc.raw).sort()).toEqual(['status', 'suite_count', 'test_count', 'failed_suite_count', 'report', 'output', 'messages'].sort());
+      for (const value of [doc.raw.report, doc.raw.output, ...doc.raw.messages]) {
+        expect(Object.keys(value).sort()).toEqual(['bytes', 'sha256']);
+        expect(value.sha256).toMatch(/^[a-f0-9]{64}$/);
+        expect(Number.isSafeInteger(value.bytes)).toBe(true);
+      }
+      for (const forbidden of [privateMessage, 'probe-private-token', 'C:/private', '/private/customer',
+        'raw-only-private-value', 'private-test-name', 'PRIVATE_CODE', f.worktree, clone]) {
+        expect(kept.toString('utf8')).not.toContain(forbidden);
+        expect(first.output).not.toContain(forbidden);
+      }
+      expect(git(f.s.control, ['check-ignore', target])).not.toBe('');
+      second = f.probe();
+      noHandles(second);
+      expect(readFileSync(target)).toEqual(kept);
+      const secondId = second.output.match(/DIAGNOSTIC_ID=([a-f0-9]{64})$/)?.[1];
+      expect(secondId).toBeDefined();
+      expect(f.files().some(name => digest(readFileSync(join(f.dir, name))) === secondId)).toBe(true);
+    } finally { runner.mockRestore(); }
+    noHandles(first!);
+    expect(existsSync(dirname(clone))).toBe(false);
+    expect(f.state()).toBe(state);
+    expect(f.evidence()).toEqual(ledger);
+    expect(f.state()).not.toContain(firstName);
+    expect(f.state()).not.toContain(digest(kept!));
+  });
+
+  it.each(['malformed', 'missing'])('records static safe %s raw status without retaining invalid bytes', async kind => {
+    const f = await emptyFixture(kind);
+    const before = f.state();
+    const result = f.probe();
+    expect(result.output).toMatch(/^CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=[a-f0-9]{64}$/);
+    expect(f.files()).toHaveLength(1);
+    const bytes = readFileSync(join(f.dir, f.files()[0]!));
+    expect(bytes.byteLength).toBeLessThanOrEqual(8192);
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(doc.schema).toBe('mycelink-probe-diagnostic/1');
+    expect(doc.stage).toBe('IDENTITY:EMPTY');
+    expect(result.output).toContain(`DIAGNOSTIC_ID=${digest(bytes)}`);
+    expect(doc.raw.status).toBe(kind);
+    expect(doc.raw.messages).toEqual([]);
+    expect(doc.raw.suite_count).toBe(0);
+    expect(doc.raw.test_count).toBe(0);
+    expect(doc.raw.failed_suite_count).toBe(0);
+    expect(doc.errors).toEqual([]);
+    expect(doc.runner.normalized_count).toBe(0);
+    expect(bytes.toString()).not.toContain(privateMessage);
+    expect(result.output).not.toContain(privateMessage);
+    noHandles(result);
+    expect(f.state()).toBe(before);
+  });
+
+  it.each(['throws', 'wrong hash', 'oversize'])('fails closed on raw callback %s without sidecar or unsafe output', async kind => {
+    const f = await emptyFixture();
+    const before = f.state();
+    const realRun = verificationRunner.runVerification;
+    let clone = '';
+    let calls = 0;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      clone = args.cwd;
+      const hook = (args as ProbeRunnerArgs).onRawReport;
+      return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+        calls++;
+        if (kind === 'throws') throw new Error(privateMessage);
+        const bytes = kind === 'oversize' ? Buffer.alloc(64 * 1024 * 1024 + 1, 120) : value.bytes;
+        hook?.({ ...value, bytes, sha256: kind === 'wrong hash' ? '0'.repeat(64) : digest(bytes!) });
+      } } as ProbeRunnerArgs);
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); } finally { runner.mockRestore(); }
+    expect.soft(calls).toBe(1);
+    expect(result!).toEqual({ exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:RAW' });
+    expect(f.files()).toEqual([]);
+    expect(existsSync(dirname(clone))).toBe(false);
+    expect(f.state()).toBe(before);
+  });
+
+  it.each(['cancelled', 'generation', 'dispatch'] as const)('publishes no sidecar after %s changes during the real run', async kind => {
+    const f = await emptyFixture();
+    const scope = f.controller.codexClaimScope.bind(f.controller);
+    let changed = false;
+    const current = vi.spyOn(f.controller, 'codexClaimScope').mockImplementation((...args) => {
+      const live = scope(...args);
+      if (!changed || !live) return live;
+      return kind === 'cancelled' ? null : { ...live,
+        ...(kind === 'generation' ? { generation: (live.generation ?? 0) + 1 } : { dispatchId: 'different-dispatch' }) };
+    });
+    const realRun = verificationRunner.runVerification;
+    let clone = '';
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      clone = args.cwd;
+      const record = realRun(args);
+      changed = true;
+      return record;
+    });
+    const before = f.state();
+    try {
+      expect(f.probe()).toEqual({ exitCode: 2, output: 'CHANNEL_CLAIM_STALE' });
+      expect(f.files()).toEqual([]);
+      expect(existsSync(dirname(clone))).toBe(false);
+      expect(f.state()).toBe(before);
+    } finally { runner.mockRestore(); current.mockRestore(); }
   });
 });

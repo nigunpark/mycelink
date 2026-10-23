@@ -26801,35 +26801,62 @@ function runVerification(args) {
   const nodeJUnit = args.shellScript === void 0 && args.command?.length === 4 && args.command[0] === "node" && args.command[1] === "--test-reporter=junit" && args.command[2] === "--test-reporter-destination=${REPORT}" && /^tests\/[A-Za-z0-9_./-]+\.mjs$/.test(args.command[3] ?? "") && !args.command[3]?.split("/").includes("..");
   const report = args.report ?? (nodeJUnit ? { format: "junit-xml" } : null);
   const scratch = report !== null && report.dir === void 0 ? mkdtempSync3(join28(args.reportScratchRoot ?? tmpdir3(), "mycelink-report-")) : null;
-  const reportFile = scratch === null ? null : join28(scratch, report.format === "vitest-json" ? "report.json" : "report.xml");
-  const reportDir = report?.dir !== void 0 ? resolve11(cwd, report.dir) : null;
-  if (reportDir !== null) clearReportDir(cwd, reportDir);
-  const argv = args.shellScript !== void 0 || reportFile === null ? command : command.map((part) => part.split("${REPORT}").join(reportFile));
+  let results;
   let exitCode;
-  if (failedStep === null) {
-    const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
-    const proc = args.shellScript !== void 0 ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false }) : runCommandSync(argv, runOptions);
-    output += `$ ${command.join(" ")}
+  let finishedAt;
+  let observerFailed = false;
+  try {
+    const reportFile = scratch === null ? null : join28(scratch, report.format === "vitest-json" ? "report.json" : "report.xml");
+    const reportDir = report?.dir !== void 0 ? resolve11(cwd, report.dir) : null;
+    if (reportDir !== null) clearReportDir(cwd, reportDir);
+    const argv = args.shellScript !== void 0 || reportFile === null ? command : command.map((part) => part.split("${REPORT}").join(reportFile));
+    if (failedStep === null) {
+      const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
+      const proc = args.shellScript !== void 0 ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false }) : runCommandSync(argv, runOptions);
+      output += `$ ${command.join(" ")}
 (cwd: ${cwd})
 
 `;
-    output += proc.stdout;
-    output += proc.stderr;
-    if (proc.timedOut) output += `
+      output += proc.stdout;
+      output += proc.stderr;
+      if (proc.timedOut) output += `
 [mycelink] command timed out after ${timeoutMs} ms
 `;
-    if (proc.spawnError !== null) output += `
+      if (proc.spawnError !== null) output += `
 [mycelink] failed to start: ${proc.spawnError}
 `;
-    exitCode = proc.exitCode;
-    timedOut = proc.timedOut;
-  } else {
-    exitCode = failedStep.exit_code === 0 ? 1 : failedStep.exit_code;
+      exitCode = proc.exitCode;
+      timedOut = proc.timedOut;
+    } else {
+      exitCode = failedStep.exit_code === 0 ? 1 : failedStep.exit_code;
+    }
+    finishedAt = /* @__PURE__ */ new Date();
+    output = redactText(output);
+    results = report === null ? null : failedStep !== null ? [] : readReport(report, reportFile, reportDir, cwd, args.module?.path ?? null);
+    if (args.onRawReport) {
+      try {
+        const bytes2 = reportFile === null || failedStep !== null ? null : readRegular(reportFile, MAX_REPORT_BYTES)?.bytes ?? null;
+        args.onRawReport(Object.freeze({
+          bytes: bytes2,
+          sha256: bytes2 === null ? null : createHash21("sha256").update(bytes2).digest("hex"),
+          output,
+          exit_code: exitCode,
+          steps: steps.map((s) => Object.freeze({ exit_code: s.exit_code, timed_out: s.timed_out })),
+          normalized_count: results?.length ?? 0
+        }));
+      } catch {
+        observerFailed = true;
+        throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
+      }
+    }
+  } finally {
+    try {
+      if (scratch !== null) rmSync8(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    } catch (e) {
+      if (observerFailed) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
+      throw e;
+    }
   }
-  const finishedAt = /* @__PURE__ */ new Date();
-  output = redactText(output);
-  const results = report === null ? null : failedStep !== null ? [] : readReport(report, reportFile, reportDir, cwd, args.module?.path ?? null);
-  if (scratch !== null) rmSync8(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   const expectExit = args.expectExit ?? 0;
   const label = args.label ?? args.kind;
   const stored = writeImmutable(evidenceDir, safe2(label), ".log", output);
@@ -30714,6 +30741,51 @@ function cloneDelta(before, after, scope, nodePath) {
   const refused = metadata.some((p) => p.path === "status" ? !disposableDelta : p.path !== "indexFile") || changes.some((p) => !p.disposable);
   return { refused, diagnostic: "CLONE_DELTA=" + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map((p) => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some((p) => p.path.length > 256) }) };
 }
+function rawSummary(snapshot4) {
+  if (!snapshot4 || snapshot4.bytes !== null && (!Buffer.isBuffer(snapshot4.bytes) || snapshot4.bytes.length > 64 * 1024 * 1024) || (snapshot4.bytes === null ? snapshot4.sha256 !== null : hash(snapshot4.bytes) !== snapshot4.sha256) || typeof snapshot4.output !== "string" || !Number.isSafeInteger(snapshot4.exit_code) || !Number.isSafeInteger(snapshot4.normalized_count) || snapshot4.normalized_count < 0 || !Array.isArray(snapshot4.steps) || snapshot4.steps.some((s) => !Number.isSafeInteger(s.exit_code) || typeof s.timed_out !== "boolean")) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
+  const fingerprint = (text) => {
+    const bytes2 = Buffer.from(redactText(text));
+    return { sha256: hash(bytes2), bytes: bytes2.length };
+  };
+  let doc = null;
+  if (snapshot4.bytes !== null) {
+    try {
+      const value = JSON.parse(snapshot4.bytes.toString("utf8"));
+      if (value && typeof value === "object" && !Array.isArray(value) && Array.isArray(value.testResults)) doc = value;
+    } catch {
+    }
+  }
+  const count = (key) => typeof doc?.[key] === "number" && Number.isSafeInteger(doc[key]) && doc[key] >= 0 ? doc[key] : 0;
+  const errors = [];
+  const messages = [];
+  if (Array.isArray(doc?.errors)) for (const value of doc.errors.slice(0, 16)) {
+    if (!value || typeof value !== "object") continue;
+    const error = value;
+    const allowed = {};
+    if (error.type === "SyntaxError") allowed.type = "SyntaxError";
+    if (error.code === "ERR_MODULE_NOT_FOUND") allowed.code = "ERR_MODULE_NOT_FOUND";
+    if (Object.keys(allowed).length) errors.push(allowed);
+    if (typeof error.message === "string" && error.message.startsWith("No test files found ") && !errors.some((error2) => error2.code === "NO_TEST_FILES")) errors.push({ code: "NO_TEST_FILES" });
+    if (typeof error.message === "string") messages.push(fingerprint(error.message));
+  }
+  if (doc?.error && typeof doc.error === "object" && !Array.isArray(doc.error)) {
+    const error = doc.error;
+    if (typeof error.message === "string" && error.message.startsWith("No test files found ") && !errors.some((error2) => error2.code === "NO_TEST_FILES")) errors.push({ code: "NO_TEST_FILES" });
+  }
+  return {
+    runner: { exit_code: snapshot4.exit_code, step_exit_codes: snapshot4.steps.map((s) => s.exit_code), normalized_count: snapshot4.normalized_count },
+    raw: {
+      status: snapshot4.bytes === null ? "missing" : doc === null ? "malformed" : "valid",
+      suite_count: count("numTotalTestSuites"),
+      test_count: count("numTotalTests"),
+      failed_suite_count: count("numFailedTestSuites"),
+      ...doc !== null && snapshot4.bytes !== null ? { report: fingerprint(snapshot4.bytes.toString("utf8")) } : {},
+      output: fingerprint(snapshot4.output),
+      messages
+    },
+    errors
+  };
+}
 function runClaimProbe(args) {
   const fail = (output) => ({ exitCode: 2, output: boundChannelResponse({
     ok: true,
@@ -30791,6 +30863,7 @@ function runClaimProbe(args) {
     const fixturePath = args.fixture();
     if (fixturePath) env.MYCELINK_AC5_FIXTURE = fixturePath;
     executed = true;
+    let summary;
     const record = runVerification({
       kind: "red",
       nodeId: scope.nodeId,
@@ -30802,7 +30875,11 @@ function runClaimProbe(args) {
       label: "probe",
       env,
       cleanEnv: true,
-      reportScratchRoot: root
+      reportScratchRoot: root,
+      onRawReport: (value) => {
+        if (summary) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
+        summary = rawSummary(value);
+      }
     });
     let output = redactText(readFileSync27(record.output_path, "utf8")).slice(0, 32 * 1024);
     fixtureChecked = true;
@@ -30824,7 +30901,49 @@ function runClaimProbe(args) {
     if (doc === null || typeof doc !== "object" || doc.schema !== "mycelink-test-results/1" || doc.format !== record.results.format || !Array.isArray(doc.results)) return fail("CHANNEL_PROBE_REPORT_INVALID:FORMAT");
     if (doc.results.some((t) => !t || typeof t !== "object" || typeof t.file !== "string" || typeof t.full_name !== "string" || Buffer.byteLength(t.file) > 1024 || Buffer.byteLength(t.full_name) > 4096)) return fail("CHANNEL_PROBE_REPORT_INVALID:ENTRY");
     const tests = (doc.results ?? []).map((t) => ({ id: t.test_id, path: t.file, full_name: t.full_name, status: t.status }));
-    if (!tests.length) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY");
+    if (!tests.length) {
+      if (!summary) return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
+      if (summary.runner.normalized_count !== 0) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY");
+      const segments2 = [scope.featureId, scope.nodeId, scope.claimId];
+      if (segments2.some((s) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(s) || classifyRelativePath(s)) || !/^[a-f0-9]{64}$/.test(args.bound.plan_sha256) || !Number.isSafeInteger(scope.generation) || scope.dispatchId !== void 0 && (typeof scope.dispatchId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(scope.dispatchId))) return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
+      const body = JSON.stringify({
+        schema: "mycelink-probe-diagnostic/1",
+        stage: "IDENTITY:EMPTY",
+        claim: { id: scope.claimId, generation: scope.generation, dispatch_id: scope.dispatchId ?? null },
+        plan_sha256: args.bound.plan_sha256,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        ...summary
+      }) + "\n";
+      if (Buffer.byteLength(body) > 8192) return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
+      let dir = resolve19(args.controlRoot);
+      for (const part of [".mycelink", "probe-diagnostics", ...segments2]) {
+        dir = join40(dir, part);
+        try {
+          const st = lstatSync17(dir);
+          if (st.isSymbolicLink() || !st.isDirectory()) return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
+        } catch (e) {
+          if (e.code !== "ENOENT") return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
+        }
+      }
+      remaining();
+      args.fixture();
+      if (!args.current() || snapshot3(scope.worktree, args.deadline + 2e3) !== before) throw new Error("CHANNEL_CLAIM_STALE");
+      if (!args.current()) throw new Error("CHANNEL_CLAIM_STALE");
+      let kept;
+      try {
+        kept = writeImmutable(dir, "diagnostic", ".json", body);
+      } catch {
+        return fail("CHANNEL_PROBE_REPORT_INVALID:RAW");
+      }
+      let current = false;
+      try {
+        current = args.current();
+      } finally {
+        if (!current && kept.created) rmSync13(kept.file, { force: true });
+      }
+      if (!current) throw new Error("CHANNEL_CLAIM_STALE");
+      return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=" + kept.sha256);
+    }
     if (tests.length > 1e4) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:COUNT");
     if (tests.some((t) => classifyRelativePath(t.path) || t.path.split("/").includes(".."))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:PATH");
     if (tests.some((t) => t.id !== canonicalTestId(record.results.format, t.path, t.full_name))) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:ID");

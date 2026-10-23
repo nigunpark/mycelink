@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
@@ -261,5 +261,110 @@ describe('runVerification', () => {
     });
     expect(record.baseline_excluded).toEqual(['legacy/flaky.test.js']);
     expect(record.failure_fingerprint).toBeNull();
+  });
+});
+
+
+// Proposed optional observer; no raw persistence and no caller-selected report
+// path. Keeping this local permits native RED before the source API exists.
+type RawReportObservation = {
+  bytes: Buffer | null;
+  sha256: string | null;
+  output: string;
+  exit_code: number;
+  steps: { exit_code: number; timed_out: boolean }[];
+  normalized_count: number;
+};
+type ObservedVerificationArgs = Parameters<typeof runVerification>[0] & {
+  onRawReport?: (snapshot: RawReportObservation) => void;
+};
+
+describe('runner optional transient raw-report observer', () => {
+  it('calls the observer once after normalization while raw scratch still exists and removes it before return', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-lifetime-');
+    const raw = JSON.stringify({ testResults: [], errors: [{ type: 'SyntaxError',
+      message: 'token=private-runner-token C:/private/source.ts' }] });
+    const observations: RawReportObservation[] = [];
+    let rawPath = '';
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      cleanEnv: true, reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      steps: [[process.execPath, '-e', 'process.exit(0)']],
+      command: [process.execPath, '-e', `require('node:fs').writeFileSync(process.argv[1], ${JSON.stringify(raw)}); process.exit(1)`, '${REPORT}'],
+      onRawReport: snapshot => {
+        observations.push(snapshot);
+        const dirs = readdirSync(scratch);
+        expect(dirs).toHaveLength(1);
+        rawPath = join(scratch, dirs[0]!, 'report.json');
+        expect(readFileSync(rawPath)).toEqual(Buffer.from(raw));
+        expect(snapshot.bytes).toEqual(Buffer.from(raw));
+        expect(snapshot.sha256).toBe(createHash('sha256').update(raw).digest('hex'));
+        expect(snapshot).toMatchObject({ exit_code: 1, normalized_count: 0,
+          steps: [expect.objectContaining({ exit_code: 0, timed_out: false })] });
+        expect(snapshot).not.toHaveProperty('path');
+      },
+    };
+    const record = runVerification(args);
+    expect(observations).toHaveLength(1); // Missing hook is the intended native RED.
+    expect(rawPath).not.toBe('');
+    expect(existsSync(rawPath)).toBe(false);
+    expect(readdirSync(scratch)).toEqual([]);
+    expect(record.results).toMatchObject({ total: 0, format: 'vitest-json' });
+    expect(record).not.toHaveProperty('raw');
+    expect(record).not.toHaveProperty('diagnostic');
+    expect(readdirSync(evidence).sort()).toEqual([
+      record.output_path.split(/[\\/]/).at(-1)!, record.results!.path.split(/[\\/]/).at(-1)!,
+    ].sort());
+  });
+
+  it.each(['malformed', 'missing'])('observes %s raw without inventing normalized identities and cleans scratch', kind => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-unavailable-');
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      command: [process.execPath, '-e', kind === 'missing' ? 'process.exit(1)' :
+        "require('node:fs').writeFileSync(process.argv[1], '{invalid'); process.exit(1)", '${REPORT}'],
+      onRawReport: value => { seen.push(value); },
+    };
+    const record = runVerification(args);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ bytes: kind === 'missing' ? null : Buffer.from('{invalid'),
+      sha256: kind === 'missing' ? null : createHash('sha256').update('{invalid').digest('hex'), normalized_count: 0 });
+    expect(record.results?.total).toBe(0);
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+
+  it('turns an observer exception into a static failure and still deletes raw scratch', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-throw-');
+    let calls = 0;
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      command: [process.execPath, '-e', "require('node:fs').writeFileSync(process.argv[1], '{\"testResults\":[]}')", '${REPORT}'],
+      onRawReport: () => { calls++; throw new Error('token=private-exception C:/private/source.ts'); },
+    };
+    expect(() => runVerification(args)).toThrowError(/^CHANNEL_PROBE_REPORT_INVALID:RAW$/);
+    expect(calls).toBe(1);
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+
+  it('keeps ordinary accepted verification unchanged with no observer or diagnostic artifacts', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-ordinary-');
+    const raw = JSON.stringify({ testResults: [{ name: join(repo, 'tests/ordinary.test.ts'),
+      status: 'passed', assertionResults: [{ title: 'ordinary', fullName: 'ordinary', status: 'passed', ancestorTitles: [] }] }] });
+    const record = runVerification({ kind: 'green', nodeId: 'N', repository: null, cwd: repo,
+      evidenceDir: evidence, reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      command: [process.execPath, '-e', `require('node:fs').writeFileSync(process.argv[1], ${JSON.stringify(raw)})`, '${REPORT}'] });
+    expect(record.exit_code).toBe(0);
+    expect(record.results).toMatchObject({ total: 1, passed: 1, failed: 0 });
+    expect(record).not.toHaveProperty('diagnostic');
+    expect(record).not.toHaveProperty('raw');
+    expect(readdirSync(evidence)).toHaveLength(2);
+    expect(readdirSync(scratch)).toEqual([]);
   });
 });
