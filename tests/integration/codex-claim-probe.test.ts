@@ -1318,8 +1318,8 @@ describe('empty-identity probe forensic sidecars', () => {
 
 // Controlled launch failures only; these do not diagnose historical probes.
 // Stable extension: test_command contains a static code, last_error, and at most
-// twelve last nonempty redacted-line hashes with byte lengths; never excerpts.
-// No excerpt or arbitrary CODE is persisted. last_error hashes the final
+// twelve last nonempty redacted-line hashes with byte lengths. An optional
+// excerpt uses only closed static templates. last_error hashes the final
 // nonblank test-output line after redactText, capped to its last 1024 bytes.
 describe('missing-report isolated test-command classification', () => {
   const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -1430,7 +1430,8 @@ describe('missing-report isolated test-command classification', () => {
     const nonempty = (redactedOutput ?? '').split(/\r?\n/).filter(line => line.trim() !== '');
     const bounded = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
     const lines = nonempty.slice(-12).map(line => ({ sha256: hash(line), bytes: Buffer.byteLength(line) }));
-    expectPrivateText(JSON.stringify(doc.test_command), JSON.stringify({ code,
+    const { sanitized_excerpt: _excerpt, ...fingerprints } = doc.test_command;
+    expectPrivateText(JSON.stringify(fingerprints), JSON.stringify({ code,
       last_error: { sha256: hash(bounded), bytes: bounded.byteLength }, lines }));
     expect(Array.isArray(doc.test_command?.lines)).toBe(true);
     expect(doc.test_command?.lines?.length ?? Infinity).toBeLessThanOrEqual(12);
@@ -1438,7 +1439,7 @@ describe('missing-report isolated test-command classification', () => {
     const live = f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
     expectPrivateText(JSON.stringify(doc.claim), JSON.stringify({ id: f.claim.claimId,
       generation: live.generation, dispatch_id: live.dispatchId ?? null }));
-    expect(Buffer.byteLength(JSON.stringify(doc.test_command))).toBeLessThanOrEqual(2048);
+    expect(Buffer.byteLength(JSON.stringify(fingerprints))).toBeLessThanOrEqual(2048);
     expect(Object.keys(doc.raw).sort()).toEqual(['status', 'suite_count', 'test_count', 'failed_suite_count', 'output', 'messages'].sort());
     expect(doc.raw.status).toBe('missing');
     expectPrivateText(JSON.stringify(doc.raw.messages), '[]');
@@ -1458,6 +1459,128 @@ describe('missing-report isolated test-command classification', () => {
     expect(f.state()).toBe(before);
     expect(f.evidence()).toEqual(ledger);
     for (const key of ['diagnostic', 'results', 'criterion_evidence', 'output_path']) expect(result).not.toHaveProperty(key);
+  });
+
+  // This exact finite vocabulary is the entire permitted excerpt surface. No
+  // dynamic message, path, function, code, test name, or environment name survives.
+  const excerptVocabulary = new Set([
+    'Error [ERR_MODULE_NOT_FOUND]: <redacted>',
+    'TypeError: <redacted>',
+    'at node:internal/<redacted>',
+    'UNKNOWN',
+  ]);
+  const excerptCanaries = [
+    'token=unregistered-canary-secret', 'unregistered-canary-secret',
+    'amber orbit velvet', 'amber', 'orbit', 'velvet',
+    '"quoted private path"', '`backtick private content`',
+    'C:\\private\\secret.ts', '/mnt/c/private/secret.ts', '/private/secret.env',
+    'person@private.invalid', 'arbitrary raw message', 'private synthetic test name',
+    'PRIVATE_SYNTHETIC_ENV_KEY', 'setup-only', 'build-only',
+  ];
+  const excerptPoison = excerptCanaries.slice(0, -2).join(' ') + '\x1b[31m\x07\x00\x1b[0m';
+
+  it.each(['module', 'type', 'bounded'] as const)('keeps a useful closed static %s excerpt private, bounded and immutable', async kind => {
+    const marker = kind === 'type' ? 'TypeError: <redacted>' : 'Error [ERR_MODULE_NOT_FOUND]: <redacted>';
+    const error = kind === 'type' ? 'TypeError: ' : 'Error [ERR_MODULE_NOT_FOUND]: ';
+    const text = '\x1b[31m' + error + excerptPoison + '\x1b[0m\n' +
+      Array.from({ length: kind === 'bounded' ? 30 : 2 }, () =>
+        '    at node:internal/modules/esm/resolve:123:45').join('\n') +
+      '\n    at privateFunction (C:\\private\\secret.ts:1:2)\n' +
+      '    at privateFunction (/mnt/c/private/secret.ts:1:2)\n' +
+      '    at privateFunction (/private/secret.env:1:2)\n' +
+      'arbitrary raw message\nprivate synthetic test name\nPRIVATE_SYNTHETIC_ENV_KEY=amber orbit velvet\n';
+    const f = await launch(text);
+    const before = f.state();
+    const ledger = f.evidence();
+    const response = f.probe();
+    expect(response.exitCode).toBe(2);
+    expect(/^CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=[a-f0-9]{64}$/.test(response.output)).toBe(true);
+    const names = f.files();
+    expect(names.length === 1).toBe(true);
+    const target = join(f.dir, names[0]!);
+    const bytes = readFileSync(target);
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(doc.raw.status === 'missing' && doc.stage === 'IDENTITY:EMPTY' && doc.runner.exit_code === 1).toBe(true);
+    const excerpt: unknown = doc.test_command?.sanitized_excerpt;
+    // Missing feature is RED here; avoid dereferencing it into a harness error.
+    expect.soft(typeof excerpt === 'string').toBe(true);
+    if (typeof excerpt === 'string') {
+      const lines = excerpt.split('\n');
+      expect(lines.length > 0 && lines.length <= 6).toBe(true);
+      expect(Buffer.byteLength(excerpt) <= 1024).toBe(true);
+      expect(lines.every(line => excerptVocabulary.has(line))).toBe(true);
+      expect(lines.includes(marker)).toBe(true);
+      expect(lines.includes('at node:internal/<redacted>')).toBe(true);
+      expect(/[\x00-\x09\x0b-\x1f\x7f]/.test(excerpt)).toBe(false);
+      expectPrivateText(excerpt, redactText(excerpt));
+      expect(JSON.stringify(response).includes(excerpt)).toBe(false);
+    }
+    expect(bytes.byteLength <= 8192).toBe(true);
+    expect(response.output.includes(`DIAGNOSTIC_ID=${hash(bytes)}`)).toBe(true);
+    expect(lstatSync(target).isFile() && !lstatSync(target).isSymbolicLink()).toBe(true);
+    for (const canary of [...excerptCanaries, f.worktree]) {
+      expect(bytes.toString('utf8').includes(canary)).toBe(false);
+      expect(JSON.stringify(response).includes(canary)).toBe(false);
+    }
+    expect(f.probe().exitCode).toBe(2);
+    expectPrivateText(readFileSync(target, 'utf8'), bytes.toString('utf8'));
+    for (const key of ['sanitized_excerpt', 'test_command', 'diagnostic', 'results', 'criterion_evidence', 'output_path']) {
+      expect(Object.hasOwn(response, key)).toBe(false);
+    }
+    expectPrivateText(f.state(), before);
+    expect(f.evidence()).toEqual(ledger);
+  });
+
+  it.each([
+    'amber orbit velvet',
+    'test name mentions TypeError: amber orbit velvet',
+    'test name mentions Error [ERR_MODULE_NOT_FOUND]: amber orbit velvet',
+    '"Error [ERR_MODULE_NOT_FOUND]: amber orbit velvet"',
+    '`TypeError: amber orbit velvet`',
+    'at privateFunction (/private/secret.env:1:2)',
+    '$ Error [ERR_MODULE_NOT_FOUND]: amber orbit velvet\n(cwd: /private/secret.env)',
+  ])('omits or uses fixed UNKNOWN for unrecognized content %#', async text => {
+    const f = await launch(text + '\n' + excerptPoison);
+    const before = f.state();
+    const ledger = f.evidence();
+    const response = f.probe();
+    expect(response.exitCode).toBe(2);
+    expect(f.files().length === 1).toBe(true);
+    const bytes = readFileSync(join(f.dir, f.files()[0]!));
+    const doc = JSON.parse(bytes.toString('utf8'));
+    const excerpt: unknown = doc.test_command?.sanitized_excerpt;
+    expect(excerpt === undefined || excerpt === 'UNKNOWN').toBe(true);
+    for (const canary of excerptCanaries) {
+      expect(bytes.toString('utf8').includes(canary)).toBe(false);
+      expect(JSON.stringify(response).includes(canary)).toBe(false);
+    }
+    expectPrivateText(f.state(), before);
+    expect(f.evidence()).toEqual(ledger);
+  });
+
+  it('never adds an excerpt for valid raw even with a recognized test-command exception', async () => {
+    const raw = JSON.stringify({ testResults: [], numTotalTests: 0, numTotalTestSuites: 0, numFailedTestSuites: 0 });
+    const f = await fixture({}, [process.execPath, '-e',
+      `require('node:fs').writeFileSync(process.argv[1], ${JSON.stringify(raw)});` +
+      `console.error(${JSON.stringify('Error [ERR_MODULE_NOT_FOUND]: ' + excerptPoison + '\n    at node:internal/modules/esm/resolve:1:2')});process.exitCode=1;`,
+      '${REPORT}'], { report: { format: 'vitest-json' } });
+    const before = f.state();
+    const ledger = f.evidence();
+    const response = f.probe();
+    const dir = join(f.s.control, '.mycelink', 'probe-diagnostics', SHOP_FEATURE, ERRORS, f.claim.claimId);
+    const names = existsSync(dir) ? readdirSync(dir) : [];
+    expect(names.length === 1).toBe(true);
+    const bytes = readFileSync(join(dir, names[0]!));
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(response.exitCode === 2 && doc.raw.status === 'valid').toBe(true);
+    expect(Object.hasOwn(doc, 'test_command')).toBe(false);
+    expect(bytes.toString('utf8').includes('sanitized_excerpt')).toBe(false);
+    for (const canary of excerptCanaries) {
+      expect(bytes.toString('utf8').includes(canary)).toBe(false);
+      expect(JSON.stringify(response).includes(canary)).toBe(false);
+    }
+    expectPrivateText(f.state(), before);
+    expect(f.evidence()).toEqual(ledger);
   });
 
   it.each(['object', 'oversize', 'missing'] as const)('fails closed on %s test-command callback data', async kind => {

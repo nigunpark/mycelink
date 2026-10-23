@@ -82,6 +82,35 @@ function cloneDelta(before: string, after: string, scope: LiveClaim, nodePath: s
   return { refused, diagnostic: 'CLONE_DELTA=' + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map(p => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some(p => p.path.length > 256) }) };
 }
 
+/** Render literals only; no dynamic substring may survive, even ordinary prose. */
+function testCommandExcerpt(output: string | null): string | undefined {
+  const vocabulary = new Set([
+    'Error [ERR_MODULE_NOT_FOUND]: <redacted>',
+    'TypeError: <redacted>',
+    'at node:internal/<redacted>',
+    'UNKNOWN',
+  ]);
+  const lines: string[] = [];
+  for (const raw of (output ?? '').split(/\r\n|[\r\n]/)) {
+    const line = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+    if (lines.length === 0) {
+      // Suppress the entire suffix, including paths, quoted values, emails,
+      // token/key-shaped words and unquoted multiword values, with one literal.
+      if (/^Error \[ERR_MODULE_NOT_FOUND\]: .*$/.test(line)) lines.push('Error [ERR_MODULE_NOT_FOUND]: <redacted>');
+      else if (/^TypeError: .*$/.test(line)) lines.push('TypeError: <redacted>');
+    } else if (/^    at node:internal\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+(?:\.[cm]?js)?:[0-9]+:[0-9]+$/.test(line)) {
+      lines.push('at node:internal/<redacted>');
+    }
+    if (lines.length === 6) break;
+  }
+  if (lines.length === 0) return undefined;
+  const excerpt = lines.join('\n');
+  const redacted = redactText(excerpt);
+  if (redacted !== excerpt || Buffer.byteLength(redacted) > 1024 ||
+      redacted.split('\n').length > 6 || !redacted.split('\n').every(line => vocabulary.has(line))) return undefined;
+  return redacted;
+}
+
 /** Only hashes of redacted text and a fixed vocabulary may survive the clone. */
 function testCommandSummary(output: string | null) {
   const text = redactText(output ?? '');
@@ -107,7 +136,9 @@ function testCommandSummary(output: string | null) {
     classified.map(line => standalone.exec(line)?.[1]).find(value => value !== undefined) ??
     (/^Node\.js v[0-9]+\.[0-9]+\.[0-9]+$/.test(classified.at(-1) ?? '') ? 'NODE_FATAL_UNKNOWN' : 'UNKNOWN');
   const last = Buffer.from(nonempty.at(-1) ?? '').subarray(-1024);
+  const sanitizedExcerpt = testCommandExcerpt(output);
   return { code, last_error: { sha256: hash(last), bytes: last.length },
+    ...(sanitizedExcerpt !== undefined ? { sanitized_excerpt: sanitizedExcerpt } : {}),
     lines: nonempty.slice(-12).map(line => {
       const bytes = Buffer.from(line);
       return { sha256: hash(bytes), bytes: bytes.length };
