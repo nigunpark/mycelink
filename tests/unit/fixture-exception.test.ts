@@ -20,7 +20,7 @@ function fixture(manifestName = 'frozen-build.json', baselineName = 'frozen-buil
   const control = join(root, 'control'), baseline = join(root, baselineName);
   mkdirSync(control); mkdirSync(baseline);
   const git = (...a: string[]) => execFileSync('git', ['-C', baseline, ...a], { encoding: 'utf8' }).trim();
-  git('init', '-q'); git('config', 'user.email', 'fixture@example.test'); git('config', 'user.name', 'Fixture');
+  git('init', '-q'); git('config', 'user.email', 'fixture@example.com'); git('config', 'user.name', 'Fixture');
   writeFileSync(join(baseline, 'pnpm-lock.yaml'), 'fixture lock\n');
   git('add', '.'); git('commit', '-qm', 'fixture');
   const manifest = join(root, manifestName);
