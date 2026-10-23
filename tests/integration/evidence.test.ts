@@ -10,9 +10,20 @@ import {
   runVerification,
 } from '../../src/evidence/runner.js';
 import { validateAgainstSchema } from '../../src/schema/registry.js';
+import { redactText } from '../../src/security/redact.js';
 import { readGateTests } from '../../src/evidence/gate-tests.js';
 
 afterAll(() => cleanupTmpRoots());
+
+// Assert only metadata so failed assertions cannot print private fixture output.
+function expectPrivateText(actual: unknown, expected: string) {
+  expect.soft(typeof actual === 'string').toBe(true);
+  if (typeof actual !== 'string') return;
+  expect.soft(createHash('sha256').update(actual).digest('hex'))
+    .toBe(createHash('sha256').update(expected).digest('hex'));
+  expect.soft(Buffer.byteLength(actual)).toBe(Buffer.byteLength(expected));
+}
+
 
 function workspace(files: Record<string, string> = {}): { repo: string; evidence: string } {
   const dir = makeTmpDir('ev-');
@@ -138,7 +149,7 @@ describe('runVerification', () => {
     expect(createHash('sha256').update(readFileSync(record.output_path)).digest('hex')).toBe(
       record.output_sha256,
     );
-    expect(JSON.stringify(record)).not.toContain('hello-evidence');
+    expect(JSON.stringify(record).includes('hello-evidence')).toBe(false);
   });
 
   it('records a failing command with a fingerprint and a RED classification', () => {
@@ -268,6 +279,7 @@ describe('runVerification', () => {
 // Proposed optional observer; no raw persistence and no caller-selected report
 // path. Keeping this local permits native RED before the source API exists.
 type RawReportObservation = {
+  test_command_output?: string | null;
   bytes: Buffer | null;
   sha256: string | null;
   output: string;
@@ -297,8 +309,9 @@ describe('runner optional transient raw-report observer', () => {
         const dirs = readdirSync(scratch);
         expect(dirs).toHaveLength(1);
         rawPath = join(scratch, dirs[0]!, 'report.json');
-        expect(readFileSync(rawPath)).toEqual(Buffer.from(raw));
-        expect(snapshot.bytes).toEqual(Buffer.from(raw));
+        expectPrivateText(readFileSync(rawPath, 'utf8'), raw);
+        expect(Buffer.isBuffer(snapshot.bytes)).toBe(true);
+        if (Buffer.isBuffer(snapshot.bytes)) expectPrivateText(snapshot.bytes.toString('utf8'), raw);
         expect(snapshot.sha256).toBe(createHash('sha256').update(raw).digest('hex'));
         expect(snapshot).toMatchObject({ exit_code: 1, normalized_count: 0,
           steps: [expect.objectContaining({ exit_code: 0, timed_out: false })] });
@@ -306,7 +319,7 @@ describe('runner optional transient raw-report observer', () => {
       },
     };
     const record = runVerification(args);
-    expect(observations).toHaveLength(1); // Missing hook is the intended native RED.
+    expect(observations.length).toBe(1); // Missing hook is the intended native RED.
     expect(rawPath).not.toBe('');
     expect(existsSync(rawPath)).toBe(false);
     expect(readdirSync(scratch)).toEqual([]);
@@ -330,7 +343,7 @@ describe('runner optional transient raw-report observer', () => {
       onRawReport: value => { seen.push(value); },
     };
     const record = runVerification(args);
-    expect(seen).toHaveLength(1);
+    expect(seen.length).toBe(1);
     expect(seen[0]).toMatchObject({ bytes: kind === 'missing' ? null : Buffer.from('{invalid'),
       sha256: kind === 'missing' ? null : createHash('sha256').update('{invalid').digest('hex'), normalized_count: 0 });
     expect(record.results?.total).toBe(0);
@@ -366,5 +379,71 @@ describe('runner optional transient raw-report observer', () => {
     expect(record).not.toHaveProperty('raw');
     expect(readdirSync(evidence)).toHaveLength(2);
     expect(readdirSync(scratch)).toEqual([]);
+  });
+});
+
+
+// Extension contract: optional, transient, redacted stdout + stderr of the test
+// process only. Null means it never ran; cap at the last 64KiB after redaction.
+// Headers and setup output cannot be recovered safely by parsing delimiters.
+describe('runner isolated test-command observation', () => {
+  it('redacts test stdout/stderr before observation and excludes setup, build and command headers', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('command-observer-');
+    const stdout = 'TEST_STDOUT\n$ forged command\n(cwd: forged)\n';
+    const stderr = 'SyntaxError: token=arbitrary-observer-secret sk-' + 'a'.repeat(30) + '\n';
+    writeFileSync(join(repo, 'child.cjs'), `process.stdout.write(${JSON.stringify(stdout)}); process.stderr.write(${JSON.stringify(stderr)}); process.exit(1);`);
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      steps: [[process.execPath, '-e', 'console.error("Error: ENOENT: setup-only")'],
+        [process.execPath, '-e', 'console.error("Error: EPERM: build-only")']],
+      command: [process.execPath, 'child.cjs', '${REPORT}'],
+      onRawReport: value => { seen.push(value); },
+    };
+    const record = runVerification(args);
+    expect(seen.length).toBe(1);
+    expectPrivateText(seen[0]?.test_command_output, redactText(stdout + stderr));
+    expect(seen[0]!.test_command_output.includes('sk-' + 'a'.repeat(30))).toBe(false);
+    expect(seen[0]!.output.includes('setup-only')).toBe(true);
+    expect(seen[0]!.output.includes('build-only')).toBe(true);
+    expect(seen[0]!.output.includes('child.cjs')).toBe(true);
+    expect(record).not.toHaveProperty('test_command_output');
+    expect(record).not.toHaveProperty('test_command');
+    expect(readdirSync(scratch)).toEqual([]);
+    expect(readdirSync(evidence)).toHaveLength(2); // existing log + normalized results only
+    expectPrivateText(readFileSync(record.output_path, 'utf8'), seen[0]!.output);
+    for (const name of readdirSync(evidence)) {
+      expect(readFileSync(join(evidence, name), 'utf8').includes('sk-' + 'a'.repeat(30))).toBe(false);
+    }
+  });
+
+  it('bounds redacted transient test output to 64KiB without including the command text', () => {
+    const { repo, evidence } = workspace();
+    const text = 'x'.repeat(70 * 1024) + '\nSyntaxError: bounded tail\n';
+    writeFileSync(join(repo, 'large.cjs'), `process.stderr.write(${JSON.stringify(text)}, () => { process.exitCode = 1; });`);
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      command: [process.execPath, 'large.cjs'], onRawReport: value => { seen.push(value); },
+    };
+    runVerification(args);
+    expect(seen.length).toBe(1);
+    expectPrivateText(seen[0]?.test_command_output, Buffer.from(redactText(text)).subarray(-65536).toString('utf8'));
+  });
+
+  it('reports null test output when setup fails before the test command runs', () => {
+    const { repo, evidence } = workspace();
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      steps: [[process.execPath, '-e', 'console.error("Error: ENOENT: setup"); process.exit(1)']],
+      command: [process.execPath, '-e', 'throw new Error("must not run")'],
+      onRawReport: value => { seen.push(value); },
+    };
+    runVerification(args);
+    expect(seen.length).toBe(1);
+    expect(seen[0]?.test_command_output === null).toBe(true);
   });
 });

@@ -83,10 +83,31 @@ function cloneDelta(before: string, after: string, scope: LiveClaim, nodePath: s
 }
 
 /** Only hashes of redacted text and a fixed vocabulary may survive the clone. */
+function testCommandSummary(output: string | null) {
+  const text = redactText(output ?? '');
+  // Match actual error prefixes only; arbitrary code fields and mentions are not signals.
+  const prefixes = [
+    ['MODULE_NOT_FOUND', /^Error: Cannot find module(?:\s|$)/],
+    ['ERR_MODULE_NOT_FOUND', /^Error \[ERR_MODULE_NOT_FOUND\]:/],
+    ['ENOENT', /^Error: ENOENT:/],
+    ['EPERM', /^Error: EPERM:/],
+    ['ERR_DLOPEN_FAILED', /^Error \[ERR_DLOPEN_FAILED\]:/],
+    ['NATIVE_BINDING', /^Error: Could not locate the bindings file\. Tried:/],
+    ['SYNTAX_ERROR', /^SyntaxError:/],
+    ['NO_TEST_FILES', /^No test files found, exiting with code 1(?:\s|$)/],
+  ] as const;
+  const lines = text.split(/\r?\n/);
+  const code = prefixes.find(([, pattern]) => lines.some(line => pattern.test(line)))?.[0] ?? 'UNKNOWN';
+  const last = Buffer.from(lines.filter(line => line.trim() !== '').at(-1) ?? '').subarray(-1024);
+  return { code, last_error: { sha256: hash(last), bytes: last.length } };
+}
+
 function rawSummary(snapshot: RawReportSnapshot) {
   if (!snapshot || (snapshot.bytes !== null && (!Buffer.isBuffer(snapshot.bytes) || snapshot.bytes.length > 64 * 1024 * 1024)) ||
       (snapshot.bytes === null ? snapshot.sha256 !== null : hash(snapshot.bytes) !== snapshot.sha256) ||
       typeof snapshot.output !== 'string' || !Number.isSafeInteger(snapshot.exit_code) ||
+      (snapshot.test_command_output !== null && (typeof snapshot.test_command_output !== 'string' ||
+        Buffer.byteLength(snapshot.test_command_output) > 65536)) ||
       !Number.isSafeInteger(snapshot.normalized_count) || snapshot.normalized_count < 0 ||
       !Array.isArray(snapshot.steps) ||
       snapshot.steps.some(s => !Number.isSafeInteger(s.exit_code) || typeof s.timed_out !== 'boolean')) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW');
@@ -124,7 +145,9 @@ function rawSummary(snapshot: RawReportSnapshot) {
     raw: { status: snapshot.bytes === null ? 'missing' : doc === null ? 'malformed' : 'valid',
       suite_count: count('numTotalTestSuites'), test_count: count('numTotalTests'), failed_suite_count: count('numFailedTestSuites'),
       ...(doc !== null && snapshot.bytes !== null ? { report: fingerprint(snapshot.bytes.toString('utf8')) } : {}),
-      output: fingerprint(snapshot.output), messages }, errors };
+      output: fingerprint(snapshot.output), messages }, errors,
+    ...(snapshot.bytes === null && snapshot.exit_code === 1 && snapshot.normalized_count === 0
+      ? { test_command: testCommandSummary(snapshot.test_command_output) } : {}) };
 }
 
 export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification; setup: WorktreeSetupConfig | null;

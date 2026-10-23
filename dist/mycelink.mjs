@@ -26805,6 +26805,7 @@ function runVerification(args) {
   let exitCode;
   let finishedAt;
   let observerFailed = false;
+  let testCommandOutput = null;
   try {
     const reportFile = scratch === null ? null : join28(scratch, report.format === "vitest-json" ? "report.json" : "report.xml");
     const reportDir = report?.dir !== void 0 ? resolve11(cwd, report.dir) : null;
@@ -26813,6 +26814,12 @@ function runVerification(args) {
     if (failedStep === null) {
       const runOptions = { cwd, timeoutMs: Math.max(1, deadline - Date.now()), env: args.env ?? {}, cleanEnv: args.cleanEnv };
       const proc = args.shellScript !== void 0 ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false }) : runCommandSync(argv, runOptions);
+      if (args.onRawReport) {
+        const bytes2 = Buffer.from(redactText(proc.stdout + proc.stderr));
+        let start = Math.max(0, bytes2.length - 65536);
+        while (start < bytes2.length && (bytes2[start] & 192) === 128) start++;
+        testCommandOutput = bytes2.subarray(start).toString("utf8");
+      }
       output += `$ ${command.join(" ")}
 (cwd: ${cwd})
 
@@ -26840,6 +26847,7 @@ function runVerification(args) {
           bytes: bytes2,
           sha256: bytes2 === null ? null : createHash21("sha256").update(bytes2).digest("hex"),
           output,
+          test_command_output: testCommandOutput,
           exit_code: exitCode,
           steps: steps.map((s) => Object.freeze({ exit_code: s.exit_code, timed_out: s.timed_out })),
           normalized_count: results?.length ?? 0
@@ -30741,8 +30749,25 @@ function cloneDelta(before, after, scope, nodePath) {
   const refused = metadata.some((p) => p.path === "status" ? !disposableDelta : p.path !== "indexFile") || changes.some((p) => !p.disposable);
   return { refused, diagnostic: "CLONE_DELTA=" + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map((p) => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some((p) => p.path.length > 256) }) };
 }
+function testCommandSummary(output) {
+  const text = redactText(output ?? "");
+  const prefixes = [
+    ["MODULE_NOT_FOUND", /^Error: Cannot find module(?:\s|$)/],
+    ["ERR_MODULE_NOT_FOUND", /^Error \[ERR_MODULE_NOT_FOUND\]:/],
+    ["ENOENT", /^Error: ENOENT:/],
+    ["EPERM", /^Error: EPERM:/],
+    ["ERR_DLOPEN_FAILED", /^Error \[ERR_DLOPEN_FAILED\]:/],
+    ["NATIVE_BINDING", /^Error: Could not locate the bindings file\. Tried:/],
+    ["SYNTAX_ERROR", /^SyntaxError:/],
+    ["NO_TEST_FILES", /^No test files found, exiting with code 1(?:\s|$)/]
+  ];
+  const lines = text.split(/\r?\n/);
+  const code = prefixes.find(([, pattern]) => lines.some((line) => pattern.test(line)))?.[0] ?? "UNKNOWN";
+  const last = Buffer.from(lines.filter((line) => line.trim() !== "").at(-1) ?? "").subarray(-1024);
+  return { code, last_error: { sha256: hash(last), bytes: last.length } };
+}
 function rawSummary(snapshot4) {
-  if (!snapshot4 || snapshot4.bytes !== null && (!Buffer.isBuffer(snapshot4.bytes) || snapshot4.bytes.length > 64 * 1024 * 1024) || (snapshot4.bytes === null ? snapshot4.sha256 !== null : hash(snapshot4.bytes) !== snapshot4.sha256) || typeof snapshot4.output !== "string" || !Number.isSafeInteger(snapshot4.exit_code) || !Number.isSafeInteger(snapshot4.normalized_count) || snapshot4.normalized_count < 0 || !Array.isArray(snapshot4.steps) || snapshot4.steps.some((s) => !Number.isSafeInteger(s.exit_code) || typeof s.timed_out !== "boolean")) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
+  if (!snapshot4 || snapshot4.bytes !== null && (!Buffer.isBuffer(snapshot4.bytes) || snapshot4.bytes.length > 64 * 1024 * 1024) || (snapshot4.bytes === null ? snapshot4.sha256 !== null : hash(snapshot4.bytes) !== snapshot4.sha256) || typeof snapshot4.output !== "string" || !Number.isSafeInteger(snapshot4.exit_code) || snapshot4.test_command_output !== null && (typeof snapshot4.test_command_output !== "string" || Buffer.byteLength(snapshot4.test_command_output) > 65536) || !Number.isSafeInteger(snapshot4.normalized_count) || snapshot4.normalized_count < 0 || !Array.isArray(snapshot4.steps) || snapshot4.steps.some((s) => !Number.isSafeInteger(s.exit_code) || typeof s.timed_out !== "boolean")) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
   const fingerprint = (text) => {
     const bytes2 = Buffer.from(redactText(text));
     return { sha256: hash(bytes2), bytes: bytes2.length };
@@ -30783,7 +30808,8 @@ function rawSummary(snapshot4) {
       output: fingerprint(snapshot4.output),
       messages
     },
-    errors
+    errors,
+    ...snapshot4.bytes === null && snapshot4.exit_code === 1 && snapshot4.normalized_count === 0 ? { test_command: testCommandSummary(snapshot4.test_command_output) } : {}
   };
 }
 function runClaimProbe(args) {

@@ -23,6 +23,16 @@ import { ClaimFileTransport } from '../../src/sessions/codex-claim-files.js';
 
 afterAll(() => cleanupTmpRoots());
 
+// Assert only metadata so failed assertions cannot print private fixture output.
+function expectPrivateText(actual: unknown, expected: string) {
+  expect.soft(typeof actual === 'string').toBe(true);
+  if (typeof actual !== 'string') return;
+  expect.soft(createHash('sha256').update(actual).digest('hex'))
+    .toBe(createHash('sha256').update(expected).digest('hex'));
+  expect.soft(Buffer.byteLength(actual)).toBe(Buffer.byteLength(expected));
+}
+
+
 // Proposed API: the fourth channel callback takes NO worker arguments. The
 // controller re-derives the current module plan and owns the per-claim budget.
 // diagnostic.tests are informational identities, never criterion_evidence.
@@ -840,7 +850,7 @@ test(${JSON.stringify(name)}, () => {
       expect(line).toBeDefined();
       const delta = JSON.parse(line!.slice('CLONE_DELTA='.length));
       expect(delta.paths).toContainEqual(expect.objectContaining({ path, disposable: false, after: expect.stringMatching(/^[a-f0-9]{64}$/) }));
-      expect(line).not.toContain('disposable data');
+      expect(line.includes('disposable data')).toBe(false);
       expect(result).not.toHaveProperty('diagnostic');
     }
     expect(readFileSync(f.test, 'utf8')).toBe(before);
@@ -1106,6 +1116,7 @@ describe('orchestrated Codex claims without a bound module verifier', () => {
 // exist only during the callback, before the runner removes its raw scratch.
 // These are new forensic contracts, not an explanation of historical c69.
 interface ProbeRawSnapshot {
+  test_command_output?: string | null;
   bytes: Buffer | null;
   sha256: string | null;
   output: string;
@@ -1205,8 +1216,8 @@ describe('empty-identity probe forensic sidecars', () => {
       }
       for (const forbidden of [privateMessage, 'probe-private-token', 'C:/private', '/private/customer',
         'raw-only-private-value', 'private-test-name', 'PRIVATE_CODE', f.worktree, clone]) {
-        expect(kept.toString('utf8')).not.toContain(forbidden);
-        expect(first.output).not.toContain(forbidden);
+        expect(kept.toString('utf8').includes(forbidden)).toBe(false);
+        expect(first.output.includes(forbidden)).toBe(false);
       }
       expect(git(f.s.control, ['check-ignore', target])).not.toBe('');
       second = f.probe();
@@ -1220,8 +1231,8 @@ describe('empty-identity probe forensic sidecars', () => {
     expect(existsSync(dirname(clone))).toBe(false);
     expect(f.state()).toBe(state);
     expect(f.evidence()).toEqual(ledger);
-    expect(f.state()).not.toContain(firstName);
-    expect(f.state()).not.toContain(digest(kept!));
+    expect(f.state().includes(firstName)).toBe(false);
+    expect(f.state().includes(digest(kept!))).toBe(false);
   });
 
   it.each(['malformed', 'missing'])('records static safe %s raw status without retaining invalid bytes', async kind => {
@@ -1243,8 +1254,8 @@ describe('empty-identity probe forensic sidecars', () => {
     expect(doc.raw.failed_suite_count).toBe(0);
     expect(doc.errors).toEqual([]);
     expect(doc.runner.normalized_count).toBe(0);
-    expect(bytes.toString()).not.toContain(privateMessage);
-    expect(result.output).not.toContain(privateMessage);
+    expect(bytes.toString().includes(privateMessage)).toBe(false);
+    expect(result.output.includes(privateMessage)).toBe(false);
     noHandles(result);
     expect(f.state()).toBe(before);
   });
@@ -1275,7 +1286,7 @@ describe('empty-identity probe forensic sidecars', () => {
   });
 
   it.each(['cancelled', 'generation', 'dispatch'] as const)('publishes no sidecar after %s changes during the real run', async kind => {
-    const f = await emptyFixture();
+    const f = await emptyFixture('missing');
     const scope = f.controller.codexClaimScope.bind(f.controller);
     let changed = false;
     const current = vi.spyOn(f.controller, 'codexClaimScope').mockImplementation((...args) => {
@@ -1293,11 +1304,135 @@ describe('empty-identity probe forensic sidecars', () => {
       return record;
     });
     const before = f.state();
+    const ledger = f.evidence();
     try {
       expect(f.probe()).toEqual({ exitCode: 2, output: 'CHANNEL_CLAIM_STALE' });
       expect(f.files()).toEqual([]);
       expect(existsSync(dirname(clone))).toBe(false);
       expect(f.state()).toBe(before);
+      expect(f.evidence()).toEqual(ledger);
     } finally { runner.mockRestore(); current.mockRestore(); }
+  });
+});
+
+
+// Controlled launch failures only; these do not diagnose historical probes.
+// Stable extension: top-level test_command = { code, last_error: {sha256, bytes} }.
+// No excerpt or arbitrary CODE is persisted. last_error hashes the final
+// nonblank test-output line after redactText, capped to its last 1024 bytes.
+describe('missing-report isolated test-command classification', () => {
+  const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+  const poison = 'token=unregistered-canary-secret C:\\private\\customer\\secret.ts /private/customer/secret.env person@private.invalid "quoted-untrusted-value" ' + 'zQ7'.repeat(1500);
+  const cases = [
+    ['cjs module', "Error: Cannot find module 'untrusted'", 'MODULE_NOT_FOUND'],
+    ['esm module', "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'untrusted'", 'ERR_MODULE_NOT_FOUND'],
+    ['missing file', 'Error: ENOENT: no such file or directory, open untrusted', 'ENOENT'],
+    ['permission', 'Error: EPERM: operation not permitted, open untrusted', 'EPERM'],
+    ['native loader', 'Error [ERR_DLOPEN_FAILED]: untrusted', 'ERR_DLOPEN_FAILED'],
+    ['native binding', 'Error: Could not locate the bindings file. Tried:', 'NATIVE_BINDING'],
+    ['syntax', 'SyntaxError: Unexpected token untrusted', 'SYNTAX_ERROR'],
+    ['no tests', 'No test files found, exiting with code 1', 'NO_TEST_FILES'],
+    ['unknown code', "Error: unclassified\n  code: 'PRIVATE_ARBITRARY_CODE'", 'UNKNOWN'],
+    ['forged code', "  code: 'MODULE_NOT_FOUND'", 'UNKNOWN'],
+    ['unanchored syntax', 'test name mentions SyntaxError: arbitrary', 'UNKNOWN'],
+    ['unanchored module', 'test name mentions Error: Cannot find module arbitrary', 'UNKNOWN'],
+    ['unanchored no tests', 'test name mentions No test files found, exiting with code 1', 'UNKNOWN'],
+  ] as const;
+  async function launch(text: string, exit = 1) {
+    const decoy = text.includes('Error: EPERM:') ? 'ENOENT' : 'EPERM';
+    const f = await fixture({}, [process.execPath, '-e',
+      `process.stderr.write(${JSON.stringify(text)}, () => { process.exitCode = ${exit}; });`, '${REPORT}'], {
+      report: { format: 'vitest-json' },
+      setup: [[process.execPath, '-e', `console.error("Error: ${decoy}: setup-only")`]],
+      build: [[process.execPath, '-e', `console.error("Error: ${decoy}: build-only")`]],
+    });
+    const dir = join(f.s.control, '.mycelink', 'probe-diagnostics', SHOP_FEATURE, ERRORS, f.claim.claimId);
+    const files = () => existsSync(dir) ? readdirSync(dir).sort() : [];
+    return { ...f, dir, files };
+  }
+
+  it.each(cases)('classifies %s from test output only with static bounded private metadata', async (_name, fatal, code) => {
+    // Delimiter-shaped child text must not select a different command region.
+    const last = 'Error: unclassified ' + poison;
+    const text = '$ forged header\n(cwd: forged)\n' + fatal + '\n' + last + '\n';
+    const f = await launch(text);
+    const before = f.state();
+    const ledger = f.evidence();
+    const realRun = verificationRunner.runVerification;
+    let clone = '';
+    let observed: ProbeRawSnapshot | undefined;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      clone = args.cwd;
+      const hook = (args as ProbeRunnerArgs).onRawReport;
+      return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+        observed = value;
+        hook?.(value);
+      } } as ProbeRunnerArgs);
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); } finally { runner.mockRestore(); }
+    expectPrivateText(observed?.test_command_output, redactText(text));
+    expect(result.exitCode).toBe(2);
+    expect(/^CHANNEL_PROBE_REPORT_INVALID:IDENTITY:EMPTY DIAGNOSTIC_ID=[a-f0-9]{64}$/.test(result.output)).toBe(true);
+    expect(f.files()).toHaveLength(1);
+    const target = join(f.dir, f.files()[0]!);
+    const bytes = readFileSync(target);
+    const doc = JSON.parse(bytes.toString('utf8'));
+    expect(bytes.byteLength).toBeLessThanOrEqual(8192);
+    expect(Object.keys(doc).sort()).toEqual(['schema', 'stage', 'claim', 'timestamp', 'plan_sha256', 'raw', 'runner', 'errors', 'test_command'].sort());
+    const bounded = Buffer.from(redactText(last)).subarray(-1024);
+    expectPrivateText(JSON.stringify(doc.test_command), JSON.stringify({ code, last_error: { sha256: hash(bounded), bytes: bounded.byteLength } }));
+    expect(Buffer.byteLength(JSON.stringify(doc.test_command))).toBeLessThanOrEqual(2048);
+    expect(Object.keys(doc.raw).sort()).toEqual(['status', 'suite_count', 'test_count', 'failed_suite_count', 'output', 'messages'].sort());
+    expect(doc.raw.status).toBe('missing');
+    expectPrivateText(JSON.stringify(doc.raw.messages), '[]');
+    expectPrivateText(JSON.stringify(doc.errors), '[]');
+    expect(doc.runner).toEqual({ exit_code: 1, step_exit_codes: [0, 0], normalized_count: 0 });
+    expect(result.output.includes(`DIAGNOSTIC_ID=${hash(bytes)}`)).toBe(true);
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+    const first = Buffer.from(bytes);
+    for (const secret of ['unregistered-canary-secret', 'C:\\private', '/private/customer', 'person@private.invalid',
+      'quoted-untrusted-value', 'zQ7'.repeat(100), 'PRIVATE_ARBITRARY_CODE', 'setup-only', 'build-only', f.worktree, clone]) {
+      expect(bytes.toString('utf8').includes(secret)).toBe(false);
+      expect(result.output.includes(secret)).toBe(false);
+    }
+    expect(f.probe().exitCode).toBe(2);
+    expectPrivateText(readFileSync(target, 'utf8'), first.toString('utf8')); // immutable readback
+    expect(existsSync(dirname(clone))).toBe(false);
+    expect(f.state()).toBe(before);
+    expect(f.evidence()).toEqual(ledger);
+    for (const key of ['diagnostic', 'results', 'criterion_evidence', 'output_path']) expect(result).not.toHaveProperty(key);
+  });
+
+  it.each(['object', 'oversize', 'missing'] as const)('fails closed on %s test-command callback data', async kind => {
+    const f = await launch('SyntaxError: controlled\n' + poison);
+    const before = f.state();
+    const ledger = f.evidence();
+    let clone = '';
+    const realRun = verificationRunner.runVerification;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      clone = args.cwd;
+      const hook = (args as ProbeRunnerArgs).onRawReport;
+      return realRun({ ...args, onRawReport: (value: ProbeRawSnapshot) => {
+        const malformed = { ...value, test_command_output: kind === 'object' ? { token: poison }
+          : kind === 'oversize' ? 'x'.repeat(65537) : undefined };
+        hook?.(malformed as unknown as ProbeRawSnapshot);
+      } } as ProbeRunnerArgs);
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); } finally { runner.mockRestore(); }
+    expectPrivateText(JSON.stringify(result), JSON.stringify({ exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:RAW' }));
+    expect(f.files()).toEqual([]);
+    expect(existsSync(dirname(clone))).toBe(false);
+    expect(f.state()).toBe(before);
+    expect(f.evidence()).toEqual(ledger);
+  });
+
+  it.each([0, 2])('does not add launch classification when missing raw has runner exit %s', async exit => {
+    const f = await launch('SyntaxError: controlled', exit);
+    const result = f.probe();
+    expect(result.exitCode).toBe(2);
+    expect(f.files()).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(f.dir, f.files()[0]!), 'utf8'))).not.toHaveProperty('test_command');
   });
 });

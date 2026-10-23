@@ -64,6 +64,7 @@ export interface RawReportSnapshot {
   readonly bytes: Buffer | null;
   readonly sha256: string | null;
   readonly output: string;
+  readonly test_command_output: string | null;
   readonly exit_code: number;
   readonly steps: { exit_code: number; timed_out: boolean }[];
   readonly normalized_count: number;
@@ -242,6 +243,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
   let exitCode: number;
   let finishedAt: Date;
   let observerFailed = false;
+  let testCommandOutput: string | null = null;
   try {
     const reportFile = scratch === null ? null : join(scratch, (report as ModuleReport).format === 'vitest-json' ? 'report.json' : 'report.xml');
     const reportDir = report?.dir !== undefined ? resolve(cwd, report.dir) : null;
@@ -256,6 +258,13 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
         args.shellScript !== undefined
           ? runShellScriptSync(args.shellScript, { ...runOptions, allowShell: args.allowShell ?? false })
           : runCommandSync(argv, runOptions);
+      if (args.onRawReport) {
+        const bytes = Buffer.from(redactText(proc.stdout + proc.stderr));
+        let start = Math.max(0, bytes.length - 65536);
+        // Do not decode a partial leading UTF-8 character into an expanded replacement.
+        while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++;
+        testCommandOutput = bytes.subarray(start).toString('utf8');
+      }
       output += `$ ${command.join(' ')}\n(cwd: ${cwd})\n\n`;
       output += proc.stdout;
       output += proc.stderr;
@@ -275,7 +284,7 @@ export function runVerification(args: RunVerificationArgs): EvidenceRecord {
       try {
         const bytes = reportFile === null || failedStep !== null ? null : readRegular(reportFile, MAX_REPORT_BYTES)?.bytes ?? null;
         args.onRawReport(Object.freeze({ bytes, sha256: bytes === null ? null : createHash('sha256').update(bytes).digest('hex'),
-          output, exit_code: exitCode, steps: steps.map(s => Object.freeze({ exit_code: s.exit_code, timed_out: s.timed_out })),
+          output, test_command_output: testCommandOutput, exit_code: exitCode, steps: steps.map(s => Object.freeze({ exit_code: s.exit_code, timed_out: s.timed_out })),
           normalized_count: results?.length ?? 0 }));
       } catch { observerFailed = true; throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW'); }
     }
