@@ -1419,6 +1419,109 @@ test(${JSON.stringify(name)}, () => {
     expect(git(f.worktree, ['rev-parse', 'HEAD'])).toBe(before);
   });
 
+  it('projects a changed failure from native Vitest JSON with duplicate baseline IDs in one file', async () => {
+    const baselinePath = 'packages/errors/test/cli.test.mjs';
+    const changedPath = 'packages/errors/test/z-projection.test.mjs';
+    const duplicateNames = ['changeset publish > <no args>', 'changeset git-tag > <no args>'];
+    const baseline = duplicateNames.map(name =>
+      `it(${JSON.stringify(name)}, () => {});\nit(${JSON.stringify(name)}, () => {});`).join('\n') + '\n' +
+      Array.from({ length: 246 }, (_, i) =>
+        `it('baseline compatibility case ${i} preserves registered behavior', () => {});`).join('\n');
+    const cli = realpathSync(resolve('node_modules/vitest/vitest.mjs'));
+    const f = await fixture({ baseFiles: {
+      [baselinePath]: baseline,
+      'vitest.config.mjs': `export default {
+        cacheDir: process.env.TMPDIR + '/vitest-cache',
+        test: { include: ['${baselinePath}', '${changedPath}'], pool: 'forks', maxWorkers: 1, fileParallelism: false }
+      };\n`,
+    } }, [realpathSync(process.execPath), cli, 'run', '--globals', '--reporter=json', '--outputFile=${REPORT}'],
+    { report: { format: 'vitest-json' } });
+    const names = ['changed compatibility control', 'changed intentional assertion failure'];
+    writeFileSync(join(f.worktree, changedPath), names.map((name, i) =>
+      `it(${JSON.stringify(name)}, () => { expect(1).toBe(${i + 1}); });`).join('\n'));
+    const scope = f.controller.codexClaimScope(ERRORS, f.claim.claimId, f.claim.capability, f.worktree)!;
+    expect(redDeclaredTests(f.worktree, scope.tddPolicy!, scope.expectedHead).declared)
+      .toEqual(names.map(name => ({ file: changedPath, name })));
+    const before = f.state();
+    const ledger = f.evidence();
+    const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+    let raw: ProbeRawSnapshot | undefined;
+    let clone = '';
+    const realRun = verificationRunner.runVerification;
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      clone = args.cwd;
+      const record = realRun({ ...args, onRawReport: value => {
+        raw = value;
+        args.onRawReport?.(value);
+      } });
+      expect(record.results).toMatchObject({ format: 'vitest-json', total: 252, passed: 251, failed: 1 });
+      expect(raw?.normalized_count).toBe(252);
+      expect(raw?.sha256).toBe(hash(raw!.bytes!));
+      const native = JSON.parse(raw!.bytes!.toString('utf8'));
+      expect(native).toMatchObject({ numTotalTests: 252, numPassedTests: 251, numFailedTests: 1 });
+      const bytes = readFileSync(record.results!.path);
+      expect(record.results!.sha256).toBe(hash(bytes));
+      const normalized = JSON.parse(bytes.toString('utf8')).results;
+      const assertions = native.testResults.flatMap((suite: { name: string; assertionResults: object[] }) =>
+        suite.assertionResults.map(assertion => ({ ...assertion, file: relative(clone, suite.name).replace(/\\/g, '/') })));
+      expect(assertions).toHaveLength(252);
+      for (const [index, test] of normalized.entries()) {
+        const actual = assertions[index];
+        expect(test).toMatchObject({
+          test_id: canonicalTestId('vitest-json', actual.file, actual.fullName),
+          file: actual.file, full_name: actual.fullName, name: actual.title, status: actual.status,
+        });
+      }
+      const baselineTests = normalized.filter((test: { file: string }) => test.file === baselinePath);
+      expect(baselineTests).toHaveLength(250);
+      expect(new Set(baselineTests.map((test: { test_id: string }) => test.test_id)).size).toBe(248);
+      for (const name of duplicateNames) {
+        expect(baselineTests.filter((test: { full_name: string; status: string }) =>
+          test.full_name === name && test.status === 'passed')).toHaveLength(2);
+      }
+      expect(Buffer.byteLength(JSON.stringify(normalized))).toBeGreaterThan(16384);
+      return record;
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); expect(runner).toHaveBeenCalledTimes(1); } finally { runner.mockRestore(); }
+    expect(result).toMatchObject({ exitCode: 1, diagnostic: { role: 'diagnostic-only', tests: names.map((full_name, i) => ({
+      id: canonicalTestId('vitest-json', changedPath, full_name), path: changedPath, full_name,
+      status: i === 1 ? 'failed' : 'passed',
+    })) } });
+    expect(result.diagnostic?.tests[0]).not.toHaveProperty('failure');
+    expect(result.diagnostic?.tests[1]).toHaveProperty('failure.code', 'ASSERTION_MISMATCH');
+    const lines = result.output.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^CLONE_DELTA=/);
+    expect(lines[1]).toMatch(/^PROBE_REPORT=/);
+    const delta = JSON.parse(lines[0].slice('CLONE_DELTA='.length));
+    const report = JSON.parse(lines[1].slice('PROBE_REPORT='.length));
+    expect(delta).toEqual({ metadata: expect.any(Array), count: expect.any(Number),
+      paths: expect.any(Array), truncated: expect.any(Boolean) });
+    expect(report).toEqual({ runner: { exit_code: 1, normalized_count: 252 },
+      clone_delta: { metadata_count: delta.metadata.length, count: delta.count } });
+    for (const count of [delta.count, report.clone_delta.metadata_count, report.clone_delta.count]) {
+      expect(Number.isFinite(count)).toBe(true);
+      expect(count).toBeGreaterThanOrEqual(0);
+    }
+    expect(delta.paths.length).toBeLessThanOrEqual(32);
+    for (const entry of delta.paths) {
+      expect(entry.path.length).toBeLessThanOrEqual(256);
+      expect(entry.disposable).toBe(true);
+    }
+    for (const privateText of [realpathSync(process.execPath), cli, '--globals', '--reporter=json', '--outputFile=']) {
+      expect(result.output.includes(privateText)).toBe(false);
+    }
+    expect(Buffer.byteLength(JSON.stringify(result.diagnostic))).toBeLessThanOrEqual(16384);
+    for (const key of ['results', 'output_path', 'criterion_evidence', 'accepted', 'evidence']) {
+      expect(result).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(result).includes(clone)).toBe(false);
+    expect(existsSync(dirname(clone))).toBe(false);
+    expectPrivateText(f.state(), before);
+    expect(f.evidence()).toEqual(ledger);
+  });
+
   it.skipIf(process.platform !== 'win32')('runs a bounded native Windows Vitest JSON canary in an independent probe clone', async () => {
     const testPath = 'packages/errors/test/errors.test.mjs';
     // Resolve against this project's installation, never PATH or the clone's

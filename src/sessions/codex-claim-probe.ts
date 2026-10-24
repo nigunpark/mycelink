@@ -413,7 +413,8 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
           (t.full_name === name || t.full_name.endsWith(' > ' + name) || t.full_name.endsWith('#' + name)) &&
           namesDeclared({ path: t.path, name }, declared);
       };
-      const selected = tests.filter((_: unknown, index: number) => declarations.declared.some(d => matches(index, d)));
+      const selected = tests.map((test: typeof tests[number], index: number) => ({ test, index }))
+        .filter(({ index }: { index: number }) => declarations.declared.some(d => matches(index, d)));
       // Never manufacture a passing result for a declaration the runner omitted.
       if (!selected.length) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
       if (declarations.declared.some(d => !tests.some((_: unknown, index: number) => matches(index, d)))) {
@@ -426,13 +427,13 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
           const raw = observed![i];
           return !raw || t.id !== raw.id || t.path !== raw.path || t.full_name !== raw.full_name ||
             t.status !== raw.status || doc.results[i].name !== raw.name;
-        }) || new Set(tests.map((t: { id: string }) => t.id)).size !== tests.length) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW');
-        const failures = new Map(observed.map(t => [t.id, t.failure]));
-        diagnostic = { role: 'diagnostic-only', tests: selected.map((t: typeof selected[number]) => {
-          const failure = failures.get(t.id);
+        })) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW');
+        diagnostic = { role: 'diagnostic-only', tests: selected.map(({ test: t, index }: typeof selected[number]) => {
+          // Duplicate full titles share an ID; preserve the validated raw position.
+          const failure = observed![index]?.failure;
           return t.status === 'failed' && failure ? { ...t, failure } : t;
         }) };
-      } else diagnostic = { role: 'diagnostic-only', tests: selected };
+      } else diagnostic = { role: 'diagnostic-only', tests: selected.map(({ test }: typeof selected[number]) => test) };
     }
     if (!validProbeDiagnostic(diagnostic)) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
     // A validated structured report never releases the runner log: it includes

@@ -31152,7 +31152,7 @@ function runClaimProbe(args) {
         const name = doc.results[index].name;
         return typeof name === "string" && (t.full_name === name || t.full_name.endsWith(" > " + name) || t.full_name.endsWith("#" + name)) && namesDeclared({ path: t.path, name }, declared);
       };
-      const selected = tests.filter((_, index) => declarations.declared.some((d) => matches2(index, d)));
+      const selected = tests.map((test, index) => ({ test, index })).filter(({ index }) => declarations.declared.some((d) => matches2(index, d)));
       if (!selected.length) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
       if (declarations.declared.some((d) => !tests.some((_, index) => matches2(index, d)))) {
         return fail("CHANNEL_PROBE_REPORT_INVALID:DECLARATION:NOT_RUN");
@@ -31161,13 +31161,12 @@ function runClaimProbe(args) {
         if (!observed || observed.length !== tests.length || tests.some((t, i) => {
           const raw = observed[i];
           return !raw || t.id !== raw.id || t.path !== raw.path || t.full_name !== raw.full_name || t.status !== raw.status || doc.results[i].name !== raw.name;
-        }) || new Set(tests.map((t) => t.id)).size !== tests.length) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW");
-        const failures = new Map(observed.map((t) => [t.id, t.failure]));
-        diagnostic = { role: "diagnostic-only", tests: selected.map((t) => {
-          const failure = failures.get(t.id);
+        })) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW");
+        diagnostic = { role: "diagnostic-only", tests: selected.map(({ test: t, index }) => {
+          const failure = observed[index]?.failure;
           return t.status === "failed" && failure ? { ...t, failure } : t;
         }) };
-      } else diagnostic = { role: "diagnostic-only", tests: selected };
+      } else diagnostic = { role: "diagnostic-only", tests: selected.map(({ test }) => test) };
     }
     if (!validProbeDiagnostic(diagnostic)) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
     const output = delta.diagnostic + "\nPROBE_REPORT=" + JSON.stringify({
