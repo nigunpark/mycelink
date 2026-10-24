@@ -12,7 +12,7 @@ not edit it by hand. Mycelink claims no ownership of this code.
 | ajv | 8.20.0 | MIT |
 | ajv-formats | 3.0.1 | MIT |
 | fast-deep-equal | 3.1.3 | MIT |
-| fast-uri | 3.1.8 | BSD-3-Clause |
+| fast-uri | 3.1.9 | BSD-3-Clause |
 | json-schema-traverse | 1.0.0 | MIT |
 | yaml | 2.9.1 | ISC |
 
@@ -109,7 +109,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## fast-uri@3.1.8
+## fast-uri@3.1.9
 
 - License: BSD-3-Clause
 - Source: https://github.com/fastify/fast-uri
