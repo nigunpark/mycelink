@@ -30509,7 +30509,7 @@ function commitClaimPaths(scope, request) {
 function validProbeDiagnostic(value) {
   if (!value || typeof value !== "object") return false;
   const d = value;
-  return d.role === "diagnostic-only" && Array.isArray(d.tests) && d.tests.length <= 256 && d.tests.every((t) => t && typeof t.id === "string" && /^[0-9a-f]{16}$/.test(t.id) && typeof t.path === "string" && Buffer.byteLength(t.path) <= 1024 && typeof t.full_name === "string" && Buffer.byteLength(t.full_name) <= 4096 && ["passed", "failed", "skipped", "not-run"].includes(t.status)) && Buffer.byteLength(JSON.stringify(d)) <= 16 * 1024;
+  return d.role === "diagnostic-only" && Array.isArray(d.tests) && d.tests.length <= 256 && d.tests.every((t) => t && typeof t.id === "string" && /^[0-9a-f]{16}$/.test(t.id) && typeof t.path === "string" && Buffer.byteLength(t.path) <= 1024 && typeof t.full_name === "string" && Buffer.byteLength(t.full_name) <= 4096 && ["passed", "failed", "skipped", "not-run"].includes(t.status) && (t.failure === void 0 || t.status === "failed" && t.failure !== null && t.failure.code === "ASSERTION_MISMATCH" && typeof t.failure.excerpt === "string" && /^(?:Assertion failed|-?\d{1,12}(?:\.\d{1,12})? !== -?\d{1,12}(?:\.\d{1,12})?)$/.test(t.failure.excerpt) && Object.keys(t.failure).every((key) => key === "code" || key === "excerpt"))) && Buffer.byteLength(JSON.stringify(d)) <= 16 * 1024;
 }
 function boundChannelResponse(response) {
   const invalid = (stage) => ({
@@ -30626,7 +30626,13 @@ var ClaimChannel = class {
         }
         const diagnostic = result.diagnostic ? {
           role: "diagnostic-only",
-          tests: result.diagnostic.tests.slice(0, 256).map((t) => ({ id: t.id, path: t.path, full_name: t.full_name, status: t.status }))
+          tests: result.diagnostic.tests.slice(0, 256).map((t) => ({
+            id: t.id,
+            path: t.path,
+            full_name: t.full_name,
+            status: t.status,
+            ...t.failure !== void 0 ? { failure: { code: t.failure.code, excerpt: t.failure.excerpt } } : {}
+          }))
         } : void 0;
         return boundChannelResponse({
           ok: true,
@@ -30720,6 +30726,27 @@ var ClaimChannel = class {
 
 // src/sessions/codex-claim-probe.ts
 var hash = (bytes2) => createHash31("sha256").update(bytes2).digest("hex");
+function assertionFailure(messages) {
+  if (!Array.isArray(messages) || !messages.every((m) => typeof m === "string")) return void 0;
+  const text = redactText(messages.join("\n").replace(/\x1b\[[0-9;]*m/g, ""));
+  if (!/^AssertionError(?:\s|:|\[)/m.test(text)) return void 0;
+  const mismatch = text.split(/\r?\n/).map((line) => line.trim()).find((line) => /^-?\d{1,12}(?:\.\d{1,12})? !== -?\d{1,12}(?:\.\d{1,12})?$/.test(line));
+  return { code: "ASSERTION_MISMATCH", excerpt: mismatch ?? "Assertion failed" };
+}
+function observedVitestTests(bytes2, root) {
+  if (bytes2 === null) return void 0;
+  try {
+    const doc = JSON.parse(bytes2.toString("utf8"));
+    if (!Array.isArray(doc?.testResults)) return void 0;
+    const tests = canonicalTests(parseVitestJson(doc, { root }), "vitest-json");
+    if (tests.length > 1e4) return void 0;
+    const messages = doc.testResults.flatMap((file) => file.assertionResults?.length ? file.assertionResults.map((a) => a.failureMessages) : file.status === "failed" ? [void 0] : []);
+    if (messages.length !== tests.length) return void 0;
+    return tests.map((t, i) => ({ ...t, failure: t.status === "failed" ? assertionFailure(messages[i]) : void 0 }));
+  } catch {
+    return void 0;
+  }
+}
 function safeFile(root, path) {
   if (classifyRelativePath(path) || path.split("/").some((p) => !p || p === "." || p === "..") || /[\x00-\x1f\x7f\\*?{}]/.test(path)) throw new Error("CHANNEL_PROBE_PATH_INVALID");
   let current = root;
@@ -30777,7 +30804,7 @@ function cloneDelta(before, after, scope, nodePath) {
   })).filter((p) => p.before !== p.after);
   const disposableDelta = changes.length > 0 && changes.every((p) => p.disposable);
   const refused = metadata.some((p) => p.path === "status" ? !disposableDelta : p.path !== "indexFile") || changes.some((p) => !p.disposable);
-  return { refused, diagnostic: "CLONE_DELTA=" + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map((p) => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some((p) => p.path.length > 256) }) };
+  return { refused, metadataCount: metadata.length, count: changes.length, diagnostic: "CLONE_DELTA=" + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map((p) => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some((p) => p.path.length > 256) }) };
 }
 function testCommandExcerpt(output) {
   const vocabulary = /* @__PURE__ */ new Set([
@@ -31027,6 +31054,7 @@ function runClaimProbe(args) {
     checkFixture();
     executed = true;
     let summary;
+    let observed;
     const record = runVerification({
       readonlyFixture: args.readonlyFixture,
       kind: "red",
@@ -31043,15 +31071,14 @@ function runClaimProbe(args) {
       onRawReport: (value) => {
         if (summary) throw new Error("CHANNEL_PROBE_REPORT_INVALID:RAW");
         summary = rawSummary(value);
+        observed = observedVitestTests(value.bytes, clone);
       }
     });
-    let output = redactText(readFileSync27(record.output_path, "utf8")).slice(0, 32 * 1024);
     fixtureChecked = true;
     checkFixture();
     if (!args.current() || snapshot3(scope.worktree, args.deadline + 2e3) !== before) throw new Error("CHANNEL_CLAIM_STALE");
     const delta = cloneDelta(cloneBefore, snapshot3(clone, args.deadline + 2e3), scope, args.bound.path);
-    if (delta.refused) return fail("CHANNEL_PROBE_CLONE_MUTATED\n" + delta.diagnostic + "\n" + output);
-    output = (delta.diagnostic + "\n" + output).slice(0, 32 * 1024);
+    if (delta.refused) return fail("CHANNEL_PROBE_CLONE_MUTATED\n" + delta.diagnostic);
     if (Date.now() >= args.deadline || record.exit_code === 124) return fail("CHANNEL_PROBE_TIMEOUT");
     if (!record.results || record.steps?.some((s) => s.exit_code !== 0 || s.timed_out)) return fail("CHANNEL_PROBE_REPORT_UNAVAILABLE");
     const bytes2 = readFileSync27(record.results.path);
@@ -31130,9 +31157,23 @@ function runClaimProbe(args) {
       if (declarations.declared.some((d) => !tests.some((_, index) => matches2(index, d)))) {
         return fail("CHANNEL_PROBE_REPORT_INVALID:DECLARATION:NOT_RUN");
       }
-      diagnostic = { role: "diagnostic-only", tests: selected };
+      if (record.results.format === "vitest-json") {
+        if (!observed || observed.length !== tests.length || tests.some((t, i) => {
+          const raw = observed[i];
+          return !raw || t.id !== raw.id || t.path !== raw.path || t.full_name !== raw.full_name || t.status !== raw.status || doc.results[i].name !== raw.name;
+        }) || new Set(tests.map((t) => t.id)).size !== tests.length) return fail("CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW");
+        const failures = new Map(observed.map((t) => [t.id, t.failure]));
+        diagnostic = { role: "diagnostic-only", tests: selected.map((t) => {
+          const failure = failures.get(t.id);
+          return t.status === "failed" && failure ? { ...t, failure } : t;
+        }) };
+      } else diagnostic = { role: "diagnostic-only", tests: selected };
     }
     if (!validProbeDiagnostic(diagnostic)) return fail("CHANNEL_PROBE_REPORT_INVALID:SIZE");
+    const output = delta.diagnostic + "\nPROBE_REPORT=" + JSON.stringify({
+      runner: { exit_code: record.exit_code, normalized_count: tests.length },
+      clone_delta: { metadata_count: delta.metadataCount, count: delta.count }
+    });
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });
     return {
       exitCode: bounded.exitCode ?? 2,

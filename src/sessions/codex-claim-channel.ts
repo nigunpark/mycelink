@@ -24,7 +24,9 @@ export interface LiveClaim {
   challengeCriteria?: string[];
 }
 
-export interface ProbeResult { exitCode: number; output: string; diagnostic?: { role: 'diagnostic-only'; tests: Pick<import('../evidence/test-ids.js').CanonicalTest, 'id' | 'path' | 'full_name' | 'status'>[] } }
+export interface ProbeResult { exitCode: number; output: string; diagnostic?: { role: 'diagnostic-only'; tests: (Pick<import('../evidence/test-ids.js').CanonicalTest, 'id' | 'path' | 'full_name' | 'status'> & {
+  failure?: { code: 'ASSERTION_MISMATCH'; excerpt: string };
+})[] } }
 
 // Leave room for the response envelope and output; identities are never truncated.
 export function validProbeDiagnostic(value: unknown): value is NonNullable<ProbeResult['diagnostic']> {
@@ -34,7 +36,11 @@ export function validProbeDiagnostic(value: unknown): value is NonNullable<Probe
     d.tests.every(t => t && typeof t.id === 'string' && /^[0-9a-f]{16}$/.test(t.id) &&
       typeof t.path === 'string' && Buffer.byteLength(t.path) <= 1024 &&
       typeof t.full_name === 'string' && Buffer.byteLength(t.full_name) <= 4096 &&
-      ['passed', 'failed', 'skipped', 'not-run'].includes(t.status)) &&
+      ['passed', 'failed', 'skipped', 'not-run'].includes(t.status) &&
+      (t.failure === undefined || (t.status === 'failed' && t.failure !== null &&
+        t.failure.code === 'ASSERTION_MISMATCH' && typeof t.failure.excerpt === 'string' &&
+        /^(?:Assertion failed|-?\d{1,12}(?:\.\d{1,12})? !== -?\d{1,12}(?:\.\d{1,12})?)$/.test(t.failure.excerpt) &&
+        Object.keys(t.failure).every(key => key === 'code' || key === 'excerpt')))) &&
     Buffer.byteLength(JSON.stringify(d)) <= 16 * 1024;
 }
 
@@ -161,7 +167,10 @@ export class ClaimChannel {
         }
         const diagnostic: ProbeResult['diagnostic'] = result.diagnostic ? {
           role: 'diagnostic-only',
-          tests: result.diagnostic.tests.slice(0, 256).map(t => ({ id: t.id, path: t.path, full_name: t.full_name, status: t.status })),
+          tests: result.diagnostic.tests.slice(0, 256).map(t => ({
+            id: t.id, path: t.path, full_name: t.full_name, status: t.status,
+            ...(t.failure !== undefined ? { failure: { code: t.failure.code, excerpt: t.failure.excerpt } } : {}),
+          })),
         } : undefined;
         return boundChannelResponse({ ok: true, sequence, exitCode: result.exitCode, output: result.output,
           ...(diagnostic ? { diagnostic } : {}) });

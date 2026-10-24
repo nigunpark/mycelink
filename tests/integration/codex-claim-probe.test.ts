@@ -224,7 +224,7 @@ describe('controller-owned probe with a real registered module and native host v
         // the legacy binding. Neither assertion accepts a launch error as RED.
         const probe = f.probe();
         expect.soft(probe.exitCode, 'probe must reach the behavioral test').toBe(1);
-        expect.soft(probe.output.includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect.soft(probe.output).toMatch(/^PROBE_REPORT=/m);
         expect.soft(probe.diagnostic?.tests.some(t => t.status === 'failed')).toBe(true);
         const red = await formal(f, 'red');
         expect.soft(/^(?:AssertionError \[ERR_ASSERTION\]|Error): READONLY_FIXTURE_ENV_UNBOUND\r?$/m.test(output(f, 'red')),
@@ -263,7 +263,7 @@ describe('controller-owned probe with a real registered module and native host v
         const before = f.state();
         const diagnostic = f.probe();
         expect(diagnostic.exitCode).toBe(1);
-        expect(diagnostic.output.includes('READONLY_FIXTURE_CHILD_VERIFIED')).toBe(true);
+        expect(diagnostic.output).toMatch(/^PROBE_REPORT=/m);
         expect(diagnostic.diagnostic?.tests.some(t => t.status === 'failed')).toBe(true);
         expectPrivateText(f.state(), before);
         unlinkSync(f.marker + '.launch');
@@ -351,7 +351,7 @@ describe('controller-owned probe with a real registered module and native host v
       vi.stubEnv('MYCELINK_FIXTURE_TEST_AMBIENT', 'preserved');
       try {
         const probe = f.probe();
-        expect.soft(probe.output.includes('UNDECLARED_CHILD_VERIFIED')).toBe(true);
+        expect.soft(probe.output).toMatch(/^PROBE_REPORT=/m);
         const red = await shopCli(f.s, ['tdd', 'red', SHOP_FEATURE, ERRORS, '--capability', f.claim.capability]);
         expect(red.code, 'undeclared parent binding must be removed before formal verification').toBe(0);
         expect(output(f, 'red').includes('UNRELATED_AMBIENT_ENV_PRESERVED')).toBe(true);
@@ -372,7 +372,7 @@ describe('controller-owned probe with a real registered module and native host v
     vi.stubEnv('OPENAI_API_KEY', 'inherited-api-key');
     vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'inherited-aws-secret');
     try {
-      expect(f.probe()).toMatchObject({ exitCode: 0, output: expect.stringContaining('FIXTURE_CHILD_VERIFIED'),
+      expect(f.probe()).toMatchObject({ exitCode: 0, output: expect.stringMatching(/^PROBE_REPORT=/m),
         diagnostic: { role: 'diagnostic-only', tests: [expect.objectContaining({ status: 'passed' })] } });
       expect(readFileSync(f.marker, 'utf8')).toBe('started');
       // Probe entry + pre-verification, runner entry + before/after child, probe post-verification.
@@ -771,7 +771,7 @@ test(${JSON.stringify(name)}, () => {
     expect(f.evidence()).toEqual(ledger);
   });
 
-  it('projects Vitest JSON changed leaves after 250 baseline tests across 17 paths', async () => {
+  it.each(['numeric', 'private oversized', 'rebound baseline'] as const)('projects Vitest JSON changed leaves after 250 baseline tests across 17 paths (%s)', async kind => {
     const paths = Array.from({ length: 17 }, (_, i) => `packages/errors/test/a-baseline-${String(i).padStart(2, '0')}.test.mjs`);
     const baseFiles: Record<string, string> = {};
     for (const [i, path] of paths.entries()) {
@@ -792,7 +792,11 @@ test(${JSON.stringify(name)}, () => {
           const assertionResults = [];
           globalThis.it = (title, fn) => {
             let failureMessages = [];
-            try { fn(); } catch (error) { failureMessages = [error.stack]; }
+            try { fn(); } catch (error) {
+              failureMessages = [${kind === 'private oversized'
+                ? "'AssertionError: private-canary-do-not-project sk-' + 'Q'.repeat(40) + '\\n' + '9'.repeat(20000) + ' !== 2\\n' + 'private-canary-do-not-project'.repeat(2000)"
+                : 'error.stack'}];
+            }
             assertionResults.push({ ancestorTitles: [], title, fullName: title,
               status: failureMessages.length ? 'failed' : 'passed', failureMessages, duration: 1 });
           };
@@ -839,7 +843,18 @@ test(${JSON.stringify(name)}, () => {
           if (process.platform === 'win32') expect(entry.name).toMatch(/^[A-Za-z]:[\\/]/);
           else expect(isAbsolute(entry.name)).toBe(true);
         }
-        expect(report.testResults[17].assertionResults[1].failureMessages.join('\n')).toContain('AssertionError');
+        const failureMessages: unknown = report.testResults[17].assertionResults[1].failureMessages;
+        expect(Array.isArray(failureMessages) && failureMessages.every(m => typeof m === 'string')).toBe(true);
+        if (!Array.isArray(failureMessages) || !failureMessages.every((m): m is string => typeof m === 'string')) {
+          throw new Error('Unexpected failureMessages shape');
+        }
+        const failureText = failureMessages.join('\n').replace(/\x1b\[[0-9;]*m/g, '');
+        expect(/^AssertionError(?:\s|:|\[)/m.test(failureText)).toBe(true);
+        // On failure, print only finite numeric mismatch lines, never raw stack
+        // text (the private oversized case deliberately contains arbitrary secrets).
+        const numericMismatches = failureText.split(/\r?\n/).map(line => line.trim())
+          .filter(line => /^-?\d{1,12}(?:\.\d{1,12})? !== -?\d{1,12}(?:\.\d{1,12})?$/.test(line));
+        expect(numericMismatches).toEqual(kind === 'private oversized' ? [] : ['1 !== 2']);
       } });
       expect(record.exit_code).toBe(1);
       expect(record.results).toMatchObject({ format: 'vitest-json', total: 252, passed: 251, failed: 1 });
@@ -852,12 +867,34 @@ test(${JSON.stringify(name)}, () => {
       expect(new Set(unfiltered.map((t: { id: string }) => t.id)).size).toBe(252);
       expect(unfiltered.slice(250)).toEqual(expected);
       expect(Buffer.byteLength(JSON.stringify({ role: 'diagnostic-only', tests: unfiltered }))).toBeGreaterThan(16384);
+      if (kind === 'rebound baseline') {
+        // Even a self-consistent canonical ID cannot rebind an omitted baseline identity.
+        doc.results[0].full_name = 'forged baseline identity';
+        doc.results[0].test_id = canonicalTestId('vitest-json', doc.results[0].file, doc.results[0].full_name);
+        const changed = JSON.stringify(doc);
+        writeFileSync(record.results!.path, changed);
+        record.results!.sha256 = createHash('sha256').update(changed).digest('hex');
+      }
       return record;
     });
     let result: ReturnType<typeof f.probe>;
     try { result = f.probe(); expect(runner).toHaveBeenCalledTimes(1); } finally { runner.mockRestore(); }
-    expect(result, JSON.stringify(result)).toMatchObject({ exitCode: 1,
-      diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(expected) } });
+    if (kind === 'rebound baseline') {
+      expect(result).toMatchObject({ exitCode: 2, output: 'CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW' });
+      expect(result).not.toHaveProperty('diagnostic');
+      expectPrivateText(f.state(), before);
+      expect(f.evidence()).toEqual(ledger);
+      return;
+    }
+    const expectedSubset = expected.map(test => expect.objectContaining(test));
+    const expectedFailure = {
+      code: 'ASSERTION_MISMATCH', excerpt: kind === 'numeric' ? '1 !== 2' : 'Assertion failed',
+    };
+    expect(result).toMatchObject({ exitCode: 1,
+      diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(expectedSubset) } });
+    expect(result.diagnostic?.tests).toHaveLength(expected.length);
+    expect(result.diagnostic?.tests[1]).toHaveProperty('failure', expectedFailure);
+    expect(result.diagnostic?.tests[0]).not.toHaveProperty('failure');
     expect(Buffer.byteLength(JSON.stringify(result.diagnostic))).toBeLessThanOrEqual(16384);
     const channel = new ClaimChannel(live, vi.fn(), undefined, () => result);
     mkdirSync(join(f.worktree, '.mycelink-worker'), { recursive: true });
@@ -872,8 +909,21 @@ test(${JSON.stringify(name)}, () => {
       const response = JSON.parse(bytes.toString('utf8'));
       expect(bytes.length).toBeLessThanOrEqual(32768);
       expect(response).toMatchObject({ ok: true, exitCode: 1,
-        diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(expected) } });
+        diagnostic: { role: 'diagnostic-only', tests: expect.arrayContaining(expectedSubset) } });
+      expect(response.diagnostic.tests).toHaveLength(expected.length);
+      expect(response.diagnostic.tests[1]).toHaveProperty('failure', expectedFailure);
+      expect(response.diagnostic.tests[0]).not.toHaveProperty('failure');
       for (const value of [result, response]) {
+        // Exact output grammar excludes argv/source, stdout/stderr and raw assertions.
+        // Native private-oversized reproduction previously leaked the Node -e source here.
+        expect(value.output === 'CLONE_DELTA=' + JSON.stringify({
+          metadata: [], count: 0, paths: [], truncated: false,
+        }) + '\nPROBE_REPORT=' + JSON.stringify({
+          runner: { exit_code: 1, normalized_count: 252 },
+          clone_delta: { metadata_count: 0, count: 0 },
+        })).toBe(true);
+        expect(JSON.stringify(value)).not.toContain('private-canary-do-not-project');
+        expect(JSON.stringify(value)).not.toContain('Q'.repeat(40));
         for (const key of ['results', 'output_path', 'output_sha256', 'outputSha256', 'test_ids', 'testIds',
           'criterion_evidence', 'accepted', 'acceptance', 'evidence']) expect(value).not.toHaveProperty(key);
       }
@@ -1155,6 +1205,7 @@ test(${JSON.stringify(name)}, () => {
   // Functional isolation for a non-adversarial plugin. These commands intentionally
   // mutate their cwd; this does not promise confinement of hostile host processes.
   it('runs setup/build/test in a disposable independent clone and preserves the coding checkout', async () => {
+    const privateText = 'clone-isolation-private-child-text';
     const product = 'packages/errors/src/index.mjs';
     const testPath = 'packages/errors/test/errors.test.mjs';
     const fixturePath = 'packages/errors/test/probe-fixture.json';
@@ -1189,6 +1240,7 @@ test(${JSON.stringify(name)}, () => {
       fs.appendFileSync(${JSON.stringify(product)}, '\\n// test changed product');
       observation.written = fs.readFileSync(${JSON.stringify(product)}, 'utf8');
       console.log('CLONE_OBSERVATION=' + JSON.stringify(observation));
+      console.log(${JSON.stringify(privateText)});
       fs.writeFileSync(process.argv[1], '<testsuites><testsuite tests="1"><testcase name="clone isolation" file="packages/errors/test/errors.test.mjs"/></testsuite></testsuites>');
     `, '${REPORT}'];
     const f = await fixture({ baseFiles: { [removedPath]: '{}\n' } }, command,
@@ -1208,12 +1260,23 @@ test(${JSON.stringify(name)}, () => {
     const before = snapshot();
     const state = f.state();
     const evidence = f.evidence();
-    const result = f.probe();
+    const realRun = verificationRunner.runVerification;
+    let privateOutput = '';
+    const runner = vi.spyOn(verificationRunner, 'runVerification').mockImplementation(args => {
+      const record = realRun(args);
+      privateOutput = readFileSync(resolve(f.s.control, record.output_path), 'utf8');
+      return record;
+    });
+    let result: ReturnType<typeof f.probe>;
+    try { result = f.probe(); } finally { runner.mockRestore(); }
     // Commands can mutate only the disposable clone; a changed clone cannot supply a diagnostic report.
     expect(result).toMatchObject({ exitCode: 2, output: expect.stringContaining('CHANNEL_PROBE_CLONE_MUTATED') });
     expect(result).not.toHaveProperty('diagnostic');
-    const line = result.output.split(/\r?\n/).find(line => line.startsWith('CLONE_OBSERVATION='));
-    expect(line).toBeDefined();
+    expect(result.output.includes('CLONE_OBSERVATION=')).toBe(false);
+    expect(privateOutput.includes(privateText)).toBe(true);
+    expect(JSON.stringify(result).includes(privateText)).toBe(false);
+    const line = privateOutput.split(/\r?\n/).find(line => line.startsWith('CLONE_OBSERVATION='));
+    expect(typeof line === 'string').toBe(true);
     const seen = JSON.parse(line!.slice('CLONE_OBSERVATION='.length));
     expect(seen.ownGit).toBe(true);
     const originalCommon = realpathSync(resolve(f.worktree, git(f.worktree, ['rev-parse', '--git-common-dir'])));
@@ -1300,7 +1363,14 @@ test(${JSON.stringify(name)}, () => {
     if (siblingWrite) {
       expect(result).toMatchObject({ exitCode: 2, output: expect.stringContaining('CHANNEL_PROBE_CLONE_MUTATED') });
       expect(result).not.toHaveProperty('diagnostic');
-    } else expect(result, JSON.stringify(result)).toMatchObject({ exitCode: 0, diagnostic: { role: 'diagnostic-only' } });
+    } else {
+      expect(result, JSON.stringify(result)).toMatchObject({ exitCode: 0, diagnostic: { role: 'diagnostic-only' } });
+      expect(result.output.split('\n')).toHaveLength(2);
+      expect(JSON.parse(result.output.split('\n')[1].slice('PROBE_REPORT='.length))).toEqual({
+        runner: { exit_code: 0, normalized_count: 1 },
+        clone_delta: { metadata_count: 1, count: 4 },
+      });
+    }
     const line = result.output.split('\n').find(line => line.startsWith('CLONE_DELTA='));
     expect(line).toBeDefined();
     const delta = JSON.parse(line!.slice('CLONE_DELTA='.length));

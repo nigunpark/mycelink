@@ -13,11 +13,38 @@ import { runWorktreeSetup, setupEnvironment, setupInputs, type WorktreeSetupConf
 import { moduleInvocation, runVerification, verifiedVerificationFixture, type VerificationFixture } from '../evidence/runner.js';
 import { writeImmutable } from '../evidence/store.js';
 import type { RawReportSnapshot } from '../evidence/runner.js';
-import { canonicalTestId } from '../evidence/test-ids.js';
+import { canonicalTestId, canonicalTests } from '../evidence/test-ids.js';
+import { parseVitestJson } from '../evidence/red-classify.js';
 import type { ClaimVerification } from '../model/types.js';
 import { boundChannelResponse, validProbeDiagnostic, type LiveClaim, type ProbeResult } from './codex-claim-channel.js';
 
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+/** No arbitrary assertion text survives: redact whole messages before selecting a finite grammar. */
+function assertionFailure(messages: unknown): { code: 'ASSERTION_MISMATCH'; excerpt: string } | undefined {
+  if (!Array.isArray(messages) || !messages.every(m => typeof m === 'string')) return undefined;
+  // Node assertion stacks can color the numeric operands on native Windows.
+  // Remove only SGR formatting, then redact before selecting the finite grammar.
+  const text = redactText(messages.join('\n').replace(/\x1b\[[0-9;]*m/g, ''));
+  if (!/^AssertionError(?:\s|:|\[)/m.test(text)) return undefined;
+  const mismatch = text.split(/\r?\n/).map(line => line.trim())
+    .find(line => /^-?\d{1,12}(?:\.\d{1,12})? !== -?\d{1,12}(?:\.\d{1,12})?$/.test(line));
+  return { code: 'ASSERTION_MISMATCH', excerpt: mismatch ?? 'Assertion failed' };
+}
+
+function observedVitestTests(bytes: Buffer | null, root: string) {
+  if (bytes === null) return undefined;
+  try {
+    const doc = JSON.parse(bytes.toString('utf8'));
+    if (!Array.isArray(doc?.testResults)) return undefined;
+    const tests = canonicalTests(parseVitestJson(doc, { root }), 'vitest-json');
+    if (tests.length > 10_000) return undefined;
+    const messages: unknown[] = doc.testResults.flatMap((file: { assertionResults?: { failureMessages?: unknown }[]; status?: string }) =>
+      file.assertionResults?.length ? file.assertionResults.map(a => a.failureMessages) : file.status === 'failed' ? [undefined] : []);
+    if (messages.length !== tests.length) return undefined;
+    return tests.map((t, i) => ({ ...t, failure: t.status === 'failed' ? assertionFailure(messages[i]) : undefined }));
+  } catch { return undefined; }
+}
 function safeFile(root: string, path: string): Buffer | null {
   // Paths come from NUL-delimited Git enumeration/snapshots; brackets are literal filename characters.
   if (classifyRelativePath(path) || path.split('/').some(p => !p || p === '.' || p === '..') || /[\x00-\x1f\x7f\\*?{}]/.test(path)) throw new Error('CHANNEL_PROBE_PATH_INVALID');
@@ -80,7 +107,7 @@ function cloneDelta(before: string, after: string, scope: LiveClaim, nodePath: s
   // Raw index stat-cache refreshes are harmless; staged entries (mode/blob/stage/path) must match.
   const disposableDelta = changes.length > 0 && changes.every(p => p.disposable);
   const refused = metadata.some(p => p.path === 'status' ? !disposableDelta : p.path !== 'indexFile') || changes.some(p => !p.disposable);
-  return { refused, diagnostic: 'CLONE_DELTA=' + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map(p => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some(p => p.path.length > 256) }) };
+  return { refused, metadataCount: metadata.length, count: changes.length, diagnostic: 'CLONE_DELTA=' + JSON.stringify({ metadata, count: changes.length, paths: changes.slice(0, 32).map(p => ({ ...p, path: p.path.slice(0, 256) })), truncated: changes.length > 32 || changes.some(p => p.path.length > 256) }) };
 }
 
 /** Render literals only; no dynamic substring may survive, even ordinary prose. */
@@ -302,16 +329,19 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
     checkFixture();
     executed = true;
     let summary: ReturnType<typeof rawSummary> | undefined;
+    let observed: ReturnType<typeof observedVitestTests>;
     const record = runVerification({ readonlyFixture: args.readonlyFixture, kind: 'red', nodeId: scope.nodeId, repository: null, ...moduleInvocation(args.bound),
       timeoutMs: Math.min(args.bound.plan.timeout_seconds * 1000, remaining()), cwd: clone, evidenceDir: evidence, label: 'probe', env, cleanEnv: true, reportScratchRoot: root,
-      onRawReport: value => { if (summary) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW'); summary = rawSummary(value); } });
-    let output = redactText(readFileSync(record.output_path, 'utf8')).slice(0, 32 * 1024);
+      onRawReport: value => {
+        if (summary) throw new Error('CHANNEL_PROBE_REPORT_INVALID:RAW');
+        summary = rawSummary(value); // Validates the observer's byte bound and hash before parsing.
+        observed = observedVitestTests(value.bytes, clone);
+      } });
     fixtureChecked = true;
     checkFixture();
     if (!args.current() || snapshot(scope.worktree, args.deadline + 2_000) !== before) throw new Error('CHANNEL_CLAIM_STALE');
     const delta = cloneDelta(cloneBefore, snapshot(clone, args.deadline + 2_000), scope, args.bound.path);
-    if (delta.refused) return fail('CHANNEL_PROBE_CLONE_MUTATED\n' + delta.diagnostic + '\n' + output);
-    output = (delta.diagnostic + '\n' + output).slice(0, 32 * 1024);
+    if (delta.refused) return fail('CHANNEL_PROBE_CLONE_MUTATED\n' + delta.diagnostic);
     if (Date.now() >= args.deadline || record.exit_code === 124) return fail('CHANNEL_PROBE_TIMEOUT');
     if (!record.results || record.steps?.some(s => s.exit_code !== 0 || s.timed_out)) return fail('CHANNEL_PROBE_REPORT_UNAVAILABLE');
     const bytes = readFileSync(record.results.path);
@@ -389,9 +419,30 @@ export function runClaimProbe(args: { scope: LiveClaim; bound: ClaimVerification
       if (declarations.declared.some(d => !tests.some((_: unknown, index: number) => matches(index, d)))) {
         return fail('CHANNEL_PROBE_REPORT_INVALID:DECLARATION:NOT_RUN');
       }
-      diagnostic = { role: 'diagnostic-only', tests: selected };
+      if (record.results.format === 'vitest-json') {
+        // Bind every normalized identity/status/title, including omitted baseline entries,
+        // to the hash-checked native observation before projecting any failure.
+        if (!observed || observed.length !== tests.length || tests.some((t: { id: string; path: string; full_name: string; status: string }, i: number) => {
+          const raw = observed![i];
+          return !raw || t.id !== raw.id || t.path !== raw.path || t.full_name !== raw.full_name ||
+            t.status !== raw.status || doc.results[i].name !== raw.name;
+        }) || new Set(tests.map((t: { id: string }) => t.id)).size !== tests.length) return fail('CHANNEL_PROBE_REPORT_INVALID:IDENTITY:RAW');
+        const failures = new Map(observed.map(t => [t.id, t.failure]));
+        diagnostic = { role: 'diagnostic-only', tests: selected.map((t: typeof selected[number]) => {
+          const failure = failures.get(t.id);
+          return t.status === 'failed' && failure ? { ...t, failure } : t;
+        }) };
+      } else diagnostic = { role: 'diagnostic-only', tests: selected };
     }
     if (!validProbeDiagnostic(diagnostic)) return fail('CHANNEL_PROBE_REPORT_INVALID:SIZE');
+    // A validated structured report never releases the runner log: it includes
+    // command argv/source as well as arbitrary child stdout/stderr. Keep failure
+    // details solely in the separately validated, bounded diagnostic field.
+    // Retain the bounded, controller-generated clone snapshot diagnostic contract.
+    const output = delta.diagnostic + '\nPROBE_REPORT=' + JSON.stringify({
+      runner: { exit_code: record.exit_code, normalized_count: tests.length },
+      clone_delta: { metadata_count: delta.metadataCount, count: delta.count },
+    });
     const bounded = boundChannelResponse({ ok: true, sequence: Number.MAX_SAFE_INTEGER, exitCode: record.exit_code, output, diagnostic });
     return { exitCode: bounded.exitCode ?? 2, output: bounded.output ?? '',
       ...('diagnostic' in bounded && bounded.diagnostic ? { diagnostic: bounded.diagnostic } : {}) };
