@@ -66,7 +66,7 @@ import { withLock } from '../state/process-lock.js';
 import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
-import { assertControllerAuthority, authorityFile, openControllerAuthority } from '../engine/authority.js';
+import { assertControllerAuthority, AuthorityError, authorityFile, openControllerAuthority } from '../engine/authority.js';
 import { continueController, continueReviewedController } from '../engine/codex-continuation.js';
 import { importCompletions } from '../engine/continuation-import.js';
 import { finalizeCodexDelivery } from '../engine/codex-finalize.js';
@@ -82,7 +82,7 @@ import { repairEvidence } from '../engine/evidence-integrity.js';
 import { productionSince, redBinding, redBoundFiles, redDeclaredTests, tddPolicyFor, verifyTddHistory } from '../engine/tdd-history.js';
 import { RED_RETRY_GUIDANCE } from '../evidence/red-classify.js';
 import { namesDeclared, readGateTests, shownTests, testLine } from '../evidence/gate-tests.js';
-import { sessionHolder } from '../util/process-identity.js';
+import { processIdentity, sessionHolder } from '../util/process-identity.js';
 import { ACCEPTANCE_FILE, AcceptanceError, buildManifest, extractAcceptanceCriteria, loadAcceptanceManifest, manifestProblems, sidecarPath } from '../engine/acceptance.js';
 
 /** Whether a path is a link (for a message only: nothing is read from this look). */
@@ -540,7 +540,32 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     const sourceBytes = importing ? readFileSync(featurePaths(sourceControlRoot!, featureId).state) : null;
     if (sourceBytes && createHash('sha256').update(sourceBytes).digest('hex') !== sourceSha) throw new Error('IMPORT_SOURCE_HASH: source STATE.json differs from the independently pinned SHA-256.');
     const detail: { node_id: string; outcome: string; state: string }[] = [];
-    const open = () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority;
+    const open = () => {
+      const holder = sessionHolder() ?? processIdentity(process.pid);
+      if (holder === null) throw new AuthorityError('CONTROLLER_BUSY', 'continuation requires a verifiable holder process.');
+      try {
+        return openControllerAuthority(controlRoot, { holder }).authority;
+      } catch (error) {
+        if (!(error instanceof AuthorityError) || error.code !== 'CONTROLLER_AUTHORITY_EXISTS') throw error;
+        // Recovery is specific to continuation. A reused or unverifiable PID
+        // must not turn a mismatched identity into permission to recover.
+        const previous = JSON.parse(readFileSync(authorityFile(controlRoot), 'utf8')) as { holder?: { pid?: number; start?: string } | null };
+        const prior = previous.holder;
+        if (!prior || !Number.isSafeInteger(prior.pid) || prior.pid! <= 0 || typeof prior.start !== 'string' || prior.start.trim() === '') {
+          throw new AuthorityError('CONTROLLER_BUSY', 'the prior holder identity cannot be verified.');
+        }
+        try {
+          process.kill(prior.pid!, 0);
+        } catch (probeError) {
+          if ((probeError as NodeJS.ErrnoException).code === 'ESRCH') {
+            // The engine rechecks the record under its lock and enforces the
+            // prior identity, host, adapter and settler recovery rules.
+            return openControllerAuthority(controlRoot, { recover: true, holder }).authority;
+          }
+        }
+        throw new AuthorityError('CONTROLLER_BUSY', 'the prior holder PID is active or its exit cannot be proved.');
+      }
+    };
     const prepare = (authority: string) => {
         // A newly approved graph has no STATE.json. Initialise it once under
         // this same controller key, without printing or persisting the key.

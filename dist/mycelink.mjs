@@ -48194,7 +48194,28 @@ async function codexGroup(args, io) {
     const sourceBytes = importing ? readFileSync43(featurePaths(sourceControlRoot, featureId2).state) : null;
     if (sourceBytes && createHash44("sha256").update(sourceBytes).digest("hex") !== sourceSha) throw new Error("IMPORT_SOURCE_HASH: source STATE.json differs from the independently pinned SHA-256.");
     const detail = [];
-    const open = () => openControllerAuthority(controlRoot, { holder: sessionHolder() }).authority;
+    const open = () => {
+      const holder = sessionHolder() ?? processIdentity(process.pid);
+      if (holder === null) throw new AuthorityError("CONTROLLER_BUSY", "continuation requires a verifiable holder process.");
+      try {
+        return openControllerAuthority(controlRoot, { holder }).authority;
+      } catch (error) {
+        if (!(error instanceof AuthorityError) || error.code !== "CONTROLLER_AUTHORITY_EXISTS") throw error;
+        const previous = JSON.parse(readFileSync43(authorityFile(controlRoot), "utf8"));
+        const prior = previous.holder;
+        if (!prior || !Number.isSafeInteger(prior.pid) || prior.pid <= 0 || typeof prior.start !== "string" || prior.start.trim() === "") {
+          throw new AuthorityError("CONTROLLER_BUSY", "the prior holder identity cannot be verified.");
+        }
+        try {
+          process.kill(prior.pid, 0);
+        } catch (probeError) {
+          if (probeError.code === "ESRCH") {
+            return openControllerAuthority(controlRoot, { recover: true, holder }).authority;
+          }
+        }
+        throw new AuthorityError("CONTROLLER_BUSY", "the prior holder PID is active or its exit cannot be proved.");
+      }
+    };
     const prepare = (authority) => {
       if (loadState(featurePaths(controlRoot, featureId2).featureDir) === null) {
         const initOutput = [];
