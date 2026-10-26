@@ -48193,6 +48193,8 @@ async function codexGroup(args, io) {
     }
     const sourceBytes = importing ? readFileSync43(featurePaths(sourceControlRoot, featureId2).state) : null;
     if (sourceBytes && createHash44("sha256").update(sourceBytes).digest("hex") !== sourceSha) throw new Error("IMPORT_SOURCE_HASH: source STATE.json differs from the independently pinned SHA-256.");
+    const answering = args.flags["answer-decision"] !== void 0 || args.flags["answer"] !== void 0;
+    const decision = answering ? codexContinuationDecision(args, controlRoot, featureId2) : null;
     const detail = [];
     const open = () => {
       const holder = sessionHolder() ?? processIdentity(process.pid);
@@ -48217,6 +48219,29 @@ async function codexGroup(args, io) {
       }
     };
     const prepare = (authority) => {
+      if (decision) {
+        const heldArgs = { ...args, flags: { ...args.flags, authority } };
+        assertControllerAuthority(heldArgs, controlRoot, "codex continue answer decision");
+        const current = codexContinuationDecision(args, controlRoot, featureId2);
+        if (current.nodeId !== decision.nodeId) throw new Error("CODEX_DECISION_CHANGED: pending request changed.");
+        const paths2 = featurePaths(controlRoot, featureId2);
+        const internal = { out: () => {
+        }, err: (text) => {
+          throw new Error(text);
+        } };
+        decisionGroup({ ...heldArgs, positional: ["decision", "record", featureId2, decision.id] }, internal);
+        assertDecisionUsable(paths2.events, decision.id);
+        mutateState(paths2.featureDir, (state2) => {
+          const next = applyNodeTransition(loadGraph(controlRoot, featureId2), state2, decision.nodeId, "READY", {
+            actor: "mycelink",
+            decisionId: decision.id
+          });
+          next.pending_decisions = next.pending_decisions.filter((id2) => id2 !== decision.id);
+          if (next.pending_decisions.length === 0 && next.feature_state === "NEEDS_DECISION") next.feature_state = "RUNNING";
+          return next;
+        });
+        markDecisionApplied(paths2.events, featureId2, decision.id, "codex continue answer decision");
+      }
       if (loadState(featurePaths(controlRoot, featureId2).featureDir) === null) {
         const initOutput = [];
         const initCode = featureGroup({ ...args, positional: ["feature", "init", featureId2], flags: { ...args.flags, authority, json: true } }, {
@@ -50346,6 +50371,34 @@ function loopGroup(args, io) {
   }
   io.err(`Unknown loop command "${sub}".`);
   return 2;
+}
+function codexContinuationDecision(args, controlRoot, featureId) {
+  const id2 = args.flags["answer-decision"];
+  const answer = args.flags["answer"];
+  const refuse2 = () => {
+    throw new Error("CODEX_DECISION_INVALID: both answer flags must identify one pending recorded request and an exact durable option.");
+  };
+  if (typeof id2 !== "string" || !/^DEC-[0-9a-f]{8}$/.test(id2) || typeof answer !== "string" || answer.length === 0) return refuse2();
+  const paths = featurePaths(controlRoot, featureId);
+  const state = loadState(paths.featureDir)?.data;
+  if (!state || state.pending_decisions.filter((pending) => pending === id2).length !== 1) return refuse2();
+  const events = readEvents(paths.events, { includeRotated: true });
+  const related = events.filter((event) => event.data?.decision_id === id2);
+  if (related.some((event) => event.type === "decision.recorded" || event.type === "decision.applied")) return refuse2();
+  const requests = related.filter((event) => event.type === "decision.requested");
+  if (requests.length !== 1) return refuse2();
+  const request = requests[0];
+  const nodeId = request.node_id;
+  if (request.actor !== "mycelink" || request.feature_id !== featureId || !nodeId || state.nodes[nodeId]?.state !== "NEEDS_DECISION" || !loadGraph(controlRoot, featureId).nodes.some((node) => node.id === nodeId)) return refuse2();
+  if (!existsSync48(paths.decisions)) return refuse2();
+  const sections = readFileSync43(paths.decisions, "utf8").replace(/\r\n/g, "\n").split(/(?=^## )/m).filter((section) => section.startsWith(`## ${id2} (`));
+  if (sections.length !== 1) return refuse2();
+  const lines = sections[0].split("\n");
+  const nodes = lines.filter((line) => line.startsWith("- Node: "));
+  const statuses = lines.filter((line) => line.startsWith("- Status: "));
+  const options = lines.filter((line) => line.startsWith("  - [ ] ")).map((line) => line.slice(8));
+  if (nodes.length !== 1 || nodes[0] !== `- Node: \`${nodeId}\`` || statuses.length !== 1 || statuses[0] !== "- Status: PENDING" || options.filter((option) => option === answer).length !== 1) return refuse2();
+  return { id: id2, nodeId };
 }
 function decisionGroup(args, io) {
   const controlRoot = resolveControlRoot(args);

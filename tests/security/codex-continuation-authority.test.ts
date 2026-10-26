@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { createPortfolio, FEATURE_ID, portfolioGraph, writePrd, type Portfolio } from '../helpers/portfolio-fixture.js';
@@ -11,6 +11,10 @@ import { capabilityMatches } from '../../src/engine/capability.js';
 import { isProcessAlive, processIdentity, type ProcessIdentity } from '../../src/util/process-identity.js';
 import { settlerMarker } from '../../src/engine/settler.js';
 import { recordSpawn } from '../../src/sessions/registry.js';
+import { initialState, loadState, saveState } from '../../src/state/feature-state.js';
+import { loadGraph, validateFeatureGraph } from '../../src/workspace/workspace.js';
+import { appendEvent, readEvents } from '../../src/state/event-log.js';
+import { markDecisionApplied } from '../../src/state/decisions.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -165,5 +169,115 @@ describe('direct Codex continuation authority across native process invocations'
     expect(result.stderr).toContain('CONTROLLER_BUSY');
     expect(readFileSync(authorityFile(p.control), 'utf8')).toBe(before);
     expect(() => openControllerAuthority(p.control, { recover: true, holder: self() })).toThrow(/CONTROLLER_BUSY/);
+  });
+});
+
+const pendingId = 'DEC-12345678';
+const pendingNode = `${FEATURE_ID}.core.publish.impl`;
+const exactAnswer = 'Allow offline frozen-lockfile pnpm installs only in test-harness-owned temporary full-source clones; never in the worker coding checkout.';
+
+// Reproduce the durable shape written by recordDecisionRequest, without
+// opening authority or running/installing anything in the coding checkout.
+function pendingFixture(evidence = true): Portfolio {
+  const p = fixture();
+  const state = initialState(loadGraph(p.control, FEATURE_ID), validateFeatureGraph(p.control, FEATURE_ID).graphHash);
+  state.feature_state = 'NEEDS_DECISION';
+  state.pending_decisions = [pendingId];
+  state.nodes[pendingNode]!.state = 'NEEDS_DECISION';
+  state.nodes[pendingNode]!.blocked_reason = 'Graph exception needs manager choice';
+  saveState(p.featureDir, state);
+  if (evidence) {
+    writeFileSync(join(p.featureDir, 'DECISIONS.md'), `# Decisions for ${FEATURE_ID}\n\n## ${pendingId} (graph exception)\n\n- Node: \`${pendingNode}\`\n- Status: PENDING\n- Question: Permit the narrow offline test harness exception?\n  - [ ] ${exactAnswer}\n  - [ ] Keep installs prohibited and stop\n\n`);
+    appendEvent(join(p.featureDir, 'events.jsonl'), {
+      idempotency_key: `decision.requested:${pendingId}`,
+      type: 'decision.requested', actor: 'mycelink', feature_id: FEATURE_ID,
+      node_id: pendingNode, data: { decision_id: pendingId, category: 'graph exception' },
+    });
+  }
+  return p;
+}
+
+function decisionSnapshot(p: Portfolio) {
+  return ['STATE.json', 'DECISIONS.md', 'events.jsonl'].map((name) => {
+    const path = join(p.featureDir, name);
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  });
+}
+
+function assertAnswerRejected(p: Portfolio, flags: string[], env: Record<string, string> = {}) {
+  const before = decisionSnapshot(p);
+  const authorityBefore = existsSync(authorityFile(p.control)) ? readFileSync(authorityFile(p.control), 'utf8') : null;
+  const result = invoke(p, flags, env);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toMatch(/DECISION|ROLE_DENIED/);
+  expect(decisionSnapshot(p)).toEqual(before);
+  expect(existsSync(authorityFile(p.control)) ? readFileSync(authorityFile(p.control), 'utf8') : null).toBe(authorityBefore);
+}
+
+describe('Codex manager answers a pending choice inside continuation authority', () => {
+  it.each([false, true])('records/applies then dispatches READY under the held authority (recover=%s)', (recover) => {
+    const p = pendingFixture();
+    if (recover) openControllerAuthority(p.control, { holder: endedHolder() });
+    const result = invoke(p, ['--answer-decision', pendingId, '--answer', exactAnswer, '--max-nodes', '1']);
+    // The Node executable intentionally cannot run a Codex worker. A report
+    // proves dispatch was reached after unblocking, without paid model use.
+    expect(result.stderr).not.toMatch(/CODEX_RUNTIME_DENIED|DECISION_NOT_RECORDED|CONTROLLER_AUTHORITY_EXISTS/);
+    expect(JSON.parse(result.stdout)).toMatchObject({ reports: [{ node_id: pendingNode }] });
+    expect(loadState(p.featureDir)!.data.pending_decisions).toEqual([]);
+    const decisions = readEvents(join(p.featureDir, 'events.jsonl')).filter((e) => e.type === 'decision.recorded' || e.type === 'decision.applied');
+    expect(decisions.map((e) => e.type)).toEqual(['decision.recorded', 'decision.applied']);
+    expect(decisions.map((e) => e.data)).toEqual(expect.arrayContaining([expect.objectContaining({ decision_id: pendingId })]));
+    expect(readFileSync(join(p.featureDir, 'DECISIONS.md'), 'utf8')).toContain(`### ${pendingId} ANSWERED`);
+    expect(record(p)).toMatchObject({ holder: { pid: result.pid }, takeover: false, ...(recover ? { recovered: true } : {}) });
+    const output = result.stdout + result.stderr + readFileSync(join(p.featureDir, 'events.jsonl'), 'utf8');
+    expect(output).not.toMatch(/"authority"\s*:/);
+    for (const candidate of output.match(/[0-9a-f]{64}/g) ?? []) expect(capabilityMatches(candidate, record(p).sha256)).toBe(false);
+    assertAnswerRejected(p, ['--answer-decision', pendingId, '--answer', exactAnswer]);
+  });
+
+  it.each([
+    ['--answer-decision', pendingId],
+    ['--answer', exactAnswer],
+    ['--answer-decision', '--answer', exactAnswer],
+    ['--answer-decision', pendingId, '--answer'],
+    ['--answer-decision', 'DEC-unknown', '--answer', exactAnswer],
+    ['--answer-decision', pendingId, '--answer', 'Allow installs anywhere'],
+    ['--answer-decision', pendingId, '--answer', `${exactAnswer} `],
+  ])('rejects invalid answer flags before opening authority: %j', (...flags) => {
+    assertAnswerRejected(pendingFixture(), flags);
+  });
+
+  it('requires durable worker choice evidence before opening authority', () => {
+    assertAnswerRejected(pendingFixture(false), ['--answer-decision', pendingId, '--answer', exactAnswer]);
+  });
+
+  it('refuses an already applied decision even if still listed pending', () => {
+    const p = pendingFixture();
+    markDecisionApplied(join(p.featureDir, 'events.jsonl'), FEATURE_ID, pendingId, 'prior decision apply');
+    assertAnswerRejected(p, ['--answer-decision', pendingId, '--answer', exactAnswer]);
+  });
+
+  it.each(['flag', 'environment'])('refuses worker capability via %s without mutation', (kind) => {
+    assertAnswerRejected(pendingFixture(), ['--answer-decision', pendingId, '--answer', exactAnswer,
+      ...(kind === 'flag' ? ['--capability', 'a'.repeat(64)] : [])],
+    kind === 'environment' ? { MYCELINK_CLAIM_TOKEN: 'a'.repeat(64) } : {});
+  });
+
+  it('leaves an unanswered pending choice parked on normal continuation', () => {
+    const p = pendingFixture();
+    const result = invoke(p, ['--max-nodes', '1']);
+    expect(JSON.parse(result.stdout)).toMatchObject({ reports: [] });
+    expect(loadState(p.featureDir)!.data.pending_decisions).toEqual([pendingId]);
+    expect(readEvents(join(p.featureDir, 'events.jsonl')).some((e) => e.type === 'decision.recorded' || e.type === 'decision.applied')).toBe(false);
+  });
+
+  it.each(['record', 'apply'])('keeps generic decision %s denied by the Codex runtime gate', (command) => {
+    const p = pendingFixture();
+    const before = decisionSnapshot(p);
+    const result = invoke(p, ['--answer', exactAnswer], {}, ['decision', command, FEATURE_ID, pendingId]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('CODEX_RUNTIME_DENIED');
+    expect(decisionSnapshot(p)).toEqual(before);
+    expect(existsSync(authorityFile(p.control))).toBe(false);
   });
 });
