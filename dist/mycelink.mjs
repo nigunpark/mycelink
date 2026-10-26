@@ -19089,6 +19089,15 @@ function redBinding(worktree, policy, evidenceSha256) {
     production
   };
 }
+function redBindingMatchesWorktree(worktree, policy, binding) {
+  if (binding.tests.length === 0 || testsSha256(binding.tests) !== binding.tests_sha256 || !isAncestor(worktree, binding.head_sha, resolveRef(worktree, "HEAD"))) return false;
+  const changed = runGit(worktree, ["diff", "--name-only", "-z", "--no-renames", binding.head_sha]).stdout.split("\0").filter(Boolean);
+  const paths = [.../* @__PURE__ */ new Set([...changed, ...workingTreeChanges(worktree)])].filter((p) => isTestPath(policy, p));
+  const hashes = hashWorkingFiles(worktree, paths.filter((p) => existsSync8(join12(worktree, p))));
+  const before = blobsAt(worktree, binding.head_sha, paths);
+  const tests = paths.map((path) => ({ path, blob: hashes.get(path) ?? null })).filter((t) => t.blob !== (before.get(t.path) ?? null));
+  return testsSha256(tests) === binding.tests_sha256;
+}
 function redDeclaredTests(worktree, policy, base, options = {}) {
   const head = resolveRef(worktree, "HEAD");
   let start = head;
@@ -35194,7 +35203,7 @@ var Orchestrator = class _Orchestrator {
     const rt = state.nodes[nodeId];
     const claim = rt?.claim;
     if (state.graph_hash !== hashGraph(graph) || !node || node.repository === null || !claim || claim.mode !== "adapter" || claim.claim_id !== claimId || !claim.worktree || resolve24(claim.worktree) !== resolve24(worktree) || !isInsideReal(worktree, claim.worktree) || !claim.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256)) return null;
-    const nextGate = rt.state === "CLAIMED" || rt.state === "RED_PENDING" ? redRequired(node, rt) ? "red" : "green" : rt.state === "RED_VERIFIED" || rt.state === "GREEN_PENDING" ? "green" : rt.state === "GREEN_VERIFIED" ? "regression" : null;
+    const nextGate = rt.state === "CLAIMED" || rt.state === "RED_PENDING" ? rt.state === "CLAIMED" && this.retainedCodexGreen(state, node, rt) ? "regression" : redRequired(node, rt) ? "red" : "green" : rt.state === "RED_VERIFIED" || rt.state === "GREEN_PENDING" ? "green" : rt.state === "GREEN_VERIFIED" ? "regression" : null;
     return {
       claimId,
       generation: claim.generation,
@@ -35211,6 +35220,32 @@ var Orchestrator = class _Orchestrator {
       gateCommands: this.gateCommands(nodeId, capability),
       ...rt.rework_brief?.origin?.kind === "acceptance-review" ? { challengeCriteria: [...rt.rework_brief.acceptance_criteria] } : {}
     };
+  }
+  /** Infrastructure release keeps gates, but only this lineage's intact gates confer authority. */
+  retainedCodexGreen(state, node, rt) {
+    const claim = rt.claim;
+    const red = rt.evidence.red;
+    const green = rt.evidence.green;
+    if (!claim?.worktree || claim.mode !== "adapter" || !red || !green || red.carried_from != null || claim.generation !== (rt.rework_brief?.generation ?? (rt.rework_history ?? []).filter(stoodRework).length) || red.kind !== "red" || red.exit_code === 0 || red.red_reason !== "behaviour-missing" || green.kind !== "green" || green.exit_code !== 0) return false;
+    try {
+      const head = resolveRef(claim.worktree, "HEAD");
+      for (const record of [red, green]) {
+        const started = Date.parse(record.started_at);
+        const finished = Date.parse(record.finished_at);
+        if (record.node_id !== node.id || record.repository !== node.repository || resolve24(this.controlRoot, record.cwd) !== resolve24(claim.worktree) || !record.commit_sha || !isAncestor(claim.worktree, record.commit_sha, head) || !Number.isFinite(started) || !Number.isFinite(finished) || finished < started || !(state.orchestration?.leases ?? []).some((lease) => lease.node_id === node.id && lease.generation === claim.generation && lease.lineage === lineageOf(state, node.id) && lease.worktree != null && resolve24(lease.worktree) === resolve24(claim.worktree) && Date.parse(lease.issued_at) <= started && (lease.closed_at === null || Date.parse(lease.closed_at) >= finished)) || checkEvidenceOutput(this.controlRoot, this.featureId, record, { overlay: false }) !== null || !record.results || checkEvidenceOutput(
+          this.controlRoot,
+          this.featureId,
+          { output_path: record.results.path, output_sha256: record.results.sha256 },
+          { overlay: false }
+        ) !== null || !readGateTests(this.controlRoot, record)?.length) return false;
+        if (claim.verification && (record.module !== claim.verification.module || record.module_sha256 !== claim.verification.module_sha256 || record.plan_sha256 !== claim.verification.plan_sha256)) return false;
+      }
+      if (Date.parse(green.started_at) < Date.parse(red.finished_at) || !claim.verification && JSON.stringify(red.command) !== JSON.stringify(green.command)) return false;
+      const binding = [...rt.tdd_red_bindings ?? []].reverse().find((b) => b.evidence_sha256 === red.output_sha256);
+      return binding !== void 0 && binding.head_sha === red.commit_sha && redBindingMatchesWorktree(claim.worktree, claim.tdd_policy ?? this.claimTddPolicy(node.repository), binding);
+    } catch {
+      return false;
+    }
   }
   /** Diagnostic budget belongs to the host claim, never a mailbox/channel instance. */
   codexProbeClaim(nodeId, claimId, capability, worktree, options) {
@@ -49363,7 +49398,7 @@ function tddGroup(args, io) {
   const node = graph.nodes.find((n) => n.id === nodeId);
   if (!node) throw new Error(`Node "${nodeId}" is not in the graph.`);
   const doc = loadState(paths.featureDir);
-  const runtime = doc?.data.nodes[nodeId];
+  let runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
   const capability = presentedCapability(args);
   assertClaimCapability(nodeId, runtime, capability);
@@ -49378,6 +49413,20 @@ function tddGroup(args, io) {
       `${phase} gate refused: EVIDENCE_CORRECTION_PENDING: ${nodeId}'s code, history and gate evidence are recorded and its submission is held only for its criterion evidence (${held.code}). Do not edit, commit or run a gate: write the corrected result (criterion_evidence by test_id) and settle. Nothing was run or recorded.`
     );
     return 2;
+  }
+  if (phase === "regression" && runtime.state === "CLAIMED" && runtime.claim?.mode === "adapter" && runtime.claim.worktree && capability !== void 0) {
+    const controller = orchestratorFor(controlRoot, featureId);
+    const claim = runtime.claim;
+    mutateState(paths.featureDir, (s) => {
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+      if (s.nodes[nodeId]?.state !== "CLAIMED" || controller.codexClaimScope(nodeId, claim.claim_id, capability, claim.worktree)?.nextGate !== "regression") return s;
+      let next = s;
+      for (const stage of ["RED_PENDING", "RED_VERIFIED", "GREEN_PENDING", "GREEN_VERIFIED"]) {
+        next = applyNodeTransition(graph, next, nodeId, stage, { actor: "mycelink" });
+      }
+      return next;
+    });
+    runtime = loadState(paths.featureDir).data.nodes[nodeId];
   }
   const gatePending = phase === "red" ? "RED_PENDING" : phase === "green" ? "GREEN_PENDING" : null;
   const gateVerified = phase === "red" ? "RED_VERIFIED" : phase === "green" ? "GREEN_VERIFIED" : "REGRESSION_VERIFIED";

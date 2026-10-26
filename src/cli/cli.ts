@@ -1837,7 +1837,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   if (!node) throw new Error(`Node "${nodeId}" is not in the graph.`);
 
   const doc = loadState(paths.featureDir);
-  const runtime = doc?.data.nodes[nodeId];
+  let runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
   // Only the holder of the node's current claim may record its gates, or read the tests they ran.
   const capability = presentedCapability(args);
@@ -1862,6 +1862,23 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   // A gate that could not move the node is refused before it runs anything:
   // running the verifier anyway records evidence for nothing and, when it
   // fails, counts a failure the gate order caused.
+  if (phase === 'regression' && runtime.state === 'CLAIMED' && runtime.claim?.mode === 'adapter' && runtime.claim.worktree && capability !== undefined) {
+    const controller = orchestratorFor(controlRoot, featureId);
+    const claim = runtime.claim;
+    mutateState(paths.featureDir, (s) => {
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+      if (s.nodes[nodeId]?.state !== 'CLAIMED' ||
+          controller.codexClaimScope(nodeId, claim.claim_id, capability, claim.worktree!)?.nextGate !== 'regression') return s;
+      // Re-establish only gates the retained, integrity-checked evidence already
+      // passed. Regression still runs normally at the current committed head.
+      let next = s;
+      for (const stage of ['RED_PENDING', 'RED_VERIFIED', 'GREEN_PENDING', 'GREEN_VERIFIED'] as const) {
+        next = applyNodeTransition(graph, next, nodeId, stage, { actor: 'mycelink' });
+      }
+      return next;
+    });
+    runtime = loadState(paths.featureDir)!.data.nodes[nodeId]!;
+  }
   const gatePending = phase === 'red' ? 'RED_PENDING' : phase === 'green' ? 'GREEN_PENDING' : null;
   const gateVerified =
     phase === 'red' ? 'RED_VERIFIED' : phase === 'green' ? 'GREEN_VERIFIED' : 'REGRESSION_VERIFIED';

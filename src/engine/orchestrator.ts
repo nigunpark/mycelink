@@ -50,7 +50,7 @@ import { MAX_LEDGER_RECORDS, carriedRed, completionsOf, ledgerOf, revalidateComp
 import { readGateTests } from '../evidence/gate-tests.js';
 import { TEST_IDENTITY_VERSION, namesDeclaration } from '../evidence/test-identity.js';
 import { commitProofUnit, planProofUnit, type ProofFile } from './proof-units.js';
-import { tddPolicyFor, tddPolicySha256, verifyTddHistory, type TddHistory, type TddPolicy } from './tdd-history.js';
+import { redBindingMatchesWorktree, tddPolicyFor, tddPolicySha256, verifyTddHistory, type TddHistory, type TddPolicy } from './tdd-history.js';
 import {
   WorktreeSetupError,
   reusableSetup,
@@ -1846,7 +1846,7 @@ export class Orchestrator {
         resolve(claim.worktree) !== resolve(worktree) || !isInsideReal(worktree, claim.worktree) ||
         !claim.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256)) return null;
     const nextGate = rt.state === 'CLAIMED' || rt.state === 'RED_PENDING'
-      ? (redRequired(node, rt) ? 'red' : 'green')
+      ? (rt.state === 'CLAIMED' && this.retainedCodexGreen(state, node, rt) ? 'regression' : redRequired(node, rt) ? 'red' : 'green')
       : rt.state === 'RED_VERIFIED' || rt.state === 'GREEN_PENDING' ? 'green'
         : rt.state === 'GREEN_VERIFIED' ? 'regression' : null;
     return {
@@ -1859,6 +1859,51 @@ export class Orchestrator {
       ...(rt.rework_brief?.origin?.kind === 'acceptance-review'
         ? { challengeCriteria: [...rt.rework_brief.acceptance_criteria] } : {}),
     };
+  }
+
+  /** Infrastructure release keeps gates, but only this lineage's intact gates confer authority. */
+  private retainedCodexGreen(state: FeatureState_, node: GraphNode, rt: NodeRuntime): boolean {
+    const claim = rt.claim;
+    const red = rt.evidence.red;
+    const green = rt.evidence.green;
+    if (!claim?.worktree || claim.mode !== 'adapter' || !red || !green || red.carried_from != null ||
+        claim.generation !== (rt.rework_brief?.generation ?? (rt.rework_history ?? []).filter(stoodRework).length) ||
+        red.kind !== 'red' || red.exit_code === 0 || red.red_reason !== 'behaviour-missing' ||
+        green.kind !== 'green' || green.exit_code !== 0) return false;
+    try {
+      const head = resolveRef(claim.worktree, 'HEAD');
+      for (const record of [red, green]) {
+        const started = Date.parse(record.started_at);
+        const finished = Date.parse(record.finished_at);
+        // Evidence records predate the fresh claim. The durable lease identifies the
+        // generation and lineage whose capability could record them at that time.
+        if (record.node_id !== node.id || record.repository !== node.repository ||
+            resolve(this.controlRoot, record.cwd) !== resolve(claim.worktree) ||
+            !record.commit_sha || !isAncestor(claim.worktree, record.commit_sha, head) ||
+            !Number.isFinite(started) || !Number.isFinite(finished) || finished < started ||
+            !(state.orchestration?.leases ?? []).some((lease) => lease.node_id === node.id &&
+              lease.generation === claim.generation && lease.lineage === lineageOf(state, node.id) &&
+              lease.worktree != null && resolve(lease.worktree) === resolve(claim.worktree!) &&
+              Date.parse(lease.issued_at) <= started &&
+              (lease.closed_at === null || Date.parse(lease.closed_at) >= finished)) ||
+            checkEvidenceOutput(this.controlRoot, this.featureId, record, { overlay: false }) !== null ||
+            !record.results || checkEvidenceOutput(this.controlRoot, this.featureId,
+              { output_path: record.results.path, output_sha256: record.results.sha256 }, { overlay: false }) !== null ||
+            !readGateTests(this.controlRoot, record)?.length) return false;
+        if (claim.verification && (record.module !== claim.verification.module ||
+            record.module_sha256 !== claim.verification.module_sha256 ||
+            record.plan_sha256 !== claim.verification.plan_sha256)) return false;
+      }
+      // Bound RED and GREEN may use phase-specific commands. Both must prove
+      // the claim's same module and plan; unbound gates still require equal argv.
+      if (Date.parse(green.started_at) < Date.parse(red.finished_at) ||
+          (!claim.verification && JSON.stringify(red.command) !== JSON.stringify(green.command))) return false;
+      const binding = [...(rt.tdd_red_bindings ?? [])].reverse().find((b) => b.evidence_sha256 === red.output_sha256);
+      return binding !== undefined && binding.head_sha === red.commit_sha &&
+        redBindingMatchesWorktree(claim.worktree, claim.tdd_policy ?? this.claimTddPolicy(node.repository!), binding);
+    } catch {
+      return false;
+    }
   }
 
   /** Diagnostic budget belongs to the host claim, never a mailbox/channel instance. */
