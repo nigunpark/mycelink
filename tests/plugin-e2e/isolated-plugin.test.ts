@@ -9,6 +9,7 @@
  * model, so the suite is free to run in CI and on a developer machine.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runLauncher } from '../helpers/launcher-process.js';
@@ -52,8 +53,12 @@ function record(label: string, run: ClaudeRun): ClaudeRun {
 
 describeIfClaude('isolated plugin harness', () => {
   let profile: IsolatedProfile;
+  const realSettings = join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? '', '.claude', 'settings.json');
+  let realSettingsBefore: string | null = null;
 
   beforeAll(() => {
+    realSettingsBefore = existsSync(realSettings)
+      ? createHash('sha256').update(readFileSync(realSettings)).digest('hex') : null;
     profile = createIsolatedProfile(PLUGIN_SOURCE);
   });
 
@@ -310,11 +315,12 @@ describeIfClaude('isolated plugin harness', () => {
     expect(remaining.some((p) => p.id === PLUGIN_ID)).toBe(false);
   });
 
-  it('never wrote outside the isolated profile', () => {
-    // The real user config must not have gained our marketplace.
-    const realConfig = join(process.env['USERPROFILE'] ?? '', '.claude', 'settings.json');
-    if (existsSync(realConfig)) {
-      expect(readFileSync(realConfig, 'utf8')).not.toContain(MARKETPLACE);
+  it('leaves the real user settings byte-identical', () => {
+    // A developer may already have Mycelink installed. Preserve their bytes
+    // rather than assuming the marketplace was absent before this test.
+    expect(existsSync(realSettings)).toBe(realSettingsBefore !== null);
+    if (realSettingsBefore !== null) {
+      expect(createHash('sha256').update(readFileSync(realSettings)).digest('hex')).toBe(realSettingsBefore);
     }
   });
 
