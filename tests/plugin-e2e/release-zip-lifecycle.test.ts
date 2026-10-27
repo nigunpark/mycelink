@@ -4,6 +4,7 @@
  * model usage). Nothing is built and nothing is npm-installed.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -40,6 +41,8 @@ describeIfClaude('release ZIP lifecycle in an isolated profile', () => {
   let profile: IsolatedProfile;
   let plugin: string;
   let control: string;
+  const realSettings = join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? '', '.claude', 'settings.json');
+  let realSettingsBefore: string | null = null;
 
   function installed(): Installed[] {
     const run = runClaude(profile, ['plugin', 'list', '--json']);
@@ -62,6 +65,8 @@ describeIfClaude('release ZIP lifecycle in an isolated profile', () => {
   }
 
   beforeAll(() => {
+    realSettingsBefore = existsSync(realSettings)
+      ? createHash('sha256').update(readFileSync(realSettings)).digest('hex') : null;
     // The profile copies an empty directory; the plugin comes from the ZIP.
     profile = createIsolatedProfile(makeTmpDir('zip-src-'));
     const out = join(profile.artifacts, 'release');
@@ -151,8 +156,9 @@ describeIfClaude('release ZIP lifecycle in an isolated profile', () => {
   });
 
   it('never touched the real user configuration', () => {
-    const home = process.env['USERPROFILE'] ?? process.env['HOME'] ?? '';
-    const real = join(home, '.claude', 'settings.json');
-    if (existsSync(real)) expect(readFileSync(real, 'utf8')).not.toContain('mycelink-marketplace');
+    expect(existsSync(realSettings)).toBe(realSettingsBefore !== null);
+    if (realSettingsBefore !== null) {
+      expect(createHash('sha256').update(readFileSync(realSettings)).digest('hex')).toBe(realSettingsBefore);
+    }
   });
 });

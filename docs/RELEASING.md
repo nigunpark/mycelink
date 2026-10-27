@@ -1,18 +1,19 @@
 # Releasing
 
 Releases are tag-driven and designed to be reproducible. Same-host repeat
-packaging has matched bytes; this branch's actual cross-OS equivalence and CI
-are unverified. Do not infer a published release from a local ZIP.
+packaging has matched bytes, and the previous main tree passed the full
+Windows, Linux and macOS CI matrix. A new version still needs its own green
+PR, post-merge and tag workflow; do not infer publication from a local ZIP.
 
 ## Versioning
 
 - Semantic Versioning; pre-releases use `-beta.N` / `-rc.N`.
-- The version lives in five places that must agree: `package.json`,
+- The version lives in five surfaces that must agree: `package.json`,
   `package-lock.json` (root entry), `.claude-plugin/plugin.json`, the
   plugin entry plus `metadata.version` in `.claude-plugin/marketplace.json`,
-  and `codex-plugin/plugin.json` (planning-only).
+  and `codex-plugin/plugin.json` (experimental opt-in).
   `npm test` checks they agree (`tests/release/metadata.test.ts`).
-- The Git tag is `v<version>`, e.g. `v0.3.0-beta.1`.
+- The Git tag is `v<version>`, e.g. `v0.3.0-beta.2`.
 
 ## Checklist
 
@@ -64,17 +65,17 @@ are unverified. Do not infer a published release from a local ZIP.
    CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list
    ```
 
-Codex plugin planning does **not** enable Codex worker/runtime execution.
-That remains disabled pending independent security review; see the shipped
-[Codex planning guide](CODEX.md). The Codex plugin
-ships init/PRD/plan/status guidance and explicit run/resume/verify/deliver
-refusals, plus its own copy of the bundled CLI. It has empty hooks, no MCP,
-and no Claude worker assets inside the Codex plugin. CLI `codex init` refuses
-occupied paths and creates no Claude hooks. To repeat the isolated live CLI
-install and app-server `skills/list` test on a machine with `codex-cli 0.163.0`,
-run `MYCELINK_LIVE_CODEX_PLUGIN=1 npx vitest run tests/release/codex-plugin.test.ts`
-from the source checkout. The ordinary suite validates ZIP contents and
-model-free planning/denial, but skips the live install when unset.
+The Codex plugin ships init/PRD/plan/status guidance and an **experimental,
+explicitly opted-in disposable-repository** `codex continue --review --deliver`
+path, with its own bundled CLI. Standalone resume/verify/deliver are denied.
+It has empty hooks, no MCP, and no Claude worker assets inside the Codex
+plugin. CLI `codex init` refuses occupied paths and creates no Claude hooks.
+See the [Codex guide](CODEX.md) for setup, limits and evidence. To repeat the
+isolated live CLI install and app-server `skills/list` check on a machine with
+`codex-cli 0.163.0`, run `MYCELINK_LIVE_CODEX_PLUGIN=1 npx vitest run
+tests/release/codex-plugin.test.ts` from the source checkout. The ordinary
+suite validates ZIP contents and model-free contracts but skips live model
+use; neither means broad Codex production parity.
 
 ## Reproducing a release
 
@@ -92,8 +93,8 @@ commit time when unset.
 
 ## What goes in the archive
 
-Exactly the allowlist in `scripts/package.mjs`: Claude and Codex-planning
-marketplace manifests, the isolated planning-only Codex plugin and its
+Exactly the allowlist in `scripts/package.mjs`: Claude and Codex
+marketplace manifests, the isolated experimental Codex plugin and its
 packaged launcher/runtime copy, Claude
 commands, skills, agents and hooks, templates, schemas, user documentation
 (the threat model, permission model, data handling, adapters and this file),

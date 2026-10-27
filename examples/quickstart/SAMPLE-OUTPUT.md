@@ -8,7 +8,7 @@ a fault planted in the scripted web worker's first implementation. Commit SHAs a
 a fixed identity and date, so the same Mycelink version prints the same SHAs on every machine.
 
 ```text
-Mycelink 0.3.0-beta.1 quickstart walkthrough: feature ORD-101 across two Git repositories.
+Mycelink 0.3.0-beta.2 quickstart walkthrough: feature ORD-101 across two Git repositories.
 Scripted worker and reviewer, no model: see examples/quickstart/walkthrough.mjs.
 
 [setup]      orders-api own Git repository, main 884eed990cb0, 4 tests pass

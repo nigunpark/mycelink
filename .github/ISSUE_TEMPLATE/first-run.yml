@@ -53,7 +53,7 @@ body:
     id: versions
     attributes:
       label: Mycelink, Claude Code, Node.js and OS
-      placeholder: "0.3.0-beta.1, claude 2.x, node v24.x, Windows 11"
+      placeholder: "0.3.0-beta.2, claude 2.x, node v24.x, Windows 11"
     validations:
       required: true
   - type: textarea
