@@ -1,7 +1,8 @@
 import { afterAll, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 import { BUILD_DIR, REPO_ROOT } from '../helpers/global-setup.js';
 import { controllerKey } from '../helpers/authority.js';
 import { authorityFile } from '../../src/engine/authority.js';
@@ -181,6 +182,66 @@ it.each(['feature ref', 'control input', 'candidate manifest', 'evidence', 'miss
   },
 );
 
+
+it('CLI continue --review --deliver requires control Git before authority, STATE or workers', async () => {
+  const fixture = await createVer({ init: false, review: {} });
+  const control = join(fixture.root, 'codex-control');
+  const featureDir = join(control, 'features', VER_FEATURE);
+  const env = { ...process.env };
+  for (const name of ['CLAUDE_PID', 'MYCELINK_CLAIM_TOKEN', 'MYCELINK_FAKE_CLAUDE', 'MYCELINK_CRASH_AT']) delete env[name];
+  const run = (args: string[]) => {
+    const result = spawnSync(process.execPath, [join(REPO_ROOT, 'bin', 'mycelink.mjs'), ...args],
+      { cwd: fixture.root, env, encoding: 'utf8', timeout: 90_000, windowsHide: true });
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    return result;
+  };
+  const init = run(['codex', 'init', control, '--json']);
+  expect(init.status, init.stderr).toBe(0);
+  mkdirSync(featureDir, { recursive: true });
+  const graph = YAML.parse(readFileSync(join(fixture.featureDir, 'PORTFOLIO-GRAPH.yaml'), 'utf8'));
+  // Give the fixture criteria the approved requirement's Markdown block form,
+  // keeping the reviewed graph's text identical to the prepared manifest.
+  graph.acceptance_criteria = graph.acceptance_criteria.map((criterion: { id: string; text: string; kind: string }) => ({
+    ...criterion, text: `**${criterion.id}** ${criterion.text}`,
+  }));
+  writeFileSync(join(featureDir, 'PRD.md'), `# ${VER_FEATURE}\n\nStatus: approved\n\n${graph.acceptance_criteria.map((criterion: { text: string }) => criterion.text).join('\n\n')}\n`);
+  const draft = join(featureDir, 'PORTFOLIO-GRAPH.draft.yaml');
+  writeFileSync(draft, YAML.stringify(graph));
+  // The existing fixture registers a separate, committed Git producer at
+  // ../changesets, also relative to this fresh Codex control.
+  writeFileSync(join(control, 'repositories.yaml'), readFileSync(join(fixture.control, 'repositories.yaml'), 'utf8'));
+  const configFile = join(control, 'mycelink.config.json');
+  const config = JSON.parse(readFileSync(configFile, 'utf8'));
+  config.experimental_codex = { enabled: true, disposable_repositories: ['changesets'] };
+  writeFileSync(configFile, JSON.stringify(config));
+  const prepared = run(['codex', 'prepare', VER_FEATURE, '--source', `features/${VER_FEATURE}/PRD.md`,
+    '--from', draft, '--kind', 'AC-5=compatibility', '--control-root', control, '--json']);
+  expect(prepared.status, prepared.stderr).toBe(0);
+  expect(JSON.parse(prepared.stdout)).toMatchObject({ prepared: true, authority_opened: false });
+  // Use the official Codex executable configured by init; no worker mock or
+  // version-only substitute may mask an unrelated runtime denial.
+  const status = run(['codex', 'status', VER_FEATURE, '--control-root', control, '--json']);
+  expect(status.status, status.stderr).toBe(0);
+  expect(JSON.parse(status.stdout)).toMatchObject({ graph_valid: true, state_present: false, runtime_enabled: true });
+  expect(existsSync(join(control, '.git'))).toBe(false);
+  expect(existsSync(authorityFile(control))).toBe(false);
+  expect(existsSync(join(featureDir, 'STATE.json'))).toBe(false);
+  const head = git(fixture.repo, ['rev-parse', 'HEAD']);
+  const worktrees = git(fixture.repo, ['worktree', 'list', '--porcelain']);
+
+  const continued = run(['codex', 'continue', VER_FEATURE, '--review', '--deliver', '--control-root', control, '--json']);
+  expect.soft(continued.status, continued.stderr).toBe(1);
+  expect.soft(continued.stderr).toContain('CODEX_CONTROL_GIT_REQUIRED');
+  expect.soft(continued.stderr).toMatch(/control/i);
+  expect.soft(continued.stderr).toMatch(/git init\b/i);
+  expect.soft(continued.stderr).toMatch(/git (?:-C\s+(?:"[^"]+"|\S+)\s+)?commit\b/i);
+  expect.soft(existsSync(authorityFile(control))).toBe(false);
+  expect.soft(existsSync(join(featureDir, 'STATE.json'))).toBe(false);
+  expect.soft(existsSync(join(featureDir, 'sessions'))).toBe(false);
+  expect.soft(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(head);
+  expect.soft(git(fixture.repo, ['worktree', 'list', '--porcelain'])).toBe(worktrees);
+});
 
 it('CLI continue --review --deliver resumes the existing candidate with fresh authority and denies replay', async () => {
   const { s, base, candidateId, candidate, manifest } = await resumableCandidate({ codexCli: true });

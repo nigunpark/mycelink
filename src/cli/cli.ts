@@ -543,6 +543,15 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
     // authority. Generic decision mutations remain unavailable to Codex.
     const answering = args.flags['answer-decision'] !== undefined || args.flags['answer'] !== undefined;
     const decision = answering ? codexContinuationDecision(args, controlRoot, featureId) : null;
+    if (args.flags['deliver'] === true) {
+      // Delivery records control inputs in this repository. An ancestor repo
+      // or an unborn HEAD must fail before authority, state or workers exist.
+      const top = runGit(controlRoot, ['rev-parse', '--show-toplevel'], { allowFail: true });
+      const head = runGit(controlRoot, ['rev-parse', '--verify', 'HEAD^{commit}'], { allowFail: true });
+      if (top.exitCode !== 0 || !samePath(top.stdout.trim(), controlRoot) || head.exitCode !== 0) {
+        throw new Error('CODEX_CONTROL_GIT_REQUIRED: controlRoot itself must be a committed Git worktree. In the control root, run git init, git add <approved-control-inputs>, and git commit -m "Approve control inputs" before retrying. Stage only approved control inputs; exclude credentials and runtime artifacts.');
+      }
+    }
     const detail: { node_id: string; outcome: string; state: string }[] = [];
     const open = () => {
       const holder = sessionHolder() ?? processIdentity(process.pid);

@@ -115,6 +115,62 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(skill('init')).not.toMatch(/runtime is denied pending independent security review/i);
   });
 
+  it.each(['run', 'resume'])('packaged mycelink-%s guides held-authority continuation of an existing valid controller', (name) => {
+    const skill = readFileSync(join(source, `codex-plugin/skills/mycelink-${name}/SKILL.md`), 'utf8');
+    expect(skill).toMatch(/codex continue[^\n`]*--review[^\n`]*--deliver/);
+    expect(skill).toMatch(/(?:resum\w*|continu\w*)[^.\n]*existing[^.\n]*(?:valid|controller|authority)/i);
+    expect(skill).toMatch(/held[- ]authority|holds?[^.\n]*authority|retains?[^.\n]*authority/i);
+  });
+
+  it.each(['run', 'resume', 'deliver'])('packaged mycelink-%s does not falsely forbid recovery of valid controller authority', (name) => {
+    const skill = readFileSync(join(source, `codex-plugin/skills/mycelink-${name}/SKILL.md`), 'utf8');
+    expect(skill).not.toMatch(/never invoke[^.\n]*existing key/i);
+    expect(skill).not.toMatch(/(?:never[^.\n]*recovery[^.\n]*closed authority|closed authority[^.\n]*cannot[^.\n]*(?:reused|recovered))/i);
+  });
+
+  it('packaged delivery guidance resumes a built candidate after PASS without a second review', () => {
+    const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-deliver/SKILL.md'), 'utf8');
+    expect(skill).toMatch(/codex continue[^\n`]*--review[^\n`]*--deliver/);
+    expect(skill).toMatch(/(?:built|existing|already[- ]built)[^.\n]*candidate|candidate[^.\n]*(?:already built|has been built)/i);
+    expect(skill).toMatch(/PASS/);
+    expect(skill).toMatch(/(?:without|no|does not require)[^.\n]*(?:second|another|repeat(?:ed)?|new)[^.\n]*review|(?:skip|reuse)[^.\n]*review/i);
+    expect(skill).toMatch(/resum\w*|continu\w*/i);
+  });
+
+  it('packaged planning preflight commits approved inputs in the fresh disposable control before workers run', () => {
+    const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-plan/SKILL.md'), 'utf8');
+    // Registered worker repositories being Git repositories is insufficient:
+    // candidate construction also needs a committed control repository.
+    expect(skill).toMatch(/(?:fresh|disposable)[^.\n]*control|control[^.\n]*(?:fresh|disposable)/i);
+    expect(skill).toMatch(/git init\b/);
+    expect(skill).toMatch(/git (?:-C\s+(?:"[^"]+"|\S+)\s+)?add\b/);
+    expect(skill).toMatch(/git (?:-C\s+(?:"[^"]+"|\S+)\s+)?commit\b/);
+    expect(skill).toMatch(/(?:commit[^.\n]*approved|approved[^.\n]*commit)/i);
+    expect(skill).toMatch(/(?:before|prior to)[^.\n]*(?:worker|codex continue)/i);
+  });
+
+  it('packaged planning preflight checks Windows-to-WSL shell acceptance scripts for LF and Bash syntax', () => {
+    const skill = readFileSync(join(source, 'codex-plugin/skills/mycelink-plan/SKILL.md'), 'utf8');
+    expect(skill).toMatch(/Windows/i);
+    expect(skill).toMatch(/WSL/);
+    expect(skill).toMatch(/acceptance[^.\n]*(?:shell|script)|(?:shell|script)[^.\n]*acceptance/i);
+    expect(skill).toMatch(/\bLF\b/);
+    expect(skill).toMatch(/\bCRLF\b/);
+    expect(skill).toMatch(/bash -n\b/);
+    expect(skill).toMatch(/(?:before|prior to)[^.\n]*(?:worker|codex continue)/i);
+  });
+
+  it('packaged continuation guidance preserves experimental disposable opt-in and standalone command denials', () => {
+    const skill = (name: string) => readFileSync(join(source, `codex-plugin/skills/mycelink-${name}/SKILL.md`), 'utf8');
+    expect(skill('run')).toMatch(/experimental_codex\.enabled:\s*true/);
+    expect(skill('run')).toMatch(/experimental_codex\.disposable_repositories/);
+    expect(skill('run')).toMatch(/never opt in[^.\n]*production/i);
+    expect(skill('resume')).toMatch(/standalone[^.\n]*codex resume[^.\n]*(?:denied|CODEX_RUNTIME_DENIED)/i);
+    expect(skill('resume')).toMatch(/(?:do not|never)[^.\n]*generic[^.\n]*dispatch[^.\n]*session[^.\n]*orchestrate[^.\n]*codex exec/i);
+    expect(skill('deliver')).toMatch(/standalone[^.\n]*codex deliver[^.\n]*denied/i);
+    expect(skill('deliver')).toMatch(/do not bypass[^.\n]*generic[^.\n]*deliver[^.\n]*candidate[^.\n]*settle[^.\n]*orchestrate[^.\n]*codex exec/i);
+  });
+
   it('prepares a fresh Codex PRD and reviewed graph without minting an authority before continuation', () => {
     const control = join(output, 'fresh-codex-prepare');
     const launcher = join(source, 'codex-plugin/bin/mycelink.mjs');
