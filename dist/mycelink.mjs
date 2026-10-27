@@ -47801,21 +47801,31 @@ async function finalizeCodexDelivery(controlRoot, featureId, orchestrator) {
   const paths = featurePaths(controlRoot, featureId);
   const state = loadState(paths.featureDir)?.data;
   if (!state) throw new Error("CODEX_FINALIZE_NO_STATE");
-  if (state.current_candidate || state.accepted_deliveries && Object.keys(state.accepted_deliveries).length > 0) {
-    throw new Error("CODEX_FINALIZE_REPLAY: candidate or delivery already exists");
+  if (state.accepted_deliveries && Object.keys(state.accepted_deliveries).length > 0) {
+    throw new Error("CODEX_FINALIZE_REPLAY: delivery already exists");
   }
   const review = reviewGateProblems(controlRoot, featureId);
   if (review.length > 0) throw new Error(`CODEX_FINALIZE_REVIEW_REQUIRED: ${review.join("; ")}`);
   const graph = loadGraph(controlRoot, featureId);
   const pending = graph.nodes.filter((node) => state.nodes[node.id]?.state !== "DONE" && state.nodes[node.id]?.state !== "EXCLUDED");
-  if (pending.length !== 1 || pending[0]?.node_type !== "candidate-build" || !["READY", "PLANNED"].includes(state.nodes[pending[0].id]?.state ?? "")) {
-    throw new Error(`CODEX_FINALIZE_NOT_READY: expected only an unclaimed candidate-build node, got ${pending.map((n) => `${n.id}:${state.nodes[n.id]?.state}`).join(", ")}`);
+  let candidateId = state.current_candidate;
+  if (candidateId) {
+    if (!state.acceptance_review?.required || !state.acceptance_review.reviews.some((review2) => review2.overall === "PASS")) {
+      throw new Error("CODEX_FINALIZE_REVIEW_REQUIRED: resumed candidate requires a prior PASS");
+    }
+    if (pending.length !== 0 || state.feature_state !== "VERIFIED" || !graph.nodes.some((node) => node.node_type === "candidate-build" && state.nodes[node.id]?.state === "DONE")) {
+      throw new Error("CODEX_FINALIZE_NOT_VERIFIED: resumed candidate requires settled nodes, DONE candidate-build and VERIFIED feature");
+    }
+  } else {
+    if (pending.length !== 1 || pending[0]?.node_type !== "candidate-build" || !["READY", "PLANNED"].includes(state.nodes[pending[0].id]?.state ?? "")) {
+      throw new Error(`CODEX_FINALIZE_NOT_READY: expected only an unclaimed candidate-build node, got ${pending.map((n) => `${n.id}:${state.nodes[n.id]?.state}`).join(", ")}`);
+    }
+    const dispatched = await orchestrator.dispatchNext();
+    if (dispatched.status !== "ALL_SETTLED" || dispatched.controller_reports.length !== 1 || dispatched.controller_reports[0]?.node_id !== pending[0].id || dispatched.controller_reports[0]?.outcome !== "DONE") {
+      throw new Error(`CODEX_FINALIZE_CANDIDATE_FAILED: ${dispatched.status}: ${dispatched.detail}`);
+    }
+    candidateId = loadState(paths.featureDir)?.data.current_candidate ?? null;
   }
-  const dispatched = await orchestrator.dispatchNext();
-  if (dispatched.status !== "ALL_SETTLED" || dispatched.controller_reports.length !== 1 || dispatched.controller_reports[0]?.node_id !== pending[0].id || dispatched.controller_reports[0]?.outcome !== "DONE") {
-    throw new Error(`CODEX_FINALIZE_CANDIDATE_FAILED: ${dispatched.status}: ${dispatched.detail}`);
-  }
-  const candidateId = loadState(paths.featureDir)?.data.current_candidate;
   if (!candidateId) throw new Error("CODEX_FINALIZE_CANDIDATE_MISSING");
   const candidate = loadCandidate(paths.featureDir, candidateId);
   const workspace = loadWorkspace(controlRoot);
@@ -48201,7 +48211,7 @@ async function codexGroup(args, io) {
   if (sub === "continue" && gate.ok) {
     assertControllerRole(args, "codex continue");
     if (args.flags["deliver"] !== void 0 && args.flags["review"] !== true) {
-      throw new Error("CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a fresh PASS in this held-authority continuation.");
+      throw new Error("CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a valid PASS.");
     }
     if (args.flags["deliver"] !== void 0 && args.flags["deliver"] !== true) {
       throw new Error("CODEX_DELIVERY_FLAG_INVALID: --deliver takes no value.");
@@ -48335,6 +48345,18 @@ async function codexGroup(args, io) {
       const rawReviews = args.flags["max-reviews"];
       const maxReviews = rawReviews === void 0 ? 2 : typeof rawReviews === "string" ? Number(rawReviews) : NaN;
       if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 6) throw new Error("CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 6.");
+      if (args.flags["deliver"] === true && loadState(featurePaths(controlRoot, featureId2).featureDir)?.data.current_candidate) {
+        const authority = open();
+        prepare(authority);
+        const delivery2 = await finalizeCodexDelivery(controlRoot, featureId2, orchestratorFor(controlRoot, featureId2));
+        emit2(
+          io,
+          args,
+          { stop_reason: "REVIEW_PASS", nodes: [], reviews: [], reports: detail, review: null, delivery: delivery2 },
+          () => `REVIEW_PASS: ${delivery2.candidate_id} ${delivery2.status}`
+        );
+        return delivery2.ok ? 0 : 1;
+      }
       const reviewReports = [];
       const result2 = await continueReviewedController({ maxNodes, maxReviews, open, prepare, run, review: async () => {
         const report2 = await runReview(featureId2);

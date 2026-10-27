@@ -1,6 +1,12 @@
-import { afterAll, expect, it } from 'vitest';
+import { afterAll, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { BUILD_DIR, REPO_ROOT } from '../helpers/global-setup.js';
+import { controllerKey } from '../helpers/authority.js';
+import { authorityFile } from '../../src/engine/authority.js';
+import { preflightAdapter } from '../../src/sessions/preflight.js';
+import { loadConfig } from '../../src/workspace/workspace.js';
 import { createVer, verCli, verState, VER_FEATURE, ARP, ARP_RED, ARP_SRC, ARP_TESTS, ARP_ROLLBACK_TEST, ARP_JOURNAL_TEST, ARP_GAPPY_IMPL, CLI, CLI_FULL_WORK, CLI_RECOVERY_TEST, CLI_FAILURE_TEST, CLI_AC5 } from '../helpers/version-fixture.js';
 import { fulfil } from '../helpers/shop-worker.js';
 import { reviewPacket, verdictFor } from '../helpers/review-agent.js';
@@ -9,6 +15,9 @@ import { finalizeCodexDelivery } from '../../src/engine/codex-finalize.js';
 import { cleanupTmpRoots } from '../helpers/tmp.js';
 import { git } from '../helpers/git-fixture.js';
 import type { SessionAdapter } from '../../src/sessions/adapter.js';
+import { listCandidates, loadCandidate } from '../../src/git/candidate.js';
+import { featureVerifyProblems } from '../../src/engine/feature-verify.js';
+import { reviewGateProblems } from '../../src/engine/acceptance-review.js';
 
 const fakeRoots: string[] = [];
 afterAll(() => { cleanupTmpRoots(); fakeRoots.forEach((p) => rmSync(p, { recursive: true, force: true })); });
@@ -78,4 +87,149 @@ it('refuses a reviewed integration head changed after PASS without moving the ba
   await expect(finalizeCodexDelivery(s.control, VER_FEATURE, engine)).rejects.toThrow(/REVIEW|HEAD|MOVED/);
   expect(git(s.repo, ['rev-parse', 'main'])).toBe(before);
   expect(verState(s).current_candidate).toBeNull();
+});
+
+// Simulate process loss after the ordinary scheduler completed candidate-build,
+// before delivery. No fabricated candidate or hand-written STATE.json.
+async function resumableCandidate({ codexCli = false } = {}) {
+  const { s, t, engine } = await prepared();
+  expect((await engine.settleCodexReview(t, {
+    executable: process.execPath, prefixArgs: [fakeReviewer(verdictFor(reviewPacket(t)))], timeoutMs: 5000,
+  })).outcome).toBe('PASS');
+  if (codexCli) {
+    const configFile = join(s.control, 'mycelink.config.json');
+    const config = JSON.parse(readFileSync(configFile, 'utf8'));
+    // Configure continuation before candidate-build seals the control inputs.
+    // Node answers the official --version probe without authentication or model
+    // use. Continuation must never invoke a worker or a second reviewer.
+    config.provider = { provider: 'codex', executable: process.execPath, extra_args: [] };
+    config.experimental_codex = { enabled: true, disposable_repositories: ['changesets'] };
+    writeFileSync(configFile, JSON.stringify(config));
+    // Candidate-build requires a clean control repo; commit fixture setup first.
+    git(s.control, ['add', 'mycelink.config.json']);
+    git(s.control, ['commit', '-q', '-m', 'Configure Codex continuation fixture']);
+  }
+  const base = git(s.repo, ['rev-parse', 'main']);
+  const built = await engine.dispatchNext();
+  expect(built.status, JSON.stringify({ detail: built.detail, problems: built.problems }).slice(0, 2000)).toBe('ALL_SETTLED');
+  expect(built.controller_reports).toEqual([expect.objectContaining({ outcome: 'DONE' })]);
+  const state = verState(s);
+  expect(Object.values(state.nodes).every((node: any) => ['DONE', 'EXCLUDED'].includes(node.state))).toBe(true);
+  expect(state.feature_state).toBe('VERIFIED');
+  expect(Object.keys(state.accepted_deliveries ?? {})).toEqual([]);
+  expect(reviewGateProblems(s.control, VER_FEATURE)).toEqual([]);
+  expect(featureVerifyProblems(s.control, VER_FEATURE)).toEqual([]);
+  const candidateId = state.current_candidate as string;
+  expect(listCandidates(s.featureDir)).toEqual([candidateId]);
+  const candidate = loadCandidate(s.featureDir, candidateId);
+  const manifest = readFileSync(join(s.featureDir, 'candidates', `${candidateId}.yaml`), 'utf8');
+  expect(git(s.repo, ['rev-parse', 'main'])).toBe(base);
+  const resumed = new Orchestrator({ controlRoot: s.control, featureId: VER_FEATURE, adapter: {} as SessionAdapter });
+  return { s, base, candidateId, candidate, manifest, resumed };
+}
+
+it('resumes delivery of the pinned candidate after process loss without another dispatch or review, then refuses replay', async () => {
+  const { s, base, candidateId, candidate, manifest, resumed } = await resumableCandidate();
+  const reviews = verState(s).acceptance_review;
+  const dispatch = vi.spyOn(resumed, 'dispatchNext');
+  const review = vi.spyOn(resumed, 'settleCodexReview');
+  const delivered = await finalizeCodexDelivery(s.control, VER_FEATURE, resumed);
+  const target = candidate.repositories.changesets!.sha;
+  expect(delivered).toMatchObject({ ok: true, idempotent: false,
+    repositories: { changesets: { before: base, after: target, target } },
+    acceptance: [expect.objectContaining({ repository: 'changesets', sha: target, exit_code: 0, failure_fingerprint: null })],
+  });
+  expect(git(s.repo, ['rev-parse', 'main'])).toBe(target);
+  expect(verState(s).current_candidate).toBe(candidateId);
+  expect(verState(s).acceptance_review).toEqual(reviews);
+  expect(listCandidates(s.featureDir)).toEqual([candidateId]);
+  expect(readFileSync(join(s.featureDir, 'candidates', `${candidateId}.yaml`), 'utf8')).toBe(manifest);
+  await expect(finalizeCodexDelivery(s.control, VER_FEATURE, resumed)).rejects.toThrow(/REPLAY|ALREADY/);
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(review).not.toHaveBeenCalled();
+});
+
+it.each(['feature ref', 'control input', 'candidate manifest', 'evidence', 'missing PASS'] as const)(
+  'refuses resumed delivery with %s drift without cutting a replacement or moving main', async (kind) => {
+    const { s, base, candidateId, resumed } = await resumableCandidate();
+    const state = verState(s);
+    if (kind === 'feature ref') git(s.repo, ['update-ref', `refs/heads/feature/${VER_FEATURE}`, base]);
+    else if (kind === 'control input') {
+      const file = join(s.featureDir, 'PRD.md');
+      writeFileSync(file, readFileSync(file, 'utf8') + '\nChanged acceptance intent after candidate build.\n');
+    } else if (kind === 'candidate manifest') {
+      const file = join(s.featureDir, 'candidates', `${candidateId}.yaml`);
+      writeFileSync(file, readFileSync(file, 'utf8').replace('manifest_sha256:', 'manifest_sha256: corrupted'));
+    } else if (kind === 'evidence') {
+      const file = join(s.control, state.nodes[ARP].evidence.green.output_path);
+      writeFileSync(file, readFileSync(file, 'utf8') + '\nmutated evidence\n');
+    } else {
+      const pass = state.acceptance_review.reviews.find((r: any) => r.overall === 'PASS');
+      expect(pass).toBeDefined();
+      rmSync(join(s.control, pass.receipt_path));
+    }
+    const dispatch = vi.spyOn(resumed, 'dispatchNext');
+    const review = vi.spyOn(resumed, 'settleCodexReview');
+    // A blanket current_candidate replay rejection does not satisfy these guards.
+    await expect(finalizeCodexDelivery(s.control, VER_FEATURE, resumed)).rejects.toThrow(/DRIFT|STALE|REVIEW|PASS|EVIDENCE|VERIFIED|manifest|schema/i);
+    expect(git(s.repo, ['rev-parse', 'main'])).toBe(base);
+    expect(verState(s).current_candidate).toBe(candidateId);
+    expect(Object.keys(verState(s).accepted_deliveries ?? {})).toEqual([]);
+    expect(listCandidates(s.featureDir)).toEqual([candidateId]);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(review).not.toHaveBeenCalled();
+  },
+);
+
+
+it('CLI continue --review --deliver resumes the existing candidate with fresh authority and denies replay', async () => {
+  const { s, base, candidateId, candidate, manifest } = await resumableCandidate({ codexCli: true });
+  expect(preflightAdapter(loadConfig(s.control), process.env, s.control)).toMatchObject({ ok: true, adapter: 'codex-cli', auth: 'not-checked' });
+  expect(reviewGateProblems(s.control, VER_FEATURE)).toEqual([]);
+  expect(featureVerifyProblems(s.control, VER_FEATURE)).toEqual([]);
+
+  // Rotate with the actual current key to a verifiable child holder. Its exit
+  // models process loss; continue must recover and mint its own fresh key.
+  const rotated = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { pathToFileURL } from 'node:url';
+    const { openControllerAuthority } = await import(pathToFileURL(process.argv[1]).href);
+    const { processIdentity } = await import(pathToFileURL(process.argv[2]).href);
+    openControllerAuthority(process.argv[3], { current: process.argv[4], holder: processIdentity(process.pid) });
+  `, join(BUILD_DIR, 'engine', 'authority.js'), join(BUILD_DIR, 'util', 'process-identity.js'), s.control, controllerKey(s.control)],
+  { encoding: 'utf8', timeout: 30_000, windowsHide: true });
+  expect(rotated.error).toBeUndefined();
+  expect(rotated.status, rotated.stderr).toBe(0);
+  const previousAuthority = JSON.parse(readFileSync(authorityFile(s.control), 'utf8'));
+  expect(previousAuthority.holder.pid).toBe(rotated.pid);
+  const reviews = verState(s).acceptance_review;
+  const invoke = () => {
+    const env = { ...process.env };
+    for (const name of ['CLAUDE_PID', 'MYCELINK_CLAIM_TOKEN', 'MYCELINK_FAKE_CLAUDE', 'MYCELINK_CRASH_AT']) delete env[name];
+    const result = spawnSync(process.execPath, [join(REPO_ROOT, 'bin', 'mycelink.mjs'),
+      'codex', 'continue', VER_FEATURE, '--review', '--deliver', '--json', '--control-root', s.control],
+    { cwd: s.control, env, encoding: 'utf8', timeout: 90_000, windowsHide: true });
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    return { code: result.status, out: result.stdout, err: result.stderr };
+  };
+  const delivered = await invoke();
+  const freshAuthority = JSON.parse(readFileSync(authorityFile(s.control), 'utf8'));
+  expect(freshAuthority).toMatchObject({ recovered: true, takeover: false });
+  expect(freshAuthority.sha256).not.toBe(previousAuthority.sha256);
+  // Keep the existing review and candidate immutable across continuation.
+  expect.soft(verState(s).acceptance_review).toEqual(reviews);
+  expect.soft(listCandidates(s.featureDir)).toEqual([candidateId]);
+  expect.soft(readFileSync(join(s.featureDir, 'candidates', `${candidateId}.yaml`), 'utf8')).toBe(manifest);
+  const target = candidate.repositories.changesets!.sha;
+  expect.soft(git(s.repo, ['rev-parse', 'main'])).toBe(target);
+  expect(delivered.code, delivered.err).toBe(0);
+  expect(JSON.parse(delivered.out)).toMatchObject({ delivery: { ok: true, idempotent: false,
+    candidate_id: candidateId, repositories: { changesets: { before: base, after: target, target } },
+  } });
+  const replay = await invoke();
+  expect(replay.code).toBe(1);
+  expect(replay.err).toContain('CODEX_FINALIZE_REPLAY');
+  expect(git(s.repo, ['rev-parse', 'main'])).toBe(target);
+  expect(listCandidates(s.featureDir)).toEqual([candidateId]);
+  expect(verState(s).acceptance_review).toEqual(reviews);
 });

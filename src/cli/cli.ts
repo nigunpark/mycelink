@@ -512,7 +512,7 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
   if (sub === 'continue' && gate.ok) {
     assertControllerRole(args, 'codex continue');
     if (args.flags['deliver'] !== undefined && args.flags['review'] !== true) {
-      throw new Error('CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a fresh PASS in this held-authority continuation.');
+      throw new Error('CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a valid PASS.');
     }
     if (args.flags['deliver'] !== undefined && args.flags['deliver'] !== true) {
       throw new Error('CODEX_DELIVERY_FLAG_INVALID: --deliver takes no value.');
@@ -645,6 +645,16 @@ async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
       const rawReviews = args.flags['max-reviews'];
       const maxReviews = rawReviews === undefined ? 2 : typeof rawReviews === 'string' ? Number(rawReviews) : NaN;
       if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 6) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 6.');
+      if (args.flags['deliver'] === true && loadState(featurePaths(controlRoot, featureId).featureDir)?.data.current_candidate) {
+        // Reacquire held authority before validating and delivering the pinned
+        // candidate. The finalizer independently checks readiness and drift.
+        const authority = open();
+        prepare(authority);
+        const delivery = await finalizeCodexDelivery(controlRoot, featureId, orchestratorFor(controlRoot, featureId));
+        emit(io, args, { stop_reason: 'REVIEW_PASS', nodes: [], reviews: [], reports: detail, review: null, delivery },
+          () => `REVIEW_PASS: ${delivery.candidate_id} ${delivery.status}`);
+        return delivery.ok ? 0 : 1;
+      }
       const reviewReports: Awaited<ReturnType<typeof runReview>>[] = [];
       const result = await continueReviewedController({ maxNodes, maxReviews, open, prepare, run, review: async () => {
         const report = await runReview(featureId);
