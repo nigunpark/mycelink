@@ -35,7 +35,7 @@ describe('identity and version', () => {
   });
 
   it('agrees on one version everywhere', () => {
-    expect(pkg.version).toBe('0.3.0-beta.1');
+    expect(pkg.version).toBe('0.3.0-beta.2');
     const codex = json<{ name: string; version: string; extensions: { 'com.openai': { hooks: Record<string, unknown> } } }>('codex-plugin/plugin.json');
     expect(codex.name).toBe(plugin['name']);
     expect(codex.extensions['com.openai'].hooks).toEqual({});

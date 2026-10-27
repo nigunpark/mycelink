@@ -1,6 +1,6 @@
 # Roadmap
 
-Mycelink is in public beta (`0.3.0-beta.1`). This roadmap says what has to be
+Mycelink is in public beta (`0.3.0-beta.2`). This roadmap says what has to be
 true before 1.0. It sets priorities, not dates. It changes with what beta
 users report. To influence it, open a
 [first-run feedback](https://github.com/nigunpark/mycelink/issues/new?template=first-run.yml)

@@ -1,5 +1,23 @@
 # Codex functional acceptance ledger
 
+October 27 NEW disposable CSET-202 `c96` completion (separate from the earlier
+bounded `c17` and failed `c95` attempts): a freshly installed Codex plugin was
+discovered in an isolated host profile, with no old STATE or authority reused.
+One foreground held-authority `codex continue CSET-202 --review --deliver`
+started seven separate worker/review sessions against a fresh frozen Changesets
+clone. The five graph nodes are DONE. Independent review revision 3 returned
+PASS on the approved AC-1..5; candidate `CSET-202-C001` bound the clean
+Changesets target SHA `bb2d4d9ed7ca357391e99e0a217f280efed55fd0`.
+Delivery record `deliveries/CSET-202-C001.json` says ACCEPTED, with before
+`c73949ba7b3160a4aa5729223335c190de1528f8`, after/target `bb2d4d9...`
+and full acceptance exit 0; the post-delivery gate passed **827 tests**, with
+**2 todo**. Controller STATE is COMPLETED. The isolated candidate delivery
+does not push Changesets, publish a GitHub Release or prove arbitrary PRDs,
+hostile-worker OS confinement, PCM-101 or a repeated-run success rate. The
+`c95` Git-permission BLOCKED result remains a separate failure. This public
+release's tag workflow and assets are additional gates, not implied by the
+pilot. No scratch machine path or credential is part of this report.
+
 October 21 NEW `c17` CSET-202 AC-4 one-shot continuation from clean Mycelink `48165275101fd321e84f2137a9a4162f7e24c20d`: the initial source release gate at that HEAD was RED (**178 passed/2 failed/1 skipped**), despite provider-codex **105 passed/6 skipped**. The tracked c15 ledger contained one personal `/mnt/c/Users/<user>/...` path; only that documentation literal was replaced by `<user>`. Two ignored c13 scratch test files under `tests/.work/` were byte-preservingly relocated outside Vitest discovery to `<scratch>/c17/release-scratch-evidence/` (SHA-256 `dbff45970fe016c936c0f9d63078cfd3e221821cbffdf5dbe90e601188e665a5`, `5246133b939420712db8d291ea2e0187107714f527fedd39678ce790357bc897`). The two affected release files then passed **25/25**; the full provider-codex/release source gate passed **105/105 (6 skipped)** and **180/180 (1 skipped)**, with typecheck, build and diff-check exit 0 before dispatch. These fixes do not retroactively make the initial gate green.
 
 Fresh `<scratch>/c17/changesets` cloned `--no-local` from c16's clean source clone, with clean `main` `65a7365b7388a0fd0d402e232f522f0f1911af14`, feature ref/detached checkout `cb7a02ab28277c608f802ceec758799541effe6c`; frozen upstream source verification exited 0 (transport-byte advisory). A freshly packaged ZIP SHA-256 `eab3e6bdd49da9ef2ba6555084b8db93173e3535047117754f4f9a562fdcae9d` was installed and read back via `codex plugin list` in a NEW host-only c17 CODEX_HOME. Installed planning-only init and graph validation passed (`4a619de120e46e81440d8d2a70a268dba8cf6d8a031adf0dedea2b23f600268d`). Before authority, an independent c17 preflight checked the immutable c14 STATE SHA-256 `540e4a268e021b4b23319b119e1f7ddf88147600a7feaa61b9a0c5d3fb2f2d8a`, three DONE producers, exact PRD SHA-256 `71073de6b65e5e7e687e367569f09a9e07f6d32ce4671b6970c9ef5cb48deb3a` and AC-1..5, clean refs, complete relocated repository/graph semantics and all command arrays, four independently computed module hashes, and both nested scripts byte-for-byte after c14→c17 relocation including the terminal `base=.../c17` line. No old authority key or target STATE existed. Independent clean exact-cb7a02 install/build/CLI baseline passed **249/249**. Normal Ubuntu `psh09` Codex login was confirmed using WSL's pinned npx; no auth material was copied.

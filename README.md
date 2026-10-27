@@ -38,9 +38,13 @@ AC-4 review gap planted on purpose. Its output is
 A real Claude Code run of the same demo, with its own SHAs, is
 [reported separately](https://github.com/nigunpark/mycelink/blob/main/docs/evals/2026-10-15-public-two-repo-demo.md).</sub>
 
-> **Status: public beta (`0.3.0-beta.1`).** Interfaces may change before 1.0.
+> **Status: public beta (`0.3.0-beta.2`).** Interfaces may change before 1.0.
 > Mycelink is an independent, third-party project. It is **not affiliated with
 > or endorsed by Anthropic**. Licensed under [Apache-2.0](LICENSE). No telemetry.
+
+The separate [Codex plugin](docs/CODEX.md) has an **experimental, explicitly
+opted-in disposable-repository** worker/review/delivery path. It is not Claude
+host parity, a hardened hostile-worker sandbox or a production-readiness claim.
 
 ---
 
@@ -405,10 +409,12 @@ Short version — details in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md),
 | Node.js | 22.12+ and 24.x |
 | Git | 2.30+ recommended (worktrees) |
 | Claude Code | a version with plugin marketplaces and `plugin validate --strict` |
-| OS | Windows, Linux, macOS — configured in the CI matrix; this branch's actual cross-OS run remains unverified |
+| OS | Windows, Linux, macOS — the model-free CI matrix passed on Node.js 22.12 and 24; the authenticated Codex worker pilot used disposable repositories and WSL on Windows |
 
-No Docker, WSL or VM is required. You do **not** need to run `npm install` or
-build anything to use a release: the runtime ships prebuilt.
+The Claude Code flow needs no Docker, WSL or VM. The experimental Codex worker
+pilot on Windows used WSL; that does not certify a native Windows Codex worker.
+You do **not** need `npm install` or a build to use a release: runtime ships
+prebuilt.
 
 ---
 
@@ -428,22 +434,23 @@ claude plugin install mycelink@mycelink-marketplace
 ```bash
 # download mycelink-<version>.zip and mycelink-<version>.zip.sha256 from
 # https://github.com/nigunpark/mycelink/releases
-sha256sum -c mycelink-0.3.0-beta.1.zip.sha256        # PowerShell: Get-FileHash
-unzip mycelink-0.3.0-beta.1.zip -d mycelink
+sha256sum -c mycelink-0.3.0-beta.2.zip.sha256        # PowerShell: Get-FileHash
+unzip mycelink-0.3.0-beta.2.zip -d mycelink
 claude plugin marketplace add ./mycelink
 claude plugin install mycelink@mycelink-marketplace
 ```
 
 Each release also carries an SPDX SBOM (`SBOM.spdx.json`).
 
-### Codex plugin (planning only; local release ZIP)
+### Codex plugin (experimental; disposable repositories only)
 
-The Codex marketplace is separate from Claude's. On this branch, extract a
-locally built release ZIP and use an **isolated** profile when evaluating it:
+The Codex marketplace is separate from Claude's. Extract the release ZIP and
+use a **fresh isolated** profile when evaluating it (no credential copying):
 
 ```bash
-# Build locally first: npm ci && npm run package
-unzip artifacts/mycelink-0.3.0-beta.1.zip -d mycelink
+# Download the ZIP and checksum from the matching GitHub Release first.
+sha256sum -c mycelink-0.3.0-beta.2.zip.sha256
+unzip mycelink-0.3.0-beta.2.zip -d mycelink
 # Set ISOLATED_CODEX_HOME to a new native absolute directory (create it first).
 CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin marketplace add ./mycelink
 CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list --available
@@ -451,22 +458,20 @@ CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin add mycelink@mycelink-codex-marke
 CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list
 ```
 
-The installed skills `mycelink-init`, `mycelink-prd`, `mycelink-plan`, and
-`mycelink-status` guide planning with the **installed plugin's own launcher**.
-`codex init <new-control-path>` creates a Codex-provider skeleton without
-Claude hooks or CLAUDE.md; write a PRD, approve its criteria, then compile
-and validate a reviewed graph with the existing CLI. The CLI does not generate
-or approve a PRD for you. `mycelink-run`, `mycelink-resume`, `mycelink-verify`,
-and `mycelink-deliver` explain and exercise explicit `CODEX_RUNTIME_DENIED`
-checks. Generic CLI worker/reviewer/delivery paths are also denied for Codex
-controls. No Codex hooks or MCP server are shipped. **No worker, reviewer,
-implementation, fresh verification, or delivery is enabled**: the original
-Codex host-hook/worker security boundary remains unverified. A valid graph or
-doctor check is not an execution grant. Claude's plugin assets are unchanged.
-See the [Codex planning and DENIED-runtime guide](docs/CODEX.md) for the
-isolated `CODEX_HOME`/doctor walkthrough, exact policy limitations, migration
-and cleanup; source-only `docs/CODEX_COMPATIBILITY.md` holds the probes.
-A local build is not a published listing.
+The installed skills guide planning and use the **installed plugin's own
+launcher**. `codex init <new-control-path>` makes a separate Codex control
+without Claude hooks; a human must approve its PRD, graph and disposable
+repository registrations. Only after explicit `experimental_codex` opt-in may
+one foreground `codex continue <feature> --review --deliver` hold authority
+across bounded worker sessions, independent review and verified delivery.
+It refuses missing opt-in, stale or unverifiable authority, failed gates or
+review gaps; the bound does not guarantee completion. Standalone `codex
+resume`, `codex verify` and `codex deliver` remain denied. No Codex hooks or
+MCP server are shipped, and a valid graph or `doctor` check is not an execution
+grant. See the [Codex guide](docs/CODEX.md) for exact opt-in, recovery limits,
+isolated profile and cleanup; source-only `docs/CODEX_COMPATIBILITY.md` records
+bounded CLI probes. The earlier single installed CSET-202 delivery is not a
+general performance or security certificate.
 
 ### Try without installing
 

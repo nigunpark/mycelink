@@ -6,18 +6,42 @@ All notable changes to Mycelink are recorded here. The format follows
 version is 0, minor releases may contain breaking changes; they are called out
 under **Breaking**.
 
-### Development branch note — Codex discovery, not part of the published beta
-
-- Added a shipped planning-only Codex guide covering isolated `CODEX_HOME`
-  marketplace installation, `codex init`, `doctor`, auth status, migration and
-  cleanup. Observed CLI 0.163.0 plugin metadata and app-server skills/list,
-  plus model-free graph/denial tests, do **not** establish Codex host parity.
-- `CODEX_RUNTIME_DENIED` remains unconditional: the MXC hardlink-alias
-  counterexample, unconstrained MCP effects, failed AppContainer launch, and
-  unsealed worker/reviewer result provenance block dispatch and delivery.
-  CSET-202 / PCM-101 PRD-to-delivery E2E and actual cross-OS CI are unverified.
-
 ## [Unreleased]
+
+## [0.3.0-beta.2]
+
+Third public beta. The separate Codex plugin now supports an **experimental,
+explicitly opted-in disposable-repository** path from an approved PRD and
+validated graph through bounded test-first workers, a separate read-only
+acceptance review, an immutable candidate and verified delivery. The
+single-process `codex continue <feature> --review --deliver` retains controller
+authority across those phases; `codex status` remains read-only. Without
+opt-in, runtime is denied. Standalone `codex resume`, `codex verify` and
+`codex deliver` remain denied rather than silently bypassing authority.
+
+**Evidence and limits**
+
+- One fresh installed CSET-202 Changesets pilot completed five nodes, a
+  separate review PASS and candidate `CSET-202-C001`; its delivered SHA
+  `bb2d4d9ed7ca357391e99e0a217f280efed55fd0` passed the independent
+  post-delivery full gate (827 passed, 2 todo). This is an isolated functional
+  pilot, not a GitHub release or a success rate over arbitrary PRDs. The
+  earlier ORD-101 two-repository run and GAP/rework run are separate evidence.
+- The product PR's 105 checks and the post-merge `main` CI, CodeQL and OpenSSF
+  Scorecard passed on the exact merged tree. Runtime dependency `smol-toml`
+  now requires `^1.9.1`; runtime and full npm audits passed in integration.
+- Hardened controller file reads and reviewer evidence reservation; normalized
+  Windows 8.3 and macOS `/var` path aliases in Git pointers and test fixtures.
+- This is **not** a hardened hostile-worker OS sandbox, general Codex host
+  parity, verified PCM-101 run, automatic push or a promise of crash recovery
+  for every failure mode. Use separate disposable Git repositories, a fresh
+  Codex control, explicit opt-in and an authenticated Codex CLI. See
+  [Codex guide](docs/CODEX.md) for setup and refusal boundaries.
+
+**Upgrading:** Preserve any existing Claude control. Install the new ZIP or
+refresh the marketplace plugin, create a **separate** Codex control with
+`codex init`, and re-review the PRD, graph and disposable repository list.
+There is no automatic Claude-to-Codex state migration.
 
 ## [0.3.0-beta.1]
 
@@ -1041,5 +1065,6 @@ First public beta.
   and macOS with Node.js 22.12.0 and 24.
 
 [Unreleased]: #unreleased
+[0.3.0-beta.2]: #030-beta2
 [0.3.0-beta.1]: #030-beta1
 [0.2.0-beta.1]: #020-beta1

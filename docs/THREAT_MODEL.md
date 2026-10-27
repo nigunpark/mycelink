@@ -1,19 +1,21 @@
 # Threat model
 
 This document describes what Mycelink protects, from whom, and how. It covers
-`0.3.0-beta.1`. Each mitigation names the code that implements it and the
+`0.3.0-beta.2`. Each mitigation names the code that implements it and the
 tests that prove it. The controller authority, claim capabilities and hook
 fences that several mitigations rely on are specified in
 [PERMISSION_MODEL.md](PERMISSION_MODEL.md).
 
-**Codex boundary is denied, not certified.** The separate [Codex guide](CODEX.md)
-records the negative Windows MXC hardlink-alias counterexample (an allowed
-alias changed a forbidden file), failed whole-Codex AppContainer launch,
-MCP side effects during a read-only turn, and unauthenticated worker/result/
-reviewer provenance. These are not mitigated by the Claude hook, a custom
-Codex role TOML or a successful model-free test. Production Codex dispatch
-remains `CODEX_RUNTIME_DENIED`; this threat table's Claude mitigations must
-not be read as Codex coverage.
+**Experimental Codex dispatch is opt-in, not OS-certified confinement.** Without
+an approved graph and explicit disposable-repository opt-in, Codex runtime
+remains `CODEX_RUNTIME_DENIED`. The separate [Codex guide](CODEX.md) records
+bounded worker/review/delivery pilots and the negative Windows MXC hardlink
+counterexample (an allowed alias changed a forbidden file), failed whole-Codex
+AppContainer launch, MCP side effects during a read-only turn and reviewer
+provenance limits. The Claude hook, a custom Codex role TOML and a model-free
+CI pass do not mitigate those OS/process boundaries. The table below describes
+Claude controls unless a Codex-specific rule is named; opt-in functional
+delivery must not be mistaken for hostile-worker protection.
 
 ## What Mycelink is
 
