@@ -214,14 +214,18 @@ it.skipIf(process.platform !== 'win32')('CLI continue --review --deliver require
   writeFileSync(join(control, 'repositories.yaml'), readFileSync(join(fixture.control, 'repositories.yaml'), 'utf8'));
   const configFile = join(control, 'mycelink.config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8'));
+  // This case tests the control-Git preflight, not whether a CI runner has a
+  // real Codex executable. Node answers only the model-free --version probe;
+  // the missing-Git guard must run before any worker can be dispatched.
+  config.provider = { provider: 'codex', executable: process.execPath, extra_args: [] };
   config.experimental_codex = { enabled: true, disposable_repositories: ['changesets'] };
   writeFileSync(configFile, JSON.stringify(config));
   const prepared = run(['codex', 'prepare', VER_FEATURE, '--source', `features/${VER_FEATURE}/PRD.md`,
     '--from', draft, '--kind', 'AC-5=compatibility', '--control-root', control, '--json']);
   expect(prepared.status, prepared.stderr).toBe(0);
   expect(JSON.parse(prepared.stdout)).toMatchObject({ prepared: true, authority_opened: false });
-  // Use the official Codex executable configured by init; no worker mock or
-  // version-only substitute may mask an unrelated runtime denial.
+  // The preflight binary above is a version-only fixture. This test never
+  // launches a worker and does not claim to prove Codex model availability.
   const status = run(['codex', 'status', VER_FEATURE, '--control-root', control, '--json']);
   expect(status.status, status.stderr).toBe(0);
   expect(JSON.parse(status.stdout)).toMatchObject({ graph_valid: true, state_present: false, runtime_enabled: true });

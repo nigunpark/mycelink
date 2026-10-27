@@ -219,6 +219,9 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     }] }));
     const configPath = join(control, 'mycelink.config.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    // A packaged status probe needs a known runnable --version executable;
+    // CI hosts do not promise a real Codex binary or authenticated model.
+    config['provider'] = { provider: 'codex', executable: process.execPath, extra_args: [] };
     config['experimental_codex'] = { enabled: true, disposable_repositories: ['core'] };
     writeFileSync(configPath, JSON.stringify(config));
     const result = run(['codex', 'status', 'FEAT-101', '--control-root', control, '--json']);
