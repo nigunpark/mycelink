@@ -6,7 +6,7 @@
  * other's working tree. Path ownership is then enforced against a real diff,
  * not against a promise.
  */
-import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import {
   branchExists,
@@ -134,12 +134,16 @@ export function createWorkerWorktree(args: CreateWorktreeArgs): WorkerWorktree {
 }
 
 export function makeRelativeGitPointers(worktree: string): void {
-  const dotGit = join(worktree, '.git');
+  // Git may report an admin path through macOS /private/var while the caller
+  // used /var (or through a Windows long name after an 8.3 alias). Compute
+  // both relative pointers from physical, not differently spelled, roots.
+  const physicalWorktree = realpathSync(worktree);
+  const dotGit = join(physicalWorktree, '.git');
   const pointer = readFileSync(dotGit, 'utf8').trim();
   if (!pointer.startsWith('gitdir: ')) throw new Error('WORKTREE_GIT_POINTER: expected linked worktree');
-  const admin = resolve(worktree, pointer.slice('gitdir: '.length));
+  const admin = realpathSync(resolve(physicalWorktree, pointer.slice('gitdir: '.length)));
   if (!existsSync(join(admin, 'gitdir'))) throw new Error('WORKTREE_GIT_POINTER: missing admin metadata');
-  const forward = relative(worktree, admin).replaceAll('\\', '/');
+  const forward = relative(physicalWorktree, admin).replaceAll('\\', '/');
   const backward = relative(admin, dotGit).replaceAll('\\', '/');
   if (!forward || !backward || /^[A-Za-z]:/.test(forward + backward)) throw new Error('WORKTREE_GIT_POINTER: different volumes');
   // Windows marks linked .git files hidden; CREATE_ALWAYS ('w') fails with EPERM.

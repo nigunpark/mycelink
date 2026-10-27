@@ -1,6 +1,7 @@
 import { afterAll, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createVer, verCli, verState, VER_FEATURE, ARP, ARP_RED, ARP_SRC, ARP_TESTS, ARP_ROLLBACK_TEST, ARP_JOURNAL_TEST, ARP_GAPPY_IMPL, CLI, CLI_FULL_WORK, CLI_RECOVERY_TEST, CLI_FAILURE_TEST, CLI_AC5, COMPAT } from '../helpers/version-fixture.js';
 import { fulfil } from '../helpers/shop-worker.js';
 import { reviewPacket, verdictFor, refinementFor } from '../helpers/review-agent.js';
@@ -50,7 +51,7 @@ it('makes a WSL Codex reviewer checkout readable by Git on both hosts', async ()
   expect(readFileSync(join(checkout, pointer.slice('gitdir: '.length), 'gitdir'), 'utf8').trim()).toMatch(/^\.\./);
 });
 function fake(final: unknown) {
-  const root = mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? '.', 'codex-review-bridge-'));
+  const root = mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? tmpdir(), 'codex-review-bridge-'));
   roots.push(root);
   const script = join(root, 'provider.mjs');
   writeFileSync(script, `const a=process.argv.slice(2);if(!a.includes('read-only')||!a.includes('--json'))process.exit(8);process.stdin.resume();console.log(JSON.stringify({type:'thread.started',thread_id:'11111111-1111-4111-8111-111111111111'}));console.log(JSON.stringify({type:'turn.started'}));console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:${JSON.stringify(JSON.stringify(final))}}}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:10,output_tokens:12}}));`);

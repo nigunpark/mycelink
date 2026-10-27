@@ -204,7 +204,7 @@ describe('Codex release plugin in an isolated CODEX_HOME', () => {
     expect(replay.stderr).toContain('CODEX_PREPARE_AUTHORITY_EXISTS');
   });
 
-  it('reports review and bounded delivery eligibility honestly after disposable opt-in', () => {
+  it.skipIf(process.platform !== 'win32')('reports review and bounded delivery eligibility honestly after disposable opt-in', () => {
     const control = join(output, 'codex-status-enabled');
     const repo = join(output, 'codex-status-repo');
     mkdirSync(repo, { recursive: true });

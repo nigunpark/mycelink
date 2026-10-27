@@ -1,10 +1,10 @@
 /** Claim-local mailbox. Only the controller handles requests; the worker writes numbered files. */
-import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { boundChannelResponse, validProbeDiagnostic, type ChannelResponse } from './codex-claim-channel.js';
 import { redactValue, type Env } from '../security/redact.js';
-import { isInsideReal } from '../security/paths.js';
+import { isInsideReal, readRegular } from '../security/paths.js';
 
 const MAX_REQUEST = 8 * 1024;
 const MAX_REQUESTS = 64;
@@ -90,18 +90,11 @@ export class ClaimFileTransport {
         response = { ok: false, sequence: n, code: 'CHANNEL_SEQUENCE_INVALID' };
       } else {
         try {
-          const before = lstatSync(requestFile);
-          if (!before.isFile() || before.size > MAX_REQUEST) throw new Error('invalid file');
-          const fd = openSync(requestFile, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-          let bytes: Buffer;
-          try {
-            const stat = fstatSync(fd);
-            if (!stat.isFile() || stat.size > MAX_REQUEST || stat.ino !== before.ino || stat.dev !== before.dev) throw new Error('invalid descriptor');
-            bytes = Buffer.alloc(MAX_REQUEST + 1);
-            const count = readSync(fd, bytes, 0, bytes.length, 0);
-            bytes = bytes.subarray(0, count);
-            if (count > MAX_REQUEST) throw new Error('oversized request');
-          } finally { closeSync(fd); }
+          // Open once, compare the opened file with its current path, and read
+          // through that descriptor. A swapped link or oversized request fails.
+          const observed = readRegular(requestFile, MAX_REQUEST);
+          if (!observed) throw new Error('invalid request file');
+          const bytes = observed.bytes;
           let parsed: unknown;
           try { parsed = JSON.parse(bytes.toString('utf8')); }
           catch (err) {

@@ -15,6 +15,7 @@ import * as hostGate from '../../src/sessions/codex-host-gate.js';
 import type { ChannelResponse } from '../../src/sessions/codex-claim-channel.js';
 import { executeHostClaimGate } from '../../src/sessions/codex-host-gate.js';
 import { redactText } from '../../src/security/redact.js';
+import { readRegular } from '../../src/security/paths.js';
 import { redDeclaredTests } from '../../src/engine/tdd-history.js';
 import { canonicalTestId } from '../../src/evidence/test-ids.js';
 import { createHash } from 'node:crypto';
@@ -124,7 +125,8 @@ async function fixture(options: Parameters<typeof createShop>[0] = {}, command?:
   const test = join(worktree, 'packages/errors/test/errors.test.mjs');
   const probe = (deadlineMs = 30_000) => controller.codexProbeClaim(ERRORS, claim.claimId, claim.capability, worktree, { deadlineMs });
   const state = () => readFileSync(join(s.featureDir, 'STATE.json'), 'utf8');
-  const evidence = () => readdirSync(s.featureDir, { recursive: true }).map(String).filter((p) => /evidence|probe|results|\.log$/.test(p)).sort();
+  const evidence = () => readdirSync(s.featureDir, { recursive: true }).map(String).filter((p) =>
+    p.includes('evidence') || p.includes('probe') || p.includes('results') || p.endsWith('.log')).sort();
   return { s, controller, claim, worktree, test, probe, state, evidence };
 }
 
@@ -137,10 +139,11 @@ describe('controller-owned probe with a real registered module and native host v
     let declaration: { manifest: string; baseline: string; sha256: string };
     const markerName = 'fixture-child-ran.txt';
     const f = await fixture({}, s => {
-      const baseline = join(dirname(s.control), 'probe-baseline');
+      const fixtureRoot = realpathSync(dirname(s.control));
+      const baseline = join(fixtureRoot, 'probe-baseline');
       makeGitRepo(baseline, { files: { 'pnpm-lock.yaml': 'disposable fixture lock\n' } });
       const hash = (v: string | Buffer) => createHash('sha256').update(v).digest('hex');
-      manifest = join(dirname(s.control), 'probe-fixture.json');
+      manifest = join(fixtureRoot, 'probe-fixture.json');
       bytes = JSON.stringify({ schema: 'mycelink-frozen-git-build/1',
         frozen_sha: git(baseline, ['rev-parse', 'HEAD']), tree: git(baseline, ['rev-parse', 'HEAD^{tree}']),
         lock_git_blob: git(baseline, ['rev-parse', 'HEAD:pnpm-lock.yaml']), baseline_windows_root: baseline,
@@ -1783,7 +1786,7 @@ describe('empty-identity probe forensic sidecars', () => {
       expect(names).toHaveLength(1); // Native RED now: no sidecar exists.
       firstName = names[0]!;
       const target = join(f.dir, firstName);
-      kept = readFileSync(target);
+      kept = readRegular(target, 8192)!.bytes;
       expect(lstatSync(target).isFile()).toBe(true);
       expect(lstatSync(target).isSymbolicLink()).toBe(false);
       expect(kept.byteLength).toBeLessThanOrEqual(8192);
@@ -1821,10 +1824,10 @@ describe('empty-identity probe forensic sidecars', () => {
       expect(git(f.s.control, ['check-ignore', target])).not.toBe('');
       second = f.probe();
       noHandles(second);
-      expect(readFileSync(target)).toEqual(kept);
+      expect(readRegular(target, 8192)?.bytes).toEqual(kept);
       const secondId = second.output.match(/DIAGNOSTIC_ID=([a-f0-9]{64})$/)?.[1];
       expect(secondId).toBeDefined();
-      expect(f.files().some(name => digest(readFileSync(join(f.dir, name))) === secondId)).toBe(true);
+      expect(f.files().some(name => digest(readRegular(join(f.dir, name), 8192)!.bytes) === secondId)).toBe(true);
     } finally { runner.mockRestore(); }
     noHandles(first!);
     expect(existsSync(dirname(clone))).toBe(false);
@@ -2053,7 +2056,7 @@ describe('missing-report isolated test-command classification', () => {
       expect(result.output.includes(secret)).toBe(false);
     }
     expect(f.probe().exitCode).toBe(2);
-    expectPrivateText(readFileSync(target, 'utf8'), first.toString('utf8')); // immutable readback
+    expectPrivateText(readRegular(target, 8192)?.bytes.toString('utf8'), first.toString('utf8')); // immutable readback
     expect(existsSync(dirname(clone))).toBe(false);
     expect(f.state()).toBe(before);
     expect(f.evidence()).toEqual(ledger);
@@ -2122,7 +2125,7 @@ describe('missing-report isolated test-command classification', () => {
       expect(JSON.stringify(response).includes(canary)).toBe(false);
     }
     expect(f.probe().exitCode).toBe(2);
-    expectPrivateText(readFileSync(target, 'utf8'), bytes.toString('utf8'));
+    expectPrivateText(readRegular(target, 8192)?.bytes.toString('utf8'), bytes.toString('utf8'));
     for (const key of ['sanitized_excerpt', 'test_command', 'diagnostic', 'results', 'criterion_evidence', 'output_path']) {
       expect(Object.hasOwn(response, key)).toBe(false);
     }
@@ -2274,7 +2277,7 @@ describe('missing-report isolated test-command classification', () => {
       }
       expect(JSON.stringify(response).includes(tailMessage)).toBe(false);
       expect(f.probe().exitCode === 2).toBe(true);
-      expectPrivateText(readFileSync(target, 'utf8'), bytes.toString('utf8'));
+      expectPrivateText(readRegular(target, 8192)?.bytes.toString('utf8'), bytes.toString('utf8'));
       for (const name of f.files()) expect(/^diagnostic\.[a-f0-9]{16}(?:-[1-9][0-9]*)?\.json$/.test(name)).toBe(true);
       expect(existsSync(dirname(clone))).toBe(false);
       expectPrivateText(f.state(), before);

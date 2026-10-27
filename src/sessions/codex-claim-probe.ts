@@ -1,11 +1,11 @@
 /** Functional isolation for approved host commands; this is not hostile-process confinement. */
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { runGit } from '../git/git.js';
 import { matchGlob } from '../git/worktree.js';
-import { classifyRelativePath, samePath } from '../security/paths.js';
+import { classifyRelativePath, readRegular, samePath } from '../security/paths.js';
 import { redactText } from '../security/redact.js';
 import { isTestPath, redDeclaredTests } from '../engine/tdd-history.js';
 import { namesDeclared } from '../evidence/gate-tests.js';
@@ -51,14 +51,19 @@ function safeFile(root: string, path: string): Buffer | null {
   let current = root;
   for (const part of path.split('/')) {
     current = join(current, part);
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error('CHANNEL_PROBE_SYMLINK');
     // lstat also detects dangling links.
     try { if (lstatSync(current).isSymbolicLink()) throw new Error('CHANNEL_PROBE_SYMLINK'); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   }
-  if (!existsSync(current)) return null;
-  if (!lstatSync(current).isFile()) throw new Error('CHANNEL_PROBE_PATH_INVALID');
-  return readFileSync(current);
+  const observed = readRegular(current);
+  if (observed) return observed.bytes;
+  try {
+    if (lstatSync(current).isSymbolicLink()) throw new Error('CHANNEL_PROBE_SYMLINK');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw e;
+  }
+  throw new Error('CHANNEL_PROBE_PATH_INVALID');
 }
 interface ProbeSnapshot {
   head: string; refs: string; headFile: string; index: string; indexFile: string; status: string; trackedDiff: string;
@@ -74,7 +79,8 @@ function snapshot(root: string, deadline: number): string {
   if (paths.length > 100_000) throw new Error('CHANNEL_PROBE_SNAPSHOT_LIMIT');
   const gitPathHash = (name: string) => {
     const path = resolve(root, git(['rev-parse', '--git-path', name]).trim());
-    return existsSync(path) ? hash(readFileSync(path)) : '';
+    const observed = readRegular(path);
+    return observed ? hash(observed.bytes) : '';
   };
   return JSON.stringify({ head: git(['rev-parse', 'HEAD']), refs: git(['show-ref']), headFile: gitPathHash('HEAD'),
     index: git(['ls-files', '--stage', '-v', '-z']), indexFile: gitPathHash('index'),

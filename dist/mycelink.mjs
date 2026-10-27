@@ -7746,11 +7746,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names2, constants9) {
+      optimizeNames(names2, constants8) {
         if (!names2[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names2, constants9);
+          this.rhs = optimizeExpr(this.rhs, names2, constants8);
         return this;
       }
       get names() {
@@ -7767,10 +7767,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names2, constants9) {
+      optimizeNames(names2, constants8) {
         if (this.lhs instanceof code_1.Name && !names2[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names2, constants9);
+        this.rhs = optimizeExpr(this.rhs, names2, constants8);
         return this;
       }
       get names() {
@@ -7831,8 +7831,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names2, constants9) {
-        this.code = optimizeExpr(this.code, names2, constants9);
+      optimizeNames(names2, constants8) {
+        this.code = optimizeExpr(this.code, names2, constants8);
         return this;
       }
       get names() {
@@ -7861,12 +7861,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names2, constants9) {
+      optimizeNames(names2, constants8) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names2, constants9))
+          if (n.optimizeNames(names2, constants8))
             continue;
           subtractNames(names2, n.names);
           nodes.splice(i, 1);
@@ -7919,12 +7919,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names2, constants9) {
+      optimizeNames(names2, constants8) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names2, constants9);
-        if (!(super.optimizeNames(names2, constants9) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names2, constants8);
+        if (!(super.optimizeNames(names2, constants8) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names2, constants9);
+        this.condition = optimizeExpr(this.condition, names2, constants8);
         return this;
       }
       get names() {
@@ -7947,10 +7947,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names2, constants9) {
-        if (!super.optimizeNames(names2, constants9))
+      optimizeNames(names2, constants8) {
+        if (!super.optimizeNames(names2, constants8))
           return;
-        this.iteration = optimizeExpr(this.iteration, names2, constants9);
+        this.iteration = optimizeExpr(this.iteration, names2, constants8);
         return this;
       }
       get names() {
@@ -7986,10 +7986,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names2, constants9) {
-        if (!super.optimizeNames(names2, constants9))
+      optimizeNames(names2, constants8) {
+        if (!super.optimizeNames(names2, constants8))
           return;
-        this.iterable = optimizeExpr(this.iterable, names2, constants9);
+        this.iterable = optimizeExpr(this.iterable, names2, constants8);
         return this;
       }
       get names() {
@@ -8031,11 +8031,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names2, constants9) {
+      optimizeNames(names2, constants8) {
         var _a, _b;
-        super.optimizeNames(names2, constants9);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names2, constants9);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names2, constants9);
+        super.optimizeNames(names2, constants8);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names2, constants8);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names2, constants8);
         return this;
       }
       get names() {
@@ -8336,7 +8336,7 @@ var require_codegen = __commonJS({
     function addExprNames(names2, from) {
       return from instanceof code_1._CodeOrName ? addNames(names2, from.names) : names2;
     }
-    function optimizeExpr(expr, names2, constants9) {
+    function optimizeExpr(expr, names2, constants8) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -8351,14 +8351,14 @@ var require_codegen = __commonJS({
         return items2;
       }, []));
       function replaceName(n) {
-        const c = constants9[n.str];
+        const c = constants8[n.str];
         if (c === void 0 || names2[n.str] !== 1)
           return n;
         delete names2[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names2[c.str] === 1 && constants9[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names2[c.str] === 1 && constants8[c.str] !== void 0);
       }
     }
     function subtractNames(names2, from) {
@@ -15417,7 +15417,7 @@ var require_dist2 = __commonJS({
 
 // src/cli/cli.ts
 var import_yaml7 = __toESM(require_dist(), 1);
-import { existsSync as existsSync48, lstatSync as lstatSync23, mkdirSync as mkdirSync29, readFileSync as readFileSync43, readSync as readSync6, readdirSync as readdirSync27, realpathSync as realpathSync7 } from "node:fs";
+import { existsSync as existsSync46, lstatSync as lstatSync23, mkdirSync as mkdirSync29, readFileSync as readFileSync43, readSync as readSync5, readdirSync as readdirSync27, realpathSync as realpathSync8 } from "node:fs";
 import { createHash as createHash44 } from "node:crypto";
 import { dirname as dirname24, join as join59, resolve as resolve31 } from "node:path";
 
@@ -16617,7 +16617,7 @@ function evidenceOutputFile(pathBase, record) {
 }
 
 // src/git/worktree.ts
-import { closeSync as closeSync3, existsSync as existsSync4, ftruncateSync, mkdirSync, openSync as openSync3, readFileSync as readFileSync3, rmSync, writeSync } from "node:fs";
+import { closeSync as closeSync3, existsSync as existsSync4, ftruncateSync, mkdirSync, openSync as openSync3, readFileSync as readFileSync3, realpathSync as realpathSync2, rmSync, writeSync } from "node:fs";
 import { join as join7, relative as relative3, resolve as resolve7 } from "node:path";
 var AllowedPathViolationError = class extends Error {
   violations;
@@ -16672,12 +16672,13 @@ function createWorkerWorktree(args) {
   return { worktree: target, branch, base: args.baseBranch, created: true, startSha };
 }
 function makeRelativeGitPointers(worktree) {
-  const dotGit = join7(worktree, ".git");
+  const physicalWorktree = realpathSync2(worktree);
+  const dotGit = join7(physicalWorktree, ".git");
   const pointer = readFileSync3(dotGit, "utf8").trim();
   if (!pointer.startsWith("gitdir: ")) throw new Error("WORKTREE_GIT_POINTER: expected linked worktree");
-  const admin = resolve7(worktree, pointer.slice("gitdir: ".length));
+  const admin = realpathSync2(resolve7(physicalWorktree, pointer.slice("gitdir: ".length)));
   if (!existsSync4(join7(admin, "gitdir"))) throw new Error("WORKTREE_GIT_POINTER: missing admin metadata");
-  const forward = relative3(worktree, admin).replaceAll("\\", "/");
+  const forward = relative3(physicalWorktree, admin).replaceAll("\\", "/");
   const backward = relative3(admin, dotGit).replaceAll("\\", "/");
   if (!forward || !backward || /^[A-Za-z]:/.test(forward + backward)) throw new Error("WORKTREE_GIT_POINTER: different volumes");
   for (const [file, value] of [[dotGit, `gitdir: ${forward}
@@ -19569,7 +19570,7 @@ function claimMismatch(record, claimed) {
 // src/engine/reproduction-capsule.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash as createHash9 } from "node:crypto";
-import { closeSync as closeSync7, constants as constants3, existsSync as existsSync11, fstatSync as fstatSync4, lstatSync as lstatSync5, mkdirSync as mkdirSync5, openSync as openSync7, readFileSync as readFileSync9, readdirSync as readdirSync3, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync6, writeFileSync as writeFileSync3 } from "node:fs";
+import { closeSync as closeSync7, constants as constants3, existsSync as existsSync11, fstatSync as fstatSync4, lstatSync as lstatSync5, mkdirSync as mkdirSync5, openSync as openSync7, readFileSync as readFileSync9, readdirSync as readdirSync3, realpathSync as realpathSync3, renameSync as renameSync2, rmSync as rmSync6, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname6, join as join14, relative as relative5, sep as sep4 } from "node:path";
 
 // src/state/atomic-json.ts
@@ -20043,7 +20044,7 @@ function collectCapsuleFiles(args) {
   if (candidates.length > CAPSULE_LIMITS.files) return refuse2("CAPSULE_SIZE", `${candidates.length} files: a capsule holds at most ${CAPSULE_LIMITS.files} (name its own files with --files)`);
   let root;
   try {
-    root = realpathSync2(args.worktree);
+    root = realpathSync3(args.worktree);
   } catch {
     return refuse2("CAPSULE_UNAVAILABLE", `the claim's worktree ${args.worktree} cannot be read`);
   }
@@ -20067,7 +20068,7 @@ function collectCapsuleFiles(args) {
       return refuse2("CAPSULE_PATH", `${path} is not a regular file in the worktree`);
     }
     try {
-      const real = realpathSync2(full);
+      const real = realpathSync3(full);
       if (real !== root && !real.startsWith(root.endsWith(sep4) ? root : `${root}${sep4}`)) return refuse2("CAPSULE_SYMLINK", `${path} resolves outside the worktree`);
     } catch {
       return refuse2("CAPSULE_PATH", `${path} cannot be resolved`);
@@ -24961,7 +24962,7 @@ function readChallengeReceipt(controlRoot, receiptPath) {
 
 // src/engine/review-transport.ts
 import { createHash as createHash19 } from "node:crypto";
-import { closeSync as closeSync10, lstatSync as lstatSync8, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync3 } from "node:fs";
+import { closeSync as closeSync10, lstatSync as lstatSync8, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync4 } from "node:fs";
 import { basename as basename4, dirname as dirname10, isAbsolute as isAbsolute6, join as join24 } from "node:path";
 
 // src/engine/provider-interrupt.ts
@@ -25852,8 +25853,8 @@ function safeGenerationDir(controlRoot, open) {
   const fold3 = (p) => process.platform === "win32" ? slash4(p).toLowerCase() : slash4(p);
   if (!/^\.mycelink\/reviews\/[^/]+\/[^/]+\/[0-9a-f-]{36}\/verdict\.json$/.test(open.slot)) return { ok: false, detail: `${open.slot} is not a verdict file of the control root's review area` };
   try {
-    const real = realpathSync3.native(dir);
-    const expected = join24(realpathSync3.native(controlRoot), ...dirname10(open.slot).split("/"));
+    const real = realpathSync4.native(dir);
+    const expected = join24(realpathSync4.native(controlRoot), ...dirname10(open.slot).split("/"));
     if (!isDirectoryNoLink(dir) || fold3(real) !== fold3(expected)) return { ok: false, detail: `the generation's directory ${dirname10(open.slot)} is not a plain directory of the control root's review area` };
   } catch {
     return { ok: false, detail: `the generation's directory ${dirname10(open.slot)} does not exist` };
@@ -26575,7 +26576,7 @@ function listLeases(featureDir, now3 = Date.now()) {
 
 // src/sessions/context-pack.ts
 import { execFileSync } from "node:child_process";
-import { lstatSync as lstatSync9, realpathSync as realpathSync4, opendirSync } from "node:fs";
+import { lstatSync as lstatSync9, realpathSync as realpathSync5, opendirSync } from "node:fs";
 import { resolve as resolve10, dirname as dirname11, relative as relative6, isAbsolute as isAbsolute7 } from "node:path";
 import { createHash as createHash20 } from "node:crypto";
 var ContextPackTooLargeError = class extends Error {
@@ -26821,11 +26822,11 @@ function buildContextPack(args) {
 function verifyReadonlyFixture(controlRoot, declaration) {
   try {
     if (!controlRoot || !validFixtureSibling(declaration.manifest, true) || !validFixtureSibling(declaration.baseline, false) || !/^[0-9a-f]{64}$/.test(declaration.sha256)) throw new Error("invalid declaration");
-    const control = realpathSync4.native(controlRoot);
+    const control = realpathSync5.native(controlRoot);
     const parent = dirname11(control);
     const manifest = resolve10(control, declaration.manifest);
     const baseline = resolve10(control, declaration.baseline);
-    if (lstatSync9(manifest).isSymbolicLink() || lstatSync9(baseline).isSymbolicLink() || !lstatSync9(baseline).isDirectory() || !samePath(dirname11(realpathSync4.native(baseline)), parent)) throw new Error("fixture path escape");
+    if (lstatSync9(manifest).isSymbolicLink() || lstatSync9(baseline).isSymbolicLink() || !lstatSync9(baseline).isDirectory() || !samePath(dirname11(realpathSync5.native(baseline)), parent)) throw new Error("fixture path escape");
     const bytes2 = readRegular(manifest, 4 * 1024 * 1024)?.bytes;
     const hash2 = (b) => createHash20("sha256").update(b).digest("hex");
     if (!bytes2 || hash2(bytes2) !== declaration.sha256) throw new Error("manifest hash mismatch");
@@ -26859,7 +26860,7 @@ function verifyDependencyConfinement(baseline) {
   };
   const confined = (path) => {
     budget();
-    const real = realpathSync4.native(path);
+    const real = realpathSync5.native(path);
     const rel = relative6(baseline, real);
     if (isAbsolute7(rel) || rel === ".." || rel.startsWith("../") || rel.startsWith("..\\")) throw new Error("dependency path escape");
     return real;
@@ -27907,7 +27908,7 @@ function withFeatureLock(featureDir, purpose, fn, timeoutMs = 2e3) {
 }
 
 // src/engine/orchestrator.ts
-import { existsSync as existsSync35, mkdirSync as mkdirSync23, readFileSync as readFileSync34, readdirSync as readdirSync20, rmSync as rmSync15, writeFileSync as writeFileSync11 } from "node:fs";
+import { existsSync as existsSync33, mkdirSync as mkdirSync23, readFileSync as readFileSync34, readdirSync as readdirSync20, rmSync as rmSync15, writeFileSync as writeFileSync11 } from "node:fs";
 import { createHash as createHash37 } from "node:crypto";
 import { basename as basename15, dirname as dirname19, join as join48, resolve as resolve24 } from "node:path";
 import { randomBytes as randomBytes6, randomUUID as randomUUID4 } from "node:crypto";
@@ -29847,15 +29848,20 @@ function relocatedGraphMatches(input) {
   if (stableStringify(source) !== stableStringify(target)) return false;
   for (const path of scripts) {
     const dest = relocate(path);
-    if (dest === path || !existsSync25(path) || !existsSync25(dest) || !lstatSync15(path).isFile() || !lstatSync15(dest).isFile()) return false;
-    const text = readFileSync23(path, "utf8");
-    if (relocate(text) !== readFileSync23(dest, "utf8")) return false;
+    if (dest === path) return false;
+    const sourceScript = readRegular(path, 16 * 1024 * 1024);
+    const targetScript = readRegular(dest, 16 * 1024 * 1024);
+    if (!sourceScript || !targetScript) return false;
+    const text = sourceScript.bytes.toString("utf8");
+    if (relocate(text) !== targetScript.bytes.toString("utf8")) return false;
     for (const match of text.matchAll(/(?:[A-Za-z]:\/|\/mnt\/[a-z]\/)[^\s'"`]+\.(?:mjs|js|cjs|sh)/g)) {
       const nested = match[0];
       if (!nested.startsWith(`${sourceRoot}/`) && !nested.startsWith(`${wsl(sourceRoot)}/`)) continue;
       const local = nested.startsWith(wsl(sourceRoot)) ? `${sourceRoot}${nested.slice(wsl(sourceRoot).length)}` : nested;
       const translated = relocate(local);
-      if (!existsSync25(local) || !existsSync25(translated) || !lstatSync15(local).isFile() || !lstatSync15(translated).isFile() || relocate(readFileSync23(local, "utf8")) !== readFileSync23(translated, "utf8")) return false;
+      const sourceNested = readRegular(local, 16 * 1024 * 1024);
+      const targetNested = readRegular(translated, 16 * 1024 * 1024);
+      if (!sourceNested || !targetNested || relocate(sourceNested.bytes.toString("utf8")) !== targetNested.bytes.toString("utf8")) return false;
     }
   }
   return true;
@@ -30513,7 +30519,7 @@ function hookHealth(controlRoot) {
 }
 
 // src/sessions/codex-claim-probe.ts
-import { existsSync as existsSync29, lstatSync as lstatSync17, mkdirSync as mkdirSync18, mkdtempSync as mkdtempSync6, readFileSync as readFileSync27, realpathSync as realpathSync5, rmSync as rmSync13, writeFileSync as writeFileSync8 } from "node:fs";
+import { lstatSync as lstatSync17, mkdirSync as mkdirSync18, mkdtempSync as mkdtempSync6, readFileSync as readFileSync27, realpathSync as realpathSync6, rmSync as rmSync13, writeFileSync as writeFileSync8 } from "node:fs";
 import { dirname as dirname15, join as join40, resolve as resolve19 } from "node:path";
 import { tmpdir as tmpdir5 } from "node:os";
 import { createHash as createHash31 } from "node:crypto";
@@ -30817,16 +30823,21 @@ function safeFile(root, path) {
   let current = root;
   for (const part of path.split("/")) {
     current = join40(current, part);
-    if (existsSync29(current) && lstatSync17(current).isSymbolicLink()) throw new Error("CHANNEL_PROBE_SYMLINK");
     try {
       if (lstatSync17(current).isSymbolicLink()) throw new Error("CHANNEL_PROBE_SYMLINK");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
   }
-  if (!existsSync29(current)) return null;
-  if (!lstatSync17(current).isFile()) throw new Error("CHANNEL_PROBE_PATH_INVALID");
-  return readFileSync27(current);
+  const observed = readRegular(current);
+  if (observed) return observed.bytes;
+  try {
+    if (lstatSync17(current).isSymbolicLink()) throw new Error("CHANNEL_PROBE_SYMLINK");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  throw new Error("CHANNEL_PROBE_PATH_INVALID");
 }
 function snapshot3(root, deadline) {
   const git = (args) => runGit(root, args, { timeoutMs: Math.max(1, deadline - Date.now()), env: { GIT_OPTIONAL_LOCKS: "0" } }).stdout;
@@ -30835,7 +30846,8 @@ function snapshot3(root, deadline) {
   if (paths.length > 1e5) throw new Error("CHANNEL_PROBE_SNAPSHOT_LIMIT");
   const gitPathHash = (name) => {
     const path = resolve19(root, git(["rev-parse", "--git-path", name]).trim());
-    return existsSync29(path) ? hash(readFileSync27(path)) : "";
+    const observed = readRegular(path);
+    return observed ? hash(observed.bytes) : "";
   };
   return JSON.stringify({
     head: git(["rev-parse", "HEAD"]),
@@ -31085,7 +31097,7 @@ function runClaimProbe(args) {
     runGit(scope.repoPath, ["clone", "--no-local", "--no-checkout", "--", scope.repoPath, clone], { timeoutMs: remaining() });
     runGit(clone, ["config", "core.autocrlf", "false"], { timeoutMs: remaining() });
     runGit(clone, ["checkout", "--detach", scope.expectedHead], { timeoutMs: remaining() });
-    const common = (dir) => realpathSync5(resolve19(dir, runGit(dir, ["rev-parse", "--git-common-dir"], { timeoutMs: remaining() }).stdout.trim()));
+    const common = (dir) => realpathSync6(resolve19(dir, runGit(dir, ["rev-parse", "--git-common-dir"], { timeoutMs: remaining() }).stdout.trim()));
     if (!lstatSync17(join40(clone, ".git")).isDirectory() || samePath(common(clone), common(scope.worktree))) throw new Error("CHANNEL_PROBE_CLONE_INVALID");
     const evidence = join40(root, "diagnostic");
     if (args.setup) {
@@ -32166,7 +32178,7 @@ function runSummary(runsFile, nodeId) {
 }
 
 // src/engine/review-packet.ts
-import { existsSync as existsSync30, mkdirSync as mkdirSync20, readFileSync as readFileSync30, readdirSync as readdirSync15, writeFileSync as writeFileSync9 } from "node:fs";
+import { existsSync as existsSync29, mkdirSync as mkdirSync20, readFileSync as readFileSync30, readdirSync as readdirSync15, writeFileSync as writeFileSync9 } from "node:fs";
 import { createHash as createHash33 } from "node:crypto";
 import { join as join42, relative as relative9 } from "node:path";
 var MAX_TESTS_PER_GATE = 400;
@@ -32181,14 +32193,14 @@ function checkoutOf(controlRoot, featureId, reviewId, repository) {
 }
 function removeReviewCheckouts(controlRoot, featureId, reviewId, workspace) {
   const root = join42(reviewDir(controlRoot, featureId, reviewId), "checkout");
-  if (!existsSync30(root)) return;
+  if (!existsSync29(root)) return;
   for (const name of readdirSync15(root)) {
     const repo = workspace.repositories.repositories.find((r) => r.name === name);
     if (repo !== void 0) removeWorkerWorktree(repositoryPath(workspace, name), join42(root, name));
   }
 }
 function checkout(repoPath, at, sha2, crossPlatformGit) {
-  if (existsSync30(at)) {
+  if (existsSync29(at)) {
     const head = runGit(at, ["rev-parse", "HEAD"], { allowFail: true });
     if (head.exitCode === 0 && head.stdout.trim() === sha2) {
       if (crossPlatformGit) makeRelativeGitPointers(at);
@@ -32205,7 +32217,7 @@ function checkout(repoPath, at, sha2, crossPlatformGit) {
 function featureBase(controlRoot, featureId, workspace, repository, head) {
   const repoPath = repositoryPath(workspace, repository);
   const deliveries = join42(controlRoot, "features", featureId, "deliveries");
-  if (existsSync30(deliveries)) {
+  if (existsSync29(deliveries)) {
     const firsts = readdirSync15(deliveries).filter((f) => f.endsWith(".json")).map((f) => {
       try {
         return JSON.parse(readFileSync30(join42(deliveries, f), "utf8"));
@@ -32654,7 +32666,7 @@ function correctionBrief(packet) {
   ];
 }
 function loadPacket(file, sha25617) {
-  if (!existsSync30(file)) return null;
+  if (!existsSync29(file)) return null;
   const bytes2 = readFileSync30(file);
   if (createHash33("sha256").update(bytes2).digest("hex") !== sha25617) return null;
   try {
@@ -32670,7 +32682,7 @@ function controlRelative(controlRoot, file) {
 // src/engine/codex-review-session.ts
 import { spawn } from "node:child_process";
 import { createHash as createHash35, randomUUID as randomUUID3 } from "node:crypto";
-import { existsSync as existsSync31, mkdirSync as mkdirSync21, writeFileSync as writeFileSync10 } from "node:fs";
+import { mkdirSync as mkdirSync21, writeFileSync as writeFileSync10 } from "node:fs";
 import { join as join43 } from "node:path";
 
 // src/sessions/codex-transcript.ts
@@ -32816,7 +32828,12 @@ async function runCodexReviewSession(options) {
   if (Buffer.byteLength(options.prompt) > 256 * 1024 || options.prompt.length === 0) throw new Error("CODEX_REVIEW_PROMPT_INVALID");
   const jsonlPath = join43(options.evidenceDir, "session.jsonl");
   const receiptPath = join43(options.evidenceDir, "receipt.json");
-  if (existsSync31(jsonlPath) || existsSync31(receiptPath)) throw new Error("CODEX_REVIEW_EVIDENCE_EXISTS");
+  try {
+    mkdirSync21(options.evidenceDir);
+  } catch (err) {
+    if (err.code === "EEXIST") throw new Error("CODEX_REVIEW_EVIDENCE_EXISTS");
+    throw err;
+  }
   const sessionId = randomUUID3();
   const provider = codexReviewerPaths(options.prompt, options.cwd, options.wsl === true);
   const child = spawn(
@@ -32918,12 +32935,12 @@ async function runCodexReviewSession(options) {
 }
 
 // src/hooks/provider-binding.ts
-import { existsSync as existsSync34, mkdirSync as mkdirSync22, readdirSync as readdirSync19, readFileSync as readFileSync33 } from "node:fs";
+import { existsSync as existsSync32, mkdirSync as mkdirSync22, readdirSync as readdirSync19, readFileSync as readFileSync33 } from "node:fs";
 import { basename as basename13, isAbsolute as isAbsolute13, join as join47 } from "node:path";
 import { createHash as createHash36 } from "node:crypto";
 
 // src/hooks/fence.ts
-import { existsSync as existsSync33, lstatSync as lstatSync19, readFileSync as readFileSync32, readdirSync as readdirSync18, realpathSync as realpathSync6, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync31, lstatSync as lstatSync19, readFileSync as readFileSync32, readdirSync as readdirSync18, realpathSync as realpathSync7, statSync as statSync4 } from "node:fs";
 import { basename as basename12, dirname as dirname18, isAbsolute as isAbsolute12, join as join46, resolve as resolve23 } from "node:path";
 
 // src/security/shell.ts
@@ -33918,17 +33935,17 @@ function interpreterWrites(name, args, cmd2, resolve32, write2, out, scripts, sc
 }
 
 // src/hooks/red-bound.ts
-import { existsSync as existsSync32, readdirSync as readdirSync16 } from "node:fs";
+import { existsSync as existsSync30, readdirSync as readdirSync16 } from "node:fs";
 import { join as join44 } from "node:path";
 var fold = (p) => process.platform === "win32" ? p.toLowerCase() : p;
 function redBoundRefusal(root, target, norm2) {
   try {
     const features = join44(root, "features");
-    if (!existsSync32(features)) return null;
+    if (!existsSync30(features)) return null;
     for (const entry of readdirSync16(features, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const featureDir = join44(features, entry.name);
-      if (!existsSync32(join44(featureDir, "STATE.json"))) continue;
+      if (!existsSync30(join44(featureDir, "STATE.json"))) continue;
       const state = loadState(featureDir)?.data;
       if (!state) continue;
       for (const rt of Object.values(state.nodes)) {
@@ -34048,7 +34065,7 @@ var inside3 = (path, root) => path === root || path.startsWith(`${root}/`);
 function realish(path) {
   let head = resolve23(path);
   const tail2 = [];
-  while (!existsSync33(head)) {
+  while (!existsSync31(head)) {
     const parent = dirname18(head);
     if (parent === head) break;
     tail2.unshift(basename12(head));
@@ -34056,7 +34073,7 @@ function realish(path) {
   }
   let real = head;
   try {
-    real = realpathSync6.native(head);
+    real = realpathSync7.native(head);
   } catch {
   }
   return join46(real, ...tail2);
@@ -34423,7 +34440,7 @@ function recordHostBinding(call, env) {
 }
 function currentHostBinding(controlRoot, now3 = Date.now()) {
   const dir = join47(controlRoot, ".mycelink", "hosts");
-  if (!existsSync34(dir)) return null;
+  if (!existsSync32(dir)) return null;
   let best = null;
   for (const name of readdirSync19(dir)) {
     if (!/^[A-Za-z0-9_-]{1,128}\.json$/.test(name)) continue;
@@ -34832,7 +34849,7 @@ var Orchestrator = class _Orchestrator {
     const out = {};
     for (const rel of [...node.contract_inputs ?? [], ...node.contract_outputs ?? []]) {
       const full = join48(this.controlRoot, rel);
-      out[rel] = existsSync35(full) ? createHash37("sha256").update(readFileSync34(full)).digest("hex") : "";
+      out[rel] = existsSync33(full) ? createHash37("sha256").update(readFileSync34(full)).digest("hex") : "";
     }
     return out;
   }
@@ -35158,7 +35175,7 @@ var Orchestrator = class _Orchestrator {
     const bound = this.state().acceptance ?? null;
     if (bound) {
       const file = join48(this.controlRoot, bound.path);
-      const now3 = existsSync35(file) ? sha256OfFile(file) : null;
+      const now3 = existsSync33(file) ? sha256OfFile(file) : null;
       if (now3 !== bound.sha256) {
         throw new AcceptanceDriftError(nodeId, `${bound.path} ${now3 === null ? "is gone" : `now hashes to ${now3.slice(0, 12)}`}, not ${bound.sha256.slice(0, 12)}, the approved criteria the feature was initialised with`);
       }
@@ -35578,7 +35595,7 @@ var Orchestrator = class _Orchestrator {
     const rt = state.nodes[nodeId];
     assertClaimCapability(nodeId, rt, capability);
     const claim = rt.claim;
-    if (node.repository === null || claim.worktree === null || !existsSync35(claim.worktree)) return refuse2("CAPSULE_UNAVAILABLE", `${nodeId} has no claim with a worktree to read a reproduction from`);
+    if (node.repository === null || claim.worktree === null || !existsSync33(claim.worktree)) return refuse2("CAPSULE_UNAVAILABLE", `${nodeId} has no claim with a worktree to read a reproduction from`);
     const brief = rt.rework_brief ?? null;
     if (brief === null || brief.origin?.kind !== "acceptance-review") return refuse2("CAPSULE_NOT_REVIEW_REWORK", `${nodeId} is not in an acceptance review's rework: a capsule seals the exact reproduction of a review's gap`);
     const graph = this.graph();
@@ -35671,7 +35688,7 @@ var Orchestrator = class _Orchestrator {
     const claim = this.state().nodes[nodeId]?.claim ?? null;
     const entry = (claim?.capsules ?? []).find((e) => e.capsule_id === capsuleId);
     const receiptPath = `${capsuleDir(this.featureId, nodeId, capsuleId)}/capsule.json`;
-    if (entry === void 0 && !existsSync35(join48(this.controlRoot, ...receiptPath.split("/")))) return null;
+    if (entry === void 0 && !existsSync33(join48(this.controlRoot, ...receiptPath.split("/")))) return null;
     const read = readCapsule(this.controlRoot, entry?.receipt_path ?? receiptPath, entry?.capsule_sha256);
     if (!read.ok) return { ok: false, code: "CAPSULE_TAMPERED", detail: `${capsuleId} is sealed already, and its archive is not as sealed: ${read.detail}` };
     if (read.capsule.capsule_id !== capsuleId || !capsuleSelfConsistent(read.capsule)) return { ok: false, code: "CAPSULE_TAMPERED", detail: `${receiptPath} does not bind ${capsuleId}` };
@@ -36397,7 +36414,7 @@ var Orchestrator = class _Orchestrator {
       recorded = last.result_sha256;
     } else {
       const prefix = `result.${last.dispatch_id}.`;
-      const copies = existsSync35(dir) ? readdirSync20(dir).filter((f) => f.startsWith(prefix) && /^[0-9a-f]{32}\.json$/.test(f.slice(prefix.length))) : [];
+      const copies = existsSync33(dir) ? readdirSync20(dir).filter((f) => f.startsWith(prefix) && /^[0-9a-f]{32}\.json$/.test(f.slice(prefix.length))) : [];
       if (copies.length !== 1) return null;
       file = copies[0];
     }
@@ -36877,7 +36894,7 @@ var Orchestrator = class _Orchestrator {
       if (results !== void 0 && results !== null) {
         const want = results.sha256;
         const copy = `${path.slice(0, path.lastIndexOf("/"))}/${basename15(results.path)}`;
-        const where = [copy, results.path].find((p) => existsSync35(join48(this.controlRoot, p)) && sha256OfFile(join48(this.controlRoot, p)) === want);
+        const where = [copy, results.path].find((p) => existsSync33(join48(this.controlRoot, p)) && sha256OfFile(join48(this.controlRoot, p)) === want);
         if (where === void 0) return { problem: `the ${kind} results of the generation the rework replaced (${results.path}) are no longer intact` };
         results = { ...results, path: where };
       }
@@ -37905,7 +37922,7 @@ var Orchestrator = class _Orchestrator {
     for (const snap of snapshots) {
       for (const f of snap.files) {
         const file = join48(this.controlRoot, ...f.copy.split("/"));
-        if (!existsSync35(file)) return { kind: "held", criterion: criteria[0], detail: `REPROOF_UNIT_REFUSED:REPROOF_TAMPERED: ${f.path}: the red gate's copy of what it ran is gone` };
+        if (!existsSync33(file)) return { kind: "held", criterion: criteria[0], detail: `REPROOF_UNIT_REFUSED:REPROOF_TAMPERED: ${f.path}: the red gate's copy of what it ran is gone` };
         byPath2.set(f.path, { path: f.path, bytes: readFileSync34(file), sha256: f.sha256, base_blob: runGit(repoPath, ["rev-parse", "--verify", "--quiet", `${snap.head_sha}:${f.path}`], { allowFail: true }).stdout.trim() || null });
       }
     }
@@ -38465,7 +38482,7 @@ var Orchestrator = class _Orchestrator {
     const dir = join48(this.sessionDir(nodeId), "stale");
     mkdirSync23(dir, { recursive: true });
     const file = join48(dir, `${leaseId.replace(/[^\w.-]/g, "_")}.${sha2.slice(0, 16)}.json`);
-    if (!existsSync35(file)) writeTextAtomic(file, text);
+    if (!existsSync33(file)) writeTextAtomic(file, text);
     unlinkSync3(slot);
     return { path: (relativeInside(this.controlRoot, file) ?? file).replace(/\\/g, "/"), sha256: sha2 };
   }
@@ -38793,7 +38810,7 @@ var Orchestrator = class _Orchestrator {
       return next;
     });
     const held = claim;
-    if (node.repository !== null && (held.worktree === null || !existsSync35(held.worktree))) {
+    if (node.repository !== null && (held.worktree === null || !existsSync33(held.worktree))) {
       const created = this.ensureWorktree(nodeId, held.claim_id);
       held.worktree = created.worktree;
       held.branch = created.branch;
@@ -39315,7 +39332,7 @@ var Orchestrator = class _Orchestrator {
     }
     try {
       claimId = this.claim(nodeId, { mode: "controller" }).claimId;
-      const contracts = existsSync35(this.workspace.paths.contractsDir) ? readdirSync20(this.workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+      const contracts = existsSync33(this.workspace.paths.contractsDir) ? readdirSync20(this.workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
       const manifest = withFeatureLock(this.paths.featureDir, "candidate build", () => {
         const repoRefs = this.integrationRefs();
         if (repoRefs.length === 0) return null;
@@ -42584,7 +42601,7 @@ var Orchestrator = class _Orchestrator {
     for (const [candidate, sha2] of Object.entries(state.accepted_deliveries ?? {})) {
       if (!/^[A-Za-z0-9._-]+$/.test(candidate)) continue;
       const file = join48(this.paths.featureDir, "deliveries", `${candidate}.json`);
-      if (!existsSync35(file)) continue;
+      if (!existsSync33(file)) continue;
       const bytes2 = readFileSync34(file);
       if (createHash37("sha256").update(bytes2).digest("hex") !== sha2) continue;
       let at;
@@ -42668,7 +42685,7 @@ var Orchestrator = class _Orchestrator {
   featureDelivered(state) {
     if (Object.keys(state.accepted_deliveries ?? {}).length > 0) return true;
     const dir = join48(this.paths.featureDir, "deliveries");
-    return existsSync35(dir) && readdirSync20(dir).some((f) => f.endsWith(".json"));
+    return existsSync33(dir) && readdirSync20(dir).some((f) => f.endsWith(".json"));
   }
   /**
    * How each delivered base branch stands to this feature's integration
@@ -42772,7 +42789,7 @@ var Orchestrator = class _Orchestrator {
     });
     const stash = this.quarantineWorkerStash(nodeId);
     const archived = this.archiveWorkerBranch(nodeId);
-    if (claim.worktree !== null && existsSync35(claim.worktree) && this.node(nodeId).repository !== null) {
+    if (claim.worktree !== null && existsSync33(claim.worktree) && this.node(nodeId).repository !== null) {
       removeWorkerWorktree(repositoryPath(this.workspace, this.node(nodeId).repository), claim.worktree);
     }
     mutateState(this.paths.featureDir, (s) => {
@@ -42984,7 +43001,7 @@ var Orchestrator = class _Orchestrator {
 ` + request.options.map((o) => `  - [ ] ${o}
 `).join("") + `
 `;
-    const existing = existsSync35(this.paths.decisions) ? readFileSync34(this.paths.decisions, "utf8") : `# Decisions for ${this.featureId}
+    const existing = existsSync33(this.paths.decisions) ? readFileSync34(this.paths.decisions, "utf8") : `# Decisions for ${this.featureId}
 `;
     if (!existing.includes(id2)) {
       writeTextAtomic(this.paths.decisions, existing + entry);
@@ -43143,7 +43160,7 @@ var Orchestrator = class _Orchestrator {
     const rt = this.state().nodes[nodeId];
     const base = c.base_sha ?? rt.branch_base_sha ?? null;
     const wt = c.worktree;
-    if (wt === null || !existsSync35(wt)) return { state: rt.state, base_sha: base, head_sha: null, commits: 0, dirty: [] };
+    if (wt === null || !existsSync33(wt)) return { state: rt.state, base_sha: base, head_sha: null, commits: 0, dirty: [] };
     const head = runGit(wt, ["rev-parse", "HEAD"]);
     const count = base !== null ? runGit(wt, ["rev-list", "--count", `${base}..HEAD`]) : null;
     const status = runGit(wt, ["status", "--porcelain", "--untracked-files=all"]);
@@ -43158,7 +43175,7 @@ var Orchestrator = class _Orchestrator {
    */
   quarantineUncommitted(nodeId, c, dispatchId) {
     const wt = c.worktree;
-    if (wt === null || !existsSync35(wt)) return null;
+    if (wt === null || !existsSync33(wt)) return null;
     const dir = join48(this.sessionDir(nodeId), "provider");
     mkdirSync23(dir, { recursive: true });
     const name = `${(dispatchId ?? c.claim_id).replace(/[^A-Za-z0-9-]/g, "")}.patch`;
@@ -43468,7 +43485,7 @@ var Orchestrator = class _Orchestrator {
   removeVerificationCheckouts(nodeId) {
     const where = this.verificationCheckoutPrefix(nodeId);
     const node = this.graph().nodes.find((n) => n.id === nodeId);
-    if (where === null || node?.repository == null || !existsSync35(where.root)) return;
+    if (where === null || node?.repository == null || !existsSync33(where.root)) return;
     const repoPath = repositoryPath(this.workspace, node.repository);
     for (const name of readdirSync20(where.root)) {
       if (name.startsWith(where.prefix)) removeWorkerWorktree(repoPath, join48(where.root, name));
@@ -43873,7 +43890,7 @@ function isProcessAlive2(pid) {
 
 // src/sessions/process-session.ts
 import { spawn as spawn2 } from "node:child_process";
-import { createWriteStream, existsSync as existsSync36, mkdirSync as mkdirSync24, rmSync as rmSync16 } from "node:fs";
+import { createWriteStream, existsSync as existsSync34, mkdirSync as mkdirSync24, rmSync as rmSync16 } from "node:fs";
 import { dirname as dirname20, resolve as resolve25 } from "node:path";
 import { createHash as createHash38, randomUUID as randomUUID5 } from "node:crypto";
 var ProcessSessionAdapter = class {
@@ -43892,7 +43909,7 @@ var ProcessSessionAdapter = class {
     const sessionId = randomUUID5();
     mkdirSync24(dirname20(resolve25(request.logPath)), { recursive: true });
     mkdirSync24(dirname20(resolve25(request.resultPath)), { recursive: true });
-    if (existsSync36(request.resultPath)) rmSync16(request.resultPath, { force: true });
+    if (existsSync34(request.resultPath)) rmSync16(request.resultPath, { force: true });
     const handle = {
       session_id: sessionId,
       adapter: this.name,
@@ -44246,7 +44263,7 @@ var ClaudeCliAdapter = class extends ProcessSessionAdapter {
 };
 
 // src/sessions/codex-claim-files.ts
-import { closeSync as closeSync15, constants as constants7, existsSync as existsSync37, fstatSync as fstatSync9, lstatSync as lstatSync21, mkdirSync as mkdirSync25, openSync as openSync13, readSync as readSync5, readdirSync as readdirSync21, renameSync as renameSync6, rmSync as rmSync17, writeFileSync as writeFileSync12 } from "node:fs";
+import { existsSync as existsSync35, lstatSync as lstatSync21, mkdirSync as mkdirSync25, readdirSync as readdirSync21, renameSync as renameSync6, rmSync as rmSync17, writeFileSync as writeFileSync12 } from "node:fs";
 import { join as join49 } from "node:path";
 import { randomUUID as randomUUID6 } from "node:crypto";
 var MAX_REQUEST = 8 * 1024;
@@ -44309,7 +44326,7 @@ var ClaimFileTransport = class {
   responded = /* @__PURE__ */ new Set();
   incompleteSince = /* @__PURE__ */ new Map();
   start() {
-    if (this.active || existsSync37(this.dir)) throw new Error("CHANNEL_ALREADY_STARTED");
+    if (this.active || existsSync35(this.dir)) throw new Error("CHANNEL_ALREADY_STARTED");
     const parent = join49(this.dir, "..");
     if (!lstatSync21(parent).isDirectory() || !isInsideReal(join49(parent, ".."), parent)) throw new Error("CHANNEL_PATH_INVALID");
     mkdirSync25(this.dir);
@@ -44342,20 +44359,9 @@ var ClaimFileTransport = class {
         response = { ok: false, sequence: n, code: "CHANNEL_SEQUENCE_INVALID" };
       } else {
         try {
-          const before = lstatSync21(requestFile);
-          if (!before.isFile() || before.size > MAX_REQUEST) throw new Error("invalid file");
-          const fd = openSync13(requestFile, constants7.O_RDONLY | (constants7.O_NOFOLLOW ?? 0));
-          let bytes2;
-          try {
-            const stat = fstatSync9(fd);
-            if (!stat.isFile() || stat.size > MAX_REQUEST || stat.ino !== before.ino || stat.dev !== before.dev) throw new Error("invalid descriptor");
-            bytes2 = Buffer.alloc(MAX_REQUEST + 1);
-            const count = readSync5(fd, bytes2, 0, bytes2.length, 0);
-            bytes2 = bytes2.subarray(0, count);
-            if (count > MAX_REQUEST) throw new Error("oversized request");
-          } finally {
-            closeSync15(fd);
-          }
+          const observed = readRegular(requestFile, MAX_REQUEST);
+          if (!observed) throw new Error("invalid request file");
+          const bytes2 = observed.bytes;
           let parsed;
           try {
             parsed = JSON.parse(bytes2.toString("utf8"));
@@ -44541,7 +44547,7 @@ The challenge response's output is JSON containing the challenge skeleton, crite
 
 // src/loops/contracts.ts
 var import_yaml4 = __toESM(require_dist(), 1);
-import { existsSync as existsSync38, readFileSync as readFileSync35 } from "node:fs";
+import { existsSync as existsSync36, readFileSync as readFileSync35 } from "node:fs";
 function validateLoops(value) {
   const problems = [];
   const parsed = value;
@@ -44582,7 +44588,7 @@ function validateLoops(value) {
   return { ok: problems.length === 0, problems, loops: parsed.loops };
 }
 function loadLoops(file) {
-  if (!existsSync38(file)) {
+  if (!existsSync36(file)) {
     return {
       ok: false,
       problems: [{ code: "MISSING_LOOPS", path: file, detail: `No LOOPS.yaml at ${file}` }],
@@ -44717,12 +44723,12 @@ function writeLoops(file, loops) {
 }
 
 // src/hooks/entrypoint.ts
-import { existsSync as existsSync42, readFileSync as readFileSync37, readdirSync as readdirSync25 } from "node:fs";
+import { existsSync as existsSync40, readFileSync as readFileSync37, readdirSync as readdirSync25 } from "node:fs";
 import { dirname as dirname22, join as join53, posix as posix3, relative as relative10, resolve as resolve27, sep as sep5 } from "node:path";
 import { createHash as createHash41 } from "node:crypto";
 
 // src/hooks/worker-calls.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync39, lstatSync as lstatSync22, mkdirSync as mkdirSync26, readFileSync as readFileSync36, readdirSync as readdirSync22, renameSync as renameSync7, writeFileSync as writeFileSync13 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync37, lstatSync as lstatSync22, mkdirSync as mkdirSync26, readFileSync as readFileSync36, readdirSync as readdirSync22, renameSync as renameSync7, writeFileSync as writeFileSync13 } from "node:fs";
 import { createHash as createHash39, randomBytes as randomBytes7 } from "node:crypto";
 import { dirname as dirname21, isAbsolute as isAbsolute15, join as join50, resolve as resolve26 } from "node:path";
 var CALLS_SCHEMA = "mycelink-calls/1";
@@ -44748,7 +44754,7 @@ function keep2(dir, bytes2) {
   const sha2 = sha25616(bytes2);
   if (bytes2.length > MAX_KEPT_BYTES) return { sha256: sha2, kept: false };
   const target = join50(dir, "objects", sha2.slice(0, 2), sha2);
-  if (!existsSync39(target)) {
+  if (!existsSync37(target)) {
     mkdirSync26(dirname21(target), { recursive: true });
     const tmp = `${target}.${process.pid}.${randomBytes7(4).toString("hex")}.tmp`;
     writeFileSync13(tmp, bytes2, { flag: "wx" });
@@ -44914,7 +44920,7 @@ function recordAgentEnd(call, env = process.env) {
 }
 
 // src/hooks/review-launch.ts
-import { existsSync as existsSync40, readdirSync as readdirSync23 } from "node:fs";
+import { existsSync as existsSync38, readdirSync as readdirSync23 } from "node:fs";
 import { basename as basename16, isAbsolute as isAbsolute16, join as join51 } from "node:path";
 import { createHash as createHash40 } from "node:crypto";
 var ID8 = /^[A-Za-z0-9_-]{1,128}$/;
@@ -44987,7 +44993,7 @@ function duplicateReviewerLaunch(call, env) {
     if (!safe3.ok) return null;
     const { review_id: review, dispatch_id: dispatch } = chosen.open;
     const awaitLine = `review await ${chosen.featureId} --review ${review}`;
-    if (existsSync40(join51(safe3.dir, VERDICT_FILE))) return `Blocked: the reviewer of ${review} generation ${dispatch} already answered (its verdict file is written): run its ticket's ingest and settle lines; never launch a second reviewer for one generation.`;
+    if (existsSync38(join51(safe3.dir, VERDICT_FILE))) return `Blocked: the reviewer of ${review} generation ${dispatch} already answered (its verdict file is written): run its ticket's ingest and settle lines; never launch a second reviewer for one generation.`;
     const life = reviewerLifecycle(chosen.root, chosen.open, { timeoutMs: chosen.timeoutMs });
     if (life.state === "RUNNING") {
       return `Blocked: a reviewer of ${review} generation ${dispatch} is already running (launched at ${life.task.launched_at}, ${Math.round(life.task.elapsed_ms / 1e3)} s of its ${Math.round(life.task.timeout_ms / 1e3)} s wall-clock): wait for it — run its ticket's await line (${awaitLine}) until it completes, then its ingest and settle lines. Never launch a second reviewer for one generation.`;
@@ -45002,7 +45008,7 @@ function duplicateReviewerLaunch(call, env) {
 }
 
 // src/hooks/agent-task.ts
-import { existsSync as existsSync41, readdirSync as readdirSync24 } from "node:fs";
+import { existsSync as existsSync39, readdirSync as readdirSync24 } from "node:fs";
 import { join as join52 } from "node:path";
 var AGENT_TASK_SCHEMA = "mycelink-agent-task/1";
 var ID9 = /^[A-Za-z0-9_-]{1,128}$/;
@@ -45024,7 +45030,7 @@ function launchDir(root, U, reviewer) {
       for (const review of list3(join52(reviews, feature))) {
         for (const dispatch of list3(join52(reviews, feature, review))) {
           const dir = join52(reviews, feature, review, dispatch);
-          if (existsSync41(join52(dir, name))) return dir;
+          if (existsSync39(join52(dir, name))) return dir;
         }
       }
     }
@@ -45034,7 +45040,7 @@ function launchDir(root, U, reviewer) {
   for (const feature of list3(launches)) {
     for (const dispatch of list3(join52(launches, feature))) {
       const dir = join52(launches, feature, dispatch);
-      if (existsSync41(join52(dir, name))) return dir;
+      if (existsSync39(join52(dir, name))) return dir;
     }
   }
   return null;
@@ -45240,9 +45246,9 @@ function activeFeature(controlRoot, explicit) {
   const envFeature = process.env["MYCELINK_FEATURE_ID"];
   if (envFeature) return isSafeFeatureId(envFeature) ? envFeature : null;
   const dir = controlPaths(controlRoot).featuresDir;
-  if (!existsSync42(dir)) return null;
+  if (!existsSync40(dir)) return null;
   const candidates = readdirSync25(dir).filter(
-    (f) => isSafeFeatureId(f) && existsSync42(join53(dir, f, "STATE.json"))
+    (f) => isSafeFeatureId(f) && existsSync40(join53(dir, f, "STATE.json"))
   );
   if (candidates.length === 1) return candidates[0];
   for (const id2 of candidates.sort()) {
@@ -45521,7 +45527,7 @@ function preToolUse(ctx, io, input) {
   const target = editTarget(input);
   if (target !== null && ["Edit", "Write", "NotebookEdit", "MultiEdit"].includes(tool)) {
     const normalised = resolve27(target).replace(/\\/g, "/");
-    const unboundGraph = matchGlob("**/PORTFOLIO-GRAPH.yaml", normalised) && !existsSync42(join53(dirname22(resolve27(target)), "STATE.json"));
+    const unboundGraph = matchGlob("**/PORTFOLIO-GRAPH.yaml", normalised) && !existsSync40(join53(dirname22(resolve27(target)), "STATE.json"));
     if (!unboundGraph && MANAGED_PATTERNS.some((p) => matchGlob(p, normalised))) {
       return block(
         io,
@@ -45702,7 +45708,7 @@ function stopGuard(ctx, io, input) {
 
 // src/workspace/codex-settings.ts
 import { spawnSync as spawnSync9 } from "node:child_process";
-import { existsSync as existsSync43, readFileSync as readFileSync38 } from "node:fs";
+import { existsSync as existsSync41, readFileSync as readFileSync38 } from "node:fs";
 import { dirname as dirname23, join as join54 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
@@ -46468,8 +46474,8 @@ var HAS_WELLFORMED = !!"".isWellFormed;
 function pluginRoot() {
   let dir = dirname23(fileURLToPath4(import.meta.url));
   for (let i = 0; i < 9; i++) {
-    if (existsSync43(join54(dir, "codex-plugin", "plugin.json"))) return join54(dir, "codex-plugin");
-    if (existsSync43(join54(dir, "plugin.json")) && existsSync43(join54(dir, "skills", "mycelink-init", "SKILL.md"))) return dir;
+    if (existsSync41(join54(dir, "codex-plugin", "plugin.json"))) return join54(dir, "codex-plugin");
+    if (existsSync41(join54(dir, "plugin.json")) && existsSync41(join54(dir, "skills", "mycelink-init", "SKILL.md"))) return dir;
     const parent = dirname23(dir);
     if (parent === dir) break;
     dir = parent;
@@ -46526,14 +46532,14 @@ function codexHealth(controlRoot, executable = "codex") {
   }
   checks.push({ name: "codex plugin", ok: valid, detail: manifest ?? "Mycelink plugin.json missing" });
   const skill = root && join54(root, "skills", "mycelink-init", "SKILL.md");
-  checks.push({ name: "codex skills", ok: !!skill && existsSync43(skill), detail: skill ?? "Codex planning SKILL.md missing" });
+  checks.push({ name: "codex skills", ok: !!skill && existsSync41(skill), detail: skill ?? "Codex planning SKILL.md missing" });
   const launcher = root && join54(root, "bin", "mycelink.mjs");
   const bundle = root && join54(root, "dist", "mycelink.mjs");
-  const launcherOk = !!launcher && existsSync43(launcher) && !!bundle && existsSync43(bundle);
+  const launcherOk = !!launcher && existsSync41(launcher) && !!bundle && existsSync41(bundle);
   checks.push({ name: "codex launcher", ok: launcherOk, detail: launcherOk ? launcher : `${launcher ?? "Codex launcher"} or bundled runtime missing; reinstall Mycelink plugin` });
   checks.push({ name: "hooks", ok: valid && hooksDisabled, level: "warn", detail: hooksDisabled ? "Codex plugin-owned hook map is empty: this integration uses its installed launcher, not host hooks; no project hooks installed" : "Codex plugin hook map missing or unexpectedly enabled; inspect the plugin manifest before use" });
   const projectConfig = join54(controlRoot, ".codex", "config.toml");
-  if (existsSync43(projectConfig)) {
+  if (existsSync41(projectConfig)) {
     try {
       const config = parse3(readFileSync38(projectConfig, "utf8"));
       const unsafe = config["sandbox_mode"] === "danger-full-access" || config["approval_policy"] === "never";
@@ -46554,7 +46560,7 @@ import { resolve as resolve29 } from "node:path";
 
 // src/knowledge/brain.ts
 var import_yaml5 = __toESM(require_dist(), 1);
-import { existsSync as existsSync44, mkdirSync as mkdirSync27, readFileSync as readFileSync39, readdirSync as readdirSync26, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync42, mkdirSync as mkdirSync27, readFileSync as readFileSync39, readdirSync as readdirSync26, statSync as statSync5 } from "node:fs";
 import { join as join55, relative as relative11, resolve as resolve28 } from "node:path";
 var DIR_FOR = {
   policy: "policies",
@@ -46598,9 +46604,9 @@ function initBrain(root) {
     mkdirSync27(dir, { recursive: true });
   }
   const schema = join55(root, "SCHEMA.md");
-  if (!existsSync44(schema)) writeTextAtomic(schema, SCHEMA_MD);
+  if (!existsSync42(schema)) writeTextAtomic(schema, SCHEMA_MD);
   const index = join55(root, "index.md");
-  if (!existsSync44(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
+  if (!existsSync42(index)) writeTextAtomic(index, "# LLM Wiki Brain index\n");
   return root;
 }
 var SCHEMA_MD = `# LLM Wiki Brain schema
@@ -46678,7 +46684,7 @@ function writePage(root, frontmatter, body) {
   return { path: file, problems: [] };
 }
 function readPage(file) {
-  if (!existsSync44(file)) return null;
+  if (!existsSync42(file)) return null;
   const parsed = parseFrontmatter(readFileSync39(file, "utf8"));
   if (parsed === null) return null;
   const problems = validateAgainstSchema("memory-page", parsed.frontmatter);
@@ -46690,7 +46696,7 @@ function readPage(file) {
   };
 }
 function listPages(root) {
-  if (!existsSync44(root)) return [];
+  if (!existsSync42(root)) return [];
   const out = [];
   const walk2 = (dir) => {
     for (const entry of readdirSync26(dir).sort()) {
@@ -46841,7 +46847,7 @@ function consolidate(root) {
 }
 function adoptCodewiki(controlRoot, brain) {
   const codewiki = resolve28(controlRoot, ".codewiki");
-  if (!existsSync44(codewiki)) return { adopted: false, path: codewiki };
+  if (!existsSync42(codewiki)) return { adopted: false, path: codewiki };
   mkdirSync27(join55(brain, "code"), { recursive: true });
   writeTextAtomic(
     join55(brain, "code", "SUBVAULT.md"),
@@ -47311,15 +47317,15 @@ function listAdapters() {
 registerAdapter(eccAdapter);
 
 // src/sessions/preflight.ts
-import { accessSync, constants as constants8, existsSync as existsSync45, statSync as statSync6 } from "node:fs";
+import { accessSync, constants as constants7, existsSync as existsSync43, statSync as statSync6 } from "node:fs";
 import { tmpdir as tmpdir6 } from "node:os";
 import { delimiter as delimiter2, isAbsolute as isAbsolute17, join as join56, resolve as resolve30 } from "node:path";
 var PROBE_TIMEOUT_MS = 15e3;
 var VERSION = /(\d+\.\d+\.\d+)/;
 function isRunnableFile(p) {
   try {
-    if (!existsSync45(p) || !statSync6(p).isFile()) return false;
-    if (process.platform !== "win32") accessSync(p, constants8.X_OK);
+    if (!existsSync43(p) || !statSync6(p).isFile()) return false;
+    if (process.platform !== "win32") accessSync(p, constants7.X_OK);
     return true;
   } catch {
     return false;
@@ -47392,7 +47398,7 @@ function preflightAdapter(input, env = process.env, controlRoot) {
       ok: false,
       adapter: "fake-claude",
       executable: script,
-      resolved: isRunnableFile(script) || existsSync45(script) && statSync6(script).isFile() ? script : null,
+      resolved: isRunnableFile(script) || existsSync43(script) && statSync6(script).isFile() ? script : null,
       version: null,
       auth: "not-checked"
     };
@@ -47420,7 +47426,7 @@ function preflightAdapter(input, env = process.env, controlRoot) {
 
 // src/engine/feature-verify.ts
 import { createHash as createHash42 } from "node:crypto";
-import { existsSync as existsSync46, readFileSync as readFileSync41 } from "node:fs";
+import { existsSync as existsSync44, readFileSync as readFileSync41 } from "node:fs";
 import { join as join57 } from "node:path";
 function featureVerifyProblems(controlRoot, featureId) {
   const paths = featurePaths(controlRoot, featureId);
@@ -47518,7 +47524,7 @@ function featureDeliveryProblems(controlRoot, featureId) {
   if (candidate === null) return ["NO_CANDIDATE: no current candidate; every node must be DONE and the candidate cut (dispatch runs the candidate build)"];
   const pinned = state.accepted_deliveries?.[candidate];
   const manifest = join57(paths.featureDir, "deliveries", `${candidate}.json`);
-  if (pinned === void 0 || !existsSync46(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
+  if (pinned === void 0 || !existsSync44(manifest)) return [`NOT_DELIVERED: ${candidate} has no accepted delivery; run deliver`];
   const bytes2 = readFileSync41(manifest);
   if (createHash42("sha256").update(bytes2).digest("hex") !== pinned) return [`NOT_DELIVERED: the delivery manifest of ${candidate} is not the accepted one STATE.json pins`];
   let status;
@@ -47533,7 +47539,7 @@ function featureDeliveryProblems(controlRoot, featureId) {
 }
 
 // src/engine/deliver.ts
-import { existsSync as existsSync47, mkdirSync as mkdirSync28, readFileSync as readFileSync42 } from "node:fs";
+import { existsSync as existsSync45, mkdirSync as mkdirSync28, readFileSync as readFileSync42 } from "node:fs";
 import { createHash as createHash43 } from "node:crypto";
 import { join as join58 } from "node:path";
 var DeliveryRefusedError = class extends Error {
@@ -47555,7 +47561,7 @@ function manifestFile(featureDir, candidateId) {
   return join58(featureDir, "deliveries", `${candidateId}.json`);
 }
 function readManifest(file) {
-  if (!existsSync47(file)) return null;
+  if (!existsSync45(file)) return null;
   try {
     return JSON.parse(readFileSync42(file, "utf8"));
   } catch {
@@ -48078,7 +48084,7 @@ function resolveControlRoot(args, cwd = process.cwd()) {
   if (env) return resolve31(env);
   let dir = resolve31(cwd);
   for (let i = 0; i < 12; i++) {
-    if (existsSync48(join59(dir, "mycelink.config.json"))) return dir;
+    if (existsSync46(join59(dir, "mycelink.config.json"))) return dir;
     const parent = dirname24(dir);
     if (parent === dir) break;
     dir = parent;
@@ -48139,7 +48145,7 @@ function orchestratorFor(controlRoot, featureId) {
 function requireController(args, operation) {
   if (args.positional[0] === "init") {
     const target = resolve31(args.positional[1] ?? ".");
-    if (!existsSync48(controlPaths(target).config)) {
+    if (!existsSync46(controlPaths(target).config)) {
       assertControllerRole(args, operation);
       return;
     }
@@ -48197,7 +48203,7 @@ async function main(argv, io = defaultIo) {
     const sub = args.positional[1] ?? "";
     if (group === "codex") return await codexGroup(args, io);
     const target = group === "init" ? resolve31(args.positional[1] ?? ".") : resolveControlRoot(args);
-    if (existsSync48(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
+    if (existsSync46(controlPaths(target).config) && loadConfig(target).provider.provider === "codex") {
       const planning = group === "graph" && ["compile", "validate", "import", "adapters", "ready"].includes(sub) || group === "feature" && ["acceptance", "init"].includes(sub) || group === "repo" && ["register", "modules", "audit"].includes(sub) || group === "controller" && sub === "open" || group === "doctor";
       const experimentalWorker = group === "orchestrate" && ["ready", "once"].includes(sub) || group === "tdd";
       const gate = preflightAdapter(loadConfig(target), process.env, target);
@@ -48275,26 +48281,26 @@ async function codexGroup(args, io) {
   if (sub === "init") {
     assertControllerRole(args, "codex init");
     const target = resolve31(requirePositional(args, 2, "control-repo-path"));
-    if (existsSync48(controlPaths(target).config) && loadConfig(target).provider.provider !== "codex") throw new Error("CODEX_INIT_EXISTS: existing Claude control configuration must not be replaced.");
-    if (existsSync48(join59(target, ".claude")) || existsSync48(join59(target, "CLAUDE.md"))) throw new Error("CODEX_INIT_OCCUPIED: Claude assets must not be modified.");
+    if (existsSync46(controlPaths(target).config) && loadConfig(target).provider.provider !== "codex") throw new Error("CODEX_INIT_EXISTS: existing Claude control configuration must not be replaced.");
+    if (existsSync46(join59(target, ".claude")) || existsSync46(join59(target, "CLAUDE.md"))) throw new Error("CODEX_INIT_OCCUPIED: Claude assets must not be modified.");
     const paths2 = initControlRepo(target, { provider: { provider: "codex", executable: "codex", extra_args: [] } });
-    if (!existsSync48(paths2.repositoriesManifest)) writeTextAtomic(paths2.repositoriesManifest, import_yaml7.default.stringify({ schema_version: 1, repositories: [] }));
+    if (!existsSync46(paths2.repositoriesManifest)) writeTextAtomic(paths2.repositoriesManifest, import_yaml7.default.stringify({ schema_version: 1, repositories: [] }));
     emit2(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
     return 0;
   }
   if (!["status", "prepare", "run", "continue", "review", "resume", "verify", "deliver"].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
   const controlRoot = resolveControlRoot(args);
-  if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync48(controlPaths(controlRoot).config)) {
+  if (loadConfig(controlRoot).provider.provider !== "codex" || !existsSync46(controlPaths(controlRoot).config)) {
     throw new Error("CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.");
   }
   const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
   if (sub === "prepare") {
     assertControllerRole(args, "codex prepare");
-    if (args.flags["authority"] !== void 0 || args.flags["recover"] !== void 0 || args.flags["takeover"] !== void 0 || existsSync48(authorityFile(controlRoot))) {
+    if (args.flags["authority"] !== void 0 || args.flags["recover"] !== void 0 || args.flags["takeover"] !== void 0 || existsSync46(authorityFile(controlRoot))) {
       throw new Error("CODEX_PREPARE_AUTHORITY_EXISTS: prepare requires a fresh control without controller authority; continue will open its own held authority.");
     }
     const featureDir = controlPaths(controlRoot).featuresDir;
-    if (existsSync48(featureDir) && readdirSync27(featureDir).some((name) => existsSync48(join59(featureDir, name, "STATE.json")))) {
+    if (existsSync46(featureDir) && readdirSync27(featureDir).some((name) => existsSync46(join59(featureDir, name, "STATE.json")))) {
       throw new Error("CODEX_PREPARE_STATE_EXISTS: a feature has already been initialised; planning cannot rewrite its graph.");
     }
     const featureId2 = requirePositional(args, 2, "feature-id");
@@ -48525,7 +48531,7 @@ async function codexGroup(args, io) {
   const featureId = requirePositional(args, 2, "feature-id");
   const paths = featurePaths(controlRoot, featureId);
   const state = loadState(paths.featureDir)?.data ?? null;
-  const graph = existsSync48(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
+  const graph = existsSync46(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
   const report = {
     feature_id: featureId,
     graph_valid: graph?.ok ?? false,
@@ -48548,15 +48554,15 @@ function doctor(args, io) {
   };
   push("node", true, process.version);
   push("platform", true, `${process.platform} ${process.arch}`);
-  push("control-root", existsSync48(paths.controlRoot), paths.controlRoot);
-  push("mycelink.config.json", existsSync48(paths.config), paths.config);
+  push("control-root", existsSync46(paths.controlRoot), paths.controlRoot);
+  push("mycelink.config.json", existsSync46(paths.config), paths.config);
   push("control repo is a git repository", isGitRepository(paths.controlRoot), paths.controlRoot);
   let repoOk = false;
   let repoDetail = "repositories.yaml missing";
-  const rawManifest = existsSync48(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync43(paths.repositoriesManifest, "utf8")) : null;
+  const rawManifest = existsSync46(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync43(paths.repositoriesManifest, "utf8")) : null;
   if (rawManifest !== null && Array.isArray(rawManifest.repositories) && rawManifest.repositories.length === 0) {
     repoDetail = 'no repositories registered yet; run "mycelink repo register --name <name> --path <path> -- <test argv>"';
-  } else if (existsSync48(paths.repositoriesManifest)) {
+  } else if (existsSync46(paths.repositoriesManifest)) {
     const result = validateRepositories(rawManifest);
     repoOk = result.ok;
     repoDetail = result.ok ? `${import_yaml7.default.parse(readFileSync43(paths.repositoriesManifest, "utf8")).repositories.length} repositories` : result.problems.map((p) => p.detail).join("; ");
@@ -48578,14 +48584,14 @@ function doctor(args, io) {
     level: adapter.ok ? "ok" : "warn",
     detail: config.provider.provider === "codex" ? `Codex worker preflight ${adapter.ok ? "ready (experimental disposable only)" : "denied"}: ${adapter.detail}; review and bounded delivery require held authority and passing acceptance gates.` : adapter.ok ? `${adapter.detail}` : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`
   });
-  if (existsSync48(paths.config)) {
+  if (existsSync46(paths.config)) {
     if (config.provider.provider === "codex") checks.push(...codexHealth(controlRoot, config.provider.executable ?? "codex"));
     else {
       const hooks = hookHealth(controlRoot);
       push("hooks", hooks.ok, hooks.detail);
     }
   }
-  const features = existsSync48(paths.featuresDir) ? readdirSync27(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
+  const features = existsSync46(paths.featuresDir) ? readdirSync27(paths.featuresDir).filter((f) => !f.startsWith(".")) : [];
   push("features", true, features.join(", ") || "(none)");
   const ok = checks.every((c) => c.ok);
   emit2(
@@ -48599,13 +48605,13 @@ function doctor(args, io) {
 function cmdInit(args, io) {
   const target = resolve31(requirePositional(args, 1, "control-repo-path"));
   const paths = initControlRepo(target);
-  if (!existsSync48(paths.repositoriesManifest)) {
+  if (!existsSync46(paths.repositoriesManifest)) {
     writeTextAtomic(
       paths.repositoriesManifest,
       import_yaml7.default.stringify({ schema_version: 1, repositories: [] }, { lineWidth: 0 })
     );
   }
-  if (!existsSync48(join59(target, "CLAUDE.md"))) {
+  if (!existsSync46(join59(target, "CLAUDE.md"))) {
     writeTextAtomic(join59(target, "CLAUDE.md"), CONTROL_REPO_CLAUDE_MD);
   }
   const settings = flagBool(args, "no-hooks") ? null : installHooks(target);
@@ -48651,7 +48657,7 @@ function repoGroup(args, io) {
   const sub = requirePositional(args, 1, "register|modules|audit|lock");
   if (sub === "register") {
     const name = flagString(args, "name");
-    const manifest = existsSync48(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync43(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
+    const manifest = existsSync46(paths.repositoriesManifest) ? import_yaml7.default.parse(readFileSync43(paths.repositoriesManifest, "utf8")) : { schema_version: 1, repositories: [] };
     const existing = manifest.repositories.find((r) => r["name"] === name);
     const path = flagString(args, "path", typeof existing?.["path"] === "string" ? existing["path"] : void 0);
     const other = manifest.repositories.find((r) => r["name"] !== name && typeof r["path"] === "string" && samePath(resolve31(controlRoot, r["path"]), resolve31(controlRoot, path)));
@@ -48814,7 +48820,7 @@ function featureGroup(args, io) {
     if (typeof graphPath === "string") {
       writeTextAtomic(paths.graph, readFileSync43(resolve31(graphPath), "utf8"));
     }
-    if (!existsSync48(paths.graph)) {
+    if (!existsSync46(paths.graph)) {
       io.err(
         `No PORTFOLIO-GRAPH.yaml for ${featureId}. Write one (or pass --graph <path>) before "feature init".`
       );
@@ -48835,7 +48841,7 @@ function featureGroup(args, io) {
     if (acceptance2 !== null) state.acceptance = { path: acceptance2.path, sha256: acceptance2.sha256 };
     state.acceptance_review = { required: reviewPolicy.required, max_rounds: reviewPolicy.max_rounds, criterion_ceiling: reviewPolicy.criterion_ceiling, max_review_sessions: reviewPolicy.max_review_sessions, review_wall_clock_ms: reviewPolicy.review_wall_clock_ms, reviewer_timeout_ms: reviewPolicy.reviewer_timeout_ms, open: null, reviews: [], blocked: null, usage: zeroUsage() };
     saveState(paths.featureDir, state);
-    if (!existsSync48(paths.loops)) {
+    if (!existsSync46(paths.loops)) {
       writeLoops(paths.loops, defaultLoops(featureId, "mycelink"));
     }
     for (const [file, body] of [
@@ -48844,7 +48850,7 @@ function featureGroup(args, io) {
       [paths.changes, `# Changes for ${featureId}
 `]
     ]) {
-      if (!existsSync48(file)) writeTextAtomic(file, body);
+      if (!existsSync46(file)) writeTextAtomic(file, body);
     }
     appendEvent(paths.events, {
       idempotency_key: `feature.init:${featureId}:${validation.graphHash}`,
@@ -49044,7 +49050,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   };
   const source = args.flags["source"];
   if (typeof source !== "string") {
-    if (!existsSync48(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
+    if (!existsSync46(target)) throw new AcceptanceError("ACCEPTANCE_MISSING", `${featureId} has no ${ACCEPTANCE_FILE}; write it with --source <the approved requirement>`);
     return show(readFileSync43(target), "manifest");
   }
   if (loadState(paths.featureDir) !== null) {
@@ -49052,7 +49058,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   }
   const sourceFile = resolve31(controlRoot, source);
   const sourceRel = relativeInside(controlRoot, sourceFile);
-  if (sourceRel === null || !existsSync48(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
+  if (sourceRel === null || !existsSync46(sourceFile)) throw new AcceptanceError("ACCEPTANCE_SOURCE_MISSING", `${source} is not a file inside the control repository`);
   const bytes2 = readFileSync43(sourceFile);
   const kinds = /* @__PURE__ */ new Map();
   const flag = args.flags["kind"];
@@ -49065,7 +49071,7 @@ function featureAcceptance(args, io, controlRoot, featureId) {
   }
   const sidecar = resolve31(controlRoot, sidecarPath(sourceRel));
   mkdirSync29(paths.featureDir, { recursive: true });
-  if (existsSync48(sidecar)) {
+  if (existsSync46(sidecar)) {
     const raw = readFileSync43(sidecar);
     let parsed;
     try {
@@ -49127,7 +49133,7 @@ function graphGroup(args, io) {
       }
       files[role] = readFileSync43(resolve31(file), "utf8");
     }
-    const repositories = existsSync48(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync46(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const draft = adapter.draft({ files, ...repositories ? { repositories } : {} });
     const paths = featurePaths(controlRoot, featureId);
     const out = typeof args.flags["out"] === "string" ? resolve31(args.flags["out"]) : join59(paths.featureDir, "PORTFOLIO-GRAPH.draft.yaml");
@@ -49160,7 +49166,7 @@ function graphGroup(args, io) {
   if (sub === "compile") {
     const source = flagString(args, "from");
     const parsed = import_yaml7.default.parse(readFileSync43(resolve31(source), "utf8"));
-    const repositories = existsSync48(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
+    const repositories = existsSync46(controlPaths(controlRoot).repositoriesManifest) ? loadRepositories(controlRoot) : void 0;
     const result = validateGraph(parsed, repositories ? { repositories } : {});
     if (!result.ok) {
       io.err(result.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join("\n"));
@@ -49626,7 +49632,7 @@ function tddGroup(args, io) {
   const nowInputs = worktree !== null && setupBinding !== void 0 ? setupInputs(worktree, setupBinding.config) : null;
   if (worktree !== null && setupBinding !== void 0 && nowInputs !== null && nowInputs.sha256 !== setupBinding.inputs_sha256) {
     const receiptFile = join59(controlRoot, setupBinding.receipt_path);
-    const before = existsSync48(receiptFile) ? JSON.parse(readFileSync43(receiptFile, "utf8")).input_files : void 0;
+    const before = existsSync46(receiptFile) ? JSON.parse(readFileSync43(receiptFile, "utf8")).input_files : void 0;
     const files = changedInputs(before, nowInputs.files);
     const workspace = loadWorkspace(controlRoot);
     const run = runWorktreeSetup({
@@ -49866,7 +49872,7 @@ function tddCheck(args, io, controlRoot, featureId, graph, node, runtime) {
   let result;
   const read = readRegular(slot, MAX_WORKER_RESULT_BYTES);
   if (read === null) {
-    if (existsSync48(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
+    if (existsSync46(slot) || isLink2(slot)) return refuse2("RESULT_UNREADABLE", `${slot} is not a regular file under ${MAX_WORKER_RESULT_BYTES} bytes`);
     return refuse2("RESULT_MISSING", `write your result to ${slot} first (it does not exist)`);
   }
   try {
@@ -49973,7 +49979,7 @@ function challengeSnapshot(controlRoot, featureId, nodeId, worktree, record, bin
   }
   const gateBytes = (rel2, want) => {
     const src = join59(controlRoot, ...rel2.split("/"));
-    if (!existsSync48(src)) return null;
+    if (!existsSync46(src)) return null;
     const bytes2 = readFileSync43(src);
     return sha2(bytes2) === want ? bytes2 : null;
   };
@@ -50338,7 +50344,7 @@ function candidateGroup(args, io) {
         const reviewedState = loadState(paths.featureDir)?.data;
         const unreviewed = [...reviewGateProblems(controlRoot, featureId), ...reviewedState ? reviewRevisionProblems(controlRoot, reviewedState) : []];
         if (unreviewed.length > 0) throw new Error(unreviewed.join("; "));
-        const contracts = existsSync48(workspace.paths.contractsDir) ? readdirSync27(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
+        const contracts = existsSync46(workspace.paths.contractsDir) ? readdirSync27(workspace.paths.contractsDir).filter((f) => !f.startsWith(".")).map((f) => `contracts/${f}`) : [];
         const cut = createCandidate({
           controlRepo: controlRoot,
           featureDir: paths.featureDir,
@@ -50597,7 +50603,7 @@ function codexContinuationDecision(args, controlRoot, featureId) {
   const request = requests[0];
   const nodeId = request.node_id;
   if (request.actor !== "mycelink" || request.feature_id !== featureId || !nodeId || state.nodes[nodeId]?.state !== "NEEDS_DECISION" || !loadGraph(controlRoot, featureId).nodes.some((node) => node.id === nodeId)) return refuse2();
-  if (!existsSync48(paths.decisions)) return refuse2();
+  if (!existsSync46(paths.decisions)) return refuse2();
   const sections = readFileSync43(paths.decisions, "utf8").replace(/\r\n/g, "\n").split(/(?=^## )/m).filter((section) => section.startsWith(`## ${id2} (`));
   if (sections.length !== 1) return refuse2();
   const lines = sections[0].split("\n");
@@ -50621,7 +50627,7 @@ function decisionGroup(args, io) {
   if (sub === "record") {
     const decisionId = requirePositional(args, 3, "decision-id");
     const answer = flagString(args, "answer");
-    const body = existsSync48(paths.decisions) ? readFileSync43(paths.decisions, "utf8") : "";
+    const body = existsSync46(paths.decisions) ? readFileSync43(paths.decisions, "utf8") : "";
     writeTextAtomic(
       paths.decisions,
       body + `
@@ -50700,7 +50706,7 @@ function checkpointGroup(args, io) {
     return 0;
   }
   if (sub === "validate") {
-    const files = existsSync48(paths.checkpointsDir) ? readdirSync27(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
+    const files = existsSync46(paths.checkpointsDir) ? readdirSync27(paths.checkpointsDir).filter((f) => f.endsWith(".json")).sort() : [];
     const latest = files[files.length - 1];
     if (!latest) {
       io.err("No checkpoint found.");
@@ -50803,7 +50809,7 @@ function hostResultCopy(spec, controlRoot, io) {
   }
   const file = resolve31(spec);
   try {
-    if (!isInsideReal(realpathSync7.native(controlRoot), realpathSync7.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
+    if (!isInsideReal(realpathSync8.native(controlRoot), realpathSync8.native(file))) return { ok: false, detail: `${spec} is not in the control repository` };
   } catch {
     return { ok: false, detail: `${spec} cannot be read` };
   }
@@ -50819,7 +50825,7 @@ function readStdinBounded(max) {
   for (; ; ) {
     let n = 0;
     try {
-      n = readSync6(0, buf, 0, buf.length, null);
+      n = readSync5(0, buf, 0, buf.length, null);
     } catch (err) {
       if (err.code === "EAGAIN") continue;
       if (err.code === "EOF") break;

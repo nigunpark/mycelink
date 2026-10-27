@@ -77,7 +77,7 @@ describe('Codex CLI adapter contract', () => {
     expect(() => new CodexCliAdapter({ executable: 'codex', disposableRepositories: true, extraArgs: ['-c', 'windows.sandbox=disabled'] })).toThrow(/CODEX_ARGS_DENIED/);
   });
 
-  it('maps only absolute Windows drive paths and builds a bounded WSL argv without shell interpolation', async () => {
+  it.skipIf(process.platform !== 'win32')('maps only absolute Windows drive paths and builds a bounded WSL argv without shell interpolation', async () => {
     const { CodexCliAdapter, windowsToWslPath } = await import('../../src/sessions/codex-cli-adapter.js');
     expect(windowsToWslPath('C:\\Users\\<user>\\two repos\\api')).toBe('/mnt/c/Users/<user>/two repos/api');
     for (const bad of ['relative\\repo', '\\\\server\\share', 'C:relative', 'C:\\a\\..\\b', 'C:\\a\nmalicious']) {
@@ -91,7 +91,7 @@ describe('Codex CLI adapter contract', () => {
     expect(() => new CodexCliAdapter({ executable: 'wsl.exe', wsl: { distribution: '--exec', user: 'example-user' } })).toThrow(/WSL_CONFIG/);
   });
 
-  it('maps only controller-owned gate path arguments for WSL, retaining literal capability', async () => {
+  it.skipIf(process.platform !== 'win32')('maps only controller-owned gate path arguments for WSL, retaining literal capability', async () => {
     const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
     const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true, wsl: { distribution: 'Ubuntu', user: 'example-user' } });
     const gates = [{ gate: 'red' as const, argv: ['node', 'C:/scratch/plugin/bin/mycelink.mjs', 'tdd', 'red', 'ORD-101', 'ORD-101.api', '--control-root', 'C:/scratch/control', '--capability', 'literal-value'] }];
@@ -99,7 +99,7 @@ describe('Codex CLI adapter contract', () => {
     expect(new CodexCliAdapter({ executable: 'codex' }).gateLines({ ...request, gateCommands: gates })[0]?.line).toContain('C:/scratch/control');
   });
 
-  it('trusts only declared disposable Git locations in WSL, never a wildcard', async () => {
+  it.skipIf(process.platform !== 'win32')('trusts only declared disposable Git locations in WSL, never a wildcard', async () => {
     const { CodexCliAdapter } = await import('../../src/sessions/codex-cli-adapter.js');
     const adapter = new CodexCliAdapter({ executable: 'wsl.exe', disposableRepositories: true,
       wsl: { distribution: 'Ubuntu', user: 'example-user' },

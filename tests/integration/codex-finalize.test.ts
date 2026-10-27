@@ -2,6 +2,7 @@ import { afterAll, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import YAML from 'yaml';
 import { BUILD_DIR, REPO_ROOT } from '../helpers/global-setup.js';
 import { controllerKey } from '../helpers/authority.js';
@@ -24,7 +25,7 @@ const fakeRoots: string[] = [];
 afterAll(() => { cleanupTmpRoots(); fakeRoots.forEach((p) => rmSync(p, { recursive: true, force: true })); });
 
 function fakeReviewer(final: unknown): string {
-  const root = mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? '.', 'codex-finalize-'));
+  const root = mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? tmpdir(), 'codex-finalize-'));
   fakeRoots.push(root);
   const script = join(root, 'reviewer.mjs');
   writeFileSync(script, `process.stdin.resume();console.log(JSON.stringify({type:'thread.started',thread_id:'11111111-1111-4111-8111-111111111111'}));console.log(JSON.stringify({type:'turn.started'}));console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:${JSON.stringify(JSON.stringify(final))}}}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:10,output_tokens:12}}));`);
@@ -183,7 +184,7 @@ it.each(['feature ref', 'control input', 'candidate manifest', 'evidence', 'miss
 );
 
 
-it('CLI continue --review --deliver requires control Git before authority, STATE or workers', async () => {
+it.skipIf(process.platform !== 'win32')('CLI continue --review --deliver requires control Git before authority, STATE or workers', async () => {
   const fixture = await createVer({ init: false, review: {} });
   const control = join(fixture.root, 'codex-control');
   const featureDir = join(control, 'features', VER_FEATURE);
@@ -243,7 +244,7 @@ it('CLI continue --review --deliver requires control Git before authority, STATE
   expect.soft(git(fixture.repo, ['worktree', 'list', '--porcelain'])).toBe(worktrees);
 });
 
-it('CLI continue --review --deliver resumes the existing candidate with fresh authority and denies replay', async () => {
+it.skipIf(process.platform !== 'win32')('CLI continue --review --deliver resumes the existing candidate with fresh authority and denies replay', async () => {
   const { s, base, candidateId, candidate, manifest } = await resumableCandidate({ codexCli: true });
   expect(preflightAdapter(loadConfig(s.control), process.env, s.control)).toMatchObject({ ok: true, adapter: 'codex-cli', auth: 'not-checked' });
   expect(reviewGateProblems(s.control, VER_FEATURE)).toEqual([]);

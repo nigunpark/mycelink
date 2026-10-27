@@ -96,7 +96,7 @@ describe('worker worktrees', () => {
     const admin = resolve(wt.worktree, pointer);
     const back = readFileSync(join(admin, 'gitdir'), 'utf8').trim();
     expect(isAbsolute(back)).toBe(false);
-    expect(resolve(admin, back)).toBe(join(wt.worktree, '.git'));
+    expect(samePath(resolve(admin, back), join(wt.worktree, '.git'))).toBe(true);
     expect(currentBranch(wt.worktree)).toBe('wip/FEAT-101/core.publish.impl');
     expect(listWorktrees(repo).some((w) => samePath(w.path, wt.worktree))).toBe(true);
     expect(createWorkerWorktree(args).created).toBe(false);

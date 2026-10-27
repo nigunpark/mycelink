@@ -10,7 +10,7 @@ import { hashGraph, stableStringify } from '../graph/validate.js';
 import { validateAgainstSchema } from '../schema/registry.js';
 import { createExclusive } from '../state/atomic-json.js';
 import { loadState, mutateState } from '../state/feature-state.js';
-import { isInsideReal, samePath } from '../security/paths.js';
+import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { featurePaths } from '../workspace/paths.js';
 import { loadGraph, loadRepositories, loadWorkspace, repositoryPath, validateFeatureGraph } from '../workspace/workspace.js';
 import { graphAcceptanceProblems, loadAcceptanceManifest, manifestProblems } from './acceptance.js';
@@ -80,17 +80,22 @@ function relocatedGraphMatches(input: CompletionImportInput): boolean {
   if (stableStringify(source) !== stableStringify(target)) return false;
   for (const path of scripts) {
     const dest = relocate(path);
-    if (dest === path || !existsSync(path) || !existsSync(dest) || !lstatSync(path).isFile() || !lstatSync(dest).isFile()) return false;
-    const text = readFileSync(path, 'utf8');
-    if (relocate(text) !== readFileSync(dest, 'utf8')) return false;
+    if (dest === path) return false;
+    const sourceScript = readRegular(path, 16 * 1024 * 1024);
+    const targetScript = readRegular(dest, 16 * 1024 * 1024);
+    if (!sourceScript || !targetScript) return false;
+    const text = sourceScript.bytes.toString('utf8');
+    if (relocate(text) !== targetScript.bytes.toString('utf8')) return false;
     // A gate may call a second absolute control-local script (native full).
     for (const match of text.matchAll(/(?:[A-Za-z]:\/|\/mnt\/[a-z]\/)[^\s'"`]+\.(?:mjs|js|cjs|sh)/g)) {
       const nested = match[0]!;
       if (!nested.startsWith(`${sourceRoot}/`) && !nested.startsWith(`${wsl(sourceRoot)}/`)) continue;
       const local = nested.startsWith(wsl(sourceRoot)) ? `${sourceRoot}${nested.slice(wsl(sourceRoot).length)}` : nested;
       const translated = relocate(local);
-      if (!existsSync(local) || !existsSync(translated) || !lstatSync(local).isFile() || !lstatSync(translated).isFile() ||
-        relocate(readFileSync(local, 'utf8')) !== readFileSync(translated, 'utf8')) return false;
+      const sourceNested = readRegular(local, 16 * 1024 * 1024);
+      const targetNested = readRegular(translated, 16 * 1024 * 1024);
+      if (!sourceNested || !targetNested ||
+        relocate(sourceNested.bytes.toString('utf8')) !== targetNested.bytes.toString('utf8')) return false;
     }
   }
   return true;

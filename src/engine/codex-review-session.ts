@@ -1,7 +1,7 @@
 /** A separate read-only Codex process and its JSONL evidence, not a settled review. */
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CodexTranscriptReader } from '../sessions/codex-transcript.js';
 import { extractReviewerResult } from './review-transport.js';
@@ -75,7 +75,13 @@ export async function runCodexReviewSession(options: {
   if (Buffer.byteLength(options.prompt) > 256 * 1024 || options.prompt.length === 0) throw new Error('CODEX_REVIEW_PROMPT_INVALID');
   const jsonlPath = join(options.evidenceDir, 'session.jsonl');
   const receiptPath = join(options.evidenceDir, 'receipt.json');
-  if (existsSync(jsonlPath) || existsSync(receiptPath)) throw new Error('CODEX_REVIEW_EVIDENCE_EXISTS');
+  // Reserve the entire generation before launching a model. mkdir is atomic;
+  // a prior or concurrent reviewer cannot claim this evidence directory.
+  try { mkdirSync(options.evidenceDir); }
+  catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('CODEX_REVIEW_EVIDENCE_EXISTS');
+    throw err;
+  }
   const sessionId = randomUUID();
   const provider = codexReviewerPaths(options.prompt, options.cwd, options.wsl === true);
   const child = spawn(options.executable, [...(options.prefixArgs ?? []), 'exec', '--json', '--cd', provider.cwd, '--sandbox', 'read-only', '-'],
