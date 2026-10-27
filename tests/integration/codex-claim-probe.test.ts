@@ -139,7 +139,7 @@ describe('controller-owned probe with a real registered module and native host v
     let declaration: { manifest: string; baseline: string; sha256: string };
     const markerName = 'fixture-child-ran.txt';
     const f = await fixture({}, s => {
-      const fixtureRoot = realpathSync(dirname(s.control));
+      const fixtureRoot = realpathSync.native(dirname(s.control));
       const baseline = join(fixtureRoot, 'probe-baseline');
       makeGitRepo(baseline, { files: { 'pnpm-lock.yaml': 'disposable fixture lock\n' } });
       const hash = (v: string | Buffer) => createHash('sha256').update(v).digest('hex');
@@ -1466,7 +1466,7 @@ test(${JSON.stringify(name)}, () => {
       expect(record.results!.sha256).toBe(hash(bytes));
       const normalized = JSON.parse(bytes.toString('utf8')).results;
       const assertions = native.testResults.flatMap((suite: { name: string; assertionResults: object[] }) =>
-        suite.assertionResults.map(assertion => ({ ...assertion, file: relative(clone, suite.name).replace(/\\/g, '/') })));
+        suite.assertionResults.map(assertion => ({ ...assertion, file: relative(realpathSync.native(clone), realpathSync.native(suite.name)).replace(/\\/g, '/') })));
       expect(assertions).toHaveLength(252);
       for (const [index, test] of normalized.entries()) {
         const actual = assertions[index];

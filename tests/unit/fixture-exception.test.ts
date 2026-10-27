@@ -18,7 +18,7 @@ const hash = (v: string | Buffer) => createHash('sha256').update(v).digest('hex'
 function fixture(manifestName = 'frozen-build.json', baselineName = 'frozen-build') {
   // The verifier intentionally emits real paths; macOS /var and Windows 8.3
   // temp aliases must not become different literal fixture identities.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'mycelink-fixture-'))); roots.push(root);
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'mycelink-fixture-'))); roots.push(root);
   const control = join(root, 'control'), baseline = join(root, baselineName);
   mkdirSync(control); mkdirSync(baseline);
   const git = (...a: string[]) => execFileSync('git', ['-C', baseline, ...a], { encoding: 'utf8' }).trim();
