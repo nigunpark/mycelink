@@ -3,13 +3,20 @@
 Mycelink is local software. This page lists everything it reads and writes,
 and what never leaves your machine.
 
+The [Codex planning guide](CODEX.md) uses a disposable `CODEX_HOME` for plugin
+discovery; Codex itself may create local profile/cache/log files there, which
+Mycelink does not manage or redact. Do not put credentials in the disposable
+home or share raw Codex transcripts. Plugin install/uninstall does not remove
+your control repositories, and no Codex worker or delivery writes are enabled.
+
 ## No telemetry
 
 Mycelink collects no telemetry, analytics or crash reports and makes no
 network requests of its own. Network traffic happens only through tools you
 run: Claude Code worker sessions (which talk to Anthropic's API under your
-account and Claude Code's own data policies), and your repositories' build
-and test commands.
+account and Claude Code's own data policies), Codex host commands you elect
+to run (subject to Codex's own data policies), and your repositories' build
+and test commands. The planning-only Codex plugin does not dispatch a worker.
 
 ## What is written, and where
 
@@ -63,8 +70,9 @@ the same rule: do not capture secrets.
 
 ## Deleting data
 
-Mycelink keeps no data outside the control repository and the registered
-repositories' worktrees and branches. To remove a feature's data, delete
+The Mycelink controller keeps no feature data outside the control repository
+and registered repositories' worktrees and branches; the **Codex host** keeps
+its separate plugin cache/profile under `CODEX_HOME`. To remove a feature's data, delete
 `features/<id>/`, run `git worktree prune` in each registered repository, and
 delete the `wip/<id>/…` and `feature/<id>` branches you no longer need.
 Uninstalling the plugin does not delete any of this.

@@ -110,6 +110,19 @@ describe('Claude CLI session adapter (driven by the fake claude executable)', ()
     expect(observation.result).toBeNull();
   });
 
+  it('reports a missing executable without accepting a stale worker result', async () => {
+    const h = harness({ default: { outcome: 'SUBMITTED' } });
+    writeFileSync(h.resultPath, JSON.stringify({ outcome: 'SUBMITTED' }));
+    const adapter = new ClaudeCliAdapter({ executable: join(h.dir, 'missing-worker') });
+    const { handle, observation } = await runToCompletion(adapter, request(h));
+    expect(handle.pid).toBeNull();
+    expect(observation.status).toBe('failed');
+    expect(observation.exit_code).toBe(127);
+    expect(observation.failure_reason).toMatch(/^SPAWN_FAILED:/);
+    expect(observation.result).toBeNull();
+    expect(existsSync(h.resultPath)).toBe(false);
+  });
+
   it('treats exit 0 with no result file as failed, not done', async () => {
     const h = harness({ default: { outcome: 'SUBMITTED', omit_result: true } });
     const { observation } = await runToCompletion(cliAdapter(), request(h));

@@ -360,6 +360,27 @@ interface VitestReport {
   }[];
 }
 
+// Admission-only provenance: keep normalized results/fingerprints in replay parity.
+const testBodyTypeErrors = new WeakSet<TestResult>();
+
+function typeErrorStartsInTest(details: string, testFile: string): boolean {
+  if (exceptionClass({ details }) !== 'TypeError') return false;
+  const pathKey = (path: string): string => {
+    const normalized = path.replaceAll('\\', '/').replace(/^file:\/\//, '').replace(/^\/([A-Za-z]:\/)/, '$1');
+    return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  };
+  for (const line of details.split(/\r?\n/)) {
+    const frame = /^\s*at\s+(.+?):\d+:\d+\)?\s*$/.exec(line);
+    if (!frame) continue;
+    const location = frame[1] as string;
+    const path = pathKey(location.slice(location.lastIndexOf('(') + 1));
+    if (path.startsWith('node:') || /(?:^|\/)node_modules\//.test(path)) continue;
+    // Only the first application frame establishes where the error originated.
+    return path === pathKey(testFile);
+  }
+  return false;
+}
+
 /** Vitest's `--reporter=json` output (object or JSON text). A suite that failed to load is one `<suite>` result of its file. */
 export function parseVitestJson(report: string | VitestReport, { root = '' }: { root?: string } = {}): TestResult[] {
   const data = (typeof report === 'string' ? JSON.parse(report) : report) as VitestReport;
@@ -386,7 +407,11 @@ export function parseVitestJson(report: string | VitestReport, { root = '' }: { 
         r.status = 'skipped';
         r.category = 'skipped';
       }
-      results.push(finish(r));
+      const result = finish(r);
+      if ((a.failureMessages ?? []).some((message) => classifyFailure({ details: message }) === 'exception' && typeErrorStartsInTest(message, file.name))) {
+        testBodyTypeErrors.add(result);
+      }
+      results.push(result);
     }
   }
   return results;
@@ -615,7 +640,7 @@ function matches(result: TestResult, expected: DeclaredTest): boolean {
 export function summarizeDeclared(results: readonly TestResult[], declared: readonly DeclaredTest[]): RedTestOutcome[] {
   return declared.map((e) => {
     const matching = results.filter((r) => matches(r, e));
-    const r = matching.find((x) => x.status === 'failed') ?? matching.find((x) => x.status === 'passed') ?? matching[0];
+    const r = matching.find((x) => x.status === 'failed' && INVALID_RED_CATEGORIES.has(x.category)) ?? matching.find((x) => x.status === 'failed') ?? matching.find((x) => x.status === 'passed') ?? matching[0];
     return r
       ? { file: e.file, name: e.name, status: r.status, category: r.category, type: r.type, fingerprint: r.fingerprint }
       : { file: e.file, name: e.name, status: 'not-run' as const, category: 'not-run', type: null, fingerprint: null };
@@ -642,7 +667,10 @@ export function judgeRed(args: JudgeRedArgs): RedJudgement {
     return judgement(false, 'no-test', 'the RED declares no new or changed test: write the failing test first', 'no-test');
   }
   if (args.results !== null && args.declared !== null) {
-    const tests = summarizeDeclared(args.results, args.declared);
+    const admissionResults = args.results.map((r) => testBodyTypeErrors.has(r)
+      ? { ...r, category: 'setup', fingerprint: testFailureFingerprint({ ...r, category: 'setup' }) }
+      : r);
+    const tests = summarizeDeclared(admissionResults, args.declared);
     // As the replay: a declared test that passes (an unchanged test of a file whose imports changed) is no wrong
     // reason; the RED still needs a declared test failing for a missing behaviour, and none failing for another.
     const invalid = tests.filter((t) => t.status === 'not-run' || (t.status === 'failed' && INVALID_RED_CATEGORIES.has(t.category)));

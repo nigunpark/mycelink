@@ -159,6 +159,20 @@ describe('context pack', () => {
     expect(() => buildContextPack(args)).toThrow(ContextPackTooLargeError);
   });
 
+  it('tells a worker to commit an accepted RED without changing tests or requesting RED again', () => {
+    const rules = (buildContextPack(baseArgs()).rules ?? []).join('\n');
+    expect(rules).toMatch(/accepted RED.*commit.*bound test.*before.*edit/i);
+    expect(rules).toMatch(/second RED.*out of order/i);
+    expect(rules).not.toMatch(/run red again after changing a test/i);
+  });
+
+  it('bounds inspection output so Codex JSONL cannot overflow on a repository-wide file listing', () => {
+    const rules = (buildContextPack(baseArgs()).rules ?? []).join('\n');
+    expect(rules).toMatch(/bounded.*64 KiB/i);
+    expect(rules).toMatch(/unscoped rg --files/i);
+    expect(rules).toMatch(/node_modules/);
+  });
+
   it('includes the worker rules that bound a session', () => {
     const pack = buildContextPack(baseArgs());
     const rules = (pack.rules ?? []).join('\n');

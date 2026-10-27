@@ -183,6 +183,18 @@ function requireNode(graph: PortfolioGraph, nodeId: string): GraphNode {
   return node;
 }
 
+/** Re-check graph prerequisites at the authority boundary, not at a host task hook.
+ * A dispatch may outlive an upstream invalidation or a context compaction.
+ */
+export function assertTaskDependencies(graph: PortfolioGraph, state: FeatureState_, nodeId: string): void {
+  const node = requireNode(graph, nodeId);
+  const pending = node.depends_on.filter((id) => !['DONE', 'EXCLUDED'].includes(state.nodes[id]?.state ?? 'PLANNED'));
+  if (pending.length > 0) {
+    throw new TransitionError('DEPENDENCIES_NOT_DONE', nodeId,
+      `Graph prerequisites are no longer settled: ${pending.map((id) => `${id}=${state.nodes[id]?.state ?? 'missing'}`).join(', ')}.`);
+  }
+}
+
 /**
  * Check the evidence gates for entering `to`. Throws with a specific code so
  * hooks can surface a short, actionable block reason.
@@ -339,6 +351,7 @@ export function applyNodeTransition(
       `${from} -> ${to} is not a declared edge.`,
     );
   }
+  if (to === 'DONE') assertTaskDependencies(graph, next, nodeId);
 
   // Every way out of a parked state needs the same justification: READY
   // directly, or INVALIDATED / PAUSED / EXCLUDED, each of which leads back to

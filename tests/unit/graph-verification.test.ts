@@ -147,6 +147,19 @@ const validate = (g: unknown) => validateGraph(g, { repositories: REPOSITORIES }
 const codes = (g: unknown): string[] => validate(g).problems.map((p) => p.code).sort();
 
 describe('a verification node proves compatibility by existing tests, without a worker', () => {
+  it.each([COMPAT, CANDIDATE])('rejects readonly_fixture on non-implementation node %s', id => {
+    const g = graph();
+    expect(validate(g).problems).toEqual([]);
+    Object.assign(node(g, id), {
+      readonly_fixture: { manifest: '../frozen-build.json', baseline: '../frozen-build', sha256: 'a'.repeat(64) },
+    });
+    const result = validate(g);
+    expect(result.ok).toBe(false);
+    expect(result.problems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'FIXTURE_SCOPE_DENIED', path: expect.stringContaining('/readonly_fixture') }),
+    ]));
+  });
+
   it('accepts a compatibility node that runs any module of its repository and the full suite, after every producer, before the candidate', () => {
     const result = validate(graph());
     expect(result.problems).toEqual([]);

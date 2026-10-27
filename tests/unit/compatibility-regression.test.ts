@@ -26,7 +26,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { cleanupTmpRoots, makeTmpDir } from '../helpers/tmp.js';
 import { commitAll, git, makeGitRepo, writeFiles } from '../helpers/git-fixture.js';
 import { COMPATIBILITY_TRAILER, DEFAULT_TDD_POLICY, redBinding, verifyTddHistory, type RedBinding } from '../../src/engine/tdd-history.js';
-import { priorTestChanges } from '../../src/engine/test-declarations.js';
+import { declaredTests, priorTestChanges, testsInDelta } from '../../src/engine/test-declarations.js';
 
 afterAll(() => cleanupTmpRoots());
 
@@ -198,6 +198,74 @@ describe('a compatibility-regression unit after the production code', () => {
 });
 
 describe('priorTestChanges: what a unit did to the tests that were there', () => {
+  it('bounds nested JS delimiters and template interpolation without swallowing a sibling suite', () => {
+    const block = 'test("nested", () => { const t = `text ) ${fn({value: `nested ${"}"}`})}`; expect(fn([1, (2)])).toBeDefined(); });';
+    expect(declaredTests('nested.test.ts', `${block}\ndescribe("next", () => {});`)).toEqual([
+      { name: 'nested', block },
+    ]);
+  });
+
+  it('fails closed on changed JS calls with ambiguous slash delimiters', () => {
+    const path = 'opaque.test.ts';
+    const before = "test('opaque', () => { expect(/[(]/.test('(')).toBe(true); });";
+    const after = before.replace('true', 'false');
+    expect(priorTestChanges([{ path, before, after }]).edited).toEqual([{ file: path, name: 'opaque' }]);
+  });
+
+  describe.each(['js', 'ts'])('JS/TS sibling suite boundary (.%s)', (extension) => {
+    const path = `packages/planner/test/index.test.${extension}`;
+    const previous = `it.only('aggregates unknown packages', async () => {
+  const input = { packages: [{ name: 'unknown', metadata: { enabled: true } }] };
+  const punctuation = '}); describe("not a suite", () => {';
+  const message = \`unknown: \${input.packages[0].name}\`;
+  // }); test('not a test', () => {});
+  /* unmatched punctuation in a comment: } ) ] */
+  expect({ input, punctuation, message }).toBeDefined();
+  expect(input.packages).toHaveLength(1);
+});`;
+    const sibling = `describe("link: protocol", () => {
+  test.skip('keeps linked packages', () => {
+    expect('link:local').toContain('link:');
+  });
+});
+`;
+    const added = `test('reports another unknown package', () => {
+  expect(['another']).toEqual(['another']);
+});
+
+`;
+    const before = `${previous}\n\n${sibling}`;
+    // A pure insertion between the existing test's }); and the sibling describe.
+    const after = `${previous}\n\n${added}${sibling}`;
+
+    it('inserting a test immediately before a sibling describe preserves prior bodies and identities', () => {
+      const delta = [{ path, before, after }];
+      expect(priorTestChanges(delta)).toEqual({ removed: [], edited: [], deleted: [], data: [], opaque: [] });
+      expect(declaredTests(path, after).map((test) => test.name)).toEqual([
+        'aggregates unknown packages', 'reports another unknown package', 'keeps linked packages',
+      ]);
+      expect(declaredTests(path, after)[0]?.block).toBe(declaredTests(path, before)[0]?.block);
+      expect(testsInDelta(delta)).toEqual({
+        declared: [{ file: path, name: 'reports another unknown package' }], removed: [], opaque: [],
+      });
+    });
+
+    it('still detects an assertion edit in the previous test beside the insertion', () => {
+      const changed = after.replace('toHaveLength(1)', 'toHaveLength(10)');
+      expect(priorTestChanges([{ path, before, after: changed }])).toEqual({
+        removed: [], edited: [{ file: path, name: 'aggregates unknown packages' }], deleted: [], data: [], opaque: [],
+      });
+    });
+
+    it.each(['}', ')'])('fails closed when the previous test loses its closing %s', (closer) => {
+      // Keep the assertion text intact: dropping only closers must not count as preservation.
+      const malformed = previous.slice(0, -3) + (closer === '}' ? ');' : '};');
+      expect(priorTestChanges([{ path, before: `${previous}\n`, after: `${malformed}\n` }])).toEqual({
+        removed: [], edited: [{ file: path, name: 'aggregates unknown packages' }], deleted: [], data: [], opaque: [],
+      });
+    });
+  });
+
   it('a test appended inside a describe moves the closers of the one before it: no edit', () => {
     expect(priorTestChanges([{ path: STATUS_TEST, before: STATUS_BASE, after: STATUS_WITH_JOURNAL }])).toEqual({ removed: [], edited: [], deleted: [], data: [], opaque: [] });
   });

@@ -223,6 +223,19 @@ export function redBinding(worktree: string, policy: TddPolicy, evidenceSha256: 
   };
 }
 
+/** A retained RED still binds the entire test delta, committed or dirty. */
+export function redBindingMatchesWorktree(worktree: string, policy: TddPolicy, binding: RedBinding): boolean {
+  if (binding.tests.length === 0 || testsSha256(binding.tests) !== binding.tests_sha256 ||
+      !isAncestor(worktree, binding.head_sha, resolveRef(worktree, 'HEAD'))) return false;
+  const changed = runGit(worktree, ['diff', '--name-only', '-z', '--no-renames', binding.head_sha]).stdout.split('\0').filter(Boolean);
+  const paths = [...new Set([...changed, ...workingTreeChanges(worktree)])].filter((p) => isTestPath(policy, p));
+  const hashes = hashWorkingFiles(worktree, paths.filter((p) => existsSync(join(worktree, p))));
+  const before = blobsAt(worktree, binding.head_sha, paths);
+  const tests = paths.map((path) => ({ path, blob: hashes.get(path) ?? null }))
+    .filter((t) => t.blob !== (before.get(t.path) ?? null));
+  return testsSha256(tests) === binding.tests_sha256;
+}
+
 /**
  * The tests a RED run in `worktree` declares: what the test side adds or
  * changes since the cycle began — the commit before the trailing run of

@@ -6,7 +6,10 @@
  * and a CI matrix that backs every platform claim in the README.
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
 
@@ -16,6 +19,7 @@ const DIR = join(ROOT, '.github', 'workflows');
 interface Step {
   uses?: string;
   run?: string;
+  if?: string;
   with?: Record<string, unknown>;
 }
 interface Job {
@@ -111,6 +115,44 @@ describe('ci.yml', () => {
     }
     const tests = (ci.jobs['test']?.steps ?? []).map((s) => s.run ?? '').join('\n');
     expect(tests).toContain('node scripts/test-suites.mjs ci ${{ matrix.group }}');
+  });
+
+  it('compares independently built OS artifacts after all package matrix legs finish', () => {
+    const uploads = ci.jobs['checks'].steps?.filter((s) => s.uses?.startsWith('actions/upload-artifact@')) ?? [];
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].with?.['name']).toBe('mycelink-package-${{ matrix.os }}');
+    expect(uploads[0].if).toBe("matrix.node == '24'");
+    const compare = ci.jobs['compare-package'] as Job & { needs: string };
+    expect(compare.needs).toBe('checks');
+    expect(compare.steps?.find((s) => s.uses?.startsWith('actions/download-artifact@'))?.with?.['pattern']).toBe('mycelink-package-*');
+    expect(compare.steps?.some((s) => s.run === 'node scripts/compare-package-hashes.mjs artifacts')).toBe(true);
+  });
+});
+
+describe('release artifact hash comparison', () => {
+  it('checks actual ZIP and SBOM bytes across three independent outputs, rejects mismatches and missing artifacts', () => {
+    const root = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'mycelink-artifact-hashes-'));
+    const version = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version as string;
+    const zip = `mycelink-${version}.zip`;
+    const dirs = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
+    const call = () => spawnSync(process.execPath, [join(ROOT, 'scripts/compare-package-hashes.mjs'), root], { encoding: 'utf8' });
+    try {
+      for (const name of dirs) {
+        const dir = join(root, `mycelink-package-${name}`);
+        mkdirSync(dir);
+        writeFileSync(join(dir, zip), 'zip bytes');
+        writeFileSync(join(dir, `${zip}.sha256`), `${createHash('sha256').update('zip bytes').digest('hex')}  ${zip}\n`);
+        writeFileSync(join(dir, 'SBOM.spdx.json'), '{"spdxVersion":"SPDX-2.3"}\n');
+      }
+      expect(call().status).toBe(0);
+      writeFileSync(join(root, 'mycelink-package-windows-latest', zip), 'tampered zip');
+      expect(call().status).not.toBe(0);
+      writeFileSync(join(root, 'mycelink-package-windows-latest', zip), 'zip bytes');
+      rmSync(join(root, 'mycelink-package-macos-latest', 'SBOM.spdx.json'));
+      expect(call().status).not.toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

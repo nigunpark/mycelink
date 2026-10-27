@@ -15,9 +15,11 @@
  *
  *   node scripts/test-suites.mjs all                  every suite in turn (npm test)
  *   node scripts/test-suites.mjs run <suite>[:i/n]... those suites (or one shard of one)
- *   node scripts/test-suites.mjs ci <group>           one CI matrix group, as the workflows run it
+ *   node scripts/test-suites.mjs ci <group>           one neutral or provider CI matrix group
  *   node scripts/test-suites.mjs list [--files|--json] the plan: suites, shards, files, groups
  *
+ * Codex plugin tests use an isolated CODEX_HOME; actual CLI metadata probes
+ * require MYCELINK_LIVE_CODEX_PLUGIN=1, and production dispatch is denied.
  * The real-model pilot is never here (vitest.pilot.config.ts, opt-in); the
  * benchmark's recorded fixture projects are data, never suites.
  */
@@ -27,6 +29,20 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Claude integration boundaries; Codex-named boundary tests are provider-owned. */
+export const PROVIDER_FILES = {
+  claude: [
+    'tests/unit/adapters.test.ts',
+    'tests/integration/adapter-preflight.test.ts',
+    'tests/integration/doctor-hooks.test.ts',
+    'tests/integration/hooks.test.ts',
+    'tests/integration/session-adapter.test.ts',
+    'tests/plugin-e2e/isolated-plugin.test.ts',
+    'tests/plugin-e2e/release-zip-lifecycle.test.ts',
+  ],
+  codex: [],
+};
 
 /**
  * Each suite: its directory, what it leaves out, how many files run at once, how many shards it is cut into, and the
@@ -41,12 +57,14 @@ export const SUITES = {
   security: { dir: 'tests/security', maxWorkers: 3, shards: 1 },
   fixtures: { dir: 'tests/fixtures', maxWorkers: 2, shards: 2, timeoutMs: 300_000 },
   release: { dir: 'tests/release', maxWorkers: 2, shards: 1 },
-  'plugin-e2e': { dir: 'tests/plugin-e2e', maxWorkers: 1, shards: 1 },
+  // Plugin management belongs exclusively to the provider groups below.
   // The model-free tests of the public-project benchmark (evals-public-projects); real pilots are opt-in elsewhere.
   // Three shards ran into the 60-minute job bound on the Windows legs of CI 38443874383: arms and controller-rollback,
   // each one file whose tests run one after another, did not finish within it. Both are now cut into files (none weighs
   // more than an even share), and six shards, each two files at once, leave every job well inside the bound.
   benchmark: { dir: 'tests/benchmark', exclude: ['tests/benchmark/fixtures/'], maxWorkers: 2, shards: 6, timeoutMs: 300_000 },
+  'provider-claude': { files: PROVIDER_FILES.claude, maxWorkers: 1, shards: 1, timeoutMs: 300_000 },
+  'provider-codex': { files: PROVIDER_FILES.codex, maxWorkers: 2, shards: 1, timeoutMs: 300_000 },
 };
 
 /** Directories under tests/ that hold no suite: helpers, the fake Claude, the opt-in pilot. */
@@ -56,17 +74,18 @@ export const NOT_SUITES = ['tests/helpers', 'tests/fake-claude', 'tests/pilot'];
 export const DEFAULT_WEIGHT = 30;
 
 /**
- * The CI matrix groups, in order: each a list of suites (whole) or one shard of one. The workflows run each group as
- * one job on every OS and Node version they test.
+ * The neutral CI matrix groups, in order: each a list of suites (whole) or one shard. Provider groups
+ * below are separate jobs on the same OS/Node axes; release runs both sets as one group matrix.
  */
 export const CI_GROUPS = [
-  { id: 'core', runs: ['unit', 'security', 'release', 'plugin-e2e'] },
+  { id: 'core', runs: ['unit', 'security', 'release'] },
   ...Array.from({ length: SUITES.integration.shards }, (_, i) => ({ id: `integration-${i + 1}`, runs: [`integration:${i + 1}/${SUITES.integration.shards}`] })),
   ...Array.from({ length: SUITES.fixtures.shards }, (_, i) => ({ id: `fixtures-${i + 1}`, runs: [`fixtures:${i + 1}/${SUITES.fixtures.shards}`] })),
   ...Array.from({ length: SUITES.benchmark.shards }, (_, i) => ({ id: `benchmark-${i + 1}`, runs: [`benchmark:${i + 1}/${SUITES.benchmark.shards}`] })),
 ];
 
 const slash = (p) => p.split('\\').join('/');
+export const PROVIDER_GROUPS = ['claude', 'codex'].map((provider) => ({ id: `provider-${provider}`, runs: [`provider-${provider}`] }));
 
 /** Every `*.test.ts` under `dir` (repository-relative, '/'-separated, sorted), without what `exclude` names. */
 function testFiles(dir, exclude = []) {
@@ -82,6 +101,19 @@ function testFiles(dir, exclude = []) {
   };
   if (existsSync(join(ROOT, dir))) walk(join(ROOT, dir));
   return out.sort();
+}
+
+// New Codex-named tests enter the provider matrix automatically. This is a
+// suite inventory, not permission to run a denied production worker E2E.
+PROVIDER_FILES.codex.push(...testFiles('tests').filter((f) => /codex.*\.test\.ts$/.test(f) && !f.startsWith('tests/benchmark/')));
+const providerOwners = new Set([...PROVIDER_FILES.claude, ...PROVIDER_FILES.codex]);
+if (providerOwners.size !== PROVIDER_FILES.claude.length + PROVIDER_FILES.codex.length ||
+    [...providerOwners].some((f) => !testFiles('tests').includes(f))) {
+  throw new Error('invalid provider suite inventory: missing or multiply-owned test');
+}
+
+function suiteFiles(s) {
+  return s.files ? [...s.files].sort() : testFiles(s.dir, s.exclude).filter((f) => !providerOwners.has(f));
 }
 
 /** What Vitest collects (vitest.config.ts): every tests/**\/*.test.ts but the pilot's and the benchmark's recorded fixtures. */
@@ -105,7 +137,7 @@ export function shardsOf(suite, n = SUITES[suite].shards) {
   const s = SUITES[suite];
   if (s === undefined) throw new Error(`no suite ${suite}`);
   const w = weights();
-  const files = testFiles(s.dir, s.exclude).map((f) => ({ f, w: w[f] ?? DEFAULT_WEIGHT }));
+  const files = suiteFiles(s).map((f) => ({ f, w: w[f] ?? DEFAULT_WEIGHT }));
   files.sort((a, b) => b.w - a.w || (a.f < b.f ? -1 : 1));
   const shards = Array.from({ length: n }, () => ({ files: [], weight: 0 }));
   for (const { f, w: weight } of files) {
@@ -123,7 +155,7 @@ export function selection(spec) {
   if (m === null || SUITES[m[1]] === undefined) throw new Error(`unknown suite ${spec} (suites: ${Object.keys(SUITES).join(', ')})`);
   const suite = m[1];
   const { maxWorkers, timeoutMs = null } = SUITES[suite];
-  if (m[2] === undefined) return { suite, label: suite, files: testFiles(SUITES[suite].dir, SUITES[suite].exclude), maxWorkers, timeoutMs };
+  if (m[2] === undefined) return { suite, label: suite, files: suiteFiles(SUITES[suite]), maxWorkers, timeoutMs };
   const i = Number(m[2]);
   const n = Number(m[3]);
   if (n !== SUITES[suite].shards || i < 1 || i > n) throw new Error(`${spec}: ${suite} has shards 1..${SUITES[suite].shards}`);
@@ -244,7 +276,7 @@ async function runAll(specs) {
 export function plan() {
   return {
     suites: Object.fromEntries(Object.entries(SUITES).map(([name, s]) => [name, { ...s, shards: shardsOf(name) }])),
-    groups: CI_GROUPS,
+    groups: [...CI_GROUPS, ...PROVIDER_GROUPS],
   };
 }
 
@@ -253,8 +285,9 @@ function main(argv) {
   if (cmd === 'all') return runAll(Object.keys(SUITES));
   if (cmd === 'run' && rest.length > 0) return runAll(rest);
   if (cmd === 'ci' && rest.length === 1) {
-    const group = CI_GROUPS.find((g) => g.id === rest[0]);
-    if (group === undefined) throw new Error(`unknown CI group ${rest[0]} (groups: ${CI_GROUPS.map((g) => g.id).join(', ')})`);
+    const groups = [...CI_GROUPS, ...PROVIDER_GROUPS];
+    const group = groups.find((g) => g.id === rest[0]);
+    if (group === undefined) throw new Error(`unknown CI group ${rest[0]} (groups: ${groups.map((g) => g.id).join(', ')})`);
     return runAll(group.runs);
   }
   if (cmd === 'list') {
@@ -267,7 +300,7 @@ function main(argv) {
           if (rest.includes('--files')) for (const f of x.files) process.stdout.write(`  ${f} ~${w[f] ?? DEFAULT_WEIGHT} s\n`);
         });
       }
-      for (const g of CI_GROUPS) process.stdout.write(`ci ${g.id}: ${g.runs.join(', ')}\n`);
+      for (const g of [...CI_GROUPS, ...PROVIDER_GROUPS]) process.stdout.write(`ci ${g.id}: ${g.runs.join(', ')}\n`);
     }
     return 0;
   }

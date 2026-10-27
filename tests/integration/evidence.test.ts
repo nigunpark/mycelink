@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { makeTmpDir, cleanupTmpRoots } from '../helpers/tmp.js';
@@ -10,8 +10,20 @@ import {
   runVerification,
 } from '../../src/evidence/runner.js';
 import { validateAgainstSchema } from '../../src/schema/registry.js';
+import { redactText } from '../../src/security/redact.js';
+import { readGateTests } from '../../src/evidence/gate-tests.js';
 
 afterAll(() => cleanupTmpRoots());
+
+// Assert only metadata so failed assertions cannot print private fixture output.
+function expectPrivateText(actual: unknown, expected: string) {
+  expect.soft(typeof actual === 'string').toBe(true);
+  if (typeof actual !== 'string') return;
+  expect.soft(createHash('sha256').update(actual).digest('hex'))
+    .toBe(createHash('sha256').update(expected).digest('hex'));
+  expect.soft(Buffer.byteLength(actual)).toBe(Buffer.byteLength(expected));
+}
+
 
 function workspace(files: Record<string, string> = {}): { repo: string; evidence: string } {
   const dir = makeTmpDir('ev-');
@@ -88,6 +100,18 @@ describe('classifyRedReason', () => {
 });
 
 describe('runVerification', () => {
+  it('records real Node JUnit identities from an explicitly declared reporter command without a module', () => {
+    const { repo, evidence } = workspace({ 'tests/run.mjs': "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('publishing emits JOB_RESULT_V2', () => assert.equal(1, 2));\n" });
+    const record = runVerification({ kind: 'red', nodeId: 'N', repository: 'core',
+      command: ['node', '--test-reporter=junit', '--test-reporter-destination=${REPORT}', 'tests/run.mjs'],
+      cwd: repo, evidenceDir: evidence, pathBase: join(repo, '..'),
+      redDeclared: [{ file: 'tests/run.mjs', name: 'publishing emits JOB_RESULT_V2' }] });
+    expect(record.exit_code).not.toBe(0);
+    expect(record.results?.format).toBe('junit-xml');
+    expect(readGateTests(join(repo, '..'), record)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'tests/run.mjs', name: 'publishing emits JOB_RESULT_V2', status: 'failed' }),
+    ]));
+  });
   it('records a passing command as evidence with exit 0 and no fingerprint', () => {
     const { repo, evidence } = workspace();
     const record = runVerification({
@@ -125,7 +149,7 @@ describe('runVerification', () => {
     expect(createHash('sha256').update(readFileSync(record.output_path)).digest('hex')).toBe(
       record.output_sha256,
     );
-    expect(JSON.stringify(record)).not.toContain('hello-evidence');
+    expect(JSON.stringify(record).includes('hello-evidence')).toBe(false);
   });
 
   it('records a failing command with a fingerprint and a RED classification', () => {
@@ -248,5 +272,178 @@ describe('runVerification', () => {
     });
     expect(record.baseline_excluded).toEqual(['legacy/flaky.test.js']);
     expect(record.failure_fingerprint).toBeNull();
+  });
+});
+
+
+// Proposed optional observer; no raw persistence and no caller-selected report
+// path. Keeping this local permits native RED before the source API exists.
+type RawReportObservation = {
+  test_command_output?: string | null;
+  bytes: Buffer | null;
+  sha256: string | null;
+  output: string;
+  exit_code: number;
+  steps: { exit_code: number; timed_out: boolean }[];
+  normalized_count: number;
+};
+type ObservedVerificationArgs = Parameters<typeof runVerification>[0] & {
+  onRawReport?: (snapshot: RawReportObservation) => void;
+};
+
+describe('runner optional transient raw-report observer', () => {
+  it('calls the observer once after normalization while raw scratch still exists and removes it before return', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-lifetime-');
+    const raw = JSON.stringify({ testResults: [], errors: [{ type: 'SyntaxError',
+      message: 'token=private-runner-token C:/private/source.ts' }] });
+    const observations: RawReportObservation[] = [];
+    let rawPath = '';
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      cleanEnv: true, reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      steps: [[process.execPath, '-e', 'process.exit(0)']],
+      command: [process.execPath, '-e', `require('node:fs').writeFileSync(process.argv[1], ${JSON.stringify(raw)}); process.exit(1)`, '${REPORT}'],
+      onRawReport: snapshot => {
+        observations.push(snapshot);
+        const dirs = readdirSync(scratch);
+        expect(dirs).toHaveLength(1);
+        rawPath = join(scratch, dirs[0]!, 'report.json');
+        expectPrivateText(readFileSync(rawPath, 'utf8'), raw);
+        expect(Buffer.isBuffer(snapshot.bytes)).toBe(true);
+        if (Buffer.isBuffer(snapshot.bytes)) expectPrivateText(snapshot.bytes.toString('utf8'), raw);
+        expect(snapshot.sha256).toBe(createHash('sha256').update(raw).digest('hex'));
+        expect(snapshot).toMatchObject({ exit_code: 1, normalized_count: 0,
+          steps: [expect.objectContaining({ exit_code: 0, timed_out: false })] });
+        expect(snapshot).not.toHaveProperty('path');
+      },
+    };
+    const record = runVerification(args);
+    expect(observations.length).toBe(1); // Missing hook is the intended native RED.
+    expect(rawPath).not.toBe('');
+    expect(existsSync(rawPath)).toBe(false);
+    expect(readdirSync(scratch)).toEqual([]);
+    expect(record.results).toMatchObject({ total: 0, format: 'vitest-json' });
+    expect(record).not.toHaveProperty('raw');
+    expect(record).not.toHaveProperty('diagnostic');
+    expect(readdirSync(evidence).sort()).toEqual([
+      record.output_path.split(/[\\/]/).at(-1)!, record.results!.path.split(/[\\/]/).at(-1)!,
+    ].sort());
+  });
+
+  it.each(['malformed', 'missing'])('observes %s raw without inventing normalized identities and cleans scratch', kind => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-unavailable-');
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      command: [process.execPath, '-e', kind === 'missing' ? 'process.exit(1)' :
+        "require('node:fs').writeFileSync(process.argv[1], '{invalid'); process.exit(1)", '${REPORT}'],
+      onRawReport: value => { seen.push(value); },
+    };
+    const record = runVerification(args);
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toMatchObject({ bytes: kind === 'missing' ? null : Buffer.from('{invalid'),
+      sha256: kind === 'missing' ? null : createHash('sha256').update('{invalid').digest('hex'), normalized_count: 0 });
+    expect(record.results?.total).toBe(0);
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+
+  it('turns an observer exception into a static failure and still deletes raw scratch', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-throw-');
+    let calls = 0;
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      command: [process.execPath, '-e', "require('node:fs').writeFileSync(process.argv[1], '{\"testResults\":[]}')", '${REPORT}'],
+      onRawReport: () => { calls++; throw new Error('token=private-exception C:/private/source.ts'); },
+    };
+    expect(() => runVerification(args)).toThrowError(/^CHANNEL_PROBE_REPORT_INVALID:RAW$/);
+    expect(calls).toBe(1);
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+
+  it('keeps ordinary accepted verification unchanged with no observer or diagnostic artifacts', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('raw-ordinary-');
+    const raw = JSON.stringify({ testResults: [{ name: join(repo, 'tests/ordinary.test.ts'),
+      status: 'passed', assertionResults: [{ title: 'ordinary', fullName: 'ordinary', status: 'passed', ancestorTitles: [] }] }] });
+    const record = runVerification({ kind: 'green', nodeId: 'N', repository: null, cwd: repo,
+      evidenceDir: evidence, reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      command: [process.execPath, '-e', `require('node:fs').writeFileSync(process.argv[1], ${JSON.stringify(raw)})`, '${REPORT}'] });
+    expect(record.exit_code).toBe(0);
+    expect(record.results).toMatchObject({ total: 1, passed: 1, failed: 0 });
+    expect(record).not.toHaveProperty('diagnostic');
+    expect(record).not.toHaveProperty('raw');
+    expect(readdirSync(evidence)).toHaveLength(2);
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+});
+
+
+// Extension contract: optional, transient, redacted stdout + stderr of the test
+// process only. Null means it never ran; cap at the last 64KiB after redaction.
+// Headers and setup output cannot be recovered safely by parsing delimiters.
+describe('runner isolated test-command observation', () => {
+  it('redacts test stdout/stderr before observation and excludes setup, build and command headers', () => {
+    const { repo, evidence } = workspace();
+    const scratch = makeTmpDir('command-observer-');
+    const stdout = 'TEST_STDOUT\n$ forged command\n(cwd: forged)\n';
+    const stderr = 'SyntaxError: token=arbitrary-observer-secret sk-' + 'a'.repeat(30) + '\n';
+    writeFileSync(join(repo, 'child.cjs'), `process.stdout.write(${JSON.stringify(stdout)}); process.stderr.write(${JSON.stringify(stderr)}); process.exit(1);`);
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      reportScratchRoot: scratch, report: { format: 'vitest-json' },
+      steps: [[process.execPath, '-e', 'console.error("Error: ENOENT: setup-only")'],
+        [process.execPath, '-e', 'console.error("Error: EPERM: build-only")']],
+      command: [process.execPath, 'child.cjs', '${REPORT}'],
+      onRawReport: value => { seen.push(value); },
+    };
+    const record = runVerification(args);
+    expect(seen.length).toBe(1);
+    expectPrivateText(seen[0]?.test_command_output, redactText(stdout + stderr));
+    expect(seen[0]!.test_command_output.includes('sk-' + 'a'.repeat(30))).toBe(false);
+    expect(seen[0]!.output.includes('setup-only')).toBe(true);
+    expect(seen[0]!.output.includes('build-only')).toBe(true);
+    expect(seen[0]!.output.includes('child.cjs')).toBe(true);
+    expect(record).not.toHaveProperty('test_command_output');
+    expect(record).not.toHaveProperty('test_command');
+    expect(readdirSync(scratch)).toEqual([]);
+    expect(readdirSync(evidence)).toHaveLength(2); // existing log + normalized results only
+    expectPrivateText(readFileSync(record.output_path, 'utf8'), seen[0]!.output);
+    for (const name of readdirSync(evidence)) {
+      expect(readFileSync(join(evidence, name), 'utf8').includes('sk-' + 'a'.repeat(30))).toBe(false);
+    }
+  });
+
+  it('bounds redacted transient test output to 64KiB without including the command text', () => {
+    const { repo, evidence } = workspace();
+    const text = 'x'.repeat(70 * 1024) + '\nSyntaxError: bounded tail\n';
+    writeFileSync(join(repo, 'large.cjs'), `process.stderr.write(${JSON.stringify(text)}, () => { process.exitCode = 1; });`);
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      command: [process.execPath, 'large.cjs'], onRawReport: value => { seen.push(value); },
+    };
+    runVerification(args);
+    expect(seen.length).toBe(1);
+    expectPrivateText(seen[0]?.test_command_output, Buffer.from(redactText(text)).subarray(-65536).toString('utf8'));
+  });
+
+  it('reports null test output when setup fails before the test command runs', () => {
+    const { repo, evidence } = workspace();
+    const seen: RawReportObservation[] = [];
+    const args: ObservedVerificationArgs = {
+      kind: 'red', nodeId: 'N', repository: null, cwd: repo, evidenceDir: evidence,
+      steps: [[process.execPath, '-e', 'console.error("Error: ENOENT: setup"); process.exit(1)']],
+      command: [process.execPath, '-e', 'throw new Error("must not run")'],
+      onRawReport: value => { seen.push(value); },
+    };
+    runVerification(args);
+    expect(seen.length).toBe(1);
+    expect(seen[0]?.test_command_output === null).toBe(true);
   });
 });

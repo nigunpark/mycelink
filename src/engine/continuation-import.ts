@@ -1,0 +1,428 @@
+/** Pinned completion preflight and locked, evidence-first import into a new control. */
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import type { FeatureState_, PortfolioGraph, Problem } from '../model/types.js';
+import { checkEvidenceOutput, observeEvidenceOutput } from '../evidence/paths.js';
+import { branchExists, isAncestor, resolveRef, runGit } from '../git/git.js';
+import { integrationBranchName } from '../git/worktree.js';
+import { hashGraph, stableStringify } from '../graph/validate.js';
+import { validateAgainstSchema } from '../schema/registry.js';
+import { createExclusive } from '../state/atomic-json.js';
+import { loadState, mutateState } from '../state/feature-state.js';
+import { isInsideReal, readRegular, samePath } from '../security/paths.js';
+import { featurePaths } from '../workspace/paths.js';
+import { loadGraph, loadRepositories, loadWorkspace, repositoryPath, validateFeatureGraph } from '../workspace/workspace.js';
+import { graphAcceptanceProblems, loadAcceptanceManifest, manifestProblems } from './acceptance.js';
+import { completionStanding } from './criterion-coverage.js';
+import { ledgerProblems, latestCompletion } from './criterion-ledger.js';
+import { withFeatureLock } from './feature-lock.js';
+import { revisionChain } from './review-revision.js';
+import type { TddPolicy } from './tdd-history.js';
+
+export interface CompletionImportInput {
+  sourceControlRoot: string;
+  /** Required for independently rebound control-owned command paths. */
+  targetControlRoot?: string;
+  /** Evidence-copy readback location; graph provenance stays on the source. */
+  evidenceControlRoot?: string;
+  /** The exact independently pinned source STATE.json document bytes. */
+  sourceStateBytes: Buffer;
+  expectedSourceSha256: string;
+  sourceGraph: PortfolioGraph;
+  targetGraph: PortfolioGraph;
+  targetState: FeatureState_;
+  repositoryPath: string;
+  /** The new repository's checked-out authoritative head. */
+  head: string;
+  policy: TddPolicy;
+  completedNodes: readonly string[];
+}
+
+/** Relocation is explicit and narrow: graph shape, registered gate commands,
+ * and gate script bytes must agree after replacing only the control root. */
+function relocatedGraphMatches(input: CompletionImportInput): boolean {
+  if (!input.targetControlRoot) return false;
+  const rootOf = (control: string): string => resolve(basename(control) === 'control' ? dirname(control) : control).replaceAll('\\', '/');
+  const sourceRoot = rootOf(input.sourceControlRoot);
+  const targetRoot = rootOf(input.targetControlRoot);
+  if (sourceRoot === targetRoot) return false;
+  const wsl = (s: string): string => s.replace(/^([A-Za-z]):/, (_, drive: string) => `/mnt/${drive.toLowerCase()}`);
+  const relocate = (s: string): string => s.replaceAll(sourceRoot, targetRoot).replaceAll(wsl(sourceRoot), wsl(targetRoot));
+  const scripts = new Set<string>();
+  const relocateValue = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      if (value.startsWith(`${sourceRoot}/`) && /\.(?:mjs|js|cjs|sh)$/.test(value)) scripts.add(value);
+      return relocate(value);
+    }
+    if (Array.isArray(value)) return value.map(relocateValue);
+    if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, relocateValue(v)]));
+    return value;
+  };
+  if (stableStringify(relocateValue(loadRepositories(input.sourceControlRoot))) !==
+    stableStringify(loadRepositories(input.targetControlRoot))) return false;
+  const source = structuredClone(input.sourceGraph);
+  const target = input.targetGraph;
+  if (source.nodes.length !== target.nodes.length) return false;
+  for (let i = 0; i < source.nodes.length; i++) {
+    const node = source.nodes[i]!;
+    const other = target.nodes[i]!;
+    if (node.id !== other.id || node.verification_commands.length !== other.verification_commands.length) return false;
+    for (let j = 0; j < node.verification_commands.length; j++) {
+      const verifier = node.verification_commands[j]!;
+      const targetVerifier = other.verification_commands[j]!;
+      verifier.command = verifier.command.map((arg) => relocateValue(arg) as string);
+      // Both graph validators must independently check module hash against
+      // their own registered repository before this equivalence authorizes a write.
+      if (verifier.module !== undefined && verifier.module === targetVerifier.module) verifier.module_sha256 = targetVerifier.module_sha256;
+    }
+  }
+  if (stableStringify(source) !== stableStringify(target)) return false;
+  for (const path of scripts) {
+    const dest = relocate(path);
+    if (dest === path) return false;
+    const sourceScript = readRegular(path, 16 * 1024 * 1024);
+    const targetScript = readRegular(dest, 16 * 1024 * 1024);
+    if (!sourceScript || !targetScript) return false;
+    const text = sourceScript.bytes.toString('utf8');
+    if (relocate(text) !== targetScript.bytes.toString('utf8')) return false;
+    // A gate may call a second absolute control-local script (native full).
+    for (const match of text.matchAll(/(?:[A-Za-z]:\/|\/mnt\/[a-z]\/)[^\s'"`]+\.(?:mjs|js|cjs|sh)/g)) {
+      const nested = match[0]!;
+      if (!nested.startsWith(`${sourceRoot}/`) && !nested.startsWith(`${wsl(sourceRoot)}/`)) continue;
+      const local = nested.startsWith(wsl(sourceRoot)) ? `${sourceRoot}${nested.slice(wsl(sourceRoot).length)}` : nested;
+      const translated = relocate(local);
+      const sourceNested = readRegular(local, 16 * 1024 * 1024);
+      const targetNested = readRegular(translated, 16 * 1024 * 1024);
+      if (!sourceNested || !targetNested ||
+        relocate(sourceNested.bytes.toString('utf8')) !== targetNested.bytes.toString('utf8')) return false;
+    }
+  }
+  return true;
+}
+
+export function validateCompletionImport(input: CompletionImportInput): { ok: boolean; problems: Problem[] } {
+  const problems: Problem[] = [];
+  const fail = (code: string, detail: string): void => { problems.push({ code, path: '/continuation_import', detail }); };
+  const actual = createHash('sha256').update(input.sourceStateBytes).digest('hex');
+  if (!/^[0-9a-f]{64}$/.test(input.expectedSourceSha256) || actual !== input.expectedSourceSha256) {
+    fail('IMPORT_SOURCE_HASH', 'Source state bytes do not match the independently pinned SHA-256.');
+    return { ok: false, problems };
+  }
+  let doc: { revision: number; data: FeatureState_ };
+  try {
+    doc = JSON.parse(input.sourceStateBytes.toString('utf8')) as typeof doc;
+  } catch {
+    fail('IMPORT_SOURCE_STATE', 'Source state is not JSON.');
+    return { ok: false, problems };
+  }
+  if (typeof doc.revision !== 'number' || !Number.isSafeInteger(doc.revision) || doc.revision < 0 || validateAgainstSchema('state', doc.data).length > 0) {
+    fail('IMPORT_SOURCE_STATE', 'Source STATE.json is not a valid versioned state.');
+    return { ok: false, problems };
+  }
+  const { data } = doc;
+  const evidenceRoot = input.evidenceControlRoot ?? input.sourceControlRoot;
+  const sourceHash = hashGraph(input.sourceGraph);
+  const targetHash = hashGraph(input.targetGraph);
+  if ((sourceHash !== targetHash && !relocatedGraphMatches(input)) || data.graph_hash !== sourceHash || input.targetState.graph_hash !== targetHash || data.feature_id !== input.sourceGraph.feature_id || input.targetState.feature_id !== input.targetGraph.feature_id || data.acceptance?.sha256 === undefined || data.acceptance.sha256 !== input.targetState.acceptance?.sha256) {
+    fail('IMPORT_GRAPH_MISMATCH', 'The source and new control must bind the exact same graph, feature and approved acceptance manifest.');
+    return { ok: false, problems };
+  }
+  const checkout = runGit(input.repositoryPath, ['rev-parse', 'HEAD'], { allowFail: true });
+  if (checkout.exitCode !== 0 || checkout.stdout.trim() !== input.head) {
+    fail('IMPORT_HEAD_MISMATCH', 'The declared authoritative head is not the target repository checkout HEAD.');
+    return { ok: false, problems };
+  }
+  const seen = new Set<string>();
+  for (const id of input.completedNodes) {
+    if (seen.has(id)) { fail('IMPORT_DUPLICATE', `Producer ${id} was requested twice.`); continue; }
+    seen.add(id);
+    const node = input.sourceGraph.nodes.find((n) => n.id === id);
+    const rt = data.nodes[id];
+    const target = input.targetState.nodes[id];
+    if (node === undefined || node.repository === null || ['candidate-build', 'e2e-scenario', 'verification'].includes(node.node_type) || rt?.state !== 'DONE') {
+      fail('IMPORT_PRODUCER_NOT_DONE', `${id} is not a DONE product producer of the pinned source graph.`);
+      continue;
+    }
+    if (target === undefined || target.state !== 'PLANNED' || target.attempts !== 0 || target.claim !== null ||
+      target.integrated_sha !== null || Object.keys(target.evidence).length > 0 ||
+      (target.criteria?.length ?? 0) > 0 || (target.criterion_ledger?.length ?? 0) > 0) {
+      fail('IMPORT_REPLAY', `${id} has already begun or has completion state in the target control.`);
+      continue;
+    }
+    for (const dependency of node.depends_on ?? []) {
+      if (!seen.has(dependency) && !input.completedNodes.includes(dependency) && input.targetState.nodes[dependency]?.state !== 'DONE') {
+        fail('IMPORT_DEPENDENCY_MISSING', `${id} depends on ${dependency}, which is neither imported nor completed in the new control.`);
+      }
+    }
+    if (rt.claim !== null || data.orchestration?.leases?.some((lease) => lease.node_id === id && lease.status === 'active')) {
+      fail('IMPORT_SOURCE_ACTIVE', `${id} has an active source dispatch; only closed, settled work can be assessed.`);
+    }
+    if (rt.integrated_sha === null || !isAncestor(input.repositoryPath, rt.integrated_sha, input.head)) {
+      fail('IMPORT_ANCESTRY', `${id}'s integrated work is not an ancestor of the new authoritative head.`);
+      continue;
+    }
+    if (rt.tdd_history?.ok !== true || rt.tdd_history.head_sha !== rt.integrated_sha || checkEvidenceOutput(evidenceRoot, data.feature_id, rt.tdd_history) !== null) {
+      fail('IMPORT_HISTORY_INVALID', `${id} has no intact test-first history at its integrated head.`);
+    }
+    for (const kind of node.required_evidence ?? []) {
+      const evidence = rt.evidence[kind];
+      if (evidence === undefined || checkEvidenceOutput(evidenceRoot, data.feature_id, evidence) !== null) fail('IMPORT_GATE_INVALID', `${id}'s ${kind} gate is missing or changed.`);
+    }
+    const ledger = rt.criterion_ledger ?? [];
+    for (const detail of ledgerProblems(evidenceRoot, data.feature_id, ledger)) fail('IMPORT_LEDGER_INVALID', `${id}: ${detail}`);
+    const assigned = node.acceptance_criteria ?? [];
+    for (const ac of assigned) {
+      const accepted = rt.criteria?.filter((c) => c.criterion === ac) ?? [];
+      const record = latestCompletion(ledger, ac);
+      if (accepted.length !== 1 || record === null || record.migrated === true || record.node_id !== id || record.criterion !== ac || record.repo.repository !== node.repository || record.repo.integrated_sha !== rt.integrated_sha || record.proof.output_sha256 !== accepted[0]?.output_sha256) {
+        fail('IMPORT_CRITERION_MISSING', `${id} does not have a matching settled ${ac} completion and accepted proof.`);
+        continue;
+      }
+      const standing = completionStanding({ controlRoot: evidenceRoot, featureId: data.feature_id, record, ledger, repoPath: input.repositoryPath, head: input.head, policy: input.policy });
+      if (!standing.holds || standing.tests.some((t) => t.declared !== true)) fail('IMPORT_PROOF_INVALID', `${id} ${ac} does not stand at the new head: ${standing.detail ?? 'test declaration unknown'}.`);
+    }
+    for (const c of rt.criteria ?? []) if (!assigned.includes(c.criterion)) fail('IMPORT_CRITERION_MISMATCH', `${id} settled unassigned ${c.criterion}.`);
+    for (const r of ledger) if (!assigned.includes(r.criterion) || r.node_id !== id) fail('IMPORT_LEDGER_INVALID', `${id} contains a record for another node or criterion.`);
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+export interface DurableCompletionImportInput extends CompletionImportInput {
+  targetControlRoot: string;
+}
+
+const digest = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
+const problem = (code: string, detail: string): Problem => ({ code, path: '/continuation_import', detail });
+
+/** A rework keeps its original revision even when the review's current
+ * receipt moves. Verify every immutable link before trusting that history. */
+function pinnedReworkReview(controlRoot: string, featureId: string, state: FeatureState_, reviewId: string, origin: { revision?: number; receipt_path?: string; receipt_sha256?: string }): boolean {
+  const review = state.acceptance_review?.reviews.find((r) => r.review_id === reviewId);
+  if (!review || review.overall !== 'GAPS' || !review.reworks_applied || !origin.receipt_path || !origin.receipt_sha256) return false;
+  const chain = revisionChain(review);
+  const current = chain.at(-1);
+  if (!current || review.revision !== undefined && review.revision !== current.revision ||
+    current.receipt_path !== review.receipt_path || current.receipt_sha256 !== review.receipt_sha256 ||
+    !chain.some((r) => r.revision === (origin.revision ?? 0) && r.receipt_path === origin.receipt_path && r.receipt_sha256 === origin.receipt_sha256)) return false;
+  return chain.every((ref, i) => {
+    if (checkEvidenceOutput(controlRoot, featureId, { output_path: ref.receipt_path, output_sha256: ref.receipt_sha256 }, { overlay: false }) !== null) return false;
+    if (i === 0) return true;
+    try {
+      const copy = observeEvidenceOutput(controlRoot, featureId, ref.receipt_path);
+      if (copy.kind !== 'file') return false;
+      const doc = JSON.parse(readFileSync(copy.path, 'utf8')) as { review_id?: string; revision?: number; parent?: { revision?: number; receipt_path?: string; receipt_sha256?: string } };
+      const previous = chain[i - 1]!;
+      return doc.review_id === reviewId && doc.revision === ref.revision && doc.parent?.revision === previous.revision &&
+        doc.parent.receipt_path === previous.receipt_path && doc.parent.receipt_sha256 === previous.receipt_sha256;
+    } catch { return false; }
+  });
+}
+
+/** Readback gate for imported DONE nodes; called before any subsequent claim. */
+export function completionImportProblems(controlRoot: string, state: FeatureState_): Problem[] {
+  const problems: Problem[] = [];
+  const receipts = state.completion_imports ?? [];
+  const counts = new Map<string, number>();
+  for (const receipt of receipts) counts.set(receipt.node_id, (counts.get(receipt.node_id) ?? 0) + 1);
+  // An imported producer has no local attempt. Losing its receipt must not
+  // silently turn the imported DONE into an unproven ordinary completion.
+  for (const [id, rt] of Object.entries(state.nodes)) {
+    if (rt.state === 'DONE' && rt.attempts === 0 && (rt.criterion_ledger?.length ?? 0) > 0 && counts.get(id) !== 1) {
+      problems.push(problem('IMPORT_PROVENANCE_INVALID', `${id} requires exactly one imported completion receipt.`));
+    }
+  }
+  for (const receipt of receipts) {
+    const rt = state.nodes[receipt.node_id];
+    const sourcePath = `features/${state.feature_id}/imports/${receipt.source_state_sha256}/STATE.json`;
+    const current = state.integration_heads?.[receipt.repository];
+    let trusted = false;
+    try {
+      const repo = repositoryPath(loadWorkspace(controlRoot), receipt.repository);
+      trusted = typeof current === 'string' &&
+        resolveRef(repo, integrationBranchName(state.feature_id)) === current &&
+        isAncestor(repo, receipt.integration_sha, current);
+    } catch { /* A missing repository or ref is not eligible. */ }
+    if (!rt || !trusted ||
+      !receipt.files.some((f) => f.path === sourcePath && f.sha256 === receipt.source_state_sha256)) {
+      problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} lacks its imported DONE head or pinned source document.`));
+      continue;
+    }
+    const copy = observeEvidenceOutput(controlRoot, state.feature_id, sourcePath);
+    if (copy.kind !== 'file' || copy.sha256 !== receipt.source_state_sha256) {
+      problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id}'s pinned source document is missing or changed.`));
+      continue;
+    }
+    try {
+      const source = (JSON.parse(readFileSync(copy.path, 'utf8')) as { data: FeatureState_ }).data;
+      const original = source.nodes[receipt.node_id];
+      const active = rt.state === 'DONE' && rt.attempts === 0 && rt.integrated_sha === original?.integrated_sha &&
+        JSON.stringify(original.criterion_ledger) === JSON.stringify(rt.criterion_ledger) &&
+        JSON.stringify(original.criteria) === JSON.stringify(rt.criteria) &&
+        JSON.stringify(original.tdd_history) === JSON.stringify(rt.tdd_history) &&
+        JSON.stringify(original.evidence) === JSON.stringify(rt.evidence);
+      // A settled review may reopen imported work and its dependents. The
+      // imported source remains immutable; the active generation is no longer
+      // its DONE snapshot. Require the review's intact receipt and the exact
+      // saved DONE generation instead of pretending the new state is imported.
+      const historical = state.reworks?.some((rework) => {
+        const origin = rework.origin;
+        if (origin?.kind !== 'acceptance-review' || !rework.reopened.includes(receipt.node_id)) return false;
+        if (!pinnedReworkReview(controlRoot, state.feature_id, state, origin.review_id, origin)) return false;
+        const root = state.nodes[rework.node_id];
+        const snapshots = root?.rework_history ?? [];
+        return snapshots.some((entry) => {
+          const saved = rework.node_id === receipt.node_id ? entry.restore : entry.restore_dependents?.[receipt.node_id];
+          if (!saved || saved.integrated_sha !== original?.integrated_sha ||
+            JSON.stringify(saved.criteria) !== JSON.stringify(original.criteria) ||
+            !Object.entries(original.evidence).every(([kind, gate]) => gate && saved.evidence[kind as keyof typeof saved.evidence]?.output_sha256 === gate.output_sha256) ||
+            saved.tdd_history?.output_sha256 !== original.tdd_history?.output_sha256) return false;
+          return true;
+        });
+      }) ?? false;
+      if (source.graph_hash !== receipt.source_graph_sha256 || original?.state !== 'DONE' || original.integrated_sha === null || (!active && !historical) ||
+        !isAncestor(repositoryPath(loadWorkspace(controlRoot), receipt.repository), original.integrated_sha, receipt.integration_sha) ||
+        !(Array.isArray(rt.criterion_ledger) && Array.isArray(original.criterion_ledger) &&
+          rt.criterion_ledger.length >= original.criterion_ledger.length &&
+          original.criterion_ledger.every((r, i) => JSON.stringify(r) === JSON.stringify(rt.criterion_ledger?.[i])))) {
+        problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} does not match the pinned source completion at the imported integration head.`));
+      }
+    } catch {
+      problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id}'s source completion cannot be read or verified.`));
+    }
+    for (const file of receipt.files) {
+      if (!file.path.startsWith(`features/${state.feature_id}/evidence/${receipt.node_id}/`) &&
+        file.path !== sourcePath) {
+        problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id} names evidence outside its own inventory.`));
+        continue;
+      }
+      const invalid = checkEvidenceOutput(controlRoot, state.feature_id, { output_path: file.path, output_sha256: file.sha256 }, { overlay: false });
+      if (invalid !== null) problems.push(problem('IMPORT_PROVENANCE_INVALID', `${receipt.node_id}: ${invalid}`));
+    }
+  }
+  return problems;
+}
+
+/** No implicit branch creation, graph rewrite, worker authority or CLI dispatch. */
+export function importCompletions(input: DurableCompletionImportInput): { ok: boolean; problems: Problem[] } {
+  const fail = (code: string, detail: string): { ok: false; problems: Problem[] } => ({ ok: false, problems: [problem(code, detail)] });
+  const featureId = input.targetGraph.feature_id;
+  try {
+    if (resolve(input.sourceControlRoot) === resolve(input.targetControlRoot)) return fail('IMPORT_CONTROL_ALIAS', 'The target must be a separate control.');
+    const sourceDir = featurePaths(input.sourceControlRoot, featureId).featureDir;
+    const targetDir = featurePaths(input.targetControlRoot, featureId).featureDir;
+    return withFeatureLock(targetDir, 'completion import', () => {
+      const sourceBytes = readFileSync(join(sourceDir, 'STATE.json'));
+      if (digest(sourceBytes) !== input.expectedSourceSha256 || !sourceBytes.equals(input.sourceStateBytes)) return fail('IMPORT_SOURCE_HASH', 'Source STATE.json is not the pinned document.');
+      const sourceGraph = loadGraph(input.sourceControlRoot, featureId);
+      const targetGraph = loadGraph(input.targetControlRoot, featureId);
+      if (hashGraph(sourceGraph) !== hashGraph(input.sourceGraph) || hashGraph(targetGraph) !== hashGraph(input.targetGraph)) return fail('IMPORT_GRAPH_MISMATCH', 'On-disk graphs differ from the pinned inputs.');
+      const sourceManifest = loadAcceptanceManifest(input.sourceControlRoot, featureId);
+      const targetManifest = loadAcceptanceManifest(input.targetControlRoot, featureId);
+      if (sourceManifest === null || targetManifest === null || sourceManifest.sha256 !== targetManifest.sha256 ||
+        sourceManifest.sha256 !== input.targetState.acceptance?.sha256 ||
+        ![input.sourceControlRoot, input.targetControlRoot].every((root) => {
+          const prd = featurePaths(root, featureId).prd;
+          return existsSync(prd) && manifestProblems(sourceManifest.manifest, { featureId, source: readFileSync(prd) }).length === 0;
+        }) ||
+        graphAcceptanceProblems(sourceGraph, sourceManifest.manifest).length !== 0 ||
+        graphAcceptanceProblems(targetGraph, targetManifest.manifest).length !== 0) return fail('IMPORT_ACCEPTANCE', 'Approved acceptance differs from the graphs or pinned target.');
+      const targetDoc = loadState(targetDir);
+      if (targetDoc === null || JSON.stringify(targetDoc.data) !== JSON.stringify(input.targetState) || targetDoc.data.feature_state !== 'GRAPH_VALIDATED' ||
+        (targetDoc.data.pending_integrations && Object.keys(targetDoc.data.pending_integrations).length > 0)) return fail('IMPORT_TARGET_CHANGED', 'Target is not the pinned fresh feature state.');
+      const sourceWs = loadWorkspace(input.sourceControlRoot);
+      const targetWs = loadWorkspace(input.targetControlRoot);
+      const sourceValidation = validateFeatureGraph(input.sourceControlRoot, featureId);
+      if (!sourceValidation.ok) return { ok: false, problems: sourceValidation.problems };
+      const graphValidation = validateFeatureGraph(input.targetControlRoot, featureId);
+      if (!graphValidation.ok) return { ok: false, problems: graphValidation.problems };
+      const sourceState = (JSON.parse(sourceBytes.toString('utf8')) as { data: FeatureState_ }).data;
+      for (const id of input.completedNodes) {
+        const node = sourceGraph.nodes.find((n) => n.id === id);
+        if (node?.repository === null || node?.repository === undefined) return fail('IMPORT_REPOSITORY', `${id} has no registered producer repository.`);
+        const sourceRepo = repositoryPath(sourceWs, node.repository);
+        const targetRepo = repositoryPath(targetWs, node.repository);
+        const branch = integrationBranchName(featureId);
+        if (!samePath(targetRepo, input.repositoryPath) || !branchExists(sourceRepo, branch) || !branchExists(targetRepo, branch) ||
+          resolveRef(sourceRepo, branch) !== sourceState.integration_heads?.[node.repository] ||
+          resolveRef(targetRepo, branch) !== input.head ||
+          (targetDoc.data.integration_heads?.[node.repository] !== undefined && targetDoc.data.integration_heads[node.repository] !== input.head)) {
+          return fail('IMPORT_INTEGRATION_REF', `${id} is not bound to both registered feature integration refs at recorded heads.`);
+        }
+      }
+      const eligible = validateCompletionImport({ ...input, sourceGraph, targetGraph, targetState: targetDoc.data });
+      if (!eligible.ok) return eligible;
+
+      // Inventory entire node evidence trees, not only the pointers known to
+      // today's state schema. A linked or changed file cannot become evidence.
+      const files: { path: string; sha256: string; bytes: Buffer }[] = [];
+      for (const id of input.completedNodes) {
+        const walk = (rel: string): void => {
+          const dir = join(input.sourceControlRoot, ...rel.split('/'));
+          if (!lstatSync(dir).isDirectory()) throw new Error(`IMPORT_UNSAFE_EVIDENCE: ${rel}`);
+          for (const name of readdirSync(dir).sort()) {
+            const child = `${rel}/${name}`;
+            const stat = lstatSync(join(input.sourceControlRoot, ...child.split('/')));
+            if (stat.isDirectory()) walk(child);
+            else {
+              const observed = observeEvidenceOutput(input.sourceControlRoot, featureId, child);
+              if (!stat.isFile() || observed.kind !== 'file') throw new Error(`IMPORT_UNSAFE_EVIDENCE: ${child}`);
+              const bytes = readFileSync(observed.path);
+              if (digest(bytes) !== observed.sha256) throw new Error(`IMPORT_SOURCE_CHANGED: ${child}`);
+              files.push({ path: child, sha256: observed.sha256, bytes });
+            }
+          }
+        };
+        walk(`features/${featureId}/evidence/${id}`);
+      }
+      const sourceCopy = `features/${featureId}/imports/${input.expectedSourceSha256}/STATE.json`;
+      files.push({ path: sourceCopy, sha256: input.expectedSourceSha256, bytes: sourceBytes });
+      // No overwrite or implicit partial-import repair, even of identical bytes.
+      if (files.some((f) => {
+        const dest = join(input.targetControlRoot, ...f.path.split('/'));
+        return !isInsideReal(targetDir, dest) || existsSync(dest);
+      })) return fail('IMPORT_COPY_CONFLICT', 'A destination evidence file already exists or escapes the target feature.');
+      const created: string[] = [];
+      let committed = false;
+      try {
+        for (const f of files) {
+          const dest = join(input.targetControlRoot, ...f.path.split('/'));
+          mkdirSync(join(dest, '..'), { recursive: true });
+          if (!isInsideReal(targetDir, dest)) throw new Error(`IMPORT_UNSAFE_TARGET: ${f.path}`);
+          if (createExclusive(dest, f.bytes) !== 'created') throw new Error(`IMPORT_COPY_CONFLICT: ${f.path}`);
+          created.push(dest);
+          if (checkEvidenceOutput(input.targetControlRoot, featureId, { output_path: f.path, output_sha256: f.sha256 }, { overlay: false }) !== null) throw new Error(`IMPORT_COPY_INVALID: ${f.path}`);
+        }
+        const copied = validateCompletionImport({ ...input, evidenceControlRoot: input.targetControlRoot, sourceGraph, targetGraph, targetState: targetDoc.data });
+        if (!copied.ok) throw new Error(`IMPORT_COPIED_PROOF_INVALID: ${copied.problems.map((p) => p.code).join(', ')}`);
+        mutateState(targetDir, (state) => {
+          if (JSON.stringify(state) !== JSON.stringify(targetDoc.data)) throw new Error('IMPORT_TARGET_CHANGED: state changed while copying');
+          for (const id of input.completedNodes) {
+            const node = sourceGraph.nodes.find((n) => n.id === id)!;
+            const sourceRt = sourceState.nodes[id]!;
+            const rt = state.nodes[id]!;
+            rt.state = 'DONE';
+            rt.integrated_sha = sourceRt.integrated_sha;
+            rt.branch_base_sha = sourceRt.branch_base_sha;
+            rt.criteria = structuredClone(sourceRt.criteria);
+            rt.criterion_ledger = structuredClone(sourceRt.criterion_ledger);
+            rt.tdd_history = structuredClone(sourceRt.tdd_history);
+            rt.evidence = structuredClone(sourceRt.evidence);
+            state.integration_heads ??= {};
+            state.integration_heads[node.repository!] = input.head;
+            state.completion_imports ??= [];
+            state.completion_imports.push({ node_id: id, source_state_sha256: input.expectedSourceSha256, source_graph_sha256: hashGraph(sourceGraph), repository: node.repository!, integration_sha: input.head, files: files.filter((f) => f.path.startsWith(`features/${featureId}/evidence/${id}/`) || f.path === sourceCopy).map(({ path, sha256 }) => ({ path, sha256 })) });
+          }
+          state.feature_state = 'RUNNING';
+          return state;
+        });
+        committed = true;
+        return { ok: true, problems: [] };
+      } finally {
+        if (!committed) for (const path of created) rmSync(path, { force: true });
+      }
+    });
+  } catch (err) {
+    return fail('IMPORT_REFUSED', err instanceof Error ? err.message : String(err));
+  }
+}

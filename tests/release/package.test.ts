@@ -92,6 +92,9 @@ describe('npm run package', () => {
     for (const required of [
       '.claude-plugin/plugin.json',
       '.claude-plugin/marketplace.json',
+      '.agents/plugins/marketplace.json',
+      'codex-plugin/plugin.json',
+      'codex-plugin/skills/mycelink-status/SKILL.md',
       'bin/mycelink.mjs',
       'dist/mycelink.mjs',
       'schemas/portfolio-graph.schema.json',
@@ -115,11 +118,20 @@ describe('npm run package', () => {
     expect(names.filter((n) => forbidden.test(n))).toEqual([]);
   });
 
+  it('does not ship the experimental Windows-to-WSL bridge or DPAPI escrow in either launcher', () => {
+    const entries = readZip(first.zip);
+    expect(entries.map((entry) => entry.name).filter((name) => /wsl-codex|CODEX_WSL|WSL_CODEX|dpapi/i.test(name))).toEqual([]);
+    for (const name of ['dist/mycelink.mjs', 'codex-plugin/dist/mycelink.mjs']) {
+      const bundle = entries.find((entry) => entry.name === name)?.data.toString('utf8') ?? '';
+      expect(bundle, name).not.toMatch(/wsl-codex|WSL_CODEX_|MYCELINK_LIVE_WSL|DataProtectionScope|CODEX-LIFECYCLE/);
+    }
+  });
+
   it('ships the user documentation, and leaves eval reports and benchmark audits in the repository', () => {
     const docs = readZip(first.zip)
       .map((e) => e.name)
       .filter((n) => n.startsWith('docs/'));
-    expect(docs).toEqual(['docs/ADAPTERS.md', 'docs/DATA_HANDLING.md', 'docs/PERMISSION_MODEL.md', 'docs/RELEASING.md', 'docs/THREAT_MODEL.md']);
+    expect(docs).toEqual(['docs/ADAPTERS.md', 'docs/CODEX.md', 'docs/DATA_HANDLING.md', 'docs/PERMISSION_MODEL.md', 'docs/PROVIDER_CONTRACT.md', 'docs/RELEASING.md', 'docs/THREAT_MODEL.md']);
   });
 
   it('resolves every relative link in a shipped Markdown file inside the archive', () => {
@@ -157,7 +169,7 @@ describe('npm run package', () => {
         offenders.push(`${entry.name}: personal path`);
       }
       // Third-party license texts legitimately carry their authors' addresses.
-      if (!['THIRD_PARTY_NOTICES.md', 'dist/mycelink.mjs'].includes(entry.name)) {
+      if (!['THIRD_PARTY_NOTICES.md', 'dist/mycelink.mjs', 'codex-plugin/dist/mycelink.mjs'].includes(entry.name)) {
         const emails = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? [];
         const real = emails.filter((e) => !/@(example\.(com|org|invalid)|users\.noreply\.github\.com)$/i.test(e) && !e.startsWith('git@'));
         if (real.length > 0) offenders.push(`${entry.name}: ${real.join(', ')}`);

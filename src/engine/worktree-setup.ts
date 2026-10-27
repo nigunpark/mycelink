@@ -608,6 +608,8 @@ export interface RunWorktreeSetupArgs {
   /** The worktree must lie inside this directory. */
   root: string;
   config: WorktreeSetupConfig;
+  /** Optional absolute host deadline, without changing the bound setup declaration. */
+  deadline?: number;
   evidenceDir: string;
   /** File name stem of the log and the receipt (a unique suffix is added). */
   label: string;
@@ -663,7 +665,7 @@ export function runWorktreeSetup(args: RunWorktreeSetupArgs): WorktreeSetupRun {
         code = 'ENVIRONMENT_INVALID';
         detail = err instanceof Error ? err.message : String(err);
       }
-      const deadline = Date.now() + config.timeout_seconds * 1000;
+      const deadline = Math.min(Date.now() + config.timeout_seconds * 1000, args.deadline ?? Infinity);
       for (const argv of env === null ? [] : config.commands) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) {

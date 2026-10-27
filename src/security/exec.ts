@@ -274,7 +274,7 @@ export function runCommandSync(argv: readonly string[], options: RunOptions): Ru
  * {@link runCommandSync}, down to its own spawn, so argv never reaches it.
  */
 export function runShellScriptSync(script: string, options: RunOptions & ShellPlanOptions): RunResult {
-  const env = { ...process.env, ...(options.env ?? {}) };
+  const env = options.cleanEnv === true ? { ...(options.env ?? {}) } : { ...process.env, ...(options.env ?? {}) };
   const plan = planShellScript(script, { allowShell: options.allowShell ?? false });
   if (options.input !== undefined) return toRunResult(withStdinFile(options.input, (stdin) => spawnSync(plan.file, plan.args, spawnOptions(plan, env, options, stdin))), plan);
   return toRunResult(spawnSync(plan.file, plan.args, spawnOptions(plan, env, options)), plan);

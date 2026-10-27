@@ -38,6 +38,9 @@ import { createWorkerWorktree, workerBranchName, integrationBranchName } from '.
 import { isGitRepository, isWorktreeClean, resolveRef, runGit } from '../git/git.js';
 import { Orchestrator, REVIEW_AWAIT_MAX_SECONDS, REVIEW_AWAIT_SECONDS } from '../engine/orchestrator.js';
 import { ClaudeCliAdapter } from '../sessions/claude-cli-adapter.js';
+import { CodexCliAdapter } from '../sessions/codex-cli-adapter.js';
+import { wslCodexPrefix } from '../sessions/codex-cli-adapter.js';
+import { codexRefinementPrompt, codexReviewPrompt } from '../engine/codex-review-session.js';
 import { liveSessions, loadRegistry } from '../sessions/registry.js';
 import { defaultLoops, loadLoops, writeLoops } from '../loops/contracts.js';
 import { runSummary } from '../loops/runs.js';
@@ -47,6 +50,7 @@ import { createExclusive, writeTextAtomic } from '../state/atomic-json.js';
 import { appendEvent, readEvents } from '../state/event-log.js';
 import { runHook } from '../hooks/entrypoint.js';
 import { hookHealth, installHooks } from '../workspace/hook-settings.js';
+import { codexHealth } from '../workspace/codex-settings.js';
 import { memoryCommand } from '../knowledge/cli.js';
 import type { ChallengeRedSnapshot, EvidenceKind, EvidenceRecord, GraphNode, NodeRuntime, PortfolioGraph } from '../model/types.js';
 import type { NodeResult } from '../sessions/adapter.js';
@@ -62,7 +66,10 @@ import { withLock } from '../state/process-lock.js';
 import { portfolioRefs, registeredRepositories } from '../engine/portfolio.js';
 import { deliverFeature } from '../engine/deliver.js';
 import { assertClaimCapability, assertControllerRole, presentedCapability } from '../engine/capability.js';
-import { assertControllerAuthority, openControllerAuthority } from '../engine/authority.js';
+import { assertControllerAuthority, AuthorityError, authorityFile, openControllerAuthority } from '../engine/authority.js';
+import { continueController, continueReviewedController } from '../engine/codex-continuation.js';
+import { importCompletions } from '../engine/continuation-import.js';
+import { finalizeCodexDelivery } from '../engine/codex-finalize.js';
 import { isInsideReal, readRegular, samePath } from '../security/paths.js';
 import { changedInputs, runWorktreeSetup, setupInputs, worktreeSetupOf, worktreeSetupSha256 } from '../engine/worktree-setup.js';
 import { modulesOf, verifierFor } from '../engine/modules.js';
@@ -75,7 +82,7 @@ import { repairEvidence } from '../engine/evidence-integrity.js';
 import { productionSince, redBinding, redBoundFiles, redDeclaredTests, tddPolicyFor, verifyTddHistory } from '../engine/tdd-history.js';
 import { RED_RETRY_GUIDANCE } from '../evidence/red-classify.js';
 import { namesDeclared, readGateTests, shownTests, testLine } from '../evidence/gate-tests.js';
-import { sessionHolder } from '../util/process-identity.js';
+import { processIdentity, sessionHolder } from '../util/process-identity.js';
 import { ACCEPTANCE_FILE, AcceptanceError, buildManifest, extractAcceptanceCriteria, loadAcceptanceManifest, manifestProblems, sidecarPath } from '../engine/acceptance.js';
 
 /** Whether a path is a link (for a message only: nothing is read from this look). */
@@ -109,6 +116,16 @@ const USAGE = `mycelink <group> <command> [options]
   help | --help | -h                         print this usage
   version | --version                        print the installed version
   doctor                                     environment and workspace health
+  codex init <control-repo-path>             bootstrap planning-only Codex control (no Claude hooks)
+  codex prepare <feature> --source <PRD> --from <reviewed-draft> [--kind AC-n=compatibility,...]
+                                           fresh Codex control: bind approved criteria and graph without opening authority
+  codex status <feature>                     inspect local plan and runtime preflight
+  codex run <feature>                      run one disposable worker with held authority
+  codex continue <feature> [--max-nodes 2]  hold new controller authority across bounded worker invocations (--review --deliver: one-shot candidate/delivery)
+    [--import-source-control <separate-control> --import-state-sha256 <pinned-sha256> --import-nodes <id,id>]
+                                           on a fresh target only: initialise and validate pinned DONE imports under that same held key before dispatch
+  codex review <feature>                    launch one separate read-only reviewer with held authority (experimental)
+  codex resume|verify|deliver <feature>    unsupported Codex execution
   controller open [--authority <current>|--recover|--takeover]  mint (first time), rotate, or recover (a fresh session after the holder ended) the controller key
   init <control-repo-path>                   create a control repository
   repo register|modules|audit|lock           repository manifest operations (register --worktree-setup <argv JSON>|none; modules: the verifier allowlist)
@@ -221,19 +238,35 @@ function emit(io: CliIo, args: ParsedArgs, value: unknown, human: () => string):
   else io.out(human());
 }
 
-function adapterFor(controlRoot: string): ClaudeCliAdapter {
+function adapterFor(controlRoot: string): ClaudeCliAdapter | CodexCliAdapter {
   const config = loadConfig(controlRoot);
+  if (config.provider.provider === 'codex') {
+    // The CLI gate and preflight require explicit disposable-repository opt-in.
+    return new CodexCliAdapter({
+      executable: config.experimental_codex?.wsl ? 'wsl.exe' : config.provider.executable ?? 'codex',
+      extraArgs: config.provider.extra_args,
+      sandbox: config.provider.sandbox ?? 'workspace-write',
+      disposableRepositories: preflightAdapter(config, process.env, controlRoot).ok,
+      wsl: config.experimental_codex?.wsl,
+      ...(config.experimental_codex?.wsl ? {
+        gitTrustRoots: [controlRoot, ...loadRepositories(controlRoot).repositories.map((repo) => resolve(controlRoot, repo.path))],
+      } : {}),
+    });
+  }
   const fakeExecutable = process.env['MYCELINK_FAKE_CLAUDE'];
-  if (config.session_adapter === 'fake-claude' || fakeExecutable) {
+  if (config.adapter === 'fake-provider' || fakeExecutable) {
     return new ClaudeCliAdapter({
       executable: process.execPath,
-      prefixArgs: [fakeExecutable ?? config.claude_executable],
+      prefixArgs: [fakeExecutable ?? config.provider.executable ?? 'claude'],
       adapterName: 'fake-claude',
     });
   }
+  if (config.adapter !== 'claude-cli') {
+    throw new Error(`Session adapter ${config.adapter} is configured but not implemented.`);
+  }
   return new ClaudeCliAdapter({
-    executable: config.claude_executable,
-    extraArgs: config.claude_extra_args,
+    executable: config.provider.executable ?? 'claude',
+    extraArgs: config.provider.extra_args ?? [],
     allowPermissionBypass: config.allow_dangerous_permission_bypass === true,
     adapterName: 'claude-background',
     mode: 'print',
@@ -248,7 +281,7 @@ function orchestratorFor(controlRoot: string, featureId: string): Orchestrator {
     controlRoot,
     featureId,
     adapter: adapterFor(controlRoot),
-    preflight: () => preflightAdapter(loadConfig(controlRoot)),
+    preflight: () => preflightAdapter(loadConfig(controlRoot), process.env, controlRoot),
     ...(crashAt !== undefined && crashAt !== ''
       ? {
           settleFault: (point: string) => {
@@ -331,6 +364,18 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
   try {
     const sub = args.positional[1] ?? '';
+    if (group === 'codex') return await codexGroup(args, io);
+    // Codex controls cannot reach other mutable paths by spelling a generic command.
+    const target = group === 'init' ? resolve(args.positional[1] ?? '.') : resolveControlRoot(args);
+    if (existsSync(controlPaths(target).config) && loadConfig(target).provider.provider === 'codex') {
+      const planning = (group === 'graph' && ['compile', 'validate', 'import', 'adapters', 'ready'].includes(sub)) ||
+        (group === 'feature' && ['acceptance', 'init'].includes(sub)) ||
+        (group === 'repo' && ['register', 'modules', 'audit'].includes(sub)) ||
+        (group === 'controller' && sub === 'open') || group === 'doctor';
+      const experimentalWorker = (group === 'orchestrate' && ['ready', 'once'].includes(sub)) || group === 'tdd';
+      const gate = preflightAdapter(loadConfig(target), process.env, target);
+      if (!planning && !(experimentalWorker && gate.ok)) throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${group} ${sub} is not enabled for this Codex control. Use codex status for read-only inspection.`);
+    }
     const only = CONTROLLER_ONLY[group];
     if (only === '*' || only?.has(sub)) requireController(args, `${group}${only === '*' ? '' : ` ${sub}`}`);
     switch (group) {
@@ -399,6 +444,274 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
 
 // ---- doctor / init --------------------------------------------------------
 
+/** Codex host workflow: opt-in disposable worker slice, not review or delivery. */
+async function codexGroup(args: ParsedArgs, io: CliIo): Promise<number> {
+  const sub = requirePositional(args, 1, 'init|status|run|continue|review|resume|verify|deliver');
+  if (sub === 'init') {
+    assertControllerRole(args, 'codex init');
+    const target = resolve(requirePositional(args, 2, 'control-repo-path'));
+    // Idempotent for Codex; never convert Claude or edit a project config.
+    if (existsSync(controlPaths(target).config) && loadConfig(target).provider.provider !== 'codex') throw new Error('CODEX_INIT_EXISTS: existing Claude control configuration must not be replaced.');
+    if (existsSync(join(target, '.claude')) || existsSync(join(target, 'CLAUDE.md'))) throw new Error('CODEX_INIT_OCCUPIED: Claude assets must not be modified.');
+    const paths = initControlRepo(target, { provider: { provider: 'codex', executable: 'codex', extra_args: [] } });
+    if (!existsSync(paths.repositoriesManifest)) writeTextAtomic(paths.repositoriesManifest, YAML.stringify({ schema_version: 1, repositories: [] }));
+    emit(io, args, { control_root: target, planning_only: true, runtime_enabled: false }, () => `Planning-only Codex control initialised at ${target}; no Claude hooks installed. Runtime denied.`);
+    return 0;
+  }
+  if (!['status', 'prepare', 'run', 'continue', 'review', 'resume', 'verify', 'deliver'].includes(sub)) throw new Error(`Unknown codex command "${sub}".`);
+  const controlRoot = resolveControlRoot(args);
+  if (loadConfig(controlRoot).provider.provider !== 'codex' || !existsSync(controlPaths(controlRoot).config)) {
+    throw new Error('CODEX_CONTROL_REQUIRED: use a planning-only Codex control repository; refusing to operate on a Claude control.');
+  }
+  const gate = preflightAdapter(loadConfig(controlRoot), process.env, controlRoot);
+  if (sub === 'prepare') {
+    assertControllerRole(args, 'codex prepare');
+    if (args.flags['authority'] !== undefined || args.flags['recover'] !== undefined || args.flags['takeover'] !== undefined || existsSync(authorityFile(controlRoot))) {
+      throw new Error('CODEX_PREPARE_AUTHORITY_EXISTS: prepare requires a fresh control without controller authority; continue will open its own held authority.');
+    }
+    const featureDir = controlPaths(controlRoot).featuresDir;
+    if (existsSync(featureDir) && readdirSync(featureDir).some((name) => existsSync(join(featureDir, name, 'STATE.json')))) {
+      throw new Error('CODEX_PREPARE_STATE_EXISTS: a feature has already been initialised; planning cannot rewrite its graph.');
+    }
+    const featureId = requirePositional(args, 2, 'feature-id');
+    const source = flagString(args, 'source');
+    const graphFile = resolve(flagString(args, 'from'));
+    if (relativeInside(controlRoot, resolve(controlRoot, source)) === null || relativeInside(controlRoot, graphFile) === null) {
+      throw new Error('CODEX_PREPARE_PATH: approved PRD and reviewed draft graph must both be inside the control repository.');
+    }
+    const output: string[] = [];
+    const internal: CliIo = { out: (text) => output.push(text), err: (text) => { throw new Error(text); } };
+    const accepted = featureAcceptance({ ...args, positional: ['feature', 'acceptance', featureId] }, internal, controlRoot, featureId);
+    if (accepted !== 0) throw new Error('CODEX_PREPARE_ACCEPTANCE_FAILED');
+    const compiled = graphGroup({ ...args, positional: ['graph', 'compile', featureId] }, internal);
+    if (compiled !== 0) throw new Error('CODEX_PREPARE_GRAPH_FAILED');
+    const validated = validateFeatureGraph(controlRoot, featureId);
+    if (!validated.ok) throw new Error(`CODEX_PREPARE_GRAPH_INVALID: ${validated.problems.map((p) => p.code).join(', ')}`);
+    const manifest = loadAcceptanceManifest(controlRoot, featureId)?.manifest;
+    if (!manifest) throw new Error('CODEX_PREPARE_ACCEPTANCE_MISSING');
+    emit(io, args, { prepared: true, feature_id: featureId, criteria: manifest.criteria.map((c) => c.id), graph_hash: validated.graphHash, authority_opened: false },
+      () => `${featureId}: PRD and reviewed graph prepared without opening authority; run a fresh codex continue after explicit disposable-repository opt-in.`);
+    return 0;
+  }
+  const runReview = async (featureId: string) => {
+    const orchestrator = orchestratorFor(controlRoot, featureId);
+    const dispatched = await orchestrator.dispatchNext();
+    if (dispatched.ticket?.schema !== 'mycelink-review-ticket/1' || dispatched.status !== 'DISPATCHED') throw new Error(`CODEX_REVIEW_NOT_READY: ${dispatched.status}: ${dispatched.detail}`);
+    const ticket = dispatched.ticket;
+    if (ticket.correction !== null) throw new Error('CODEX_REVIEW_CORRECTION_UNSUPPORTED');
+    const config = loadConfig(controlRoot);
+    const wsl = config.experimental_codex?.wsl;
+    return orchestrator.settleCodexReview({ ...ticket, prompt: ticket.refinement !== null
+      ? codexRefinementPrompt(ticket.prompt, ticket.packet_path)
+      : codexReviewPrompt(ticket.prompt, ticket.packet_path) }, {
+      executable: wsl ? 'wsl.exe' : config.provider.executable ?? 'codex',
+      ...(wsl ? { prefixArgs: wslCodexPrefix(wsl), wsl: true } : {}),
+      timeoutMs: 20 * 60_000,
+    });
+  };
+  if (sub === 'continue' && gate.ok) {
+    assertControllerRole(args, 'codex continue');
+    if (args.flags['deliver'] !== undefined && args.flags['review'] !== true) {
+      throw new Error('CODEX_DELIVERY_REQUIRES_REVIEW: --deliver requires --review and a valid PASS.');
+    }
+    if (args.flags['deliver'] !== undefined && args.flags['deliver'] !== true) {
+      throw new Error('CODEX_DELIVERY_FLAG_INVALID: --deliver takes no value.');
+    }
+    if (args.flags['authority'] !== undefined || args.flags['recover'] !== undefined || args.flags['takeover'] !== undefined) {
+      throw new Error('CODEX_CONTINUATION_AUTHORITY: continue opens its own new authority; it does not recover, take over or accept a key.');
+    }
+    const featureId = requirePositional(args, 2, 'feature-id');
+    const validation = validateFeatureGraph(controlRoot, featureId);
+    if (!validation.ok) throw new Error(`CODEX_GRAPH_INVALID: ${validation.problems.map((p) => `${p.code} ${p.path}: ${p.detail}`).join('; ')}`);
+    const rawBound = args.flags['max-nodes'];
+    const maxNodes = rawBound === undefined ? args.flags['review'] === true ? 3 : 2 : typeof rawBound === 'string' ? Number(rawBound) : NaN;
+    if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > 8) throw new Error('CODEX_CONTINUATION_BOUND: --max-nodes must be an integer from 1 to 8.');
+    const importFlags = ['import-source-control', 'import-state-sha256', 'import-nodes'];
+    const importing = importFlags.some((name) => args.flags[name] !== undefined);
+    if (importing && (importFlags.some((name) => typeof args.flags[name] !== 'string') || loadState(featurePaths(controlRoot, featureId).featureDir) !== null)) {
+      throw new Error('CODEX_CONTINUATION_IMPORT_FRESH: import requires all three explicit flags and no existing target STATE.json.');
+    }
+    const sourceControlRoot = importing ? resolve(args.flags['import-source-control'] as string) : null;
+    const sourceSha = importing ? args.flags['import-state-sha256'] as string : null;
+    const completedNodes = importing ? (args.flags['import-nodes'] as string).split(',') : [];
+    if (importing && (sourceControlRoot === controlRoot || !/^[0-9a-f]{64}$/.test(sourceSha!) || completedNodes.length === 0 || completedNodes.some((id) => !id || !loadGraph(controlRoot, featureId).nodes.some((n) => n.id === id)))) {
+      throw new Error('CODEX_CONTINUATION_IMPORT_INPUT: separate source, pinned SHA-256 and named graph nodes required.');
+    }
+    const sourceBytes = importing ? readFileSync(featurePaths(sourceControlRoot!, featureId).state) : null;
+    if (sourceBytes && createHash('sha256').update(sourceBytes).digest('hex') !== sourceSha) throw new Error('IMPORT_SOURCE_HASH: source STATE.json differs from the independently pinned SHA-256.');
+    // Validate the manager's exact durable choice before minting or recovering
+    // authority. Generic decision mutations remain unavailable to Codex.
+    const answering = args.flags['answer-decision'] !== undefined || args.flags['answer'] !== undefined;
+    const decision = answering ? codexContinuationDecision(args, controlRoot, featureId) : null;
+    if (args.flags['deliver'] === true) {
+      // Delivery records control inputs in this repository. An ancestor repo
+      // or an unborn HEAD must fail before authority, state or workers exist.
+      const top = runGit(controlRoot, ['rev-parse', '--show-toplevel'], { allowFail: true });
+      const head = runGit(controlRoot, ['rev-parse', '--verify', 'HEAD^{commit}'], { allowFail: true });
+      if (top.exitCode !== 0 || !samePath(top.stdout.trim(), controlRoot) || head.exitCode !== 0) {
+        throw new Error('CODEX_CONTROL_GIT_REQUIRED: controlRoot itself must be a committed Git worktree. In the control root, run git init, git add <approved-control-inputs>, and git commit -m "Approve control inputs" before retrying. Stage only approved control inputs; exclude credentials and runtime artifacts.');
+      }
+    }
+    const detail: { node_id: string; outcome: string; state: string }[] = [];
+    const open = () => {
+      const holder = sessionHolder() ?? processIdentity(process.pid);
+      if (holder === null) throw new AuthorityError('CONTROLLER_BUSY', 'continuation requires a verifiable holder process.');
+      try {
+        return openControllerAuthority(controlRoot, { holder }).authority;
+      } catch (error) {
+        if (!(error instanceof AuthorityError) || error.code !== 'CONTROLLER_AUTHORITY_EXISTS') throw error;
+        // Recovery is specific to continuation. A reused or unverifiable PID
+        // must not turn a mismatched identity into permission to recover.
+        const previous = JSON.parse(readFileSync(authorityFile(controlRoot), 'utf8')) as { holder?: { pid?: number; start?: string } | null };
+        const prior = previous.holder;
+        if (!prior || !Number.isSafeInteger(prior.pid) || prior.pid! <= 0 || typeof prior.start !== 'string' || prior.start.trim() === '') {
+          throw new AuthorityError('CONTROLLER_BUSY', 'the prior holder identity cannot be verified.');
+        }
+        try {
+          process.kill(prior.pid!, 0);
+        } catch (probeError) {
+          if ((probeError as NodeJS.ErrnoException).code === 'ESRCH') {
+            // The engine rechecks the record under its lock and enforces the
+            // prior identity, host, adapter and settler recovery rules.
+            return openControllerAuthority(controlRoot, { recover: true, holder }).authority;
+          }
+        }
+        throw new AuthorityError('CONTROLLER_BUSY', 'the prior holder PID is active or its exit cannot be proved.');
+      }
+    };
+    const prepare = (authority: string) => {
+        if (decision) {
+          const heldArgs = { ...args, flags: { ...args.flags, authority } };
+          assertControllerAuthority(heldArgs, controlRoot, 'codex continue answer decision');
+          // Recheck after acquisition so a changed pending request fails closed.
+          const current = codexContinuationDecision(args, controlRoot, featureId);
+          if (current.nodeId !== decision.nodeId) throw new Error('CODEX_DECISION_CHANGED: pending request changed.');
+          const paths = featurePaths(controlRoot, featureId);
+          const internal: CliIo = { out: () => {}, err: (text) => { throw new Error(text); } };
+          decisionGroup({ ...heldArgs, positional: ['decision', 'record', featureId, decision.id] }, internal);
+          assertDecisionUsable(paths.events, decision.id);
+          mutateState(paths.featureDir, (state) => {
+            const next = applyNodeTransition(loadGraph(controlRoot, featureId), state, decision.nodeId, 'READY', {
+              actor: 'mycelink', decisionId: decision.id,
+            });
+            next.pending_decisions = next.pending_decisions.filter((id) => id !== decision.id);
+            if (next.pending_decisions.length === 0 && next.feature_state === 'NEEDS_DECISION') next.feature_state = 'RUNNING';
+            return next;
+          });
+          markDecisionApplied(paths.events, featureId, decision.id, 'codex continue answer decision');
+        }
+        // A newly approved graph has no STATE.json. Initialise it once under
+        // this same controller key, without printing or persisting the key.
+        if (loadState(featurePaths(controlRoot, featureId).featureDir) === null) {
+          const initOutput: string[] = [];
+          const initCode = featureGroup({ ...args, positional: ['feature', 'init', featureId], flags: { ...args.flags, authority, json: true } }, {
+            out: (text) => initOutput.push(text), err: (text) => { throw new Error(text); },
+          });
+          if (initCode !== 0) throw new Error(`CODEX_CONTINUATION_INIT_FAILED: ${initOutput.join(' ').slice(0, 500)}`);
+        }
+        if (importing) {
+          const workspace = loadWorkspace(controlRoot);
+          const graph = loadGraph(controlRoot, featureId);
+          const repos = [...new Set(completedNodes.map((id) => graph.nodes.find((n) => n.id === id)?.repository))];
+          if (repos.length !== 1 || repos[0] === null || repos[0] === undefined) throw new Error('CODEX_CONTINUATION_IMPORT_REPOSITORY: one registered producer repository required.');
+          const repo = repositoryPath(workspace, repos[0]);
+          const head = resolveRef(repo, 'HEAD');
+          const state = loadState(featurePaths(controlRoot, featureId).featureDir)?.data;
+          if (!state) throw new Error('CODEX_CONTINUATION_INIT_FAILED: missing fresh state.');
+          const imported = importCompletions({ sourceControlRoot: sourceControlRoot!, targetControlRoot: controlRoot,
+            sourceStateBytes: sourceBytes!, expectedSourceSha256: sourceSha!, sourceGraph: loadGraph(sourceControlRoot!, featureId), targetGraph: graph,
+            targetState: state, repositoryPath: repo, head, policy: tddPolicyFor(loadRepositories(controlRoot).repositories.find((r) => r.name === repos[0])), completedNodes });
+          if (!imported.ok) throw new Error(`CODEX_CONTINUATION_IMPORT_FAILED: ${imported.problems.map((p) => `${p.code}: ${p.detail}`).join('; ')}`);
+        }
+    };
+    const run = async (authority: string) => {
+        // Refuse parallel schedules: the bound counts actual node invocations.
+        const plan = orchestratorFor(controlRoot, featureId).plan();
+        if (plan.scheduled.length !== 1) return { outcome: 'NO_PROGRESS' };
+        const output: string[] = [];
+        const code = await orchestrateGroup({ ...args, positional: ['orchestrate', 'once', featureId], flags: { ...args.flags, authority, json: true } }, {
+          out: (text) => output.push(text), err: (text) => { throw new Error(text); },
+        });
+        const cycle = JSON.parse(output.join('\n')) as { reports: { node_id: string; outcome: string; state: string; detail: string }[] };
+        if (cycle.reports.length !== 1 || cycle.reports[0]?.node_id !== plan.scheduled[0]?.node_id) throw new Error('CODEX_CONTINUATION_SCHEDULE_CHANGED: one scheduled node was not settled as expected.');
+        const report = cycle.reports[0]!;
+        // A challenge deliberately makes orchestrate once nonzero: the archived
+        // challenge restores DONE and schedules a separate refinement reviewer.
+        const challenged = report.outcome === 'REVIEW_CHALLENGED' && report.state === 'DONE' &&
+          orchestratorFor(controlRoot, featureId).state().acceptance_review?.challenges?.some((c) =>
+            c.node_id === report.node_id && c.status === 'pending');
+        // A model turn that failed before producing a result is not an accepted
+        // worker answer. Only this exact controller-recorded, READY retry gets
+        // a second invocation under the same held authority and node bound.
+        const providerInterrupted = code !== 0 && report.outcome === 'RETRY' && report.state === 'READY' &&
+          report.detail === 'PROVIDER_FAILED: turn.failed (unclassified)' &&
+          orchestratorFor(controlRoot, featureId).state().nodes[report.node_id]?.last_failure_fingerprint === report.detail;
+        const outcome = code === 0 || challenged ? report.outcome : providerInterrupted ? 'PROVIDER_INTERRUPTED' : 'NODE_NOT_DONE';
+        detail.push({ node_id: report.node_id, outcome, state: report.state });
+        return { node_id: report.node_id, outcome };
+    };
+    if (args.flags['review'] === true) {
+      const rawReviews = args.flags['max-reviews'];
+      const maxReviews = rawReviews === undefined ? 2 : typeof rawReviews === 'string' ? Number(rawReviews) : NaN;
+      if (!Number.isSafeInteger(maxReviews) || maxReviews < 1 || maxReviews > 6) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews must be an integer from 1 to 6.');
+      if (args.flags['deliver'] === true && loadState(featurePaths(controlRoot, featureId).featureDir)?.data.current_candidate) {
+        // Reacquire held authority before validating and delivering the pinned
+        // candidate. The finalizer independently checks readiness and drift.
+        const authority = open();
+        prepare(authority);
+        const delivery = await finalizeCodexDelivery(controlRoot, featureId, orchestratorFor(controlRoot, featureId));
+        emit(io, args, { stop_reason: 'REVIEW_PASS', nodes: [], reviews: [], reports: detail, review: null, delivery },
+          () => `REVIEW_PASS: ${delivery.candidate_id} ${delivery.status}`);
+        return delivery.ok ? 0 : 1;
+      }
+      const reviewReports: Awaited<ReturnType<typeof runReview>>[] = [];
+      const result = await continueReviewedController({ maxNodes, maxReviews, open, prepare, run, review: async () => {
+        const report = await runReview(featureId);
+        reviewReports.push(report);
+        return report;
+      } });
+      const delivery = args.flags['deliver'] === true && result.stop_reason === 'REVIEW_PASS'
+        ? await finalizeCodexDelivery(controlRoot, featureId, orchestratorFor(controlRoot, featureId))
+        : null;
+      emit(io, args, { ...result, reports: detail, review: reviewReports.at(-1) ?? null, ...(delivery ? { delivery } : {}) }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome}`).join(', ') || '(no node)'}${delivery ? `; ${delivery.candidate_id} ${delivery.status}` : ''}`);
+      return result.stop_reason === 'REVIEW_PASS' && (delivery === null || delivery.ok) ? 0 : 1;
+    }
+    if (args.flags['max-reviews'] !== undefined) throw new Error('CODEX_REVIEW_CONTINUATION_BOUND: --max-reviews requires --review.');
+    const result = await continueController({ maxNodes, open, prepare, run });
+    emit(io, args, { ...result, reports: detail }, () => `${result.stop_reason}: ${detail.map((r) => `${r.node_id} ${r.outcome} ${r.state}`).join(', ') || '(no node)'}`);
+    return result.stop_reason === 'BOUND_REACHED' && detail.every((r) => r.outcome === 'DONE') ? 0 : 1;
+  }
+  if (sub === 'run' && gate.ok) {
+    requireController(args, 'codex run');
+    const featureId = requirePositional(args, 2, 'feature-id');
+    return orchestrateGroup({ ...args, positional: ['orchestrate', 'once', featureId] }, io);
+  }
+  if (sub === 'review' && gate.ok) {
+    requireController(args, 'codex review');
+    const report = await runReview(requirePositional(args, 2, 'feature-id'));
+    emit(io, args, report, () => `Codex review ${report.review_id}: ${report.outcome}; ${report.reworked.join(', ')}`);
+    return report.outcome === 'PASS' || report.outcome === 'GAPS' ? 0 : 1;
+  }
+  if (sub !== 'status') {
+    throw new Error(`CODEX_RUNTIME_DENIED: ${gate.detail}; ${sub} is not enabled for this Codex control. No reviewer, verifier or delivery was started.`);
+  }
+  const featureId = requirePositional(args, 2, 'feature-id');
+  const paths = featurePaths(controlRoot, featureId);
+  const state = loadState(paths.featureDir)?.data ?? null;
+  const graph = existsSync(paths.graph) ? validateFeatureGraph(controlRoot, featureId) : null;
+  const report = {
+    feature_id: featureId, graph_valid: graph?.ok ?? false,
+    graph_problems: graph?.problems ?? [], state_present: state !== null,
+    feature_state: state?.feature_state ?? null,
+    nodes: state ? Object.fromEntries(Object.entries(state.nodes).map(([id, runtime]) => [id, runtime.state])) : {},
+    runtime_enabled: gate.ok, runtime_reason: gate.ok
+      ? 'Experimental disposable workers eligible; separate review and bounded delivery require a fresh codex continue --review --deliver with held authority, an approved graph and passing gates.'
+      : gate.detail,
+  };
+  emit(io, args, report, () => `${featureId}: graph ${report.graph_valid ? 'valid' : 'not valid'}, state ${report.feature_state ?? 'not initialised'}; ${report.runtime_reason}`);
+  return 0;
+}
+
 function doctor(args: ParsedArgs, io: CliIo): number {
   const controlRoot = resolveControlRoot(args);
   const paths = controlPaths(controlRoot);
@@ -439,7 +752,7 @@ function doctor(args: ParsedArgs, io: CliIo): number {
   }
 
   const config = loadConfig(controlRoot);
-  push('session adapter', true, config.session_adapter);
+  push('session adapter', true, config.adapter);
   // The standalone adapter is optional: host dispatch (the plugin's primary
   // path) never starts it. Its absence is reported, not failed.
   const adapter = preflightAdapter(config);
@@ -447,14 +760,19 @@ function doctor(args: ParsedArgs, io: CliIo): number {
     name: 'worker adapter (standalone)',
     ok: true,
     level: adapter.ok ? 'ok' : 'warn',
-    detail: adapter.ok
-      ? `${adapter.detail}`
-      : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,
+    detail: config.provider.provider === 'codex'
+      ? `Codex worker preflight ${adapter.ok ? 'ready (experimental disposable only)' : 'denied'}: ${adapter.detail}; review and bounded delivery require held authority and passing acceptance gates.`
+      : adapter.ok
+        ? `${adapter.detail}`
+        : `unavailable: ${adapter.detail}. orchestrate run cannot start workers; host dispatch (mycelink dispatch) does not need it.`,
   });
 
   if (existsSync(paths.config)) {
-    const hooks = hookHealth(controlRoot);
-    push('hooks', hooks.ok, hooks.detail);
+    if (config.provider.provider === 'codex') checks.push(...codexHealth(controlRoot, config.provider.executable ?? 'codex'));
+    else {
+      const hooks = hookHealth(controlRoot);
+      push('hooks', hooks.ok, hooks.detail);
+    }
   }
 
   const features = existsSync(paths.featuresDir)
@@ -847,21 +1165,24 @@ function featureGroup(args: ParsedArgs, io: CliIo): number {
   if (sub === 'cancel') {
     assertControllerRole(args, 'feature cancel');
     const graph = loadGraph(controlRoot, featureId);
-    mutateState(paths.featureDir, (s) => {
-      s.feature_state = 'CANCELLED';
-      s.blocked_reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : 'cancelled by user';
-      for (const [id, runtime] of Object.entries(s.nodes)) {
-        // Every claim-holding state, not only the pending ones: a node at
-        // RED_VERIFIED or REGRESSION_VERIFIED still holds its claim.
-        if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== 'INTEGRATED') {
-          s = applyNodeTransition(graph, s, id, 'PAUSED', { actor: 'mycelink', reason: 'feature cancelled' });
+    const cancel = () => {
+      mutateState(paths.featureDir, (s) => {
+        s.feature_state = 'CANCELLED';
+        s.blocked_reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : 'cancelled by user';
+        for (const [id, runtime] of Object.entries(s.nodes)) {
+          // Every claim-holding state, not only the pending ones: a node at
+          // RED_VERIFIED or REGRESSION_VERIFIED still holds its claim.
+          if (IN_FLIGHT_STATES.has(runtime.state) && runtime.state !== 'INTEGRATED') {
+            s = applyNodeTransition(graph, s, id, 'PAUSED', { actor: 'mycelink', reason: 'feature cancelled' });
+          }
         }
+        return s;
+      });
+      for (const nodeId of Object.keys(loadState(paths.featureDir)?.data.nodes ?? {})) {
+        releaseAllForNode(paths.featureDir, nodeId);
       }
-      return s;
-    });
-    for (const nodeId of Object.keys(loadState(paths.featureDir)?.data.nodes ?? {})) {
-      releaseAllForNode(paths.featureDir, nodeId);
-    }
+    };
+    cancel();
     emit(io, args, { feature_id: featureId, cancelled: true }, () => `${featureId} cancelled; claims and leases released.`);
     return 0;
   }
@@ -1493,6 +1814,7 @@ function evidenceGroup(args: ParsedArgs, io: CliIo): number {
     const graph = loadGraph(controlRoot, featureId);
     const node = graph.nodes.find((n) => n.id === nodeId);
     const record = runVerification({
+      readonlyFixture: node?.readonly_fixture ? { controlRoot, declaration: node.readonly_fixture } : undefined,
       kind,
       nodeId,
       repository: node?.repository ?? null,
@@ -1534,7 +1856,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   if (!node) throw new Error(`Node "${nodeId}" is not in the graph.`);
 
   const doc = loadState(paths.featureDir);
-  const runtime = doc?.data.nodes[nodeId];
+  let runtime = doc?.data.nodes[nodeId];
   if (!runtime) throw new Error(`Node "${nodeId}" has no runtime state.`);
   // Only the holder of the node's current claim may record its gates, or read the tests they ran.
   const capability = presentedCapability(args);
@@ -1559,6 +1881,23 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
   // A gate that could not move the node is refused before it runs anything:
   // running the verifier anyway records evidence for nothing and, when it
   // fails, counts a failure the gate order caused.
+  if (phase === 'regression' && runtime.state === 'CLAIMED' && runtime.claim?.mode === 'adapter' && runtime.claim.worktree && capability !== undefined) {
+    const controller = orchestratorFor(controlRoot, featureId);
+    const claim = runtime.claim;
+    mutateState(paths.featureDir, (s) => {
+      assertClaimCapability(nodeId, s.nodes[nodeId], capability);
+      if (s.nodes[nodeId]?.state !== 'CLAIMED' ||
+          controller.codexClaimScope(nodeId, claim.claim_id, capability, claim.worktree!)?.nextGate !== 'regression') return s;
+      // Re-establish only gates the retained, integrity-checked evidence already
+      // passed. Regression still runs normally at the current committed head.
+      let next = s;
+      for (const stage of ['RED_PENDING', 'RED_VERIFIED', 'GREEN_PENDING', 'GREEN_VERIFIED'] as const) {
+        next = applyNodeTransition(graph, next, nodeId, stage, { actor: 'mycelink' });
+      }
+      return next;
+    });
+    runtime = loadState(paths.featureDir)!.data.nodes[nodeId]!;
+  }
   const gatePending = phase === 'red' ? 'RED_PENDING' : phase === 'green' ? 'GREEN_PENDING' : null;
   const gateVerified =
     phase === 'red' ? 'RED_VERIFIED' : phase === 'green' ? 'GREEN_VERIFIED' : 'REGRESSION_VERIFIED';
@@ -1687,6 +2026,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
       ? redDeclaredTests(worktree, policy, runtime.claim?.base_sha ?? runtime.branch_base_sha ?? null)
       : null;
   const ran = runVerification({
+    readonlyFixture: node.readonly_fixture ? { controlRoot, declaration: node.readonly_fixture } : undefined,
     kind,
     nodeId,
     repository: node.repository,
@@ -1826,12 +2166,12 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
         : [
             `\nThe tests this RED declares all pass on the unchanged base (${challenge.head_sha.slice(0, 12)}): never change production code for them and never make a test fail on purpose.`,
             completedNow.length > 0
-              ? ` ${completedNow.join(', ')} ${completedNow.length === 1 ? 'was' : 'were'} completed by an earlier generation (rework.completed_criteria): a test here that is exactly the review's reproduction of ${completedNow.length === 1 ? 'it' : 'one'} is its re-proof — the completed behaviour holds on this code. Keep that test out of the branch (restore its file: this gate kept its copy) and answer the criterion DONE citing its completed proof exactly as rework.completed_criteria gives it and this test's test_id with gate "red" and this gate's sha256 (${record.output_sha256}).`
+              ? ` ${completedNow.join(', ')} ${completedNow.length === 1 ? 'was' : 'were'} completed by an earlier generation (rework.completed_criteria). If a passing test is exactly the review's reproduction, make a review-gap challenge first: run the challenge line with --criteria <AC>, fill its focused tests and assertion traces, write REVIEW_GAP_CHALLENGE and run the check line; no git restore is required for a challenge because the gate kept its copy and settlement abandons this worktree. Do not call the gap closed until a separate reviewer judges it. A distinct re-proof path may answer DONE only with both the completed proof from rework.completed_criteria and this test's test_id with gate "red" and this gate's sha256 (${record.output_sha256}); keep that test out of the branch without weakening an existing test.`
               : '',
             behaviours.filter((ac) => !completedNow.includes(ac)).length > 0
               ? ` If they are exactly the acceptance review's reproduction of ${behaviours.filter((ac) => !completedNow.includes(ac)).join(', ')}, its gap does not reproduce on this code: that is a review-gap challenge, not a RED to fake — run the challenge line (mycelink tdd challenge ${featureId} ${nodeId} --capability <your capability>, narrowed with --criteria), write outcome REVIEW_GAP_CHALLENGE for it, run the check line.`
               : completedNow.length > 0
-                ? ` If you hold the review's gap wrong instead, that is a review-gap challenge: the challenge line, narrowed with --criteria, outcome REVIEW_GAP_CHALLENGE for it.`
+                ? ''
                 : '',
             compat.length > 0 ? ` A test of ${compat.join(', ')} (compatibility) is its compatibility-regression unit: commit it alone with its trailer, then green and regression.` : '',
             ' If they are not yet exactly the reproduction, make them so and run red again.',
@@ -1870,7 +2210,7 @@ function tddGroup(args: ParsedArgs, io: CliIo): number {
       ? ''
       : [
           '',
-          'RED-bound test files: commit exactly these, then never change them after the production change begins. A compatibility test goes into a new test file; a later test in one of them goes in before its red gate, or after `mycelink tdd cycle` declares a new complete RED cycle.',
+          'RED accepted: commit these exact test files now without further edits. A second RED in this claim is out of order; if the accepted test needs revision, stop and request a fresh controller claim. After the test-only commit, edit production and run GREEN. A later test in a bound file requires a new complete RED cycle after the first one is finished.',
           ...redBound.map((t) => `  RED-bound ${t.path} ${t.blob}`),
         ].join('\n');
   emit(io, args, { ok: true, state: verified, evidence: record, ...testsJson, ...(redBound.length > 0 ? { red_bound: redBound } : {}), ...(resetUp !== null ? { worktree_setup_rerun: resetUp } : {}) }, () =>
@@ -2776,6 +3116,38 @@ function loopGroup(args: ParsedArgs, io: CliIo): number {
 
   io.err(`Unknown loop command "${sub}".`);
   return 2;
+}
+
+/** Bind a continuation answer to one pending, controller-recorded request. */
+function codexContinuationDecision(args: ParsedArgs, controlRoot: string, featureId: string): { id: string; nodeId: string } {
+  const id = args.flags['answer-decision'];
+  const answer = args.flags['answer'];
+  const refuse = (): never => { throw new Error('CODEX_DECISION_INVALID: both answer flags must identify one pending recorded request and an exact durable option.'); };
+  if (typeof id !== 'string' || !/^DEC-[0-9a-f]{8}$/.test(id) || typeof answer !== 'string' || answer.length === 0) return refuse();
+  const paths = featurePaths(controlRoot, featureId);
+  const state = loadState(paths.featureDir)?.data;
+  if (!state || state.pending_decisions.filter((pending) => pending === id).length !== 1) return refuse();
+  const events = readEvents(paths.events, { includeRotated: true });
+  const related = events.filter((event) => event.data?.decision_id === id);
+  if (related.some((event) => event.type === 'decision.recorded' || event.type === 'decision.applied')) return refuse();
+  const requests = related.filter((event) => event.type === 'decision.requested');
+  if (requests.length !== 1) return refuse();
+  const request = requests[0]!;
+  const nodeId = request.node_id;
+  if (request.actor !== 'mycelink' || request.feature_id !== featureId || !nodeId ||
+      state.nodes[nodeId]?.state !== 'NEEDS_DECISION' || !loadGraph(controlRoot, featureId).nodes.some((node) => node.id === nodeId)) return refuse();
+  if (!existsSync(paths.decisions)) return refuse();
+  const sections = readFileSync(paths.decisions, 'utf8').replace(/\r\n/g, '\n').split(/(?=^## )/m)
+    .filter((section) => section.startsWith(`## ${id} (`));
+  if (sections.length !== 1) return refuse();
+  const lines = sections[0]!.split('\n');
+  const nodes = lines.filter((line) => line.startsWith('- Node: '));
+  const statuses = lines.filter((line) => line.startsWith('- Status: '));
+  const options = lines.filter((line) => line.startsWith('  - [ ] ')).map((line) => line.slice(8));
+  if (nodes.length !== 1 || nodes[0] !== `- Node: \`${nodeId}\`` ||
+      statuses.length !== 1 || statuses[0] !== '- Status: PENDING' ||
+      options.filter((option) => option === answer).length !== 1) return refuse();
+  return { id, nodeId };
 }
 
 function decisionGroup(args: ParsedArgs, io: CliIo): number {

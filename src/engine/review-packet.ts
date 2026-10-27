@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import type { CriterionKind, FeatureState_, GraphNode, PortfolioGraph, ReviewInputs, ReviewProblem } from '../model/types.js';
 import { isAncestor, runGit } from '../git/git.js';
-import { removeWorkerWorktree } from '../git/worktree.js';
+import { makeRelativeGitPointers, removeWorkerWorktree } from '../git/worktree.js';
 import { readGateTests } from '../evidence/gate-tests.js';
 import { repositoryPath, type Workspace } from '../workspace/workspace.js';
 import { encodePackForPrompt } from '../sessions/worker-protocol.js';
@@ -205,16 +205,20 @@ export function removeReviewCheckouts(controlRoot: string, featureId: string, re
 }
 
 /** A detached checkout of `sha` for the reviewer to read; one already there at `sha` is kept. */
-function checkout(repoPath: string, at: string, sha: string): void {
+function checkout(repoPath: string, at: string, sha: string, crossPlatformGit: boolean): void {
   if (existsSync(at)) {
     const head = runGit(at, ['rev-parse', 'HEAD'], { allowFail: true });
-    if (head.exitCode === 0 && head.stdout.trim() === sha) return;
+    if (head.exitCode === 0 && head.stdout.trim() === sha) {
+      if (crossPlatformGit) makeRelativeGitPointers(at);
+      return;
+    }
     removeWorkerWorktree(repoPath, at);
   }
   mkdirSync(join(at, '..'), { recursive: true });
   runGit(repoPath, ['worktree', 'prune'], { allowFail: true });
   runGit(repoPath, ['worktree', 'add', '--detach', at, sha]);
   runGit(at, ['config', 'core.autocrlf', 'false'], { allowFail: true });
+  if (crossPlatformGit) makeRelativeGitPointers(at);
 }
 
 /**
@@ -282,7 +286,7 @@ export function buildReviewPacket(args: PacketArgs): { packet: ReviewPacket; pat
   const repositories: ReviewPacket['repositories'] = args.inputs.repositories.map((r) => {
     const repoPath = repositoryPath(workspace, r.name);
     const at = checkoutOf(controlRoot, featureId, args.reviewId, r.name);
-    checkout(repoPath, at, r.head_sha);
+    checkout(repoPath, at, r.head_sha, workspace.config.provider.provider === 'codex' && workspace.config.experimental_codex?.wsl !== undefined);
     const base = featureBase(controlRoot, featureId, workspace, r.name, r.head_sha);
     const diffFile = join(dir, `${r.name}.diff`);
     {

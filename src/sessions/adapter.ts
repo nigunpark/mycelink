@@ -6,6 +6,13 @@
  * interface, which is what keeps the automated suite free of model usage.
  */
 import type { UsageTotals } from '../model/types.js';
+import type { CodexTranscriptEvidence } from './codex-transcript.js';
+import type { ChannelResponse } from './codex-claim-channel.js';
+
+export type ProviderId = 'claude' | 'codex' | 'fake';
+export type AdapterId = 'claude-cli' | 'codex-cli' | 'fake-provider';
+export type LegacyAdapterId = 'claude-background' | 'fake-claude';
+export type SessionAdapterId = AdapterId | LegacyAdapterId;
 
 export interface NodeResult {
   /** 2: each criterion an acceptance review's rework orders may be answered on its own (outcome CRITERIA). */
@@ -159,6 +166,8 @@ export interface SpawnRequest {
    * the worker verbatim and pre-approved as that exact command line only.
    */
   gateCommands?: { gate: 'red' | 'green' | 'regression'; argv: string[] }[];
+  /** Controller-only, per-attempt handler; never serialized into the worker pack. */
+  claimChannel?: { handle: (request: unknown) => ChannelResponse; probeEnabled?: boolean; redactEnv?: Record<string, string> };
   env?: Record<string, string>;
   /** Links a replacement session to the one it took over from. */
   replacesSessionId?: string | null;
@@ -166,7 +175,7 @@ export interface SpawnRequest {
 
 export interface SessionHandle {
   session_id: string;
-  adapter: 'fake-claude' | 'claude-background';
+  adapter: SessionAdapterId;
   pid: number | null;
   node_id: string;
   claim_id: string;
@@ -176,6 +185,15 @@ export interface SessionHandle {
 }
 
 export interface SessionObservation {
+  /** Provider-process evidence only; not worker result ownership or reviewer verdict authority. */
+  codex_evidence?: CodexTranscriptEvidence & { process_session_id: string };
+  /** Separate untrusted worker slot; no Codex reviewer verdict is inferred from worker text. */
+  codex_provenance?: {
+    provider: 'codex';
+    process_session_id: string;
+    worker_result: { source: 'worktree-result-slot'; attested: false; node_id: string; claim_id: string; sha256: string } | null;
+    reviewer_verdict: null;
+  };
   status: SessionStatus;
   exit_code: number | null;
   turns: number;
@@ -187,7 +205,7 @@ export interface SessionObservation {
 }
 
 export interface SessionAdapter {
-  readonly name: 'fake-claude' | 'claude-background';
+  readonly name: SessionAdapterId;
   spawn(request: SpawnRequest): SessionHandle;
   /** Current observation without blocking. */
   poll(handle: SessionHandle): SessionObservation;

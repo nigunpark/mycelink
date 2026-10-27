@@ -104,9 +104,12 @@ export function loadState(featureDir: string): AtomicDoc<FeatureState_> | null {
 }
 
 export function saveState(featureDir: string, state: FeatureState_): AtomicDoc<FeatureState_> {
-  const problems = validateAgainstSchema('state', state);
-  if (problems.length > 0) throw new StateSchemaError(problems);
-  return writeDocAtomic(stateFilePath(featureDir), state);
+  const write = (): AtomicDoc<FeatureState_> => {
+    const problems = validateAgainstSchema('state', state);
+    if (problems.length > 0) throw new StateSchemaError(problems);
+    return writeDocAtomic(stateFilePath(featureDir), state);
+  };
+  return write();
 }
 
 /**
@@ -124,7 +127,7 @@ export function mutateState(
   mutate: (state: FeatureState_) => FeatureState_,
   options: { lockTimeoutMs?: number } = {},
 ): FeatureState_ {
-  return withLock(
+  const update = (): FeatureState_ => withLock(
     stateLockPath(featureDir),
     () => {
       const doc = loadState(featureDir);
@@ -138,4 +141,5 @@ export function mutateState(
     },
     { timeoutMs: options.lockTimeoutMs ?? 15_000, pollMs: 10, purpose: 'STATE.json mutation' },
   );
+  return update();
 }

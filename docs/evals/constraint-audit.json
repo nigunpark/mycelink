@@ -1914,7 +1914,7 @@
       ],
       "anchor": {
         "file": "src/evidence/store.ts",
-        "contains": "export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array): StoredArtifact {"
+        "contains": "export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array, mode = 0o644): StoredArtifact {"
       }
     },
     {
@@ -2963,9 +2963,9 @@
     },
     "test_files_naming_case": {
       "CSET-201": 24,
-      "CSET-202": 40,
+      "CSET-202": 41,
       "CSET-203": 106,
-      "PCM-101": 23,
+      "PCM-101": 24,
       "PCM-102": 2,
       "PCM-103": 6
     }

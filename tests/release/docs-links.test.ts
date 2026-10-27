@@ -83,4 +83,16 @@ describe('Markdown links', () => {
   it('all resolve: relative paths, their anchors, and this repository’s GitHub URLs', () => {
     expect(files.flatMap((f) => brokenLinks(f))).toEqual([]);
   });
+
+  it('links the shipped Codex guide from the README and security documentation', () => {
+    const guide = readFileSync(join(ROOT, 'docs/CODEX.md'), 'utf8');
+    expect(readFileSync(join(ROOT, 'README.md'), 'utf8')).toContain('(docs/CODEX.md)');
+    for (const name of ['ADAPTERS', 'PERMISSION_MODEL', 'THREAT_MODEL', 'DATA_HANDLING', 'RELEASING']) {
+      expect(readFileSync(join(ROOT, `docs/${name}.md`), 'utf8'), name).toContain('(CODEX.md)');
+    }
+    for (const term of ['CODEX_RUNTIME_DENIED', '0.163.0', 'CODEX_HOME', 'AppContainer', 'hardlink', 'mcp_servers']) {
+      expect(guide, term).toContain(term);
+    }
+    expect(readFileSync(join(ROOT, 'scripts/package.mjs'), 'utf8')).toContain("'docs/CODEX.md'");
+  });
 });

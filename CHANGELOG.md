@@ -6,6 +6,17 @@ All notable changes to Mycelink are recorded here. The format follows
 version is 0, minor releases may contain breaking changes; they are called out
 under **Breaking**.
 
+### Development branch note — Codex discovery, not part of the published beta
+
+- Added a shipped planning-only Codex guide covering isolated `CODEX_HOME`
+  marketplace installation, `codex init`, `doctor`, auth status, migration and
+  cleanup. Observed CLI 0.163.0 plugin metadata and app-server skills/list,
+  plus model-free graph/denial tests, do **not** establish Codex host parity.
+- `CODEX_RUNTIME_DENIED` remains unconditional: the MXC hardlink-alias
+  counterexample, unconstrained MCP effects, failed AppContainer launch, and
+  unsealed worker/reviewer result provenance block dispatch and delivery.
+  CSET-202 / PCM-101 PRD-to-delivery E2E and actual cross-OS CI are unverified.
+
 ## [Unreleased]
 
 ## [0.3.0-beta.1]

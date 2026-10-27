@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import type {
   AdoptedBase,
   CapsuleRegistryEntry,
@@ -49,7 +50,7 @@ import { MAX_LEDGER_RECORDS, carriedRed, completionsOf, ledgerOf, revalidateComp
 import { readGateTests } from '../evidence/gate-tests.js';
 import { TEST_IDENTITY_VERSION, namesDeclaration } from '../evidence/test-identity.js';
 import { commitProofUnit, planProofUnit, type ProofFile } from './proof-units.js';
-import { tddPolicyFor, tddPolicySha256, verifyTddHistory, type TddHistory, type TddPolicy } from './tdd-history.js';
+import { redBindingMatchesWorktree, tddPolicyFor, tddPolicySha256, verifyTddHistory, type TddHistory, type TddPolicy } from './tdd-history.js';
 import {
   WorktreeSetupError,
   reusableSetup,
@@ -68,11 +69,12 @@ import { featurePaths, nodeEvidenceDir, type FeaturePaths } from '../workspace/p
 import { loadWorkspace, repositoryPath, type Workspace } from '../workspace/workspace.js';
 import { loadGraph } from '../workspace/workspace.js';
 import { hashGraph } from '../graph/validate.js';
-import { addUsage, loadState, mutateState, zeroUsage } from '../state/feature-state.js';
+import { addUsage, loadState, mutateState, stateLockPath, zeroUsage } from '../state/feature-state.js';
 import { BARRIER_KINDS, activeLeases, bumpEpoch, closeLeases, currentEpoch, issueLease, leaseKindFor, leaseOf, lineageOf, markStale, orchestrationOf } from '../state/orchestration.js';
 import {
   accumulateUsage,
   applyNodeTransition,
+  assertTaskDependencies,
   recordFailure,
   redRequired,
   SETTLE_GATE_STATE,
@@ -99,7 +101,7 @@ import {
   renderGateCommand,
 } from '../sessions/worker-protocol.js';
 import { statusForOutcome } from '../sessions/adapter.js';
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, unlinkSync } from 'node:fs';
+import { closeSync, constants as fsConstants, fstatSync, fsyncSync, lstatSync, openSync, unlinkSync, writeSync } from 'node:fs';
 import type { PreflightResult } from '../sessions/preflight.js';
 import {
   acquireResource,
@@ -125,11 +127,15 @@ import { admitReworkReason, reasonSha256, reworkAcceptance, ReworkBriefError, re
 import { loadScenarios, runE2E } from '../e2e/runner.js';
 import { applyIntegration, DirtyWorktreeError, fastForwardIntegration, IntegrationConflictError, planIntegration, type IntegrateResult } from '../git/integrate.js';
 import { coverageManifest, declaredAt, lostCompletions, type CompletionCoverage, type CoverageManifest } from './criterion-coverage.js';
+import { completionImportProblems } from './continuation-import.js';
 import { branchExists, commitAll, isAncestor, isWorktreeClean, listWorktrees, resolveRef, runGit } from '../git/git.js';
 import { quarantineStash, type StashQuarantine } from '../git/stash.js';
 import { assertDecisionUsable, markDecisionApplied } from '../state/decisions.js';
-import { buildContextPack, type ContextCapsule, type ContextPack, type MemoryRef } from '../sessions/context-pack.js';
+import { verifyReadonlyFixture, buildContextPack, type ContextCapsule, type ContextPack, type MemoryRef } from '../sessions/context-pack.js';
 import { mycelinkCliPath } from '../workspace/hook-settings.js';
+import { redactText } from '../security/redact.js';
+import { runClaimProbe } from '../sessions/codex-claim-probe.js';
+import type { ProbeResult } from '../sessions/codex-claim-channel.js';
 import { moduleInvocation, runVerification, verifierInvocation } from '../evidence/runner.js';
 import { claimVerificationFor, ModuleDriftError } from './modules.js';
 import { regressionDeferral } from './regression-deferral.js';
@@ -171,6 +177,8 @@ import { writeTextAtomic } from '../state/atomic-json.js';
 import { keepExactCopy, writeImmutable } from '../evidence/store.js';
 import { repairRequired, repairRequiredDetail } from './evidence-integrity.js';
 import type { NodeResult, SessionAdapter, SessionStatus, SpawnRequest } from '../sessions/adapter.js';
+import { ClaimChannel, type LiveClaim } from '../sessions/codex-claim-channel.js';
+import { executeHostClaimGate } from '../sessions/codex-host-gate.js';
 import {
   findOrphanedSessions,
   recordObservation,
@@ -220,6 +228,7 @@ import {
   type VerdictProblem,
 } from './acceptance-review.js';
 import { MAX_REVIEW_FINDINGS, buildReviewPacket, controlRelative, loadPacket, refinementContext, refinementPrompt, removeReviewCheckouts, reviewerPrompt, verdictContext, type PacketRefinement, type ReviewCorrection, type ReviewFinding, type ReviewMemory, type ReviewPacket } from './review-packet.js';
+import { codexReviewerPaths, runCodexReviewSession } from './codex-review-session.js';
 import { DEFAULT_REVIEWER_TIMEOUT_MS, MAX_RESULT_DEPTH, REVIEWER_TRANSPORT, reviewerLifecycle, reviewerOutput, safeGenerationDir, writeIngestAttestation, writeIngestedVerdict, type AgentEvidence, type AgentOutput, type ResultExtraction, type ReviewerLifecycle, type ReviewerLifecycleState, type TransportCode } from './review-transport.js';
 import { parseStrictJson } from '../security/strict-json.js';
 import { countInterruption, emptyProviderLedger, holderFailure, launchFiles, providerMark, recordInterruption, ticketOf, type HolderFailure } from './provider-interrupt.js';
@@ -459,6 +468,10 @@ export interface FeatureRunReport {
   /** The adapter preflight, when one ran. */
   adapter?: PreflightResult;
 }
+
+/** In-memory diagnostics only: shared across controller/channel objects in this host. */
+const claimProbeBudgets = new Map<string, { attempts: number; deadline: number }>();
+const closedProbeClaims = new Set<string>();
 
 /** Node types the controller runs itself; never a rework target. */
 const CONTROLLER_NODE_TYPES: ReadonlySet<string> = new Set(['candidate-build', 'e2e-scenario', 'verification']);
@@ -1274,9 +1287,12 @@ export class Orchestrator {
 
   /** Throw GraphDriftError unless the graph still hashes to the one STATE.json was initialised for. */
   assertGraphUnchanged(): void {
-    const recorded = this.state().graph_hash;
+    const state = this.state();
+    const recorded = state.graph_hash;
     const current = hashGraph(this.graph());
     if (current !== recorded) throw new GraphDriftError(this.featureId, recorded, current);
+    const importProblems = completionImportProblems(this.controlRoot, state);
+    if (importProblems.length > 0) throw new Error(`IMPORT_PROVENANCE_INVALID: ${importProblems.map((p) => p.detail).join('; ')}`);
   }
 
   node(id: string): GraphNode {
@@ -1369,6 +1385,11 @@ export class Orchestrator {
     const graph = this.graph();
     const node = this.node(nodeId);
     const mode = options.mode ?? 'adapter';
+    if (node.readonly_fixture && (mode !== 'adapter' || node.node_type !== 'implementation'
+      || this.adapter.name !== 'codex-cli' || this.workspace.config.experimental_codex?.enabled !== true
+      || node.repository === null || !this.workspace.config.experimental_codex.disposable_repositories.includes(node.repository))) {
+      throw new Error('FIXTURE_SCOPE_DENIED: read-only fixtures require an enabled disposable Codex implementation worker');
+    }
     // A verification node writes nothing and has no worker: only the controller's own run claims it, with no worktree.
     const verifying = node.node_type === 'verification';
     if (verifying && mode !== 'controller') throw new NotWorkerNodeError(nodeId, node.node_type);
@@ -1527,6 +1548,8 @@ export class Orchestrator {
       worktreeRoot: this.workspace.paths.worktreesDir,
       repositoryName: node.repository,
       startPoint,
+      crossPlatformGit: process.platform === 'win32' && this.workspace.config.provider.provider === 'codex'
+        && this.workspace.config.experimental_codex?.enabled === true && !!this.workspace.config.experimental_codex.wsl,
     });
     // An existing branch with no recorded base (made by `branch create`, or
     // before bases were recorded) is fenced from where it meets the start point.
@@ -1811,6 +1834,127 @@ export class Orchestrator {
       }));
   }
 
+  /** Reload graph and claim for each request, never from worker-supplied scope. */
+  codexClaimScope(nodeId: string, claimId: string, capability: string, worktree: string): LiveClaim | null {
+    const graph = this.graph();
+    const state = this.state();
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    const rt = state.nodes[nodeId];
+    const claim = rt?.claim;
+    if (state.graph_hash !== hashGraph(graph) || !node || node.repository === null || !claim ||
+        claim.mode !== 'adapter' || claim.claim_id !== claimId || !claim.worktree ||
+        resolve(claim.worktree) !== resolve(worktree) || !isInsideReal(worktree, claim.worktree) ||
+        !claim.capability_sha256 || !capabilityMatches(capability, claim.capability_sha256)) return null;
+    const nextGate = rt.state === 'CLAIMED' || rt.state === 'RED_PENDING'
+      ? (rt.state === 'CLAIMED' && this.retainedCodexGreen(state, node, rt) ? 'regression' : redRequired(node, rt) ? 'red' : 'green')
+      : rt.state === 'RED_VERIFIED' || rt.state === 'GREEN_PENDING' ? 'green'
+        : rt.state === 'GREEN_VERIFIED' ? 'regression' : null;
+    return {
+      claimId, generation: claim.generation, dispatchId: claim.dispatch_id, featureId: this.featureId, nodeId,
+      repoPath: repositoryPath(this.workspace, node.repository), worktree: claim.worktree,
+      expectedHead: resolveRef(claim.worktree, 'HEAD'),
+      allowedPaths: [...node.allowed_paths], forbiddenPaths: [...(node.forbidden_paths ?? [])],
+      tddPolicy: claim.tdd_policy ?? this.claimTddPolicy(node.repository),
+      nextGate, gateCommands: this.gateCommands(nodeId, capability),
+      ...(rt.rework_brief?.origin?.kind === 'acceptance-review'
+        ? { challengeCriteria: [...rt.rework_brief.acceptance_criteria] } : {}),
+    };
+  }
+
+  /** Infrastructure release keeps gates, but only this lineage's intact gates confer authority. */
+  private retainedCodexGreen(state: FeatureState_, node: GraphNode, rt: NodeRuntime): boolean {
+    const claim = rt.claim;
+    const red = rt.evidence.red;
+    const green = rt.evidence.green;
+    if (!claim?.worktree || claim.mode !== 'adapter' || !red || !green || red.carried_from != null ||
+        claim.generation !== (rt.rework_brief?.generation ?? (rt.rework_history ?? []).filter(stoodRework).length) ||
+        red.kind !== 'red' || red.exit_code === 0 || red.red_reason !== 'behaviour-missing' ||
+        green.kind !== 'green' || green.exit_code !== 0) return false;
+    try {
+      const head = resolveRef(claim.worktree, 'HEAD');
+      for (const record of [red, green]) {
+        const started = Date.parse(record.started_at);
+        const finished = Date.parse(record.finished_at);
+        // Evidence records predate the fresh claim. The durable lease identifies the
+        // generation and lineage whose capability could record them at that time.
+        if (record.node_id !== node.id || record.repository !== node.repository ||
+            resolve(this.controlRoot, record.cwd) !== resolve(claim.worktree) ||
+            !record.commit_sha || !isAncestor(claim.worktree, record.commit_sha, head) ||
+            !Number.isFinite(started) || !Number.isFinite(finished) || finished < started ||
+            !(state.orchestration?.leases ?? []).some((lease) => lease.node_id === node.id &&
+              lease.generation === claim.generation && lease.lineage === lineageOf(state, node.id) &&
+              lease.worktree != null && resolve(lease.worktree) === resolve(claim.worktree!) &&
+              Date.parse(lease.issued_at) <= started &&
+              (lease.closed_at === null || Date.parse(lease.closed_at) >= finished)) ||
+            checkEvidenceOutput(this.controlRoot, this.featureId, record, { overlay: false }) !== null ||
+            !record.results || checkEvidenceOutput(this.controlRoot, this.featureId,
+              { output_path: record.results.path, output_sha256: record.results.sha256 }, { overlay: false }) !== null ||
+            !readGateTests(this.controlRoot, record)?.length) return false;
+        if (claim.verification && (record.module !== claim.verification.module ||
+            record.module_sha256 !== claim.verification.module_sha256 ||
+            record.plan_sha256 !== claim.verification.plan_sha256)) return false;
+      }
+      // Bound RED and GREEN may use phase-specific commands. Both must prove
+      // the claim's same module and plan; unbound gates still require equal argv.
+      if (Date.parse(green.started_at) < Date.parse(red.finished_at) ||
+          (!claim.verification && JSON.stringify(red.command) !== JSON.stringify(green.command))) return false;
+      const binding = [...(rt.tdd_red_bindings ?? [])].reverse().find((b) => b.evidence_sha256 === red.output_sha256);
+      return binding !== undefined && binding.head_sha === red.commit_sha &&
+        redBindingMatchesWorktree(claim.worktree, claim.tdd_policy ?? this.claimTddPolicy(node.repository!), binding);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Diagnostic budget belongs to the host claim, never a mailbox/channel instance. */
+  codexProbeClaim(nodeId: string, claimId: string, capability: string, worktree: string, options: { deadlineMs: number }): ProbeResult {
+    const fail = (output: string): ProbeResult => ({ exitCode: 2, output });
+    try {
+      const scope = this.codexClaimScope(nodeId, claimId, capability, worktree);
+      if (!scope) return fail('CHANNEL_CLAIM_STALE');
+      if (scope.nextGate !== 'red' || this.state().nodes[nodeId]?.evidence.red) return fail('CHANNEL_PROBE_UNAVAILABLE');
+      if (!Number.isSafeInteger(options.deadlineMs) || options.deadlineMs < 1 || options.deadlineMs > 600_000) return fail('CHANNEL_PROBE_DEADLINE_INVALID');
+      const claim = this.state().nodes[nodeId]!.claim!;
+      const generation = claim.generation;
+      const dispatchId = claim.dispatch_id;
+      if (!claim.base_sha || scope.expectedHead !== claim.base_sha) return fail('CHANNEL_PROBE_HEAD_DRIFT');
+      const key = `${this.controlRoot}:${this.featureId}:${nodeId}:${claimId}`;
+      if (closedProbeClaims.has(key)) return fail('CHANNEL_PROBE_UNAVAILABLE');
+      if (!claim.branch || runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim() !== claim.branch || resolveRef(scope.repoPath, `refs/heads/${claim.branch}`) !== scope.expectedHead) return fail('CHANNEL_PROBE_HEAD_DRIFT');
+      let budget = claimProbeBudgets.get(key);
+      if (!budget) {
+        budget = { attempts: 0, deadline: Math.min(Date.now() + options.deadlineMs, claim.expires_at ? Date.parse(claim.expires_at) : Infinity) };
+        claimProbeBudgets.set(key, budget);
+      }
+      if (budget.attempts >= 3) return fail('CHANNEL_PROBE_LIMIT');
+      if (Date.now() >= budget.deadline) return fail('CHANNEL_PROBE_TIMEOUT');
+      budget.attempts++;
+      const node = this.node(nodeId);
+      const fresh = loadWorkspace(this.controlRoot);
+      const repo = fresh.repositories.repositories.find(r => r.name === node.repository);
+      const bound = repo ? claimVerificationFor(nodeId, node.verification_commands[0], repo) : null;
+      if (!bound || !claim.verification || bound.module_sha256 !== claim.verification.module_sha256 || bound.plan_sha256 !== claim.verification.plan_sha256) return fail('CHANNEL_PROBE_MODULE_DRIFT');
+      if (claim.worktree_setup?.inputs_sha256 && setupInputs(worktree, claim.worktree_setup.config)?.sha256 !== claim.worktree_setup.inputs_sha256) return fail('CHANNEL_PROBE_SETUP_INPUT_DRIFT');
+      if (claim.worktree_setup && worktreeSetupSha256(claim.worktree_setup.config) !== claim.worktree_setup.config_sha256) return fail('CHANNEL_PROBE_SETUP_DRIFT');
+      const current = () => {
+        const now = this.codexClaimScope(nodeId, claimId, capability, worktree);
+        const state = this.state();
+        const live = state.nodes[nodeId]?.claim;
+        const lease = leaseOf(state, h => capabilityMatches(capability, h));
+        return !!now && now.nextGate === 'red' && now.expectedHead === scope.expectedHead &&
+          now.generation === generation && now.dispatchId === dispatchId &&
+          !!live && (!live.expires_at || Date.parse(live.expires_at) > Date.now()) &&
+          lease?.status === 'active' && lease.claim_id === claimId && lease.generation === generation &&
+          lease.lineage === lineageOf(state, nodeId) &&
+          runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim() === claim.branch &&
+          resolveRef(scope.repoPath, `refs/heads/${claim.branch}`) === scope.expectedHead;
+      };
+      return runClaimProbe({ scope, bound, setup: this.checkoutSetup(nodeId, node.repository!), controlRoot: this.controlRoot,
+        deadline: Math.min(budget.deadline, Date.now() + options.deadlineMs), current,
+        readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined });
+    } catch (e) { return fail(redactText((e as Error).message).slice(0, 32 * 1024)); }
+  }
+
   /** Write the node's context pack and return its path. */
   writeContextPack(nodeId: string, claimId: string): string {
     const graph = this.graph();
@@ -1818,6 +1962,7 @@ export class Orchestrator {
     const node = this.node(nodeId);
     const runtime = state.nodes[nodeId];
     const pack = buildContextPack({
+      controlRoot: this.controlRoot,
       graph,
       state,
       nodeId,
@@ -1866,6 +2011,10 @@ export class Orchestrator {
   ): { ok: boolean; evidence: EvidenceRecord[]; detail: string; sha?: string; setupFailed?: boolean } {
     const labelPrefix = options.labelPrefix ?? 'fresh';
     const node = this.node(nodeId);
+    if (node.readonly_fixture) {
+      try { verifyReadonlyFixture(this.controlRoot, node.readonly_fixture); }
+      catch (e) { return { ok: false, evidence: [], detail: (e as Error).message }; }
+    }
     const evidence: EvidenceRecord[] = [];
     if (node.repository === null) {
       return { ok: true, evidence, detail: 'no repository to verify' };
@@ -1964,7 +2113,7 @@ export class Orchestrator {
       const bindSetup = (record: EvidenceRecord): EvidenceRecord => (setupReceipt === null ? record : { ...record, worktree_setup_sha256: setupReceipt });
       for (const [i, verifier] of node.verification_commands.entries()) {
         const moduleRun = bound !== undefined && i === 0 && verifier.module === bound.module;
-        const record = bindSetup(runVerification({
+        const record = bindSetup(runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
           kind: 'green',
           nodeId,
           repository: node.repository,
@@ -1993,7 +2142,7 @@ export class Orchestrator {
         // The full suite: the one the claim bound, else the repository's.
         const command = bound?.regression.command ?? repoDecl?.commands.regression ?? repoDecl?.commands.test;
         if (command) {
-          const record = bindSetup(runVerification({
+          const record = bindSetup(runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
             kind: 'regression',
             nodeId,
             repository: node.repository,
@@ -2351,7 +2500,7 @@ export class Orchestrator {
       }
       const declared = node.verification_commands[0];
       const plan = bound !== undefined ? moduleInvocation(bound) : verifierInvocation({ command: binding?.command ?? declared?.command ?? [] });
-      const record = runVerification({
+      const record = runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
         kind: 'red',
         nodeId,
         repository,
@@ -2633,15 +2782,62 @@ export class Orchestrator {
         ),
         stallMs: Math.max(30_000, Math.floor(node.worker.max_wall_clock_minutes * 60_000 * 0.4)),
         gateCommands: this.gateCommands(nodeId, capability),
-        env: {
-          MYCELINK_CONTROL_ROOT: this.controlRoot,
-          MYCELINK_BRANCH: branch ?? '',
-          [CAPABILITY_ENV]: capability,
-          ...this.workerEnv,
-        },
+        env: this.adapter.name === 'codex-cli'
+          ? { MYCELINK_BRANCH: branch ?? '', ...this.workerEnv }
+          : { MYCELINK_CONTROL_ROOT: this.controlRoot, MYCELINK_BRANCH: branch ?? '', [CAPABILITY_ENV]: capability, ...this.workerEnv },
         replacesSessionId: previous?.session_id ?? null,
       };
 
+      if (this.adapter.name === 'codex-cli' && worktree !== null) {
+        const scope = () => this.codexClaimScope(nodeId, claimId, capability, worktree);
+        const probeEnabled = !!this.state().nodes[nodeId]?.claim?.verification && scope()?.nextGate === 'red';
+        const channel = new ClaimChannel(scope, (argv, cwd) => {
+          const gate = argv[3];
+          if (gate !== 'red' && gate !== 'green' && gate !== 'regression') throw new Error('CHANNEL_GATE_INVALID');
+          if (gate === 'red' && probeEnabled) {
+            const key = `${this.controlRoot}:${this.featureId}:${nodeId}:${claimId}`;
+            if (closedProbeClaims.has(key)) return { exitCode: 2, output: 'CHANNEL_RED_ALREADY_RUN' };
+            closedProbeClaims.add(key);
+          }
+          return executeHostClaimGate({
+            readonlyFixture: node.readonly_fixture,
+            controlRoot: this.controlRoot, featureId: this.featureId, gate, cwd, argv,
+            deadlineMs: Math.min(600_000, request.maxWallClockMs),
+            // RED/GREEN need canonical test identities. A declared full-suite
+            // regression may have only exit/output evidence (e.g. node --test).
+            requireTests: gate !== 'regression' && node.required_evidence.includes('red'),
+            readRecord: () => this.state().nodes[nodeId]?.evidence[gate],
+          });
+        }, (operation, criterion) => {
+          const current = scope();
+          if (!current?.challengeCriteria?.length || (criterion !== null && !current.challengeCriteria.includes(criterion))) {
+            throw new Error('CHANNEL_REVIEW_UNAVAILABLE');
+          }
+          const argv = [mycelinkCliPath(), 'tdd', operation, this.featureId, nodeId,
+            '--control-root', this.controlRoot, '--capability', capability,
+            ...(criterion !== null ? ['--criteria', criterion] : []), '--json'];
+          const ran = spawnSync(process.execPath, argv, {
+            cwd: worktree, encoding: 'utf8', timeout: 60_000, maxBuffer: 128 * 1024, windowsHide: true,
+          });
+          if (ran.error || ran.signal) throw new Error('CHANNEL_REVIEW_EXECUTION_FAILED');
+          return { exitCode: ran.status ?? 1, output: (ran.stdout || ran.stderr || '').slice(0, 32 * 1024) };
+        }, probeEnabled ? () => this.codexProbeClaim(nodeId, claimId, capability, worktree, { deadlineMs: Math.min(600_000, request.maxWallClockMs) }) : undefined);
+        request.claimChannel = { handle: (input) => channel.handle(input), probeEnabled, redactEnv: { [CAPABILITY_ENV]: capability } };
+      }
+
+      if (node.readonly_fixture) verifyReadonlyFixture(this.controlRoot, node.readonly_fixture);
+      const beforeSpawn = this.state();
+      const spawnRuntime = beforeSpawn.nodes[nodeId];
+      const spawnClaim = spawnRuntime?.claim;
+      const admissionSnapshot = this.adapter.name === 'codex-cli' && worktree !== null && branch !== null
+        && spawnClaim?.claim_id === claimId && spawnClaim.mode === 'adapter'
+        ? {
+          epoch: currentEpoch(beforeSpawn), lineage: lineageOf(beforeSpawn, nodeId),
+          generation: spawnClaim.generation, dispatch: spawnClaim.dispatch_id,
+          head: resolveRef(worktree, 'HEAD'),
+          branch: runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim(),
+          clean: isWorktreeClean(worktree),
+        } : null;
       const handle = this.adapter.spawn(request);
       sessionId = handle.session_id;
       recordSpawn(this.paths.sessionsRegistry, handle, {
@@ -2653,7 +2849,6 @@ export class Orchestrator {
         replacesSessionId: previous?.session_id ?? null,
       });
       if (previous) markTerminal(this.paths.sessionsRegistry, previous.session_id, 'stopped');
-
       const observation = await this.adapter.wait(handle);
       recordObservation(this.paths.sessionsRegistry, handle.session_id, observation);
 
@@ -2662,6 +2857,39 @@ export class Orchestrator {
         // than charging the node and blocking it after two identical tries.
         this.releaseForInfrastructure(nodeId, claimId, observation.failure_reason ?? 'SPAWN_FAILED');
         return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, observation.failure_reason ?? 'SPAWN_FAILED', evidence);
+      }
+
+      const admission = observation.codex_evidence;
+      if (this.adapter.name === 'codex-cli' && observation.status === 'failed'
+        && observation.exit_code === 1 && observation.timed_out === false
+        && observation.result === null && observation.turns === 0
+        && admission?.process_session_id === handle.session_id
+        && admission.provider === 'codex' && admission.source === 'exec-jsonl'
+        && admission.terminal === 'failed' && admission.turns === 0 && admission.final === null
+        && admission.failure?.class === 'capacity-admission' && admission.failure.transient === true
+        && admissionSnapshot !== null && admissionSnapshot.clean && admissionSnapshot.branch === branch
+        && worktree !== null) {
+        const current = this.state();
+        const rt = current.nodes[nodeId];
+        const c = rt?.claim;
+        // A changed claim, generation, checkout or accepted gate is product work,
+        // not an unspent admission. Git failures propagate to the charged path.
+        if (rt && c?.claim_id === claimId && c.mode === 'adapter'
+          && c.generation === admissionSnapshot.generation && c.dispatch_id === admissionSnapshot.dispatch
+          && currentEpoch(current) === admissionSnapshot.epoch && lineageOf(current, nodeId) === admissionSnapshot.lineage
+          && c.worktree === worktree && c.branch === branch && rt.state === spawnRuntime?.state
+          && Object.keys(rt.evidence).length === 0 && (rt.criteria ?? []).length === 0
+          && (rt.criterion_ledger ?? []).length === 0 && rt.integrated_sha === null
+          && (rt.tdd_red_bindings ?? []).length === 0 && rt.tdd_history == null
+          && c.result_captured_sha256 === undefined && c.capture_pending == null && c.seal == null
+          && resolveRef(worktree, 'HEAD') === admissionSnapshot.head
+          && runGit(worktree, ['symbolic-ref', '--short', 'HEAD']).stdout.trim() === admissionSnapshot.branch
+          && isWorktreeClean(worktree)) {
+          const reason = 'CODEX_CAPACITY_ADMISSION: provider refused admission before model work';
+          if (this.releaseForInfrastructure(nodeId, claimId, reason)) {
+            return this.report(nodeId, 'INFRASTRUCTURE_FAILURE', sessionId, reason, evidence);
+          }
+        }
       }
 
       mutateState(this.paths.featureDir, (s) => accumulateUsage(s, nodeId, observation.usage));
@@ -4748,7 +4976,7 @@ export class Orchestrator {
     if (retest.length > 0 && claim.verification !== undefined && claim.worktree !== null) {
       try {
         const repoDecl = this.workspace.repositories.repositories.find((r) => r.name === node.repository);
-        const ran = runVerification({ kind: 'green', label: 'revalidation', nodeId, repository: node.repository, ...moduleInvocation(claim.verification), cwd: claim.worktree, evidenceDir: nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), baselineFailures: repoDecl?.baseline_failures ?? [], allowShell: this.workspace.config.allow_shell_commands, pathBase: this.controlRoot });
+        const ran = runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined, kind: 'green', label: 'revalidation', nodeId, repository: node.repository, ...moduleInvocation(claim.verification), cwd: claim.worktree, evidenceDir: nodeEvidenceDir(this.controlRoot, this.featureId, nodeId), baselineFailures: repoDecl?.baseline_failures ?? [], allowShell: this.workspace.config.allow_shell_commands, pathBase: this.controlRoot });
         run = { output_path: ran.output_path, output_sha256: ran.output_sha256, exit_code: ran.exit_code, results_sha256: ran.results?.sha256 ?? null };
         const tests = readGateTests(this.controlRoot, ran);
         if (tests !== null) {
@@ -5004,6 +5232,9 @@ export class Orchestrator {
         throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim whose settlement could be finished.`);
       }
       const live = (rt as NodeRuntime).claim as NodeClaim;
+      // A host completion claim does not replace the graph's current prerequisites.
+      // Do this under the state lock before recording a provisional settlement.
+      if (live.mode === 'host') assertTaskDependencies(this.graph(), s, nodeId);
       if (live.settling && settlerAlive(live.settling)) throw new SettleInProgressError(nodeId, live.settling);
       from = (rt as NodeRuntime).state;
       live.settling = settlerMarker();
@@ -5512,6 +5743,10 @@ export class Orchestrator {
    * claim, worktree, branch and any result already in the slot are kept.
    */
   resumeDispatch(nodeId: string): DispatchResult {
+    return this.resumeDispatchLocked(nodeId);
+  }
+
+  private resumeDispatchLocked(nodeId: string): DispatchResult {
     try {
       this.assertGraphUnchanged();
     } catch (err) {
@@ -5526,6 +5761,8 @@ export class Orchestrator {
       throw new Error(`REVIEW_NOT_OPEN: ${nodeId} is not an acceptance review of ${this.featureId} handed to a reviewer; run dispatch.`);
     }
     const node = this.node(nodeId);
+    // A resumed ticket cannot authorize work after an upstream invalidation.
+    assertTaskDependencies(this.graph(), this.state(), nodeId);
     const before = this.state().nodes[nodeId]?.claim ?? null;
     if (before === null) throw new CapabilityError('NOT_CLAIMED', `${nodeId} has no claim to resume.`);
     if (before.mode !== 'host') {
@@ -5923,6 +6160,10 @@ export class Orchestrator {
    * submission is believed only after fresh verification and integration.
    */
   settle(nodeId: string, capability: string | undefined): SettleReport {
+    return this.settleLocked(nodeId, capability);
+  }
+
+  private settleLocked(nodeId: string, capability: string | undefined): SettleReport {
     // No result because a model provider ended the worker (or its host): an interruption, never RESULT_MISSING.
     const provider = this.providerSettle(nodeId, capability);
     if (provider !== null) return provider;
@@ -6374,7 +6615,7 @@ export class Orchestrator {
         setup = { config_sha256: worktreeSetupSha256(config), receipt_path: run.receipt_path, receipt_sha256: run.receipt_sha256 };
       }
       for (const step of steps) {
-        const ran = runVerification({
+        const ran = runVerification({ readonlyFixture: node.readonly_fixture ? { controlRoot: this.controlRoot, declaration: node.readonly_fixture } : undefined,
           kind: 'regression',
           nodeId,
           repository,
@@ -7924,6 +8165,48 @@ export class Orchestrator {
     const interrupted = this.providerReview(open);
     if (interrupted !== null) return this.providerReviewReport(open, interrupted.failure, false);
     return this.settleOpenReview('host', open.dispatch_id);
+  }
+
+  /** Controller-owned Codex process; a role label or Claude Agent callback is not provenance. */
+  async settleCodexReview(ticket: ReviewTicket, processOptions: { executable: string; prefixArgs?: string[]; timeoutMs: number; wsl?: boolean }): Promise<ReviewSettleReport> {
+    const check = (): { open: OpenReview; packet: ReviewPacket } => {
+      const state = this.state();
+      const open = state.acceptance_review?.open;
+      if (!open || (!open.refinement && state.acceptance_review?.reviews.some((r) => r.review_id === ticket.review_id))) throw new Error('CODEX_REVIEW_ALREADY_SETTLED_OR_NOT_OPEN');
+      if (ticket.feature_id !== this.featureId || ticket.review_id !== open.review_id || ticket.dispatch_id !== open.dispatch_id || !capabilityMatches(ticket.capability, open.capability_sha256) || ticket.inputs_sha256 !== open.inputs_sha256 || ticket.packet_path !== join(this.controlRoot, ...open.packet_path.split('/')).replace(/\\/g, '/') || ticket.result_slot !== join(this.controlRoot, ...open.slot.split('/')).replace(/\\/g, '/')) throw new Error('CODEX_REVIEW_FOREIGN_TICKET');
+      const why = this.reviewStaleReason(open, state);
+      if (why !== null) throw new Error(`CODEX_REVIEW_STALE: ${why}`);
+      const inputs = currentReviewInputs(this.controlRoot, this.featureId, this.workspace, this.graph(), state);
+      if (reviewInputsSha256(inputs) !== open.inputs_sha256) throw new Error('CODEX_REVIEW_HEADS_CHANGED');
+      const packet = loadPacket(join(this.controlRoot, ...open.packet_path.split('/')), open.packet_sha256);
+      if (!packet || packet.feature_id !== this.featureId || packet.review_id !== open.review_id || packet.dispatch_id !== open.dispatch_id || packet.inputs_sha256 !== open.inputs_sha256 || packet.repositories.length !== inputs.repositories.length || packet.repositories.some((r) => !inputs.repositories.some((i) => i.name === r.name && i.head_sha === r.head_sha)) || new Set(packet.criteria.map((c) => c.id)).size !== packet.criteria.length || packet.criteria.map((c) => c.id).join('\0') !== ticket.criteria.join('\0')) throw new Error('CODEX_REVIEW_PACKET_CHANGED');
+      return { open, packet };
+    };
+    const { open, packet } = check();
+    if (!!open.refinement !== !!ticket.refinement || !!open.refinement !== !!packet.refinement) throw new Error('CODEX_REVIEW_REFINEMENT_MISMATCH');
+    const checkout = packet.repositories[0]?.checkout;
+    if (!checkout) throw new Error('CODEX_REVIEW_CHECKOUT_MISSING');
+    const evidenceDir = join(this.controlRoot, ...open.slot.split('/').slice(0, -1), 'codex-process');
+    const session = await runCodexReviewSession({ ...processOptions, cwd: checkout, prompt: ticket.prompt, binding: { featureId: this.featureId, reviewId: open.review_id, dispatchId: open.dispatch_id, inputsSha256: open.inputs_sha256, criteria: packet.criteria.map((c) => c.id),
+      ...(packet.refinement ? { refinement: { challenges: packet.refinement.challenges.map((c) => ({ challenge_id: c.challenge_id, criterion: c.criterion })) } } : {}) }, evidenceDir });
+    const lockDir = join(this.paths.featureDir, 'reviews');
+    mkdirSync(lockDir, { recursive: true });
+    return withLock(join(lockDir, 'settle.lock'), () => {
+      const fresh = check();
+      if (fresh.open.dispatch_id !== open.dispatch_id || fresh.open.packet_sha256 !== open.packet_sha256) throw new Error('CODEX_REVIEW_STALE_GENERATION');
+      const evidence = readRegular(session.receiptPath, 64 * 1024);
+      const transcript = readRegular(session.jsonlPath, 8 * 1024 * 1024);
+      if (!evidence || !transcript || createHash('sha256').update(transcript.bytes).digest('hex') !== session.receipt.jsonl_sha256 || createHash('sha256').update(codexReviewerPaths(ticket.prompt, checkout, processOptions.wsl === true).prompt).digest('hex') !== session.receipt.prompt_sha256 || JSON.stringify(JSON.parse(evidence.bytes.toString('utf8'))) !== JSON.stringify(session.receipt)) throw new Error('CODEX_REVIEW_EVIDENCE_CHANGED');
+      const reviewer = { agent_id: session.receipt.thread_id, session_id: session.receipt.process_session_id, verdict_sha256: canonicalVerdictSha256(JSON.stringify(session.verdict)), transport: { kind: 'agent-result' as const, agent_id: session.receipt.thread_id, session_id: session.receipt.process_session_id, tool_use_id: null, result_sha256: session.receipt.verdict_sha256, transcript_sha256: session.receipt.jsonl_sha256, transcript_path: session.jsonlPath, extraction: 'json' as const } };
+      if (fresh.open.refinement) {
+        const refined = judgeRefinement(session.verdict, refinementContext(fresh.packet, this.workspace, this.reviewPackets(open.review_id)));
+        if (!refined.ok) throw new Error(`CODEX_REFINEMENT_JUDGE_REFUSED: ${refined.code}: ${refined.detail}`);
+        return this.recordRefinement(open, refined, reviewer, 'codex-process');
+      }
+      const judged = judgeVerdict(session.verdict, verdictContext(fresh.packet, this.workspace));
+      if (!judged.ok) throw new Error(`CODEX_REVIEW_JUDGE_REFUSED: ${judged.code}: ${judged.detail}`);
+      return this.recordVerdict(open, judged, reviewer, 'codex-process');
+    }, { timeoutMs: 15_000, pollMs: 50, purpose: 'Codex review settle' });
   }
 
   private settleOpenReview(by: 'host' | 'dispatch' | 'resume', dispatchId: string): ReviewSettleReport {

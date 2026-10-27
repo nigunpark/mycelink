@@ -111,7 +111,7 @@ function settledAt(file: string, sha: string): 'missing' | 'same' | 'other' {
   return at === 'linked' ? 'other' : at;
 }
 
-export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array): StoredArtifact {
+export function writeImmutable(dir: string, stem: string, ext: string, content: string | Uint8Array, mode = 0o644): StoredArtifact {
   const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
   const sha = sha256(bytes);
   mkdirSync(dir, { recursive: true });
@@ -122,7 +122,7 @@ export function writeImmutable(dir: string, stem: string, ext: string, content: 
       const at = settledAt(file, sha);
       if (at === 'same') return { file, sha256: sha, created: false };
       if (at === 'other') break;
-      if (createExclusive(file, bytes) === 'created') return { file, sha256: sha, created: true };
+      if (createExclusive(file, bytes, mode) === 'created') return { file, sha256: sha, created: true };
     }
   }
   throw new EvidenceStoreError(`every name for ${stem} ${sha.slice(0, 16)} in ${dir} is taken by something else; nothing was written`);

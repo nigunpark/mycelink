@@ -43,6 +43,7 @@ import { writeTextAtomic } from '../state/atomic-json.js';
 import { duplicateReviewerLaunch, recordReviewerLaunch } from './review-launch.js';
 import { recordAgentTask } from './agent-task.js';
 import { recordHostBinding, recordWorkerLaunch, runsDispatch } from './provider-binding.js';
+import { codexDecisionOutput, hookProvider, normalizeHookCall, type HookProvider } from './protocol.js';
 
 export interface HookInput {
   session_id?: string;
@@ -92,6 +93,8 @@ const MANAGED_PATTERNS = [
   // hook registration itself. A model must not be able to switch these off.
   '**/mycelink.config.json',
   '**/.claude/settings.json',
+  '**/.codex/config.toml',
+  '**/.codex-plugin/**',
 ];
 
 /**
@@ -333,6 +336,7 @@ function recordHolders(call: FenceInput): void {
 function controllerFence(io: CliIo): number {
   let decision: FenceDecision;
   let call: FenceInput | null = null;
+  let provider: HookProvider = 'claude';
   try {
     const raw = io.stdin ?? readAllStdinSync();
     let input: unknown;
@@ -341,13 +345,23 @@ function controllerFence(io: CliIo): number {
     } catch {
       input = null;
     }
-    call = input !== null && typeof input === 'object' && !Array.isArray(input) ? (input as FenceInput) : null;
+    provider = hookProvider(input);
+    const normalized = normalizeHookCall(input);
+    call = normalized?.call ?? null;
     decision =
-      call !== null && typeof call.tool_name === 'string'
+      call !== null
         ? fenceDecision(call)
-        : unjudged(call !== null && typeof call.cwd === 'string' ? { cwd: call.cwd } : {}, process.env, new Error('unreadable hook input'));
+        : unjudged(input !== null && typeof input === 'object' && 'cwd' in input && typeof input.cwd === 'string' ? { cwd: input.cwd } : {}, process.env, new Error('unreadable hook input'));
   } catch (err) {
     decision = unjudged({}, process.env, err);
+  }
+  if (provider === 'codex') {
+    const output = codexDecisionOutput(decision);
+    if (output !== null) io.out(output);
+    // The installed Codex hook is defense-in-depth only: its errors and
+    // timeouts can fail open, and its session ID does not attest subagent role.
+    // Never write Claude reviewer/worker launch or call provenance from it.
+    return 0;
   }
   if (!decision.ok) return block(io, decision.reason);
   // The host's launch of the acceptance reviewer: never a second one for a generation whose reviewer runs or answered (CSET-203

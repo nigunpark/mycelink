@@ -90,14 +90,39 @@ jobs:
           cmp artifacts/a/SBOM.spdx.json artifacts/b/SBOM.spdx.json
           cat "artifacts/a/mycelink-${VERSION}.zip.sha256"
 
-      - name: Upload package (one matrix leg)
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+      - name: Upload package (one Node 24 leg per OS)
+        if: matrix.node == '24'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mycelink-package
+          name: mycelink-package-${{ matrix.os }}
           path: artifacts/a/
           if-no-files-found: error
           retention-days: 14
+
+  compare-package:
+    name: compare package bytes across OSes
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Download independent OS packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mycelink-package-*
+          path: artifacts
+
+      - name: Compare ZIP, checksum and SBOM
+        run: node scripts/compare-package-hashes.mjs artifacts
 
   # Every suite, bounded (scripts/test-suites.mjs): each group is one runner's
   # suites or one duration-balanced shard, with its own worker limit.
@@ -152,11 +177,63 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Claude Code CLI (plugin-e2e only, no model usage)
-        if: matrix.group == 'core'
-        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-
       - name: Test ${{ matrix.group }}
         run: node scripts/test-suites.mjs ci ${{ matrix.group }}
         env:
           ANTHROPIC_API_KEY: ''
+          OPENAI_API_KEY: ''
+          CODEX_API_KEY: ''
+          MYCELINK_LIVE_CODEX_PLUGIN: '0'
+
+  # Only provider-specific adapter, hook and plugin boundaries are repeated for
+  # both providers. Neutral engine/security/fixture/benchmark shards run above once.
+  provider:
+    name: provider (${{ matrix.os }}, node ${{ matrix.node }}, ${{ matrix.provider }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.12.0', '24']
+        provider: [claude, codex]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Configure git identity for test fixtures
+        run: |
+          git config --global user.name "Mycelink CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+          git config --global core.autocrlf false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Claude Code CLI (plugin management only, no model usage)
+        if: matrix.provider == 'claude'
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Require Claude Code CLI before plugin tests
+        if: matrix.provider == 'claude'
+        run: claude --version
+
+      - name: Test provider-${{ matrix.provider }}
+        run: node scripts/test-suites.mjs ci provider-${{ matrix.provider }}
+        env:
+          ANTHROPIC_API_KEY: ''
+          OPENAI_API_KEY: ''
+          CODEX_API_KEY: ''
+          MYCELINK_LIVE_CODEX_PLUGIN: '0'

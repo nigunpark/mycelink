@@ -136,6 +136,8 @@ describe('r16: a compatibility-only continuation with a passing RED settles on i
     const run = compatContinuation(t, s.control);
     // The red gate said what a passing reproduction of a completed criterion is.
     expect(run.red.out).toMatch(/re-proof/i);
+    expect(run.red.out).toMatch(/exactly the review's reproduction.*challenge line.*--criteria/s);
+    expect(run.red.out).toMatch(/no git restore is required/i);
     reproofAnswer(t, run);
     const checked = await check(s, t);
     expect(checked, JSON.stringify(checked)).toMatchObject({ ok: true });

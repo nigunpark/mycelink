@@ -405,7 +405,7 @@ Short version — details in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md),
 | Node.js | 22.12+ and 24.x |
 | Git | 2.30+ recommended (worktrees) |
 | Claude Code | a version with plugin marketplaces and `plugin validate --strict` |
-| OS | Windows, Linux, macOS — each exercised by the CI matrix |
+| OS | Windows, Linux, macOS — configured in the CI matrix; this branch's actual cross-OS run remains unverified |
 
 No Docker, WSL or VM is required. You do **not** need to run `npm install` or
 build anything to use a release: the runtime ships prebuilt.
@@ -435,6 +435,38 @@ claude plugin install mycelink@mycelink-marketplace
 ```
 
 Each release also carries an SPDX SBOM (`SBOM.spdx.json`).
+
+### Codex plugin (planning only; local release ZIP)
+
+The Codex marketplace is separate from Claude's. On this branch, extract a
+locally built release ZIP and use an **isolated** profile when evaluating it:
+
+```bash
+# Build locally first: npm ci && npm run package
+unzip artifacts/mycelink-0.3.0-beta.1.zip -d mycelink
+# Set ISOLATED_CODEX_HOME to a new native absolute directory (create it first).
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin marketplace add ./mycelink
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list --available
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin add mycelink@mycelink-codex-marketplace
+CODEX_HOME="$ISOLATED_CODEX_HOME" codex plugin list
+```
+
+The installed skills `mycelink-init`, `mycelink-prd`, `mycelink-plan`, and
+`mycelink-status` guide planning with the **installed plugin's own launcher**.
+`codex init <new-control-path>` creates a Codex-provider skeleton without
+Claude hooks or CLAUDE.md; write a PRD, approve its criteria, then compile
+and validate a reviewed graph with the existing CLI. The CLI does not generate
+or approve a PRD for you. `mycelink-run`, `mycelink-resume`, `mycelink-verify`,
+and `mycelink-deliver` explain and exercise explicit `CODEX_RUNTIME_DENIED`
+checks. Generic CLI worker/reviewer/delivery paths are also denied for Codex
+controls. No Codex hooks or MCP server are shipped. **No worker, reviewer,
+implementation, fresh verification, or delivery is enabled**: the original
+Codex host-hook/worker security boundary remains unverified. A valid graph or
+doctor check is not an execution grant. Claude's plugin assets are unchanged.
+See the [Codex planning and DENIED-runtime guide](docs/CODEX.md) for the
+isolated `CODEX_HOME`/doctor walkthrough, exact policy limitations, migration
+and cleanup; source-only `docs/CODEX_COMPATIBILITY.md` holds the probes.
+A local build is not a published listing.
 
 ### Try without installing
 
@@ -612,6 +644,10 @@ verification commands (argv) and a worker budget.
 ---
 
 ## Update and uninstall
+
+The commands below are **Claude-only**. For an isolated Codex planning
+evaluation, see [Codex removal and cleanup](docs/CODEX.md#migration-update-and-removal);
+do not apply Claude hooks or migrate Claude state into a Codex control.
 
 ```bash
 claude plugin marketplace update mycelink-marketplace

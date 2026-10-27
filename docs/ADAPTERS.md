@@ -74,6 +74,11 @@ step, which keeps credentials out of Mycelink.
 
 ## 2. Session adapters (who runs a node)
 
+The provider-neutral lifecycle and security requirements are defined in
+[`PROVIDER_CONTRACT.md`](PROVIDER_CONTRACT.md). A host integration may
+translate process streams, hooks and subagent identities, but graph, state,
+evidence, result ownership and settle rules remain shared.
+
 Worker sessions sit behind `SessionAdapter` in `src/sessions/adapter.ts`:
 
 - `ClaudeCliAdapter` — spawns real Claude Code print-mode sessions
@@ -93,6 +98,15 @@ Worker sessions sit behind `SessionAdapter` in `src/sessions/adapter.ts`:
 The automated suite drives `ClaudeCliAdapter` with
 `tests/fake-claude/claude.mjs`, so spawning, stream parsing, timeouts and
 result validation are exercised with zero model usage.
+
+`CodexCliAdapter` has bounded JSONL/final-message parsing and model-free
+fake-executable tests, but its preflight unconditionally fails. A Codex
+process/thread observation and a writable worker result slot do not prove
+worker identity or independent reviewer provenance. Codex host-native and
+standalone CLI dispatch/settle/delivery are **not supported**; see the
+[planning-only Codex guide](CODEX.md) for the precise `CODEX_RUNTIME_DENIED`
+gate. Never treat the adapter's test-only `workspace-write` invocation as an
+operator permission default or a secure all-tool boundary.
 
 ## 3. Memory adapter (optional)
 

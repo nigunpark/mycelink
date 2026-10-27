@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 // @ts-expect-error -- plain ESM script without type declarations
-import { CI_GROUPS, DEFAULT_WEIGHT, SUITES, collectedFiles, descendants, describeProcesses, etimeMs, processTable, selection, shardsOf } from '../../scripts/test-suites.mjs';
+import { CI_GROUPS, PROVIDER_GROUPS, PROVIDER_FILES, DEFAULT_WEIGHT, SUITES, collectedFiles, descendants, describeProcesses, etimeMs, processTable, selection, shardsOf } from '../../scripts/test-suites.mjs';
 
 const ROOT = resolve(process.cwd());
 const workflow = (f: string) => YAML.parse(readFileSync(join(ROOT, '.github', 'workflows', f), 'utf8')) as { jobs: Record<string, any> };
@@ -36,7 +36,7 @@ describe('the suites', () => {
     const bySuite = suites.flatMap((s) => selection(s).files as string[]);
     expect([...bySuite].sort()).toEqual(collected);
     expect(new Set(bySuite).size).toBe(bySuite.length);
-    for (const s of ['unit', 'integration', 'security', 'fixtures', 'release', 'plugin-e2e', 'benchmark']) expect(selection(s).files.length, s).toBeGreaterThan(0);
+    for (const s of ['unit', 'integration', 'security', 'fixtures', 'release', 'provider-claude', 'provider-codex', 'benchmark']) expect(selection(s).files.length, s).toBeGreaterThan(0);
   });
 
   it('cut each suite into shards that partition it, and bound how many files run at once', () => {
@@ -52,13 +52,28 @@ describe('the suites', () => {
       // A bound on every test: the config's 120 s, or at most 300 s for the workflow suites.
       expect(SUITES[s].timeoutMs ?? 120_000, s).toBeLessThanOrEqual(300_000);
     }
-    expect(Object.keys(SUITES).filter((s) => SUITES[s].timeoutMs !== undefined).sort()).toEqual(['benchmark', 'fixtures', 'integration']);
+    expect(Object.keys(SUITES).filter((s) => SUITES[s].timeoutMs !== undefined).sort()).toEqual(['benchmark', 'fixtures', 'integration', 'provider-claude', 'provider-codex']);
   });
 
   it('weigh only files that exist', () => {
     const weights = JSON.parse(readFileSync(join(ROOT, 'scripts', 'test-weights.json'), 'utf8')) as Record<string, number>;
     const collected = new Set(collectedFiles());
     expect(Object.keys(weights).filter((f) => !collected.has(f))).toEqual([]);
+  });
+
+  it('isolates provider adapters, hooks and plugins from neutral suites without losing Codex fences', () => {
+    const claude = selection('provider-claude').files as string[];
+    const codex = selection('provider-codex').files as string[];
+    expect(claude).toEqual([...PROVIDER_FILES.claude].sort());
+    expect(codex).toEqual([...PROVIDER_FILES.codex].sort());
+    expect(claude).toContain('tests/plugin-e2e/isolated-plugin.test.ts');
+    expect(codex).toContain('tests/plugin-e2e/codex-release-zip-lifecycle.test.ts');
+    expect(codex).toContain('tests/integration/codex-session-adapter.test.ts');
+    expect(codex).toContain('tests/security/codex-host-fence.test.ts');
+    const namedCodex = collectedFiles().filter((f: string) => /codex.*\.test\.ts$/.test(f) && !f.startsWith('tests/benchmark/'));
+    expect(codex).toEqual(expect.arrayContaining(namedCodex));
+    const neutral = Object.keys(SUITES).filter((s) => !s.startsWith('provider-')).flatMap((s) => selection(s).files as string[]);
+    expect(neutral.filter((f) => [...claude, ...codex].includes(f))).toEqual([]);
   });
 
   // CI 38443874383: one benchmark file held a third of its suite, and the shard it filled ran into the 60-minute job
@@ -78,7 +93,7 @@ describe('the suites', () => {
 
 describe('the CI groups', () => {
   it('run every suite, and every shard of it, exactly once', () => {
-    const runs = (CI_GROUPS as Group[]).flatMap((g) => g.runs);
+    const runs = ([...CI_GROUPS, ...PROVIDER_GROUPS] as Group[]).flatMap((g) => g.runs);
     const expected = suites.flatMap((s) => (SUITES[s].shards === 1 ? [s] : Array.from({ length: SUITES[s].shards }, (_, i) => `${s}:${i + 1}/${SUITES[s].shards}`)));
     expect([...runs].sort()).toEqual([...expected].sort());
   });
@@ -86,7 +101,8 @@ describe('the CI groups', () => {
   it.each(['ci.yml', 'release.yml'])('are all run by %s, by the runner, and nothing runs the suites unbounded', (f) => {
     const wf = workflow(f);
     const test = wf.jobs['test'];
-    expect(test.strategy.matrix.group).toEqual((CI_GROUPS as Group[]).map((g) => g.id));
+    const expected = f === 'ci.yml' ? CI_GROUPS : [...CI_GROUPS, ...PROVIDER_GROUPS];
+    expect(test.strategy.matrix.group).toEqual((expected as Group[]).map((g) => g.id));
     const runs = (test.steps as { run?: string; name?: string }[]).filter((s) => s.run !== undefined);
     expect(runs.map((s) => s.run)).toContain('node scripts/test-suites.mjs ci ${{ matrix.group }}');
     expect(runs.find((s) => s.run!.includes('test-suites.mjs'))!.name).toBe('Test ${{ matrix.group }}');
@@ -101,12 +117,25 @@ describe('the CI groups', () => {
     expect(workflow('release.yml').jobs['publish'].needs).toBe('verify');
   });
 
+  it('gates a dedicated provider matrix on three OSes and two Node versions with no model credentials', () => {
+    const provider = workflow('ci.yml').jobs['provider'];
+    expect(provider.strategy.matrix).toMatchObject({ os: ['ubuntu-latest', 'windows-latest', 'macos-latest'], node: ['22.12.0', '24'], provider: ['claude', 'codex'] });
+    expect(provider.steps.some((s: { run?: string }) => s.run === 'node scripts/test-suites.mjs ci provider-${{ matrix.provider }}')).toBe(true);
+    expect(provider.steps.find((s: { run?: string }) => s.run?.includes('claude-code@'))?.if).toBe("matrix.provider == 'claude'");
+    expect(provider.steps.find((s: { run?: string }) => s.run === 'claude --version')?.if).toBe("matrix.provider == 'claude'");
+    expect(provider.steps.find((s: { run?: string }) => s.run?.includes('test-suites.mjs'))?.env).toMatchObject({ ANTHROPIC_API_KEY: '', OPENAI_API_KEY: '', CODEX_API_KEY: '', MYCELINK_LIVE_CODEX_PLUGIN: '0' });
+    const blocked = readFileSync(join(ROOT, 'tests/plugin-e2e/codex-release-zip-lifecycle.test.ts'), 'utf8');
+    expect(blocked).toContain("it.skip('SKIP CODEX_RUNTIME_DENIED:");
+    expect(blocked).toContain('production dispatch');
+  });
+
   it('are what npm test and the suite scripts run', () => {
     const scripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts as Record<string, string>;
     expect(scripts['test']).toBe('node scripts/test-suites.mjs all');
-    for (const [script, suite] of [['test:unit', 'unit'], ['test:integration', 'integration'], ['test:security', 'security'], ['test:fixture', 'fixtures'], ['test:release', 'release'], ['test:plugin', 'plugin-e2e'], ['test:benchmark', 'benchmark']]) {
+    for (const [script, suite] of [['test:unit', 'unit'], ['test:integration', 'integration'], ['test:security', 'security'], ['test:fixture', 'fixtures'], ['test:release', 'release'], ['test:benchmark', 'benchmark']]) {
       expect(scripts[script!], script).toBe(`node scripts/test-suites.mjs run ${suite}`);
     }
+    expect(scripts['test:plugin']).toBe('node scripts/test-suites.mjs run provider-claude provider-codex');
   });
 });
 

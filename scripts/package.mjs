@@ -38,13 +38,16 @@ const zipName = `mycelink-${version}.zip`;
  * Documentation is listed file by file: eval reports (docs/evals/) and the
  * benchmark's constraint audit stay in the repository, outside the plugin.
  */
-const INCLUDE_DIRS = ['agents', 'commands', 'skills', 'hooks', 'templates', 'schemas'];
+const INCLUDE_DIRS = ['agents', 'commands', 'skills', 'hooks', 'templates', 'schemas', 'codex-plugin'];
 const INCLUDE_FILES = [
+  '.agents/plugins/marketplace.json',
   '.claude-plugin/plugin.json',
   '.claude-plugin/marketplace.json',
   'bin/mycelink.mjs',
   'dist/mycelink.mjs',
   'docs/ADAPTERS.md',
+  'docs/CODEX.md',
+  'docs/PROVIDER_CONTRACT.md',
   'docs/DATA_HANDLING.md',
   'docs/PERMISSION_MODEL.md',
   'docs/RELEASING.md',
@@ -91,6 +94,15 @@ const entries = [...files].sort().map((name) => {
   return { name, data, mode: EXECUTABLE.has(name) ? 0o755 : 0o644 };
 });
 
+// Codex caches only its plugin subtree. Ship a self-contained launcher and
+// schema registry there; never resolve resources from the adjacent plugin.
+for (const name of ['bin/mycelink.mjs', 'dist/mycelink.mjs']) {
+  entries.push({ name: `codex-plugin/${name}`, data: readFileSync(join(root, name)), mode: 0o755 });
+}
+for (const name of walk(join(root, 'schemas'), [])) {
+  entries.push({ name: `codex-plugin/${name}`, data: readFileSync(join(root, name)), mode: 0o644 });
+}
+
 // The shipped package.json carries identity and the launcher only: no
 // scripts, no dependency lists (everything runtime is in the bundle).
 const runtimePkg = {
@@ -107,7 +119,9 @@ const runtimePkg = {
   engines: pkg.engines,
   bin: pkg.bin,
 };
-entries.push({ name: 'package.json', data: Buffer.from(JSON.stringify(runtimePkg, null, 2) + '\n', 'utf8'), mode: 0o644 });
+const runtimePkgBytes = Buffer.from(JSON.stringify(runtimePkg, null, 2) + '\n', 'utf8');
+entries.push({ name: 'package.json', data: runtimePkgBytes, mode: 0o644 });
+entries.push({ name: 'codex-plugin/package.json', data: runtimePkgBytes, mode: 0o644 });
 entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
 const zip = buildZip(entries);

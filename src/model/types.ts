@@ -109,7 +109,14 @@ export interface WorkerBudget {
   nested_delegation: boolean;
 }
 
+export interface ReadonlyFixture {
+  manifest: string;
+  baseline: string;
+  sha256: string;
+}
+
 export interface GraphNode {
+  readonly_fixture?: ReadonlyFixture;
   id: string;
   level: 'executable-node';
   repository: string | null;
@@ -1367,6 +1374,15 @@ export interface FeatureState_ {
    * at this head.
    */
   integration_heads?: Record<string, string>;
+  /** Durable source/copy inventory for a completed producer imported from a separately pinned control. */
+  completion_imports?: {
+    node_id: string;
+    source_state_sha256: string;
+    source_graph_sha256: string;
+    repository: string;
+    integration_sha: string;
+    files: { path: string; sha256: string }[];
+  }[];
   /**
    * An integration the controller planned and is carrying out, by
    * repository: written before the integration branch moves, cleared once

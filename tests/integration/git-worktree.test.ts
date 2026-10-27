@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, isAbsolute, resolve } from 'node:path';
 import { makeTmpDir, cleanupTmpRoots, windowsShortPathAlias } from '../helpers/tmp.js';
 import { samePath } from '../../src/security/paths.js';
 import { commitAll, git, headSha, makeGitRepo, writeFiles } from '../helpers/git-fixture.js';
@@ -82,6 +82,24 @@ describe('worker worktrees', () => {
     writeFiles(wt.worktree, { 'src/publish.js': 'export function publish() { return 1; }\n' });
     expect(isWorktreeClean(repo)).toBe(true);
     expect(readFileSync(join(repo, 'src', 'publish.js'), 'utf8')).toContain('return null');
+  });
+
+  it('uses relative bidirectional Git pointers for an opted-in cross-OS worktree', () => {
+    const repo = repoWithSource();
+    const root = makeTmpDir('cross-os-');
+    const args = { repoPath: repo, featureId: 'FEAT-101', nodeId: 'FEAT-101.core.publish.impl',
+      baseBranch: 'main', worktreeRoot: root, crossPlatformGit: true };
+    const wt = createWorkerWorktree(args);
+    const pointer = readFileSync(join(wt.worktree, '.git'), 'utf8').trim().slice('gitdir: '.length);
+    expect(isAbsolute(pointer)).toBe(false);
+    expect(pointer).not.toMatch(/^[A-Za-z]:/);
+    const admin = resolve(wt.worktree, pointer);
+    const back = readFileSync(join(admin, 'gitdir'), 'utf8').trim();
+    expect(isAbsolute(back)).toBe(false);
+    expect(samePath(resolve(admin, back), join(wt.worktree, '.git'))).toBe(true);
+    expect(currentBranch(wt.worktree)).toBe('wip/FEAT-101/core.publish.impl');
+    expect(listWorktrees(repo).some((w) => samePath(w.path, wt.worktree))).toBe(true);
+    expect(createWorkerWorktree(args).created).toBe(false);
   });
 
   it('is idempotent: recreating the same node worktree reuses it', () => {

@@ -64,6 +64,8 @@ import { workerBinding } from './worker-binding.js';
 import { readRegular } from '../security/paths.js';
 
 export interface FenceInput {
+  /** Only set by the hook protocol normalizer, never by an untrusted input field. */
+  provider?: 'codex';
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   cwd?: string;
@@ -200,6 +202,7 @@ function zoneOf(path: string, f: Fenced): Zone | null {
 
 /** The call's role: a module-worker (or a node's own session), the acceptance reviewer, else the controller. */
 export function roleOf(input: FenceInput, env: NodeJS.ProcessEnv): 'worker' | 'reviewer' | 'controller' {
+  if (input.provider === 'codex') return 'controller'; // no per-call subagent identity attestation
   if (typeof env['MYCELINK_NODE_ID'] === 'string' && env['MYCELINK_NODE_ID'] !== '') return 'worker';
   if (typeof input.agent_id === 'string' && input.agent_id !== '') {
     const type = String(input.agent_type ?? '');
@@ -338,6 +341,17 @@ export function unjudged(input: FenceInput, env: NodeJS.ProcessEnv, err: unknown
 function decide(input: FenceInput, env: NodeJS.ProcessEnv): FenceDecision {
   const tool = input.tool_name ?? '';
   const cwd = typeof input.cwd === 'string' && input.cwd !== '' ? input.cwd : process.cwd();
+  if (input.provider === 'codex' && tool !== 'Bash' && tool !== 'apply_patch' &&
+      controlRoots([cwd, env['MYCELINK_CONTROL_ROOT']], []).length > 0) {
+    return { ok: false, reason: `Blocked: unclassified Codex ${tool} call has no verified effect or agent-role fence.` };
+  }
+  // Codex sends patch text (not Claude file_path) and arbitrary MCP arguments.
+  // Neither can be proven safe by this Claude-shaped path reader. Until a
+  // complete host fence exists, refuse these calls in a Mycelink workspace.
+  if ((tool === 'apply_patch' || tool.startsWith('mcp__')) &&
+      controlRoots([cwd, env['CLAUDE_PROJECT_DIR'], env['MYCELINK_CONTROL_ROOT']], []).length > 0) {
+    return { ok: false, reason: `Blocked: unclassified Codex ${tool} call cannot be judged by the Mycelink fence.` };
+  }
   const role = roleOf(input, env);
   if (role === 'reviewer') return reviewerDecision(input);
   // A module-worker implements one node itself: no nested delegation.
@@ -418,6 +432,11 @@ function decide(input: FenceInput, env: NodeJS.ProcessEnv): FenceDecision {
   }
   for (const w of writes) {
     const path = norm(realish(w.path));
+    // Host-owned integration files cannot be replaced by either actor, even
+    // inside a worker worktree. Path aliases resolve through realish first.
+    if (/(^|\/)\.codex\/config\.toml$|(^|\/)\.codex-plugin\//i.test(path)) {
+      return { ok: false, reason: `Blocked: ${w.path.replace(/\\/g, '/')} is protected Codex host configuration (${w.action}).` };
+    }
     for (const f of fenced) {
       const zone = zoneOf(path, f);
       if (zone === null) continue;

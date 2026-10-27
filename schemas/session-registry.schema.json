@@ -50,13 +50,42 @@
             "output_tokens": { "type": "integer", "minimum": 0 }
           }
         },
-        "adapter": { "enum": ["fake-claude", "claude-background"] },
+        "adapter": { "enum": ["claude-cli", "codex-cli", "fake-provider", "fake-claude", "claude-background"] },
         "pid": { "type": ["integer", "null"] },
         "log_path": { "type": ["string", "null"] },
         "result_path": { "type": ["string", "null"] },
         "exit_code": { "type": ["integer", "null"] },
         "replaces_session_id": { "type": ["string", "null"] },
-        "attempt": { "type": "integer", "minimum": 1 }
+        "attempt": { "type": "integer", "minimum": 1 },
+        "codex_evidence": {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider", "source", "process_session_id", "thread_id", "terminal", "turns", "final", "failure", "role_attested"],
+          "properties": {
+            "provider": { "const": "codex" }, "source": { "const": "exec-jsonl" }, "process_session_id": { "type": "string" },
+            "thread_id": { "type": ["string", "null"] }, "terminal": { "enum": ["completed", "failed", "incomplete", "invalid"] },
+            "turns": { "type": "integer", "minimum": 0 }, "role_attested": { "const": false },
+            "final": { "type": ["object", "null"], "additionalProperties": false,
+              "required": ["item_id", "sha256", "bytes"],
+              "properties": { "item_id": { "type": "string" }, "sha256": { "type": "string" }, "bytes": { "type": "integer", "minimum": 0 } } },
+            "failure": { "type": ["object", "null"], "additionalProperties": false,
+              "required": ["class", "transient"],
+              "properties": { "class": { "enum": ["unclassified", "capacity-admission"] }, "transient": { "type": "boolean" } },
+              "oneOf": [
+                { "type": "null" },
+                { "type": "object", "properties": { "class": { "const": "unclassified" }, "transient": { "const": false } } },
+                { "type": "object", "properties": { "class": { "const": "capacity-admission" }, "transient": { "const": true } } }
+              ] }
+          }
+        },
+        "codex_provenance": {
+          "type": "object", "additionalProperties": false, "required": ["provider", "process_session_id", "worker_result", "reviewer_verdict"],
+          "properties": { "provider": { "const": "codex" }, "process_session_id": { "type": "string" }, "reviewer_verdict": { "type": "null" },
+            "worker_result": { "type": ["object", "null"], "additionalProperties": false,
+              "required": ["source", "attested", "node_id", "claim_id", "sha256"],
+              "properties": { "source": { "const": "worktree-result-slot" }, "attested": { "const": false },
+                "node_id": { "type": "string" }, "claim_id": { "type": "string" }, "sha256": { "type": "string" } } }
+          }
+        }
       }
     }
   }

@@ -145,6 +145,34 @@ describe('classifyRedOutput (no structured report: conservative patterns)', () =
 });
 
 describe('judgeRed', () => {
+  it.each([false, true])('checks Vitest TypeError provenance before admitting another assertion (product frame: %s)', (productFrame) => {
+    const file = 'packages/tool/src/compatibility.test.ts';
+    const absolute = `C:\\work\\project\\${file.replaceAll('/', '\\')}`;
+    const origin = productFrame ? 'C:\\work\\project\\packages\\tool\\src\\review.ts' : absolute;
+    const report = JSON.stringify({
+      success: false, numFailedTests: 2,
+      testResults: [{ name: absolute, status: 'failed', assertionResults: [
+        { ancestorTitles: ['review'], title: 'reports invalid input', status: 'failed', failureMessages: ['AssertionError: expected [] to deeply equal [1]'] },
+        { ancestorTitles: ['review'], title: 'preserves the tree', status: 'failed', failureMessages: [
+          `TypeError: Cannot read properties of undefined (reading 'toString')\n    at ${origin}:121:66\n    at ${absolute}:140:9\n    at runTest (C:\\work\\project\\node_modules\\@vitest\\runner\\dist\\index.js:100:5)`,
+        ] },
+      ] }],
+    });
+    const parsed = parseVitestJson(report);
+    // Normalized replay output keeps its existing generic exception category.
+    expect(parsed[1]!.category).toBe('exception');
+    const declared = parsed.map((r) => ({ file: r.file!, name: r.name }));
+    const judged = judgeRed({ exitCode: 1, timedOut: false, output: '', results: parsed, declared });
+    expect(judged).toMatchObject(productFrame ? { valid: true, category: 'assertion' } : { valid: false, category: 'setup' });
+    if (productFrame) {
+      expect(judgeRed({ exitCode: 1, timedOut: false, output: '', results: parsed, declared: declared.slice(1) })).toMatchObject({ valid: true, category: 'exception' });
+    } else {
+      // A repeated/parameterized test's earlier assertion must not hide its harness failure.
+      const earlierAssertion = { ...parsed[1]!, category: 'assertion', type: 'AssertionError' };
+      expect(judgeRed({ exitCode: 1, timedOut: false, output: '', results: [earlierAssertion, ...parsed], declared })).toMatchObject({ valid: false, category: 'setup' });
+    }
+  });
+
   const results = parseVitestJson(VITEST_R1, { root: '/ws/tree' });
   const declared = (...names: string[]) => names.map((name) => ({ file: ERRORS_TEST, name }));
 

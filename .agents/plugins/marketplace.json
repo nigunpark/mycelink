@@ -1,0 +1,20 @@
+{
+  "name": "mycelink-codex-marketplace",
+  "interface": {
+    "displayName": "Mycelink (Codex experimental workflows)"
+  },
+  "plugins": [
+    {
+      "name": "mycelink",
+      "source": {
+        "source": "local",
+        "path": "./codex-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
+    }
+  ]
+}

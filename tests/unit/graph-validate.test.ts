@@ -38,6 +38,38 @@ describe('portfolio graph validation', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('accepts a well-formed readonly_fixture declaration on an implementation node during preflight validation', () => {
+    const graph = clone(VALID_GRAPH);
+    Object.assign(graph.nodes[1]!, {
+      readonly_fixture: { manifest: '../AC5-FIXTURE.json', baseline: '../baseline', sha256: 'a'.repeat(64) },
+    });
+    const result = validateGraph(graph, { repositories: VALID_REPOSITORIES });
+    expect(result.problems).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it.each([
+    { manifest: '../../AC5-FIXTURE.json' },
+    { manifest: 'C:/fixtures/AC5-FIXTURE.json' },
+    { manifest: '/tmp/AC5-FIXTURE.json' },
+    { baseline: '../../baseline' },
+    { baseline: 'C:/fixtures/baseline' },
+    { baseline: '/tmp/baseline' },
+    { sha256: 'not-a-sha256' },
+    { sha256: 'a'.repeat(63) },
+    { sha256: 'g'.repeat(64) },
+  ])('rejects malformed readonly_fixture %j in graph preflight before worker launch', (invalid) => {
+    const graph = clone(VALID_GRAPH);
+    Object.assign(graph.nodes[0]!, {
+      readonly_fixture: {
+        manifest: '../AC5-FIXTURE.json', baseline: '../baseline', sha256: 'a'.repeat(64), ...invalid,
+      },
+    });
+    const result = validateGraph(graph, { repositories: VALID_REPOSITORIES });
+    expect(result.ok).toBe(false);
+    expect(result.problems.map(p => p.code)).toContain('sha256' in invalid ? 'FIXTURE_HASH_INVALID' : 'FIXTURE_PATH_INVALID');
+  });
+
   it('computes a stable graph hash that changes with content', () => {
     const a = validateGraph(VALID_GRAPH, { repositories: VALID_REPOSITORIES });
     const b = validateGraph(clone(VALID_GRAPH), { repositories: VALID_REPOSITORIES });
